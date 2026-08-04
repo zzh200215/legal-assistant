@@ -1179,6 +1179,194 @@
         }
       }
     },
+    "/api/auth/account-deletion/request": {
+      "post": {
+        "tags": [
+          "Account Deletion"
+        ],
+        "summary": "Request Account Deletion",
+        "operationId": "request_account_deletion_api_auth_account_deletion_request_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/account-deletion/cancel": {
+      "post": {
+        "tags": [
+          "Account Deletion"
+        ],
+        "summary": "Cancel Account Deletion",
+        "operationId": "cancel_account_deletion_api_auth_account_deletion_cancel_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/account-deletion/confirm": {
+      "post": {
+        "tags": [
+          "Account Deletion"
+        ],
+        "summary": "Confirm Account Deletion",
+        "operationId": "confirm_account_deletion_api_auth_account_deletion_confirm_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/admin/account-deletions": {
+      "get": {
+        "tags": [
+          "Account Deletion"
+        ],
+        "summary": "List Pending Deletions",
+        "operationId": "list_pending_deletions_api_auth_admin_account_deletions_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "deletion_pending / deleted / all",
+              "default": "deletion_pending",
+              "title": "Status"
+            },
+            "description": "deletion_pending / deleted / all"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/admin/account-deletions/{user_id}/confirm": {
+      "post": {
+        "tags": [
+          "Account Deletion"
+        ],
+        "summary": "Admin Confirm Deletion",
+        "operationId": "admin_confirm_deletion_api_auth_admin_account_deletions__user_id__confirm_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/chat/": {
       "post": {
         "tags": [
