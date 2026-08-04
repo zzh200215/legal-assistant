@@ -320,7 +320,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 class PortalLinkCreate(BaseModel):
     client_email: str = Field(..., max_length=256, description="客户邮箱，必填，用于 OTP 验证")
-    expires_days: int = Field(..., description="链接有效天数，只允许 7/30/90")
+    expires_days: int = Field(default=30, description="链接有效天数，只允许 7/30/90，默认 30（#93）")
     max_access_count: Optional[int] = Field(None, ge=1)
     require_email_verification: int = Field(1, ge=0, le=1)
     items: List[dict] = Field(default_factory=list, description="[{item_type, item_id}]")
@@ -636,7 +636,9 @@ def portal_get_content(
             ).first()
             if update:
                 progress_updates.append({"id": update.id, "title": update.title, "body": update.body,
-                                         "next_steps": update.next_steps, "published_at": update.published_at})
+                                         "next_steps": update.next_steps,
+                                         "published_at": update.published_at,
+                                         "status": update.status})
         elif item.item_type == "document":
             document = db.query(Document).filter(
                 Document.id == item.item_id,
@@ -649,6 +651,9 @@ def portal_get_content(
                 metadata = {}
             if document and metadata.get("case_id") == link.case_id:
                 documents.append({"id": document.id, "title": document.title, "file_type": document.file_type})
+
+    # #93：进展按发布时间倒序（时间线展示）
+    progress_updates.sort(key=lambda u: u["published_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
     return {
         "link_id": link.id,

@@ -33,16 +33,22 @@
             <span class="card-title">案件进展</span>
           </div>
         </template>
-        <div v-if="progressUpdates.length">
-          <div v-for="u in progressUpdates" :key="u.id" class="progress-item">
-            <div class="progress-header">
-              <strong>{{ u.title }}</strong>
-              <span class="muted">{{ formatDate(u.published_at || u.created_at) }}</span>
-            </div>
-            <p class="progress-body">{{ u.body }}</p>
-            <div v-if="u.next_steps" class="progress-next">
-              <strong>后续步骤：</strong>
-              <p>{{ u.next_steps }}</p>
+        <div v-if="progressUpdates.length" class="progress-timeline">
+          <div v-for="u in progressUpdates" :key="u.id" class="timeline-item">
+            <div class="timeline-dot"></div>
+            <div class="timeline-body">
+              <div class="progress-header">
+                <strong>{{ u.title }}</strong>
+                <div class="progress-meta">
+                  <el-tag v-if="u.status === 'published'" size="small" type="success" effect="plain">已发布</el-tag>
+                  <span class="muted">{{ formatDate(u.published_at || u.created_at) }}</span>
+                </div>
+              </div>
+              <p class="progress-body">{{ u.body }}</p>
+              <div v-if="u.next_steps" class="progress-next">
+                <strong>后续步骤：</strong>
+                <p>{{ u.next_steps }}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -275,20 +281,55 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.progress-item {
+.progress-timeline {
+  position: relative;
+  padding-left: 20px;
+}
+
+.progress-timeline::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--el-border-color-lighter);
+}
+
+.timeline-item {
+  position: relative;
   padding: 12px 0;
+}
+
+.timeline-item:not(:last-child) {
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
-.progress-item:last-child {
-  border-bottom: none;
+.timeline-dot {
+  position: absolute;
+  left: -20px;
+  top: 18px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px var(--el-color-primary-light-5);
 }
 
 .progress-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   margin-bottom: 6px;
+}
+
+.progress-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .progress-body {
@@ -306,5 +347,19 @@ onUnmounted(() => {
 .progress-next p {
   margin: 4px 0 0;
   line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .legal-portal {
+    max-width: 100%;
+    margin: 16px auto;
+    padding: 0 12px;
+  }
+
+  .progress-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
 }
 </style>
