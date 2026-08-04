@@ -380,7 +380,7 @@ DEFAULT_PROMPT_TEMPLATES = [
             '      "clause_type": "payment | delivery | breach | compensation | confidentiality | ip | termination | dispute_resolution | other",\n'
             '      "label": "条款类型中文名",\n'
             '      "risk_level": "high | medium | low",\n'
-            '      "description": "风险说明，需引用原文",\n'
+            '      "description": "风险说明，需引用原文；缺失条款须写明"合同未约定XXX条款"",\n'
             '      "source_location": {"paragraph": 段号, "snippet": "原文片段"},\n'
             '      "suggestion": "修改建议",\n'
             '      "status": "open | needs_facts"\n'
@@ -391,9 +391,14 @@ DEFAULT_PROMPT_TEMPLATES = [
             "规则：\n"
             "1. 按条款类型逐段审查，每段最多一条风险。\n"
             "2. 高风险条款（违约、知识产权、解除终止）必须标注 risk_level = high。\n"
-            "3. 如果某类条款（付款/交付/违约/赔偿/保密/知识产权/终止/争议解决）未出现，标注 needs_facts。\n"
+            "3. 必备条款逐项核对：对 payment、delivery、breach、compensation、confidentiality、ip、termination、dispute_resolution 八类逐项确认是否在合同中出现。"
+            "某类未出现时，必须输出一条该 clause_type 的记录，status 填 needs_facts、label 填该条款中文名，"
+            "risk_level 按缺失影响判定：breach / ip / termination 缺失标 high，其余缺失标 medium；"
+            "description 写明\"合同未约定{条款中文名}条款，建议补充\"。禁止跳过或遗漏任何未出现的必备条款。\n"
             "4. 不签署、修改或发送合同，不替代律师最终审查。\n"
-            "5. summary 末尾必须附带免责声明：{disclaimer}\n\n"
+            "5. summary 末尾必须附带免责声明：{disclaimer}\n"
+            "输出示例（缺失条款）：合同未约定违约责任时，必须输出：\n"
+            '{"clause_type": "breach", "label": "违约责任", "risk_level": "high", "description": "合同未约定违约责任条款，建议补充", "source_location": {"paragraph": null, "snippet": ""}, "suggestion": "补充违约金计算方式与损失赔偿约定", "status": "needs_facts"}\n\n'
             "合同内容：\n{content}"
         ),
         "variables": "content,disclaimer",

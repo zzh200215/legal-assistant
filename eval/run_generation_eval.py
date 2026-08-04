@@ -82,6 +82,17 @@ def build_db() -> Session:
 
 # ── Contract Review Metrics ──────────────────────────────────────────────────
 
+_MISSING_SIGNALS = ("needs_facts", "missing", "absent", "未出现", "未约定", "缺失", "未涉及")
+
+
+def _is_missing_flag(r: dict) -> bool:
+    """#92：容错识别"应有条款缺失"信号——status 归一化或描述含缺失信号词。"""
+    status = str(r.get("status") or "").strip().lower()
+    if status in ("needs_facts", "missing", "absent"):
+        return True
+    text = f"{r.get('description', '')} {r.get('suggestion', '')}"
+    return any(sig in text for sig in _MISSING_SIGNALS)
+
 
 def eval_contract_review_case(case: dict, result: tuple) -> dict:
     risks, summary = result
@@ -110,8 +121,8 @@ def eval_contract_review_case(case: dict, result: tuple) -> dict:
             "pass": bool((summary or "").strip()) and has_disclaimer and not fabrication_detected,
         }
 
-    detected = {r["clause_type"] for r in risks if r.get("status") != "needs_facts"}
-    missing_flagged = {r["clause_type"] for r in risks if r.get("status") == "needs_facts"}
+    detected = {r["clause_type"] for r in risks if not _is_missing_flag(r)}
+    missing_flagged = {r["clause_type"] for r in risks if _is_missing_flag(r)}
     high_risk_count = sum(1 for r in risks if r.get("risk_level") == "high")
 
     expected_present = set(gold["expected_present_clauses"])
