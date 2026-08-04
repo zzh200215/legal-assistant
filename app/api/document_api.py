@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -54,6 +54,7 @@ class KnowledgeBaseCreateRequest(BaseModel):
 
 
 class DocumentQAReplayOut(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     id: int
     document_id: int
     document_title: str | None = None

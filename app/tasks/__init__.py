@@ -1075,3 +1075,17 @@ def check_legal_approval_timeouts_task():
         return {"timed_out_steps": timed_out_steps, "timed_out_chains": timed_out_chains}
     finally:
         db.close()
+
+
+@celery_app.task(name="confirm_account_deletions")
+def confirm_account_deletions_task():
+    """Beat 任务：自动确认冷却期已满（默认30天）的账号注销请求，执行匿名化。"""
+    _record_beat_heartbeat()
+    db = SessionLocal()
+    try:
+        from app.services.account_deletion_service import confirm_expired_pending
+
+        confirmed_count = confirm_expired_pending(db)
+        return {"confirmed_count": confirmed_count}
+    finally:
+        db.close()

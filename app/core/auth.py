@@ -304,7 +304,7 @@ def verify_case_access(case_id: int, user_id: int, db: Session) -> dict:
     验证逻辑：
     1. 案件必须存在
     2. 用户必须是案件所属组织的成员
-    3. TODO: 如果实现了案件成员表，还需检查案件级权限
+    3. 严格模式（is_strict_mode=1）下必须是未撤销的案件成员；普通模式下组织成员均可访问（设计意图）
 
     返回包含案件、成员和组织ID的字典。
     """

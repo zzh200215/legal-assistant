@@ -62,6 +62,10 @@ celery_app.conf.update(
             "task": "parse_contract_versions",
             "schedule": 300.0,
         },
+        "confirm-account-deletions": {
+            "task": "confirm_account_deletions",
+            "schedule": 86400.0,  # 每天
+        },
     },
 )
 

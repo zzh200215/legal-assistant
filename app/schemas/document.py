@@ -78,6 +78,7 @@ class DocumentParseJobOut(BaseModel):
 
 
 class DocumentQARecordOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
     id: int
     document_id: int
     user_id: int
@@ -98,8 +99,6 @@ class DocumentQARecordOut(BaseModel):
     feedback_resolution_note: str | None = None
     feedback_resolved_by: int | None = None
     created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 class DocumentVisualAnalyzeRequest(BaseModel):

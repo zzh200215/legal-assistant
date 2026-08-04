@@ -113,6 +113,23 @@ class AccountDeletionApiTests(unittest.TestCase):
         r = self.client.get("/api/auth/admin/account-deletions", headers=self._headers(self.token))
         self.assertEqual(r.status_code, 403, r.text)
 
+    def test_service_confirms_expired_pending(self):
+        """验证 confirm_expired_pending service 能自动确认冷却期已满的注销请求（beat 任务实际调用的是这个）"""
+        from app.services.account_deletion_service import request_deletion, confirm_expired_pending, DELETION_COOL_DOWN_DAYS
+
+        # 发起注销并手动回拨 requested_at 到 31 天前
+        request_deletion(self.db, self.user)
+        self.user.deletion_requested_at = datetime.now(timezone.utc) - timedelta(days=DELETION_COOL_DOWN_DAYS + 1)
+        self.db.commit()
+
+        # 直接调用 service（beat task 调用的就是这个）
+        confirmed_count = confirm_expired_pending(self.db)
+
+        self.assertEqual(confirmed_count, 1)
+        self.db.refresh(self.user)
+        self.assertEqual(self.user.status, UserStatus.deleted.value)
+        self.assertTrue(self.user.username.startswith("deleted_"))
+
 
 if __name__ == "__main__":
     unittest.main()
