@@ -1,14 +1,15 @@
-"""CI 探针：打印 connector create 500 的响应体（复现 test_connector_contract 的 CI 失败）。"""
+"""CI 探针：复制 test_connector_contract 的 setUp 与流程，失败时打印 500 响应体。"""
 
 import json
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.auth import hash_password
+from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.user import User
@@ -25,10 +26,18 @@ class ConnectorProbeTests(unittest.TestCase):
         self.TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
         Base.metadata.create_all(bind=engine)
         self.db = self.TestingSessionLocal()
-        self.user = User(username="probe", email="probe@example.com", hashed_password=hash_password("secret"))
+        self.user = User(username="tester", email="tester@example.com", hashed_password=hash_password("secret"))
         self.db.add(self.user)
         self.db.commit()
         self.db.refresh(self.user)
+
+        self.sessionlocal_patchers = [
+            patch("app.services.llm_governance_service.SessionLocal", self.TestingSessionLocal),
+            patch("app.services.llm_observability_service.SessionLocal", self.TestingSessionLocal),
+            patch("app.core.database.SessionLocal", self.TestingSessionLocal),
+        ]
+        for patcher in self.sessionlocal_patchers:
+            patcher.start()
 
         def override_get_db():
             db = self.TestingSessionLocal()
@@ -39,26 +48,31 @@ class ConnectorProbeTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        self.token = create_access_token({"sub": self.user.id})
+        self.headers = {"Authorization": f"Bearer {self.token}"}
 
     def tearDown(self):
         app.dependency_overrides.clear()
-        self.db.close()
+        for patcher in reversed(getattr(self, "sessionlocal_patchers", [])):
+            patcher.stop()
 
-    def test_probe_connector_create(self):
-        login = self.client.post(
-            "/api/auth/login",
-            json={"username": "probe", "password": "secret"},
-        )
-        print("PROBE login:", login.status_code, login.text[:200])
-        token = login.json()["data"]["access_token"]
-        headers = {"Authorization": f"Bearer {token}"}
+    def test_probe_connector_contract(self):
         response = self.client.post(
             "/api/connectors/",
-            headers=headers,
+            headers=self.headers,
             json={"connector_type": "drive", "name": "Shared Drive", "config_json": '{"path":"contracts"}'},
         )
-        print("PROBE create:", response.status_code, json.dumps(response.json(), ensure_ascii=False)[:500])
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, msg=f"PROBE-BODY: {response.status_code} {json.dumps(response.json(), ensure_ascii=False)[:800]}")
+        connector_id = response.json()["data"]["id"]
+
+        fake_task = type("Task", (), {"id": "connector-task-1"})()
+        with patch("app.tasks.connector_sync_task.delay", return_value=fake_task):
+            sync_response = self.client.post(
+                f"/api/connectors/{connector_id}/sync",
+                headers=self.headers,
+                json={"sync_mode": "manual"},
+            )
+            self.assertEqual(sync_response.status_code, 200, msg=f"PROBE-SYNC: {sync_response.status_code} {json.dumps(sync_response.json(), ensure_ascii=False)[:500]}")
 
 
 if __name__ == "__main__":
