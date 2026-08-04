@@ -262,6 +262,11 @@ class SignCallbackHardeningTests(unittest.TestCase):
         app.dependency_overrides[get_db] = _override_db
         self.client = TestClient(app, raise_server_exceptions=False)
 
+        # 回调路径会写安全审计（security_audit_service 用独立 SessionLocal）；
+        # CI 无 data/ 目录时真实 SQLite 无法创建，需与测试库对齐。
+        self.audit_patch = patch("app.services.security_audit_service.SessionLocal", Session)
+        self.audit_patch.start()
+
         self.settings_patch = patch("app.api.legal_contract_api.get_settings")
         mock_get_settings = self.settings_patch.start()
         mock_settings = MagicMock()
@@ -270,6 +275,7 @@ class SignCallbackHardeningTests(unittest.TestCase):
 
     def tearDown(self):
         self.settings_patch.stop()
+        self.audit_patch.stop()
         app.dependency_overrides.clear()
         self.db.close()
 

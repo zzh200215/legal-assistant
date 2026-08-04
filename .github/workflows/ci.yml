@@ -23,7 +23,7 @@ jobs:
       # conftest.py 已通过 os.environ.setdefault 注入测试所需配置（加密 key 等），
       # pydantic-settings 的 env 变量优先于 .env，故 CI 无需复制 .env。
       - name: Run backend test suite
-        run: python -m pytest tests/test_ci_connector_probe.py -q -s tests/
+        run: python -m pytest tests/ -q
 
   lint:
     name: Lint (ruff, real-error rules only)

@@ -34,3 +34,26 @@ os.environ.setdefault(
     "CHROMA_PERSIST_DIR",
     os.path.join(tempfile.gettempdir(), "aibg_test_chroma"),
 )
+
+# CI 无 data/ 目录：为 OCR 测试生成占位 PNG fixture（本地产物不入 git）。
+def _ensure_upload_fixtures() -> None:
+    import io
+    from pathlib import Path
+
+    try:
+        from PIL import Image
+    except Exception:  # noqa: BLE001
+        return
+    upload_dir = Path(__file__).resolve().parent.parent / "data" / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("contract.png", "scan.png"):
+        target = upload_dir / name
+        if target.exists():
+            continue
+        with Image.new("RGB", (64, 64), color=(200, 200, 200)) as image:
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            target.write_bytes(buffer.getvalue())
+
+
+_ensure_upload_fixtures()
