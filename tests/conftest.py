@@ -14,6 +14,12 @@ os.environ.setdefault(
     base64.urlsafe_b64encode(b"A" * 32).decode("ascii"),
 )
 
+# CI（GitHub Actions）无 .env 文件：注入占位密钥/Key，使 Settings 校验通过。
+# 本地开发不受影响（CI 环境变量仅在 runner 上存在；真实密钥不会被 setdefault 覆盖）。
+if os.environ.get("CI"):
+    os.environ.setdefault("SECRET_KEY", "test-secret-key-" + "x" * 24)
+    os.environ.setdefault("LLM_API_KEY", "test-llm-api-key")
+
 # E-2b 门禁：签署/开放 API 默认关闭，回归测试需要全流程可用，
 # 因此在测试环境显式打开（真实密钥/URL 不会被 setdefault 覆盖）。
 os.environ.setdefault("SIGNING_FADADA_SANDBOX_URL", "https://sandbox.fadada.test")
