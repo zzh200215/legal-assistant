@@ -23803,7 +23803,8 @@
           "expires_days": {
             "type": "integer",
             "title": "Expires Days",
-            "description": "链接有效天数，只允许 7/30/90"
+            "description": "链接有效天数，只允许 7/30/90，默认 30（#93）",
+            "default": 30
           },
           "max_access_count": {
             "anyOf": [
@@ -23835,8 +23836,7 @@
         },
         "type": "object",
         "required": [
-          "client_email",
-          "expires_days"
+          "client_email"
         ],
         "title": "PortalLinkCreate"
       },
