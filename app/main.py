@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import agent_api, analytics_api, api_key_api, auth_api, chat_api, connector_api, dashboard_api, document_api, document_conflict_api, email_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mailbox_api, mcp_api, meeting_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, prompt_api, schedule_api, subscription_api, task_api, workflow_api, ws_api
+from app.api import agent_api, analytics_api, api_key_api, auth_api, chat_api, connector_api, dashboard_api, document_api, document_conflict_api, email_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mailbox_api, mcp_api, meeting_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, prompt_api, schedule_api, subscription_api, task_api, workflow_api, ws_api
 from app.core.config import get_settings
 from app.core.api_response import (
     ApiResponseMiddleware,
@@ -36,6 +36,7 @@ app.include_router(mailbox_api.router, prefix="/api/mailbox", tags=["Mailbox"])
 app.include_router(outbound_api.router, prefix="/api/outbound", tags=["Outbound Email"])
 app.include_router(connector_api.router, prefix="/api/connectors", tags=["Connectors"])
 app.include_router(task_api.router, prefix="/api/tasks", tags=["Tasks"])
+app.include_router(pilot_feedback_api.router, prefix="/api/pilot", tags=["Pilot Feedback"])
 app.include_router(document_conflict_api.router, prefix="/api/document-conflicts", tags=["Document Conflicts"])
 app.include_router(workflow_api.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(schedule_api.router, prefix="/api/schedules", tags=["Schedules"])
