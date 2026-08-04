@@ -32,7 +32,7 @@
 1. **案件闭环信号全 0**（case_tasks=0、with_active_case=0）——北极星主信号从未产生过读数；
    启动第 1 周如仍为 0，须人工干预（客户成功逐家带跑），并把它作为 #60 场景 12（闭环进度提醒）的立项依据。
 2. **历史留存全 0**——旧测试账号污染，真实留存只能从启动周起算（06-15/06-29/07-06 分群不可信）。
-3. **端侧反馈表缺失**（ai_output_feedback 生产库无）——试点功能若依赖该表，先补迁移（当前回流不依赖它）。
+3. ~~端侧反馈表缺失（ai_output_feedback 生产库无）~~ —— **已闭环（#73）**：采用列式方案（feedback_score/feedback_note 落在 legal_consultations/legal_contract_reviews/legal_drafts 三表，生产库列已确认存在），后端三端点（/legal/*/feedback）+ 前端 AiOutputFeedback 组件三处埋点（LegalWorkspace.vue:78/203/375）均已上线，新增 6 条端点行为回归测试。
 
 ## 4. 退出问卷时间表建议
 
