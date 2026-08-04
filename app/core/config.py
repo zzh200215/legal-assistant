@@ -155,6 +155,8 @@ class Settings(BaseSettings):
     PAYMENT_WEBHOOK_SECRET: str = ""
     # 飞书事件回调 encrypt_key（#87/M1 前置）
     FEISHU_EVENT_ENCRYPT_KEY: str = ""
+    # 评测 bundle 导出目录（#90：测试用临时目录，避免写仓库内跟踪文件；空=默认 eval/bundles/feedback_autogen）
+    EVAL_BUNDLE_OUTPUT_DIR: str = ""
 
     # 电子签名回调验签：JSON 对象，键为 fadada / esigncn，值为对应 HMAC 密钥。
     SIGNING_WEBHOOK_SECRETS_JSON: str = ""

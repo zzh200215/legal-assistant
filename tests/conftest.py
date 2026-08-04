@@ -35,6 +35,12 @@ os.environ.setdefault(
     os.path.join(tempfile.gettempdir(), "aibg_test_chroma"),
 )
 
+# #90：评测 bundle 导出到临时目录，避免测试写仓库内跟踪文件（eval/bundles/feedback_autogen/qa_dataset.json）
+os.environ.setdefault(
+    "EVAL_BUNDLE_OUTPUT_DIR",
+    os.path.join(tempfile.gettempdir(), "aibg_test_eval_bundle"),
+)
+
 # CI 无 data/ 目录：为 OCR 测试生成占位 PNG fixture（本地产物不入 git）。
 def _ensure_upload_fixtures() -> None:
     import io

@@ -8001,6 +8001,177 @@
         }
       }
     },
+    "/api/pilot/exit-survey": {
+      "post": {
+        "tags": [
+          "Pilot Feedback"
+        ],
+        "summary": "Submit Exit Survey",
+        "operationId": "submit_exit_survey_api_pilot_exit_survey_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExitSurveyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/pilot/nps": {
+      "post": {
+        "tags": [
+          "Pilot Feedback"
+        ],
+        "summary": "Submit Nps",
+        "operationId": "submit_nps_api_pilot_nps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NpsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/pilot/admin/surveys": {
+      "get": {
+        "tags": [
+          "Pilot Feedback"
+        ],
+        "summary": "List Surveys",
+        "operationId": "list_surveys_api_pilot_admin_surveys_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pilot/admin/nps-stats": {
+      "get": {
+        "tags": [
+          "Pilot Feedback"
+        ],
+        "summary": "Nps Stats",
+        "operationId": "nps_stats_api_pilot_admin_nps_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
     "/api/document-conflicts/suggestions": {
       "post": {
         "tags": [
@@ -10993,7 +11164,7 @@
           "Subscription"
         ],
         "summary": "Payment Webhook",
-        "description": "支付回调（Stripe / Ping++）。\n生产环境需验证签名；此处接受 provider 字段判断来源。",
+        "description": "支付回调（Stripe / Ping++）。\nPAYMENT_WEBHOOK_SECRET 配置时强制验签（生产要求）；未配置时跳过验签（开发/测试）。",
         "operationId": "payment_webhook_api_billing_subscriptions_webhook_post",
         "parameters": [
           {
@@ -11043,6 +11214,394 @@
         "summary": "Cancel Subscription",
         "description": "取消当前订阅（降回免费版）",
         "operationId": "cancel_subscription_api_billing_subscriptions_cancel_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/billing/payments/bank-transfer": {
+      "post": {
+        "tags": [
+          "Platform Payments"
+        ],
+        "summary": "Submit Bank Transfer",
+        "operationId": "submit_bank_transfer_api_billing_payments_bank_transfer_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankTransferRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/billing/payments/{payment_id}/confirm": {
+      "post": {
+        "tags": [
+          "Platform Payments"
+        ],
+        "summary": "Confirm Bank Transfer",
+        "operationId": "confirm_bank_transfer_api_billing_payments__payment_id__confirm_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Payment Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/billing/payments/{payment_id}/reject": {
+      "post": {
+        "tags": [
+          "Platform Payments"
+        ],
+        "summary": "Reject Bank Transfer",
+        "operationId": "reject_bank_transfer_api_billing_payments__payment_id__reject_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Payment Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/billing/payments": {
+      "get": {
+        "tags": [
+          "Platform Payments"
+        ],
+        "summary": "List Payments",
+        "operationId": "list_payments_api_billing_payments_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "pending / confirmed / rejected / all",
+              "default": "pending",
+              "title": "Status"
+            },
+            "description": "pending / confirmed / rejected / all"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/feishu/bindings": {
+      "post": {
+        "tags": [
+          "Feishu"
+        ],
+        "summary": "Bind Feishu",
+        "description": "当前用户绑定飞书 open_id（企业自建应用扫码绑定后回调调用）",
+        "operationId": "bind_feishu_api_feishu_bindings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/feishu/bindings/me": {
+      "get": {
+        "tags": [
+          "Feishu"
+        ],
+        "summary": "My Binding",
+        "operationId": "my_binding_api_feishu_bindings_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Feishu"
+        ],
+        "summary": "Unbind Feishu",
+        "operationId": "unbind_feishu_api_feishu_bindings_me_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/feishu/callbacks/event": {
+      "post": {
+        "tags": [
+          "Feishu"
+        ],
+        "summary": "Feishu Event Callback",
+        "description": "飞书事件回调（M1 咨询卡片事件等）：验签 + 解密 + 分派占位\n\n当前仅回显握手；事件分派（卡片/消息）在 10 月 M1 开发中接入。",
+        "operationId": "feishu_event_callback_api_feishu_callbacks_event_post",
+        "parameters": [
+          {
+            "name": "x-lark-signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lark-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/feishu/admin/bindings": {
+      "get": {
+        "tags": [
+          "Feishu"
+        ],
+        "summary": "List Bindings",
+        "operationId": "list_bindings_api_feishu_admin_bindings_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -18981,6 +19540,50 @@
         ],
         "title": "AuthorizeUrlResponse"
       },
+      "BankTransferRequest": {
+        "properties": {
+          "plan_tier": {
+            "type": "string",
+            "title": "Plan Tier",
+            "description": "pro / team"
+          },
+          "amount": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Amount"
+          },
+          "voucher_no": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voucher No"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_tier",
+          "amount"
+        ],
+        "title": "BankTransferRequest"
+      },
       "BillingRuleCreate": {
         "properties": {
           "case_id": {
@@ -19046,6 +19649,40 @@
           "billing_mode"
         ],
         "title": "BillingRuleCreate"
+      },
+      "BindRequest": {
+        "properties": {
+          "open_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Open Id"
+          },
+          "union_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Union Id"
+          },
+          "app_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 4,
+            "title": "App Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open_id",
+          "app_id"
+        ],
+        "title": "BindRequest"
       },
       "Body_batch_upload_documents_api_documents_batch_upload_post": {
         "properties": {
@@ -19454,6 +20091,35 @@
           "document_ids"
         ],
         "title": "CompareRequest"
+      },
+      "ConfirmRequest": {
+        "properties": {
+          "invoice_snapshot": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Snapshot"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "title": "ConfirmRequest"
       },
       "ConflictStatusRequest": {
         "properties": {
@@ -21387,6 +22053,124 @@
         "type": "object",
         "title": "EnterpriseConnectorCredentialRequest"
       },
+      "ExitSurveyRequest": {
+        "properties": {
+          "nps_score": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nps Score"
+          },
+          "trust_confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust Confidence"
+          },
+          "trust_citations": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust Citations"
+          },
+          "trust_next_steps": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trust Next Steps"
+          },
+          "value_ranking": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Ranking"
+          },
+          "review_wish": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Wish"
+          },
+          "pain_point": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pain Point"
+          },
+          "pay_intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pay Intent"
+          },
+          "feature_requests": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Requests"
+          },
+          "summary_feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Feedback"
+          }
+        },
+        "type": "object",
+        "title": "ExitSurveyRequest"
+      },
       "ExtractFromChatRequest": {
         "properties": {
           "message": {
@@ -22552,6 +23336,21 @@
         },
         "type": "object",
         "title": "NotificationPrefUpdate"
+      },
+      "NpsRequest": {
+        "properties": {
+          "score": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score"
+        ],
+        "title": "NpsRequest"
       },
       "OAuthLoginRequest": {
         "properties": {

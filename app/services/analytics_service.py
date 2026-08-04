@@ -1309,7 +1309,10 @@ class AnalyticsService:
             feedback_status=None,
             source=None,
         )
-        bundle_dir = Path("eval") / "bundles" / "feedback_autogen"
+        if settings.EVAL_BUNDLE_OUTPUT_DIR:
+            bundle_dir = Path(settings.EVAL_BUNDLE_OUTPUT_DIR)
+        else:
+            bundle_dir = Path("eval") / "bundles" / "feedback_autogen"
         bundle_dir.mkdir(parents=True, exist_ok=True)
         dataset_path = bundle_dir / "qa_dataset.json"
         items = []
