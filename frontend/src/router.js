@@ -10,6 +10,7 @@ const System = () => import('./views/System.vue')
 const Login = () => import('./views/Login.vue')
 const LegalDeveloper = () => import('./views/LegalDeveloper.vue')
 const LegalOnboarding = () => import('./views/LegalOnboarding.vue')
+const Pricing = () => import('./views/Pricing.vue')
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -22,6 +23,7 @@ const routes = [
   { path: '/system', component: System },
   { path: '/legal-developer', component: LegalDeveloper },
   { path: '/legal-onboarding', component: LegalOnboarding },
+  { path: '/pricing', component: Pricing },
   { path: '/portal/c/:token', component: LegalPortal, meta: { public: true } },
   { path: '/tokens', redirect: '/system?tab=tokens' },
   { path: '/oplogs', redirect: '/system?tab=oplogs' },

@@ -94,6 +94,18 @@ def create_checkout(
     if tier not in valid_tiers:
         raise api_error(400, f"无效的计划类型，可选: {valid_tiers}", code="INVALID_TIER")
 
+    from app.services.oplog_service import oplog_service  # noqa: E402
+
+    oplog_service.log(
+        module="subscription",
+        action="upgrade_intent",
+        db=db,
+        user_id=current_user.id,
+        target_type="subscription",
+        target_id=None,
+        detail=f"tier={tier}",
+    )
+
     # 若配置了真实支付网关，使用配置的 base URL；否则提示未配置
     base_url = settings.PAYMENT_CHECKOUT_BASE_URL
     if not base_url:

@@ -118,6 +118,7 @@ const ScaleIcon = ScaleToOriginal
 
 const navItems = [
   { path: '/legal-workspace', label: '法律工作台', caption: '咨询、审查、文书与审核', icon: ScaleIcon },
+  { path: '/pricing', label: '订阅方案', caption: '套餐、配额与购买', icon: ScaleIcon },
   { path: '/documents', label: '法律知识库', caption: '法规、案例、合同模板与文书模板', icon: Document },
   { path: '/chat', label: '对话记录', caption: '通用对话与流式输出', icon: ChatDotRound },
 ]
@@ -141,6 +142,7 @@ const navGroups = [
 const sectionMeta = {
   '/legal-workspace': { label: '法律工作台', description: '法律咨询、合同审查、文书草稿与律师审核' },
   '/': { label: '法律工作台', description: '法律咨询、合同审查、文书草稿与律师审核' },
+  '/pricing': { label: '订阅方案', description: '套餐选择、配额说明与订阅管理' },
   '/documents': { label: '法律知识库', description: '法规、案例、合同模板与文书模板的入库、解析与检索' },
   '/tasks': { label: '待办任务', description: '管理执行项、协作进度和任务来源' },
   '/agent': { label: 'Agent配置', description: '配置 Agent 目标、工具调用和执行追踪' },

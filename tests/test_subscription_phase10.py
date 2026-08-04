@@ -12,6 +12,7 @@ from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.subscription import SubscriptionPlan, UserSubscription, QuotaUsage, PlanTier, SubscriptionStatus
+from app.models.operation_log import OperationLog
 from app.models.user import User, UserStatus
 from app.services.subscription_service import subscription_service
 
@@ -261,6 +262,19 @@ class SubscriptionApiTests(unittest.TestCase):
     def test_checkout_invalid_tier(self):
         resp = self.client.post("/api/billing/subscriptions/checkout?tier=enterprise", headers=self.headers)
         self.assertEqual(resp.status_code, 400)
+
+    def test_checkout_records_upgrade_intent_oplog(self):
+        """#81/升级意图埋点：checkout 调用写 operation_logs (upgrade_intent)"""
+        resp = self.client.post("/api/billing/subscriptions/checkout?tier=team", headers=self.headers)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        log = (
+            self.db.query(OperationLog)
+            .filter(OperationLog.module == "subscription", OperationLog.action == "upgrade_intent")
+            .first()
+        )
+        self.assertIsNotNone(log, "checkout 应记录 upgrade_intent 操作日志")
+        self.assertEqual(log.user_id, self.user.id)
+        self.assertIn("tier=team", log.detail)
 
     def test_webhook_stripe_activate(self):
         """Stripe webhook 激活订阅"""
