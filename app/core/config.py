@@ -151,6 +151,8 @@ class Settings(BaseSettings):
     # 支付配置
     STRIPE_SECRET_KEY: str = ""
     PAYMENT_CHECKOUT_BASE_URL: str = ""
+    # Stripe webhook 验签密钥（t=<ts>,v1=<hmac>）；留空则跳过验签（仅开发/测试）
+    PAYMENT_WEBHOOK_SECRET: str = ""
 
     # 电子签名回调验签：JSON 对象，键为 fadada / esigncn，值为对应 HMAC 密钥。
     SIGNING_WEBHOOK_SECRETS_JSON: str = ""

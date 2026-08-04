@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Query, Request, Header
 from sqlalchemy.orm import Session
 from typing import Optional
 import hashlib, hmac
+import json
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
@@ -126,6 +127,28 @@ def create_checkout(
 
 # ================== 支付 Webhook ==================
 
+def _verify_stripe_signature(raw_body: bytes, signature: str | None, secret: str) -> None:
+    """Stripe webhook 验签：t=<ts>,v1=<hmac>；HMAC-SHA256(secret, f"{ts}.{body}")。
+
+    失败抛 400（INVALID_WEBHOOK_SIGNATURE / WEBHOOK_SIGNATURE_EXPIRED）。
+    """
+    import hmac
+    import time as _time
+
+    if not signature:
+        raise api_error(400, "缺少 Stripe 签名头", code="INVALID_WEBHOOK_SIGNATURE")
+    parts = dict(p.split("=", 1) for p in signature.split(",") if "=" in p)
+    timestamp = parts.get("t", "")
+    provided = parts.get("v1", "")
+    if not timestamp or not provided:
+        raise api_error(400, "签名头格式不正确", code="INVALID_WEBHOOK_SIGNATURE")
+    if abs(int(_time.time()) - int(timestamp)) > 300:
+        raise api_error(400, "Webhook 签名已过期", code="WEBHOOK_SIGNATURE_EXPIRED")
+    expected = hmac.new(secret.encode("utf-8"), f"{timestamp}.{raw_body.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, provided):
+        raise api_error(400, "Webhook 签名无效", code="INVALID_WEBHOOK_SIGNATURE")
+
+
 @router.post("/subscriptions/webhook")
 async def payment_webhook(
     request: Request,
@@ -134,12 +157,17 @@ async def payment_webhook(
 ):
     """
     支付回调（Stripe / Ping++）。
-    生产环境需验证签名；此处接受 provider 字段判断来源。
+    PAYMENT_WEBHOOK_SECRET 配置时强制验签（生产要求）；未配置时跳过验签（开发/测试）。
     """
+    raw_body = await request.body()
     try:
-        payload = await request.json()
+        payload = json.loads(raw_body)
     except Exception:
         raise api_error(400, "无法解析 Webhook 载荷", code="INVALID_PAYLOAD")
+
+    secret = settings.PAYMENT_WEBHOOK_SECRET
+    if secret:
+        _verify_stripe_signature(raw_body, x_stripe_signature, secret)
 
     provider = payload.get("provider", "stripe")
     event_type = payload.get("event_type") or payload.get("type", "")

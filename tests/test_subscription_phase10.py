@@ -263,6 +263,61 @@ class SubscriptionApiTests(unittest.TestCase):
         resp = self.client.post("/api/billing/subscriptions/checkout?tier=enterprise", headers=self.headers)
         self.assertEqual(resp.status_code, 400)
 
+    def test_webhook_requires_valid_signature_when_configured(self):
+        """#82/配置 PAYMENT_WEBHOOK_SECRET 后必须验签"""
+        import hashlib
+        import hmac
+        import json
+        import time as _time
+
+        payload = {"provider": "stripe", "event_type": "customer.subscription.created", "data": {"object": {"metadata": {"user_id": self.user.id, "plan_tier": "pro"}, "id": "sub_test", "customer": "cus_test"}}}
+        raw = json.dumps(payload).encode("utf-8")
+
+        with patch("app.core.config.get_settings") as mock_settings:
+            mock_settings.return_value.PAYMENT_WEBHOOK_SECRET = "whsec_test_secret"
+            mock_settings.return_value.ALERT_WEBHOOK_URL = ""
+            from app.core.config import get_settings
+            import app.api.subscription_api as sub_api
+            with patch.object(sub_api, "settings", mock_settings.return_value):
+                # 有效签名
+                ts = str(int(_time.time()))
+                sig = hmac.new(b"whsec_test_secret", f"{ts}.{raw.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
+                resp = self.client.post(
+                    "/api/billing/subscriptions/webhook",
+                    content=raw,
+                    headers={"Content-Type": "application/json", "x-stripe-signature": f"t={ts},v1={sig}"},
+                )
+                self.assertEqual(resp.status_code, 200, resp.text)
+                self.assertTrue(resp.json()["success"])
+
+                # 伪造签名
+                bad = hmac.new(b"wrong_secret", f"{ts}.{raw.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
+                resp = self.client.post(
+                    "/api/billing/subscriptions/webhook",
+                    content=raw,
+                    headers={"Content-Type": "application/json", "x-stripe-signature": f"t={ts},v1={bad}"},
+                )
+                self.assertEqual(resp.status_code, 400, resp.text)
+                self.assertIn("签名", resp.text)
+
+                # 缺少签名头
+                resp = self.client.post(
+                    "/api/billing/subscriptions/webhook",
+                    content=raw,
+                    headers={"Content-Type": "application/json"},
+                )
+                self.assertEqual(resp.status_code, 400, resp.text)
+
+    def test_webhook_without_secret_still_accepts(self):
+        """未配置 PAYMENT_WEBHOOK_SECRET 时保持兼容（测试/开发）"""
+        payload = {"provider": "stripe", "event_type": "customer.subscription.created", "data": {"object": {"metadata": {"user_id": self.user.id, "plan_tier": "pro"}, "id": "sub_ok", "customer": "cus_ok"}}}
+        resp = self.client.post(
+            "/api/billing/subscriptions/webhook",
+            json=payload,
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertTrue(resp.json()["success"])
+
     def test_checkout_records_upgrade_intent_oplog(self):
         """#81/升级意图埋点：checkout 调用写 operation_logs (upgrade_intent)"""
         resp = self.client.post("/api/billing/subscriptions/checkout?tier=team", headers=self.headers)
