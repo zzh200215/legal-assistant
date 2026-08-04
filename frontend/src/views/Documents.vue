@@ -409,116 +409,12 @@
           <el-empty v-else description="暂无关联 Agent 执行记录" />
         </el-card>
 
-        <el-card v-if="docId" class="panel-card">
-          <template #header>
-            <div class="card-header-inline">
-              <span>后台任务记录</span>
-              <el-button text @click="fetchParseJobs">刷新</el-button>
-            </div>
-          </template>
-          <el-table :data="parseJobs" border size="small">
-            <el-table-column prop="job_type" label="任务类型" width="120">
-              <template #default="{ row }">
-                {{ parseJobTypeLabel(row.job_type) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="status" label="状态" width="110">
-              <template #default="{ row }">
-                <StatusTag kind="task_run" :status="row.status" size="small" />
-              </template>
-            </el-table-column>
-            <el-table-column prop="progress" label="进度" width="90">
-              <template #default="{ row }">{{ row.progress ?? '-' }}%</template>
-            </el-table-column>
-            <el-table-column prop="current_step" label="当前步骤" width="140" />
-            <el-table-column prop="message" label="说明" show-overflow-tooltip />
-            <el-table-column prop="error_message" label="错误" show-overflow-tooltip />
-            <el-table-column prop="created_at" label="创建时间" width="180" />
-            <el-table-column label="操作" width="120">
-              <template #default="{ row }">
-                <el-button
-                  v-if="row.status === 'failed' && (row.job_type === 'document_parse' || row.job_type === 'document_parse_retry')"
-                  size="small"
-                  type="danger"
-                  text
-                  @click="retryParse"
-                >
-                  重试解析
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
+        <DocumentJobsPanel :parse-jobs="parseJobs" @retry="retryParse" @refresh="fetchParseJobs" />
 
-        <el-card v-if="docId" class="panel-card">
-          <template #header>
-            <div class="card-header-inline">
-              <span>版本记录</span>
-              <el-button text @click="fetchVersions">刷新</el-button>
-            </div>
-          </template>
-          <div v-if="versions.length" class="stack-list">
-            <div v-for="item in versions" :key="`version-${item.id}`" class="stack-item">
-              <div class="stack-top">
-                <strong>{{ item.title }}</strong>
-                <el-tag size="small" type="primary">v{{ item.version_number }}</el-tag>
-                <el-tag size="small">{{ item.status }}</el-tag>
-              </div>
-              <div class="stack-foot">
-                <span>{{ item.created_at }}</span>
-                <span v-if="item.content_hash">hash {{ item.content_hash.slice(0, 10) }}</span>
-              </div>
-            </div>
-          </div>
-          <el-empty v-else description="暂无版本记录" />
-        </el-card>
+        <DocumentVersionsPanel v-if="docId" :versions="versions" @refresh="fetchVersions" />
 
-        <el-card v-if="docId" class="panel-card">
-          <template #header>
-            <div class="card-header-inline">
-              <span>问答历史</span>
-              <el-button text @click="fetchQaRecords">刷新</el-button>
-            </div>
-          </template>
-          <div v-if="qaRecords.length" class="stack-list">
-            <div v-for="item in qaRecords" :key="item.id" class="stack-item">
-              <div class="stack-top">
-                <strong>Q: {{ item.question }}</strong>
-                <el-tag size="small">{{ item.source === 'chat' ? '聊天问答' : '文档问答' }}</el-tag>
-                <el-tag v-if="item.latency_ms" size="small" type="info">{{ item.latency_ms }}ms</el-tag>
-                <el-tag v-if="item.feedback_value" size="small" :type="feedbackTagType(item.feedback_value)">
-                  {{ feedbackValueText(item.feedback_value) }}
-                </el-tag>
-                <el-tag v-if="item.feedback_status === 'open'" size="small" type="warning">待处理</el-tag>
-                <el-tag v-else-if="item.feedback_status === 'resolved'" size="small" type="success">已处理</el-tag>
-              </div>
-              <p>{{ item.answer }}</p>
-              <div v-if="item.feedback_reason || item.feedback_note || item.feedback_resolution_note" class="stack-foot">
-                <span v-if="item.feedback_reason">原因：{{ feedbackReasonText(item.feedback_reason) }}</span>
-                <span v-if="item.feedback_note">备注：{{ item.feedback_note }}</span>
-                <span v-if="item.feedback_resolution_note">处理：{{ item.feedback_resolution_note }}</span>
-              </div>
-              <div v-if="item.citations?.length" class="qa-history-citations">
-                <div class="stack-foot">引用来源</div>
-                <div class="reference-list">
-                  <div v-for="(citation, index) in item.citations" :key="`history-citation-${item.id}-${index}`" class="reference-item citation-item">
-                    <div class="reference-label">
-                      <el-tag size="small" type="primary">片段 {{ (citation.chunk_index ?? index) + 1 }}</el-tag>
-                      <strong>{{ citation.section_title || '未标注章节' }}</strong>
-                      <span class="stack-foot" v-if="citation.page_number">第 {{ citation.page_number }} 页</span>
-                    </div>
-                    <blockquote>{{ citation.source_text || '暂无原文片段' }}</blockquote>
-                  </div>
-                </div>
-              </div>
-              <div class="stack-foot">
-                <span>{{ item.model_name || '未知模型' }}</span>
-                <span>{{ item.created_at }}</span>
-              </div>
-            </div>
-          </div>
-          <el-empty v-else description="暂无问答记录" />
-        </el-card>
+        <DocumentQaHistoryPanel v-if="docId" :records="qaRecords" @refresh="fetchQaRecords" />
+
 
         <div v-if="analysis" class="content-section-head">
           <div>
@@ -745,6 +641,9 @@ import 'element-plus/es/components/upload/style/css'
 import api from '../api'
 import StatusTag from '../components/StatusTag.vue'
 import DocumentAnalysisPanels from '../components/documents/DocumentAnalysisPanels.vue'
+import DocumentJobsPanel from '../components/documents/DocumentJobsPanel.vue'
+import DocumentVersionsPanel from '../components/documents/DocumentVersionsPanel.vue'
+import DocumentQaHistoryPanel from '../components/documents/DocumentQaHistoryPanel.vue'
 import { buildAgentDemoRouteQuery } from '../utils/agentDemo'
 import { useDocumentQaFeedback } from '../composables/useDocumentQaFeedback'
 import {
@@ -904,13 +803,6 @@ const onFileChange = (_uploadFile, uploadFiles) => {
   file.value = selectedFiles.value[0] || null
 }
 
-const parseJobTypeLabel = (value) => ({
-  document_parse: '文档解析',
-  document_parse_retry: '重新解析',
-  document_summary: '文档摘要',
-  document_analysis: '文档分析',
-}[value] || value || '后台任务')
-
 const parseJsonArray = (value) => {
   if (!value) return []
   if (Array.isArray(value)) return value
@@ -931,11 +823,6 @@ const feedbackTagType = (value) => ({
   positive: 'success',
   negative: 'danger',
 }[value] || 'info')
-
-const feedbackReasonText = (value) => {
-  const matched = feedbackReasonOptions.find((item) => item.value === value)
-  return matched?.label || value || '未分类'
-}
 
 const fetchDocuments = async () => {
   try {
