@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-tests:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      # conftest.py 已通过 os.environ.setdefault 注入测试所需配置（加密 key 等），
+      # pydantic-settings 的 env 变量优先于 .env，故 CI 无需复制 .env。
+      - name: Run backend test suite
+        run: python -m pytest tests/ -q
+
+  lint:
+    name: Lint (ruff, real-error rules only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run ruff gate
+        run: python -m ruff check --select E9,F821,F823,F632,F706,F811 app scripts alembic tests eval
+
+  contract-check:
+    name: OpenAPI contract gate (E-3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      # 与本地一致：脚本自身 setdefault 注入环境变量；schema 变更需先
+      # python scripts/check_openapi_contract.py --update 再提交。
+      - name: Check OpenAPI contract against snapshot
+        run: python scripts/check_openapi_contract.py
+
+  eval-regression:
+    name: Frozen generation eval (no LLM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run frozen eval regression
+        run: |
+          python eval/run_generation_eval.py --no-llm --output eval/outputs/generation_eval_report.json
+          python - <<'PY'
+          import json
+          report = json.load(open('eval/outputs/generation_eval_report.json', encoding='utf-8'))
+          summary = report['summary']
+          threshold = 0.95
+          min_cases = 100
+          print(f"overall pass rate: {summary['overall_pass_rate']} ({summary['total_pass']}/{summary['total_cases']})")
+          co = report['consultation']
+          print(f"refusal layer: {co['refusal']['pass_rate']} ({co['refusal']['total_cases']} cases)")
+          print(f"inactive-source layer: {co['inactive_source']['pass_rate']} ({co['inactive_source']['total_cases']} cases)")
+          if summary['total_cases'] < min_cases:
+              raise SystemExit(f"评测集规模不足 {min_cases} 题: {summary['total_cases']}")
+          if summary['overall_pass_rate'] < threshold:
+              raise SystemExit(f"通过率 {summary['overall_pass_rate']} 低于门槛 {threshold}")
+          reg = report.get('regression', {})
+          if reg.get('enabled') and reg['total_cases'] > 0:
+              print(f"AI-2 review-feedback regression layer: {reg['pass_rate']} ({reg['total_cases']} cases)")
+              if reg['pass_rate'] < threshold:
+                  raise SystemExit(f"AI-2 回流回归通过率 {reg['pass_rate']} 低于门槛 {threshold}")
+          PY

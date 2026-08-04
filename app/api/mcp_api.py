@@ -1,0 +1,85 @@
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.core.api_response import api_error, should_passthrough_exception
+from app.core.auth import get_current_user
+from app.core.database import get_db
+from app.mcp.permissions import all_agent_types, allowed_tools_for
+from app.mcp.registry import mcp_registry
+from app.models.user import User
+
+router = APIRouter()
+
+
+class MCPToolCallRequest(BaseModel):
+    tool_name: str = Field(..., min_length=1, description="MCP 工具名")
+    arguments: dict = Field(default_factory=dict, description="工具参数")
+    agent_type: str = Field("general_agent", description="调用方 agent 类型")
+
+
+@router.get("/agent-types")
+def list_mcp_agent_types(
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    items = []
+    for agent_type in all_agent_types():
+        allowed = sorted(allowed_tools_for(agent_type))
+        items.append(
+            {
+                "agent_type": agent_type,
+                "tool_count": len(allowed),
+                "allowed_tools": allowed,
+            }
+        )
+    return {
+        "items": items,
+        "total": len(items),
+    }
+
+
+@router.get("/tools")
+def list_mcp_tools(
+    agent_type: str = Query("general_agent", description="按 agent 类型过滤"),
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    if agent_type not in all_agent_types():
+        raise api_error(400, "未知的 agent_type", code="MCP_AGENT_TYPE_INVALID", detail=agent_type)
+    tools = mcp_registry.list_tools_for(agent_type)
+    return {
+        "agent_type": agent_type,
+        "items": tools,
+        "total": len(tools),
+    }
+
+
+@router.post("/tools/call")
+async def call_mcp_tool(
+    req: MCPToolCallRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        if req.agent_type not in all_agent_types():
+            raise api_error(400, "未知的 agent_type", code="MCP_AGENT_TYPE_INVALID", detail=req.agent_type)
+        if req.tool_name == "sql_query_tool" and current_user.role != "admin":
+            raise api_error(403, "需要管理员权限", code="ADMIN_REQUIRED")
+
+        result = await mcp_registry.call_tool(
+            req.tool_name,
+            req.arguments or {},
+            agent_type=req.agent_type,
+            user_id=current_user.id,
+            db=db,
+        )
+        return {
+            "tool_name": req.tool_name,
+            "agent_type": req.agent_type,
+            "result": result,
+        }
+    except Exception as e:
+        if should_passthrough_exception(e):
+            raise
+        raise api_error(500, "MCP 工具调用失败", code="MCP_TOOL_CALL_FAILED", detail=str(e))

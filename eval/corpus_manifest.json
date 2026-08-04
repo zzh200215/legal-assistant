@@ -1,0 +1,23 @@
+[
+  {
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "user_id": 9000,
+    "file_path": "eval/fixtures/contract_service_agreement.md",
+    "file_type": "md"
+  },
+  {
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "user_id": 9000,
+    "file_path": "eval/fixtures/project_delivery_plan.md",
+    "file_type": "md"
+  },
+  {
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "user_id": 9000,
+    "file_path": "eval/fixtures/vendor_due_diligence_report.md",
+    "file_type": "md"
+  }
+]

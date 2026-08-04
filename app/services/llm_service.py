@@ -1,0 +1,100 @@
+import json
+
+from app.core.llm_client import llm_client
+
+
+class LLMService:
+    async def chat(
+        self,
+        messages: list,
+        stream: bool = False,
+        temperature: float = 0.7,
+        action: str = "chat",
+        user_id: int | None = None,
+        prompt_template: str | None = None,
+        prompt_version: int | None = None,
+    ):
+        return await llm_client.chat(
+            messages,
+            stream=stream,
+            temperature=temperature,
+            action=action,
+            user_id=user_id,
+            prompt_template=prompt_template,
+            prompt_version=prompt_version,
+        )
+
+    async def generate(
+        self,
+        prompt: str,
+        temperature: float = 0.7,
+        action: str = "generate",
+        user_id: int | None = None,
+        prompt_template: str | None = None,
+        prompt_version: int | None = None,
+    ) -> str:
+        return await llm_client.generate(
+            prompt,
+            temperature=temperature,
+            action=action,
+            user_id=user_id,
+            prompt_template=prompt_template,
+            prompt_version=prompt_version,
+        )
+
+    async def generate_with_images(
+        self,
+        prompt: str,
+        image_urls: list[str],
+        temperature: float = 0.7,
+        action: str = "generate_with_images",
+        user_id: int | None = None,
+        prompt_template: str | None = None,
+        prompt_version: int | None = None,
+    ) -> str:
+        return await llm_client.generate_with_images(
+            prompt,
+            image_urls=image_urls,
+            temperature=temperature,
+            action=action,
+            user_id=user_id,
+            prompt_template=prompt_template,
+            prompt_version=prompt_version,
+        )
+
+    def _strip_code_fence(self, text: str) -> str:
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        return text.strip()
+
+    def parse_json_array(self, text: str) -> list[dict]:
+        text = self._strip_code_fence(text)
+        try:
+            result = json.loads(text)
+            if isinstance(result, dict):
+                result = [result]
+            return result if isinstance(result, list) else []
+        except json.JSONDecodeError:
+            return []
+
+    def parse_json_object(self, text: str) -> dict:
+        text = self._strip_code_fence(text)
+        try:
+            result = json.loads(text)
+            return result if isinstance(result, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    def _parse_json_array(self, text: str) -> list[dict]:
+        return self.parse_json_array(text)
+
+    def _parse_json_object(self, text: str) -> dict:
+        return self.parse_json_object(text)
+
+
+llm_service = LLMService()

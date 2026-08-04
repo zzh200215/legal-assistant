@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #F6F8FF;
+  --color-foreground: #1A1A2E;
+  --color-card: #ffffff;
+  --color-card-foreground: #1A1A2E;
+  --color-muted: #F0F2FF;
+  --color-muted-foreground: #8A8AA8;
+  --color-border: #E4E8F8;
+  --color-input: #E4E8F8;
+  --color-ring: #4F6AF5;
+  --color-primary: #4F6AF5;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #4A4A68;
+  --color-secondary-foreground: #ffffff;
+  --color-accent: #F0F2FF;
+  --color-accent-foreground: #1A1A2E;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+}
+
+@layer base {
+  body {
+    background: #F6F8FF;
+  }
+}
+
+@layer components {
+  .ui-card {
+    @apply rounded-lg border border-slate-200 bg-white shadow-sm;
+    transition: box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+                transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .ui-card:hover {
+    @apply shadow-md;
+  }
+
+  .ui-panel {
+    @apply rounded-lg border border-slate-200 bg-white/95 shadow-sm;
+  }
+
+  .ui-section-title {
+    @apply text-sm font-semibold text-slate-950;
+  }
+
+  .ui-section-subtitle {
+    @apply text-xs leading-5 text-slate-500;
+  }
+}

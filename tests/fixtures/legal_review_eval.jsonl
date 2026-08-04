@@ -1,0 +1,2 @@
+{"id":"nda-missing-term","tier":"critical","content":"保密义务适用于双方，但未约定期限。","expected_risk_levels":["high","medium"],"expected_terms":["保密"]}
+{"id":"service-payment","tier":"standard","content":"服务费于验收后30日内支付，逾期按日万分之三承担违约金。","expected_risk_levels":["low","medium"],"expected_terms":["付款","违约"]}

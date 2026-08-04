@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest *)",
+      "Bash(python -m unittest *)",
+      "Bash(python -m ruff *)",
+      "Bash(python scripts/*)",
+      "Bash(python eval/*)",
+      "Bash(python -m compileall *)",
+      "Bash(python --version)",
+      "Bash(node --test *)",
+      "Bash(npm run build)",
+      "Bash(npm run dev)",
+      "Bash(npm run lint)"
+    ]
+  }
+}

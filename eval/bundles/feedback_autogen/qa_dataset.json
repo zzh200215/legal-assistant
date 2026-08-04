@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-08-04T01:07:44.081377",
+  "days": 30,
+  "count": 1,
+  "items": [
+    {
+      "qa_record_id": 1,
+      "document_id": 1,
+      "document_title": "spec.md",
+      "question": "付款条件是什么？",
+      "previous_answer": "不知道",
+      "feedback_reason": "incorrect_answer",
+      "feedback_note": null,
+      "citations": [],
+      "created_at": "2026-08-04T01:07:44"
+    }
+  ]
+}

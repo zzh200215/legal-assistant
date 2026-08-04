@@ -1,0 +1,310 @@
+/* ============================================
+   Design Tokens - 律智检
+   Clean blue-white tool product system.
+   ============================================ */
+
+:root {
+  /* ─── Color Palette ─── */
+  --color-primary:          #4F6AF5;
+  --color-primary-hover:    #4058E8;
+  --color-primary-active:   #3448D0;
+  --color-primary-light:    #F0F2FF;
+  --color-primary-subtle:   rgba(79, 106, 245, 0.10);
+
+  --color-accent:           #28B8F6;
+  --color-accent-hover:     #119DE0;
+  --color-accent-light:     #EAF8FF;
+
+  --color-secondary:        #5B6CF6;
+  --color-secondary-hover:  #4657DF;
+  --color-secondary-light:  #F4F5FF;
+
+  --color-success:          #22C55E;
+  --color-success-light:    #ECFDF3;
+  --color-danger:           #ef4444;
+  --color-danger-light:     #fef2f2;
+  --color-warning:          #F59E0B;
+  --color-warning-light:    #FFF8E6;
+  --color-info:             #8A8AA8;
+  --color-info-light:       #F5F6FF;
+
+  /* ─── Surface & Background ─── */
+  --color-bg:               #F6F8FF;
+  --color-bg-alt:           #F0F2FF;
+  --color-surface:          #ffffff;
+  --color-surface-hover:    #FAFBFF;
+  --color-surface-soft:     rgba(255, 255, 255, 0.86);
+
+  /* ─── Text ─── */
+  --color-text:             #1A1A2E;
+  --color-text-secondary:   #4A4A68;
+  --color-text-muted:       #8A8AA8;
+  --color-text-inverse:     #ffffff;
+
+  /* ─── Border ─── */
+  --color-border:           #E4E8F8;
+  --color-border-light:     #F0F2FF;
+  --color-border-hover:     #C8D0FF;
+
+  /* ─── Shadow (premium depth hierarchy) ─── */
+  --shadow-xs:              0 4px 14px rgba(79, 106, 245, 0.06);
+  --shadow-sm:              0 8px 24px rgba(79, 106, 245, 0.08);
+  --shadow-md:              0 12px 32px rgba(79, 106, 245, 0.10);
+  --shadow-lg:              0 18px 46px rgba(79, 106, 245, 0.12);
+  --shadow-xl:              0 26px 60px rgba(26, 26, 46, 0.16);
+  --shadow-card-hover:      0 14px 34px rgba(79, 106, 245, 0.14);
+
+  /* ─── Border Radius (simplified scale) ─── */
+  --radius-xs:              4px;
+  --radius-sm:              8px;
+  --radius-md:              12px;
+  --radius-lg:              16px;
+  --radius-xl:              22px;
+  --radius-full:            9999px;
+
+  /* ─── Typography ─── */
+  --font-family:            Inter, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono:              'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
+
+  --text-xs:                11px;
+  --text-xs-lh:             16px;
+  --text-sm:                13px;
+  --text-sm-lh:             18px;
+  --text-base:              14px;
+  --text-base-lh:           20px;
+  --text-lg:                15px;
+  --text-lg-lh:             22px;
+  --text-xl:                18px;
+  --text-xl-lh:             26px;
+  --text-2xl:               22px;
+  --text-2xl-lh:            30px;
+  --text-3xl:               28px;
+  --text-3xl-lh:            36px;
+  --text-4xl:               40px;
+  --text-4xl-lh:            48px;
+
+  /* ─── Spacing (4px base grid) ─── */
+  --space-1:                4px;
+  --space-2:                8px;
+  --space-3:                12px;
+  --space-4:                16px;
+  --space-5:                20px;
+  --space-6:                24px;
+  --space-8:                32px;
+  --space-10:               40px;
+  --space-12:               48px;
+
+  /* ─── Transition ─── */
+  --transition-fast:        150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base:        200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow:        300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-bounce:      300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ─── Z-index ─── */
+  --z-sidebar:              100;
+  --z-topbar:               200;
+  --z-overlay:              500;
+  --z-modal:                1000;
+}
+
+/* ─── Gradients (clean, contemporary) ─── */
+:root {
+  --gradient-brand:         linear-gradient(135deg, #4F6AF5 0%, #27BDF5 100%);
+  --gradient-brand-hover:   linear-gradient(135deg, #4058E8 0%, #16A9E5 100%);
+  --gradient-surface:       linear-gradient(180deg, #ffffff 0%, #FAFBFF 100%);
+  --gradient-glow:          radial-gradient(ellipse at 50% 0%, rgba(79, 106, 245, 0.12) 0%, transparent 68%);
+  --gradient-hero:          linear-gradient(135deg, #FFFFFF 0%, #F0F2FF 58%, #EAF8FF 100%);
+  --gradient-success:       linear-gradient(135deg, #22C55E 0%, #8DD85F 100%);
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font-family);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ─── Utility Classes ─── */
+.app-toolbar,
+.app-toolbar-right,
+.app-chip-row,
+.app-inline-meta,
+.app-pagination-end {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.app-toolbar {
+  justify-content: space-between;
+}
+
+.app-toolbar-right {
+  margin-left: auto;
+}
+
+.app-pagination-end {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+/* Section intro banners */
+.app-section-intro,
+.app-state-banner,
+.app-readonly-banner {
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-surface);
+  transition: box-shadow var(--transition-fast);
+}
+
+.app-section-intro {
+  display: grid;
+  gap: 6px;
+}
+
+.app-section-intro strong,
+.app-state-banner strong,
+.app-readonly-banner strong {
+  color: var(--color-text);
+  font-size: var(--text-lg);
+}
+
+.app-section-intro span,
+.app-state-banner span,
+.app-readonly-banner span {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.app-state-banner {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--gradient-surface);
+}
+
+.app-readonly-banner {
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.92));
+}
+
+.app-empty-note {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Shared page chrome */
+.page-heading,
+.page-header {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  background: var(--gradient-hero);
+  box-shadow: var(--shadow-xs);
+}
+
+.page-heading h3,
+.page-header h3 {
+  color: var(--color-text);
+  font-weight: 800;
+}
+
+.section-eyebrow,
+.overview-label,
+.summary-label,
+.metric-label {
+  color: var(--color-text-muted);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.overview-tile,
+.metric-tile,
+.summary-metric,
+.draft-metric,
+.dialog-metric,
+.artifact-summary-item,
+.detail-metric {
+  border: 1px solid var(--color-border-light);
+  background: #ffffff;
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.overview-tile:hover,
+.metric-tile:hover,
+.summary-metric:hover,
+.draft-metric:hover,
+.artifact-summary-item:hover,
+.detail-metric:hover {
+  border-color: var(--color-border-hover);
+  background: #ffffff;
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-2px);
+}
+
+.toolbar-card,
+.panel-card,
+.table-card,
+.system-panel-card,
+.input-card,
+.preview-card,
+.details-card,
+.history-card,
+.summary-card,
+.demo-card,
+.board-card,
+.focus-card {
+  border-radius: var(--radius-lg);
+}
+
+.command-chip,
+.badge-chip,
+.status-chip {
+  border-radius: var(--radius-full);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+/* Grid helpers */
+.app-panel-grid-2,
+.app-panel-grid-3,
+.app-metric-grid-4 {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.app-panel-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.app-panel-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.app-metric-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .app-panel-grid-2,
+  .app-panel-grid-3,
+  .app-metric-grid-4 {
+    grid-template-columns: 1fr;
+  }
+}

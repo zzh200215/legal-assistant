@@ -1,0 +1,214 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: ai-office-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: aibg
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -p\"$${MYSQL_ROOT_PASSWORD}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-office-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-office-api
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:?set DATABASE_URL_DOCKER in .env}
+      REDIS_URL: redis://redis:6379/0
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-qwen-plus}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v3}
+      LLM_MODEL_ROUTING_ENABLED: ${LLM_MODEL_ROUTING_ENABLED:-true}
+      LLM_SMALL_MODEL: ${LLM_SMALL_MODEL:-}
+      LLM_SMALL_MODEL_PROVIDER: ${LLM_SMALL_MODEL_PROVIDER:-openai_compatible}
+      LLM_SMALL_MODEL_API_BASE_URL: ${LLM_SMALL_MODEL_API_BASE_URL:-}
+      LLM_SMALL_MODEL_API_KEY: ${LLM_SMALL_MODEL_API_KEY:-}
+      LLM_SIMPLE_REQUEST_MAX_CHARS: ${LLM_SIMPLE_REQUEST_MAX_CHARS:-600}
+      LLM_PRIMARY_REQUEST_RETRIES: ${LLM_PRIMARY_REQUEST_RETRIES:-2}
+      LLM_FALLBACK_REQUEST_RETRIES: ${LLM_FALLBACK_REQUEST_RETRIES:-1}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-60}
+      LLM_MODEL_FALLBACK_ENABLED: ${LLM_MODEL_FALLBACK_ENABLED:-true}
+      LLM_SMALL_MODEL_FALLBACK_TO_PRIMARY: ${LLM_SMALL_MODEL_FALLBACK_TO_PRIMARY:-true}
+      LLM_ROUTING_ALERT_MIN_REQUESTS: ${LLM_ROUTING_ALERT_MIN_REQUESTS:-10}
+      LLM_ROUTING_ALERT_PRIMARY_FAILURE_RATE: ${LLM_ROUTING_ALERT_PRIMARY_FAILURE_RATE:-0.20}
+      LLM_ROUTING_ALERT_FALLBACK_FAILURE_RATE: ${LLM_ROUTING_ALERT_FALLBACK_FAILURE_RATE:-0.30}
+      NEO4J_ENABLED: ${NEO4J_ENABLED:-false}
+      NEO4J_URI: ${NEO4J_URI:-}
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-}
+      NEO4J_DATABASE: ${NEO4J_DATABASE:-neo4j}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: ${CONNECTOR_CREDENTIAL_ENCRYPTION_KEY:-}
+      LEGAL_DATA_ENCRYPTION_KEY: ${LEGAL_DATA_ENCRYPTION_KEY:-}
+      LEGAL_DATA_ENCRYPTION_KEYS_JSON: ${LEGAL_DATA_ENCRYPTION_KEYS_JSON:-}
+      LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION: ${LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION:-v1}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      MAILBOX_RETENTION_DAYS: ${MAILBOX_RETENTION_DAYS:-90}
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+      ADMIN_USERNAME: admin
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+    command: sh -c "python scripts/bootstrap_system.py && uvicorn app.main:app --host 0.0.0.0 --port 8001"
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data/uploads:/app/uploads
+      - ./data/chroma_db:/app/chroma_db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json, urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8001/api/health/ready', timeout=5))['status'] == 'ok'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-office-celery
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:?set DATABASE_URL_DOCKER in .env}
+      REDIS_URL: redis://redis:6379/0
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-qwen-plus}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v3}
+      LLM_MODEL_ROUTING_ENABLED: ${LLM_MODEL_ROUTING_ENABLED:-true}
+      LLM_SMALL_MODEL: ${LLM_SMALL_MODEL:-}
+      LLM_SMALL_MODEL_PROVIDER: ${LLM_SMALL_MODEL_PROVIDER:-openai_compatible}
+      LLM_SMALL_MODEL_API_BASE_URL: ${LLM_SMALL_MODEL_API_BASE_URL:-}
+      LLM_SMALL_MODEL_API_KEY: ${LLM_SMALL_MODEL_API_KEY:-}
+      LLM_SIMPLE_REQUEST_MAX_CHARS: ${LLM_SIMPLE_REQUEST_MAX_CHARS:-600}
+      LLM_PRIMARY_REQUEST_RETRIES: ${LLM_PRIMARY_REQUEST_RETRIES:-2}
+      LLM_FALLBACK_REQUEST_RETRIES: ${LLM_FALLBACK_REQUEST_RETRIES:-1}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-60}
+      LLM_MODEL_FALLBACK_ENABLED: ${LLM_MODEL_FALLBACK_ENABLED:-true}
+      LLM_SMALL_MODEL_FALLBACK_TO_PRIMARY: ${LLM_SMALL_MODEL_FALLBACK_TO_PRIMARY:-true}
+      LLM_ROUTING_ALERT_MIN_REQUESTS: ${LLM_ROUTING_ALERT_MIN_REQUESTS:-10}
+      LLM_ROUTING_ALERT_PRIMARY_FAILURE_RATE: ${LLM_ROUTING_ALERT_PRIMARY_FAILURE_RATE:-0.20}
+      LLM_ROUTING_ALERT_FALLBACK_FAILURE_RATE: ${LLM_ROUTING_ALERT_FALLBACK_FAILURE_RATE:-0.30}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: ${CONNECTOR_CREDENTIAL_ENCRYPTION_KEY:-}
+      LEGAL_DATA_ENCRYPTION_KEY: ${LEGAL_DATA_ENCRYPTION_KEY:-}
+      LEGAL_DATA_ENCRYPTION_KEYS_JSON: ${LEGAL_DATA_ENCRYPTION_KEYS_JSON:-}
+      LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION: ${LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION:-v1}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      MAILBOX_RETENTION_DAYS: ${MAILBOX_RETENTION_DAYS:-90}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_TIMEOUT_SECONDS: ${ALERT_WEBHOOK_TIMEOUT_SECONDS:-5}
+      ALERT_WEBHOOK_MIN_SEVERITY: ${ALERT_WEBHOOK_MIN_SEVERITY:-high}
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+    command: celery -A app.core.celery_app.celery_app worker --loglevel=info --hostname=worker@%h
+    volumes:
+      - ./data/uploads:/app/uploads
+      - ./data/chroma_db:/app/chroma_db
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app.celery_app inspect ping -d worker@$$HOSTNAME --timeout=5 | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-office-celery-beat
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:?set DATABASE_URL_DOCKER in .env}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: ${CONNECTOR_CREDENTIAL_ENCRYPTION_KEY:-}
+      LEGAL_DATA_ENCRYPTION_KEY: ${LEGAL_DATA_ENCRYPTION_KEY:-}
+      LEGAL_DATA_ENCRYPTION_KEYS_JSON: ${LEGAL_DATA_ENCRYPTION_KEYS_JSON:-}
+      LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION: ${LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION:-v1}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LLM_PROVIDER: openai_compatible
+      LLM_API_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: qwen-plus
+      EMBEDDING_MODEL: text-embedding-v3
+    command: celery -A app.core.celery_app.celery_app beat --loglevel=info
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import datetime, os, redis; value=redis.from_url(os.environ['REDIS_URL']).get('aibg:operations:beat:last_tick'); assert value and (datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(value.decode())).total_seconds() < 180\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai-office-frontend
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  mysql_data:
+  redis_data:

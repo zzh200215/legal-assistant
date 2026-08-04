@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+logs/
+tmp/
+*.log
+*.out.log
+*.err.log
+
+# Node
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# Chroma
+chroma_db/
+
+# IDE
+.vscode/
+.idea/
+.tmp_run/
+.reasonix/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# DR backups (contain unencrypted DB dumps; never commit)
+backups/
+
+# Runtime data (sqlite DB, uploads, backups, daily check / baseline / weekly artifacts)
+data/
+
+# Runtime cursor for review-feedback eval export
+scripts/review_feedback_state.json
+
+# Eval run artifacts (generated reports; dataset & scripts are tracked)
+eval/outputs/

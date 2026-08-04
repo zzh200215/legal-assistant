@@ -1,0 +1,122 @@
+[
+  {
+    "name": "labor_exact_citation",
+    "question": "根据《劳动合同法》第40条，公司提前通知解除劳动合同需要满足什么条件？",
+    "category": "labor_dispute",
+    "expected_source_ids": [1],
+    "note": "精确引用匹配：问题中出现书名号+条文编号，应直接命中对应法源"
+  },
+  {
+    "name": "labor_termination_without_notice",
+    "question": "公司以业务调整为由单方解除劳动合同，未提前30日通知，也未支付经济补偿金，我该怎么办？",
+    "category": "labor_dispute",
+    "expected_source_ids": [1, 2, 3],
+    "note": "语义/关键词匹配：无精确引用，依赖关键词和分类词命中"
+  },
+  {
+    "name": "labor_compensation_calculation",
+    "question": "经济补偿金按工作年限怎么计算？工作三年半应该拿多少个月工资？",
+    "category": "labor_dispute",
+    "expected_source_ids": [3],
+    "note": "关键词高覆盖度应排在首位"
+  },
+  {
+    "name": "labor_arbitration_deadline",
+    "question": "劳动争议申请仲裁的时效是多久？从什么时候开始算？",
+    "category": "labor_dispute",
+    "expected_source_ids": [4],
+    "note": "时效相关问题应命中仲裁时效条款而非补偿条款"
+  },
+  {
+    "name": "labor_illegal_dismissal_double_compensation",
+    "question": "公司违法解除劳动合同，需要支付赔偿金吗？是经济补偿的几倍？",
+    "category": "labor_dispute",
+    "expected_source_ids": [5],
+    "note": "赔偿金（违法解除）与经济补偿（合法解除）应区分，命中第87条"
+  },
+  {
+    "name": "contract_breach_liability",
+    "question": "合同一方不履行义务，应承担什么违约责任？",
+    "category": "contract_dispute",
+    "expected_source_ids": [7],
+    "note": "合同纠纷分类关键词应正确路由到民法典违约责任条款"
+  },
+  {
+    "name": "contract_penalty_cap",
+    "question": "合同约定的违约金过高，法院可以调整吗？",
+    "category": "contract_dispute",
+    "expected_source_ids": [8],
+    "note": "违约金调整应命中第585条而非笼统的第577条"
+  },
+  {
+    "name": "contract_termination_conditions",
+    "question": "对方迟延履行主要债务，经催告后仍不履行，我可以解除合同吗？",
+    "category": "contract_dispute",
+    "expected_source_ids": [9],
+    "note": "解除条件问题应命中第563条"
+  },
+  {
+    "name": "contract_review_checklist",
+    "question": "审查服务合同应该关注哪些要点？",
+    "category": "contract_dispute",
+    "expected_source_ids": [17],
+    "note": "应命中合同审查模板而非具体法条"
+  },
+  {
+    "name": "lending_interest_rate_cap",
+    "question": "民间借贷约定的利率超过多少倍LPR就不受法律保护？",
+    "category": "private_lending",
+    "expected_source_ids": [10],
+    "note": "利率上限问题应精确命中司法解释第25条"
+  },
+  {
+    "name": "lending_no_written_contract",
+    "question": "借款没有签订书面合同，只有转账记录，法院会认定借贷关系存在吗？",
+    "category": "private_lending",
+    "expected_source_ids": [11, 12],
+    "note": "举证问题应命中借贷事实认定相关条款"
+  },
+  {
+    "name": "consumer_fraud_triple_compensation",
+    "question": "商家销售假货欺诈消费者，消费者可以要求几倍赔偿？",
+    "category": "consumer_dispute",
+    "expected_source_ids": [13],
+    "note": "欺诈三倍赔偿应精确命中第55条"
+  },
+  {
+    "name": "consumer_seven_day_return",
+    "question": "网购商品七天无理由退货有没有例外情况？",
+    "category": "consumer_dispute",
+    "expected_source_ids": [14],
+    "note": "七日无理由退货应命中第25条"
+  },
+  {
+    "name": "consumer_product_quality_defect",
+    "question": "买到的产品质量不符合约定标准，销售者应该怎么处理？",
+    "category": "consumer_dispute",
+    "expected_source_ids": [15],
+    "note": "产品质量问题应命中产品质量法而非消保法"
+  },
+  {
+    "name": "labor_should_avoid_inactive_source",
+    "question": "劳动合同法第40条规定辞退员工需要满足什么条件？",
+    "category": "labor_dispute",
+    "expected_source_ids": [1],
+    "avoid_source_ids": [16],
+    "note": "存在同名失效法源作为干扰项，用户未表达出对旧版本的偏好时应优先命中 active 版本"
+  },
+  {
+    "name": "labor_mutual_agreement_termination",
+    "question": "双方协商一致解除劳动合同，是否需要支付经济补偿？",
+    "category": "labor_dispute",
+    "expected_source_ids": [18],
+    "note": "pending_update 状态法源仍应可召回（降权但非排除），验证状态加权不是硬过滤"
+  },
+  {
+    "name": "unrelated_question_no_match",
+    "question": "今天北京的天气怎么样，适合出门吗？",
+    "category": "other",
+    "expected_source_ids": [],
+    "note": "完全无关问题应拒答或返回空结果，不应强行匹配任何法源"
+  }
+]

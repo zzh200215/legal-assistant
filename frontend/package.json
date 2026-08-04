@@ -1,0 +1,30 @@
+{
+  "name": "ai-office-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test:unit": "node --test src/composables/__tests__/useDocumentQaFeedback.test.js",
+    "preview": "vite preview",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "@sentry/vue": "^10.69.0",
+    "axios": "^1.7.0",
+    "element-plus": "^2.8.0",
+    "vue": "^3.4.0",
+    "vue-router": "^4.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@tailwindcss/vite": "^4.3.2",
+    "@vitejs/plugin-vue": "^5.1.0",
+    "autoprefixer": "^10.5.2",
+    "postcss": "^8.5.16",
+    "tailwindcss": "^4.3.2",
+    "vite": "^5.4.0"
+  }
+}

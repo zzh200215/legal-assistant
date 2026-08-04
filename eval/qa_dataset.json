@@ -1,0 +1,408 @@
+[
+  {
+    "name": "contract_parties",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "contract_basic",
+    "question": "这份合同的甲方和乙方分别是谁？",
+    "reference_answer": "甲方是星河制造（上海）有限公司，乙方是云帆智能科技（杭州）有限公司。",
+    "expected_chunk_keywords": [
+      "星河制造（上海）有限公司",
+      "云帆智能科技（杭州）有限公司"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_project_manager",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "contract_basic",
+    "question": "项目经理是谁？",
+    "reference_answer": "项目经理是李明。",
+    "expected_chunk_keywords": [
+      "项目经理",
+      "李明"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_scope_modules",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "scope",
+    "question": "合同服务范围包括哪些内容？",
+    "reference_answer": "包括合同文档解析与结构化抽取、文档问答与引用展示、会议纪要生成与行动项提取、系统上线培训与两轮用户验收支持。",
+    "expected_chunk_keywords": [
+      "合同文档解析与结构化抽取",
+      "文档问答与引用展示",
+      "会议纪要生成与行动项提取"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_total_amount",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "payment",
+    "question": "合同总金额是多少？",
+    "reference_answer": "合同总金额为人民币268万元（含税）。",
+    "expected_chunk_keywords": [
+      "268 万元"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_first_payment",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "payment",
+    "question": "首付款金额和支付条件是什么？",
+    "reference_answer": "甲方应在合同签署后5个工作日内支付首付款100万元。",
+    "expected_chunk_keywords": [
+      "首付款 100 万元",
+      "合同签署后 5 个工作日内"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_second_payment_due_date",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "payment",
+    "question": "第二笔款项金额和付款截止日期分别是什么？",
+    "reference_answer": "第二笔款项为108万元，应在2026年7月30日前支付。",
+    "expected_chunk_keywords": [
+      "108 万元",
+      "2026 年 7 月 30 日前"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_final_payment",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "payment",
+    "question": "尾款金额和支付条件是什么？",
+    "reference_answer": "尾款为60万元，项目最终验收通过后10个工作日内支付。",
+    "expected_chunk_keywords": [
+      "尾款 60 万元",
+      "最终验收通过后 10 个工作日内"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_milestone_due",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "timeline",
+    "question": "需求确认和原型评审最晚什么时候完成？",
+    "reference_answer": "乙方应在2026年7月10日前完成需求确认和原型评审。",
+    "expected_chunk_keywords": [
+      "2026 年 7 月 10 日前",
+      "需求确认和原型评审"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_acceptance_deadline",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "timeline",
+    "question": "项目计划什么时候完成验收上线？",
+    "reference_answer": "计划于2026年8月30日完成验收上线。",
+    "expected_chunk_keywords": [
+      "2026 年 8 月 30 日",
+      "验收上线"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_penalty_supplier_delay",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "liability",
+    "question": "乙方延期交付时的违约金规则是什么？",
+    "reference_answer": "每延期1个自然日，按合同总金额的0.3%支付违约金，累计不超过合同总金额的10%。",
+    "expected_chunk_keywords": [
+      "0.3%",
+      "不超过合同总金额的 10%"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_penalty_buyer_late_payment",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "liability",
+    "question": "甲方逾期付款超过15天后，乙方有什么权利？",
+    "reference_answer": "乙方有权暂停交付工作，并要求甲方按逾期金额的每日0.05%支付违约金。",
+    "expected_chunk_keywords": [
+      "暂停交付工作",
+      "每日 0.05%"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_confidentiality_term",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "confidentiality",
+    "question": "保密期限有多久？",
+    "reference_answer": "保密期限为项目终止后3年。",
+    "expected_chunk_keywords": [
+      "项目终止后 3 年"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "contract_dispute_resolution",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "dispute",
+    "question": "争议解决方式是什么？",
+    "reference_answer": "应先友好协商，协商不成则提交上海仲裁委员会仲裁。",
+    "expected_chunk_keywords": [
+      "上海仲裁委员会",
+      "友好协商"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_target_users",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "project_goal",
+    "question": "这个项目主要面向哪些团队？",
+    "reference_answer": "主要面向中型制造企业的行政与法务团队。",
+    "expected_chunk_keywords": [
+      "行政与法务团队"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_scope_modules",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "scope",
+    "question": "实施方案里的交付范围包括哪五个模块？",
+    "reference_answer": "包括文档上传与解析中心、RAG问答与引用展示模块、会议纪要与行动项提取模块、任务中心与来源追踪模块、系统监控与模型调用统计面板。",
+    "expected_chunk_keywords": [
+      "文档上传与解析中心",
+      "RAG 问答与引用展示模块",
+      "系统监控与模型调用统计面板"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_scope_exclusion",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "scope",
+    "question": "哪些内容不在本期交付范围内？",
+    "reference_answer": "邮件营销模块和外部CRM集成不在本期交付范围内。",
+    "expected_chunk_keywords": [
+      "邮件营销模块",
+      "外部 CRM 集成"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_milestone_prototype",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "timeline",
+    "question": "核心页面原型与接口联调的计划完成时间是什么时候？",
+    "reference_answer": "计划于2026年7月5日完成核心页面原型与接口联调。",
+    "expected_chunk_keywords": [
+      "2026 年 7 月 05 日",
+      "原型与接口联调"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_milestone_go_live",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "timeline",
+    "question": "正式上线日期是什么时候？",
+    "reference_answer": "正式上线日期是2026年8月5日。",
+    "expected_chunk_keywords": [
+      "2026 年 8 月 05 日",
+      "正式上线"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_team_composition",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "resource",
+    "question": "项目团队由哪些角色组成？",
+    "reference_answer": "由1名项目经理、2名后端工程师、1名前端工程师和1名测试工程师组成。",
+    "expected_chunk_keywords": [
+      "2 名后端工程师",
+      "1 名前端工程师",
+      "1 名测试工程师"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_risk_latency",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "risk",
+    "question": "方案中提到的模型API延迟风险是什么？",
+    "reference_answer": "如果模型API延迟波动超过30%，会议摘要接口会出现超时风险。",
+    "expected_chunk_keywords": [
+      "延迟波动超过 30%",
+      "会议摘要接口会出现超时风险"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_risk_permission",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "risk",
+    "question": "用户权限相关的风险是什么？",
+    "reference_answer": "若用户权限边界定义不清，可能出现跨部门数据可见性问题。",
+    "expected_chunk_keywords": [
+      "权限边界定义不清",
+      "跨部门数据可见性问题"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "plan_training_schedule",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "training",
+    "question": "项目会安排几场培训，每场多长时间？",
+    "reference_answer": "会安排2场培训，每场90分钟。",
+    "expected_chunk_keywords": [
+      "2 场培训",
+      "90 分钟"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "vendor_revenue_2025",
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "category": "finance",
+    "question": "这家供应商2025年的营业收入是多少？",
+    "reference_answer": "2025年营业收入为1820万元。",
+    "expected_chunk_keywords": [
+      "1820 万元"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "vendor_ar_ratio",
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "category": "finance",
+    "question": "2025年末应收账款占总资产比例是多少？",
+    "reference_answer": "2025年末应收账款占总资产比例达到41%。",
+    "expected_chunk_keywords": [
+      "41%"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "vendor_delivery_history",
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "category": "delivery",
+    "question": "近两年累计交付了多少个AI应用项目，其中多少个按期上线？",
+    "reference_answer": "累计交付12个AI应用项目，其中9个按期上线。",
+    "expected_chunk_keywords": [
+      "12 个 AI 应用项目",
+      "9 个按期上线"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "vendor_delay_history",
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "category": "delivery",
+    "question": "历史项目里因为模型接口变更导致延期的情况是什么？",
+    "reference_answer": "曾出现2次因外部模型接口变更导致延期，最长延期18天。",
+    "expected_chunk_keywords": [
+      "2 次",
+      "最长延期 18 天"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "vendor_security_issue",
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "category": "security",
+    "question": "最近一次内部审计发现了什么安全问题？",
+    "reference_answer": "发现测试环境日志保留策略未完全落地，存在敏感字段脱敏不彻底的问题。",
+    "expected_chunk_keywords": [
+      "日志保留策略未完全落地",
+      "敏感字段脱敏不彻底"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "vendor_recommendation_deadline",
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "category": "recommendation",
+    "question": "尽调报告建议供应商在什么时间前完成日志脱敏整改？",
+    "reference_answer": "建议不晚于2026年7月15日完成日志脱敏整改。",
+    "expected_chunk_keywords": [
+      "2026 年 7 月 15 日",
+      "日志脱敏整改"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "vendor_overall_conclusion",
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "category": "conclusion",
+    "question": "报告的总体结论是什么？",
+    "reference_answer": "供应商具备AI项目交付经验，但现金流稳定性和测试环境安全治理仍需重点关注。",
+    "expected_chunk_keywords": [
+      "具备 AI 项目交付经验",
+      "现金流稳定性",
+      "测试环境安全治理"
+    ],
+    "should_refuse": false
+  },
+  {
+    "name": "refusal_contract_ceo",
+    "document_id": 9001,
+    "document_name": "企业知识库升级服务合同",
+    "category": "refusal",
+    "question": "乙方公司的CEO是谁？",
+    "reference_answer": "",
+    "expected_chunk_keywords": [],
+    "should_refuse": true
+  },
+  {
+    "name": "refusal_plan_budget",
+    "document_id": 9002,
+    "document_name": "AI办公助手实施方案",
+    "category": "refusal",
+    "question": "这个项目的预算总额是多少？",
+    "reference_answer": "",
+    "expected_chunk_keywords": [],
+    "should_refuse": true
+  },
+  {
+    "name": "refusal_vendor_legal_case",
+    "document_id": 9003,
+    "document_name": "供应商尽调报告",
+    "category": "refusal",
+    "question": "这家供应商当前是否有未结诉讼案件？",
+    "reference_answer": "",
+    "expected_chunk_keywords": [],
+    "should_refuse": true
+  }
+]

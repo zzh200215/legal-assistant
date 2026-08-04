@@ -1,0 +1,48 @@
+[
+  {
+    "name": "amendment_relation_breaks_near_tie",
+    "question": "合同违约责任和赔偿应当如何处理？",
+    "articles": [
+      {
+        "title": "民法典合同编旧版本说明",
+        "article_number": "第577条",
+        "content": "合同违约责任、继续履行和损失赔偿的规则。"
+      },
+      {
+        "title": "民法典合同编现行修订说明",
+        "article_number": "第577条",
+        "content": "合同违约责任、继续履行和损失赔偿的规则。"
+      }
+    ],
+    "graph_support": {
+      "article_index": 1,
+      "support_count": 1,
+      "version_relations": ["AMENDED_BY"],
+      "shared_law_area": false
+    },
+    "expected_promoted_article_index": 1
+  },
+  {
+    "name": "shared_law_area_breaks_near_tie",
+    "question": "服务合同的付款和违约风险需要重点关注什么？",
+    "articles": [
+      {
+        "title": "一般合同风险提示",
+        "article_number": "第1条",
+        "content": "服务合同付款、违约责任和履约风险的处理规则。"
+      },
+      {
+        "title": "服务合同领域规则",
+        "article_number": "第2条",
+        "content": "服务合同付款、违约责任和履约风险的处理规则。"
+      }
+    ],
+    "graph_support": {
+      "article_index": 1,
+      "support_count": 2,
+      "version_relations": [],
+      "shared_law_area": true
+    },
+    "expected_promoted_article_index": 1
+  }
+]
