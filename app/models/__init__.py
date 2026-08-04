@@ -15,6 +15,7 @@ from app.models.schedule import ScheduledWorkflow, WorkflowExecution
 from app.models.token_usage import TokenUsage
 from app.models.feedback import ExitSurvey, NpsResponse
 from app.models.platform_payment import PlatformPayment
+from app.models.feishu_binding import FeishuBinding
 from app.models.llm_call_log import LLMCallLog
 from app.models.legal import ContractReview, LegalArticle, LegalConsultation, LegalDraft, LegalReviewAction, LegalSource
 from app.models.legal import LegalCase, LegalApprovalChain, LegalApprovalStep, LegalDocumentVersion

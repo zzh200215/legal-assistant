@@ -132,7 +132,6 @@ def _verify_stripe_signature(raw_body: bytes, signature: str | None, secret: str
 
     失败抛 400（INVALID_WEBHOOK_SIGNATURE / WEBHOOK_SIGNATURE_EXPIRED）。
     """
-    import hmac
     import time as _time
 
     if not signature:

@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import agent_api, analytics_api, api_key_api, auth_api, chat_api, connector_api, dashboard_api, document_api, document_conflict_api, email_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mailbox_api, mcp_api, meeting_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, schedule_api, subscription_api, task_api, workflow_api, ws_api
+from app.api import agent_api, analytics_api, api_key_api, auth_api, chat_api, connector_api, dashboard_api, document_api, document_conflict_api, email_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mailbox_api, mcp_api, meeting_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, schedule_api, subscription_api, task_api, workflow_api, ws_api
 from app.core.config import get_settings
 from app.core.api_response import (
     ApiResponseMiddleware,
@@ -48,6 +48,7 @@ app.include_router(legal_case_api.router, prefix="/api/legal", tags=["Legal Case
 app.include_router(legal_approval_api.router, prefix="/api/legal", tags=["Legal Approval"])
 app.include_router(subscription_api.router, prefix="/api/billing", tags=["Subscription"])
 app.include_router(platform_payment_api.router, prefix="/api/billing", tags=["Platform Payments"])
+app.include_router(feishu_api.router, prefix="/api/feishu", tags=["Feishu"])
 app.include_router(miniapp_api.router, prefix="/api/miniapp", tags=["Mini App"])
 app.include_router(dashboard_api.router, prefix="/api/admin", tags=["Admin Dashboard"])
 app.include_router(prompt_api.router, prefix="/api/prompts", tags=["Prompts"])
