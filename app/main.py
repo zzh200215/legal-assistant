@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import agent_api, analytics_api, api_key_api, auth_api, chat_api, connector_api, dashboard_api, document_api, document_conflict_api, email_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mailbox_api, mcp_api, meeting_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, schedule_api, subscription_api, task_api, workflow_api, ws_api
+from app.api import account_deletion_api, agent_api, analytics_api, api_key_api, auth_api, chat_api, connector_api, dashboard_api, document_api, document_conflict_api, email_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mailbox_api, mcp_api, meeting_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, schedule_api, subscription_api, task_api, workflow_api, ws_api
 from app.core.config import get_settings
 from app.core.api_response import (
     ApiResponseMiddleware,
@@ -26,6 +26,7 @@ app = FastAPI(
 )
 
 app.include_router(auth_api.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(account_deletion_api.router, prefix="/api/auth", tags=["Account Deletion"])
 app.include_router(chat_api.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(memory_api.router, prefix="/api/memory", tags=["Conversation Memory"])
 app.include_router(document_api.router, prefix="/api/documents", tags=["Documents"])

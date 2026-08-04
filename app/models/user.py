@@ -55,6 +55,8 @@ class UserStatus(str, enum.Enum):
     disabled = "disabled"  # 禁用
     locked = "locked"  # 锁定（登录失败过多）
     pending = "pending"  # 待激活
+    deletion_pending = "deletion_pending"  # 注销冷却期（#95，30 天可撤销）
+    deleted = "deleted"  # 已注销（主体已匿名化）
 
 
 class User(Base):
@@ -91,6 +93,10 @@ class User(Base):
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # 注销冷却期（#95）
+    deletion_requested_at = Column(DateTime(timezone=True), nullable=True)
+    deletion_confirmed_at = Column(DateTime(timezone=True), nullable=True)
 
     @property
     def is_admin(self) -> bool:

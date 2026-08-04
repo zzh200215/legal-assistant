@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.api_response import api_error
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.models.user import User
+from app.models.user import UserStatus, User
 from app.models.org import OrganizationMember, LegalMemberRole
 from app.services.org_service import org_service
 
@@ -67,6 +67,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = get_user_from_token(token, db)
     if user is None:
         raise credentials_exception
+    # #95：deletion_pending 视为可执行注销流程（撤销/确认），其余状态按禁用处理
+    if user.status == UserStatus.deletion_pending.value:
+        return user
     if not user.is_active:
         raise api_error(
             status.HTTP_403_FORBIDDEN,
