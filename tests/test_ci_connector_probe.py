@@ -8,10 +8,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base
+from app.core.auth import hash_password
+from app.core.database import Base, get_db
 from app.main import app
 from app.models.user import User
-from app.services.auth_service import hash_password
 
 
 class ConnectorProbeTests(unittest.TestCase):
@@ -29,7 +29,20 @@ class ConnectorProbeTests(unittest.TestCase):
         self.db.add(self.user)
         self.db.commit()
         self.db.refresh(self.user)
+
+        def override_get_db():
+            db = self.TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        self.db.close()
 
     def test_probe_connector_create(self):
         login = self.client.post(
