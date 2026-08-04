@@ -32,250 +32,31 @@ from app.services.agent_skill_registry import resolve_agent_skill
 from app.workflows.langgraph_compat import GRAPH_END, GRAPH_START, StateGraph, workflow_engine_name
 
 
-# ── Canonical domain-agent definitions ─────────────────────────────────
-# These are kept here for prompt-building (label, description) and goal
-# routing.  The actual tool-permission matrix lives in
-# app.mcp.permissions.AGENT_TOOL_ALLOW — always consult that module for
-# enforcement.
-
-SUB_AGENTS = {
-    agent_type: {**config, "tools": tuple(sorted(allowed_tools_for(agent_type)))}
-    for agent_type, config in AGENT_REGISTRY.items()
-}
-
-
-def _build_tool_descriptions(tool_names: tuple[str, ...] | list[str] | None = None) -> str:
-    """Build tool description text from the MCP registry.
-
-    When ``tool_names`` is given, only descriptions for those tools are
-    included — this is how sub-agent prompts get their scoped tool list.
-    """
-    all_tools = {t["name"]: t for t in mcp_registry.list_all_tools()}
-    selected_names = list(tool_names) if tool_names else list(all_tools.keys())
-    descriptions = []
-    for index, tool_name in enumerate(selected_names):
-        spec = all_tools.get(tool_name)
-        if not spec:
-            continue
-        descriptions.append(
-            (
-                f"{index + 1}. {spec['name']}\n"
-                f"   description: {spec['description']}\n"
-                f"   parameters: {json.dumps(spec.get('input_schema', {}), ensure_ascii=False)}\n"
-            )
-        )
-    return "\n".join(descriptions)
-
-
-def _build_sub_agent_descriptions() -> str:
-    lines = []
-    for name in CANONICAL_AGENT_TYPES:
-        config = SUB_AGENTS[name]
-        tool_list = ", ".join(sorted(config["tools"]))
-        lines.append(
-            f"- {name}（{config['label']}）：{config['description']} "
-            f"输入：{config['input_contract']}；输出：{config['output_contract']}；"
-            f"禁止：{config['forbidden']}；可用工具：{tool_list}"
-        )
-    return "\n".join(lines)
-
-
-TOOL_DESCRIPTIONS = _build_tool_descriptions()
-SUB_AGENT_DESCRIPTIONS = _build_sub_agent_descriptions()
-
-PRIORITY_FLOWS = (
-    "- 总结会议并创建任务：meeting_summary_tool -> meeting_action_tool -> finish\n"
-    "- 查询未完成任务并生成邮件：task_query_tool(status=todo 或 in_progress) -> email_writer_tool -> finish\n"
-    "- 总结文档并提取风险：document_summary_tool -> document_risk_tool -> finish"
+from app.services.agent_mixins import EvidenceVerificationMixin
+from app.services.agent_prompts import (
+    SUB_AGENTS,
+    TOOL_DESCRIPTIONS,
+    SUB_AGENT_DESCRIPTIONS,
+    PRIORITY_FLOWS,
+    EVIDENCE_SOURCE_TOOLS,
+    EVIDENCE_GATED_WRITE_TOOLS,
+    PARALLEL_READ_ONLY_TOOLS,
+    PARALLEL_READ_ONLY_WORKER_PAIRS,
+    PARALLEL_READ_ONLY_WORKERS,
+    SUPERVISOR_ARTIFACT_TYPES,
+    SUPERVISOR_RISK_LEVELS,
+    POLICY_GUARDRAIL_ROLE,
+    sanitize_agent_error_message as _sanitize_agent_error_message,
+    normalize_decision as _normalize_decision,
+    goal_execution_hints as _goal_execution_hints,
+    build_demo_plan_preview as _build_demo_plan_preview,
+    build_worker_system_prompt as _build_worker_system_prompt,
+    build_preview_prompt as _build_preview_prompt,
 )
 
-EVIDENCE_SOURCE_TOOLS = {
-    "document_search_tool",
-    "document_summary_tool",
-    "document_risk_tool",
-    "document_conflict_tool",
-    "meeting_summary_tool",
-    "meeting_query_tool",
-}
-
-EVIDENCE_GATED_WRITE_TOOLS = {
-    "task_create_tool",
-    "meeting_action_tool",
-}
-
-# Only these tools may run in the concurrent fan-out. The list intentionally
-# excludes all side effects and tools that can open an approval workflow.
-PARALLEL_READ_ONLY_TOOLS = {
-    "document_search_tool",
-    "document_summary_tool",
-    "document_risk_tool",
-    "document_conflict_tool",
-    "meeting_query_tool",
-}
-PARALLEL_READ_ONLY_WORKER_PAIRS = {
-    frozenset({"knowledge_agent", "meeting_agent"}),
-    frozenset({"legal_compliance_agent", "meeting_agent"}),
-}
-PARALLEL_READ_ONLY_WORKERS = {"knowledge_agent", "meeting_agent", "legal_compliance_agent"}
-
-SUPERVISOR_ARTIFACT_TYPES = {"document", "meeting", "task", "email"}
-SUPERVISOR_RISK_LEVELS = {"low", "medium", "high"}
-POLICY_GUARDRAIL_ROLE = "policy_guardrail"
 
 
-def _sanitize_agent_error_message(error: str | None) -> str | None:
-    if not error:
-        return None
-    if error in {"Invalid JSON response", "Agent 决策要求重试"}:
-        return error
-    if error.startswith("Invalid action_type:"):
-        return error
-    return "Agent 执行失败，请查看系统日志"
-
-
-def _normalize_decision(raw: str) -> dict[str, Any]:
-    payload = _extract_json_object(raw)
-    if not payload:
-        return {
-            "thought": "模型输出不是合法 JSON，需要重试。",
-            "action_type": "retry",
-            "tool_name": "",
-            "action_input": {},
-            "answer": "",
-            "parse_error": "Invalid JSON response",
-        }
-
-    action_type = str(payload.get("action_type") or "").strip()
-    tool_name = str(payload.get("tool_name") or "").strip()
-    action_input = payload.get("action_input") if isinstance(payload.get("action_input"), dict) else {}
-    answer = str(payload.get("answer") or "").strip()
-    thought = str(payload.get("thought") or "").strip()
-
-    legacy_action = str(payload.get("action") or "").strip()
-    if not action_type and legacy_action:
-        if legacy_action == "finish":
-            action_type = "finish"
-            answer = answer or str(action_input.get("answer") or "").strip()
-        else:
-            action_type = "tool_call"
-            tool_name = legacy_action
-
-    if action_type not in {"tool_call", "finish", "retry"}:
-        return {
-            "thought": thought or "模型返回了非法 action_type，需要重试。",
-            "action_type": "retry",
-            "tool_name": tool_name,
-            "action_input": action_input,
-            "answer": answer,
-            "parse_error": f"Invalid action_type: {action_type or '<empty>'}",
-        }
-
-    return {
-        "thought": thought,
-        "action_type": action_type,
-        "tool_name": tool_name,
-        "action_input": action_input,
-        "answer": answer,
-        "parse_error": payload.get("parse_error"),
-    }
-
-
-def _goal_execution_hints(goal: str) -> str:
-    normalized = goal.lower()
-    hints: list[str] = []
-
-    if ("会议" in goal or "meeting" in normalized) and ("任务" in goal or "待办" in goal or "action item" in normalized):
-        hints.append("建议优先使用 meeting_summary_tool，然后使用 meeting_action_tool，最后 finish。")
-
-    if ("任务" in goal or "task" in normalized) and ("邮件" in goal or "email" in normalized):
-        hints.append("建议先用 task_query_tool 查询 todo 或 in_progress 任务，再用 email_writer_tool 生成邮件。")
-
-    if ("文档" in goal or "document" in normalized) and ("风险" in goal or "risk" in normalized):
-        hints.append("建议先用 document_summary_tool，再用 document_risk_tool，最后 finish。")
-
-    if ("冲突" in goal or "核对" in goal or "对比" in goal or "conflict" in normalized):
-        hints.append("涉及多份文档的日期、金额或负责人冲突时，使用 document_conflict_tool，并依据返回的原文定位汇总结论。")
-
-    if not hints:
-        hints.append("请优先选择最少但有效的工具步骤，完成后及时 finish。")
-
-    return "\n".join(hints)
-
-
-def _build_demo_plan_preview(goal: str, max_steps: int) -> dict[str, Any] | None:
-    match = re.search(r"总结文档\s*(\d+)", goal)
-    has_risk_intent = "风险" in goal or "risk" in goal.lower()
-    if not match or not has_risk_intent:
-        return None
-
-    document_id = int(match.group(1))
-    steps = [
-        {
-            "step": 1,
-            "tool_name": "document_summary_tool",
-            "purpose": "先获取文档摘要，明确文档主题、范围和关键背景。",
-            "action_input_preview": {"document_id": document_id},
-        },
-        {
-            "step": 2,
-            "tool_name": "document_risk_tool",
-            "purpose": "基于同一文档提取风险点、风险说明和建议动作。",
-            "action_input_preview": {"document_id": document_id},
-        },
-        {
-            "step": 3,
-            "tool_name": "finish",
-            "purpose": "汇总摘要和风险结论，形成最终答复。",
-            "action_input_preview": {},
-        },
-    ]
-    return {
-        "summary": "标准演示链路会先总结文档，再提取风险点，最后汇总成可展示的执行结果。",
-        "estimated_steps": min(3, max_steps),
-        "steps": steps[:max_steps],
-        "risks": [
-            "如果文档不存在、无权限或尚未完成索引，文档类工具会直接失败。",
-            "如果文档内容过于简短或缺少明确条款，风险提取结果可能较少。",
-        ],
-        "can_execute": max_steps >= 3,
-    }
-
-
-def _build_worker_system_prompt(worker_name: str, user_id: int | None = None) -> str:
-    worker_name = canonical_agent_type(worker_name)
-    worker = SUB_AGENTS.get(worker_name) or SUB_AGENTS["knowledge_agent"]
-    scoped_descriptions = _build_tool_descriptions(worker["tools"])
-    prompt = prompt_service.render_by_name(
-        "agent_system_prompt",
-        user_id=user_id,
-        tool_descriptions=scoped_descriptions,
-        priority_flows=PRIORITY_FLOWS,
-        sub_agent_descriptions=SUB_AGENT_DESCRIPTIONS,
-    )
-    return (
-        f"你当前作为 {worker_name}（{worker['label']}）执行任务。\n"
-        f"职责边界：{worker['description']}\n"
-        f"输入契约：{worker.get('input_contract', '用户目标和授权上下文')}\n"
-        f"输出契约：{worker.get('output_contract', '结构化执行结果')}\n"
-        f"禁止事项：{worker.get('forbidden', '不得绕过权限、审批和参数校验')}\n"
-        "只能选择本从 Agent 工具清单中列出的工具；如目标已经完成，请 finish。\n\n"
-        f"{prompt}"
-    )
-
-
-def _build_preview_prompt(goal: str, user_id: int | None = None) -> str:
-    return prompt_service.render_by_name(
-        "agent_plan_preview",
-        user_id=user_id,
-        tool_descriptions=TOOL_DESCRIPTIONS,
-        priority_flows=PRIORITY_FLOWS,
-        sub_agent_descriptions=SUB_AGENT_DESCRIPTIONS,
-        goal=goal,
-        execution_hints=_goal_execution_hints(goal),
-    )
-
-
-class AgentService:
+class AgentService(EvidenceVerificationMixin):
     def __init__(self) -> None:
         self.settings = get_settings()
         self._workflow = self._build_workflow()
@@ -700,111 +481,6 @@ class AgentService:
                 )
 
         return artifacts
-
-    @staticmethod
-    def _has_evidence_source_logs(logs: list[ToolCallLog]) -> bool:
-        return any(log.tool_name in EVIDENCE_SOURCE_TOOLS and log.status == "success" for log in logs)
-
-    def _verify_evidence(self, logs: list[ToolCallLog]) -> dict[str, Any]:
-        """Validate that structured claims retain a source before a write or final answer.
-
-        The verifier is intentionally deterministic. It does not generate new business
-        conclusions, so an unsupported model response cannot approve its own evidence.
-        """
-        checks: list[dict[str, Any]] = []
-
-        def verify_claims(tool_name: str, claim_type: str, claims: Any) -> None:
-            if not isinstance(claims, list):
-                return
-            for index, claim in enumerate(claims, start=1):
-                if not isinstance(claim, dict):
-                    checks.append({"tool_name": tool_name, "claim_type": claim_type, "index": index, "passed": False})
-                    continue
-                has_evidence = bool(str(claim.get("evidence") or claim.get("source_text") or "").strip())
-                checks.append(
-                    {
-                        "tool_name": tool_name,
-                        "claim_type": claim_type,
-                        "index": index,
-                        "passed": has_evidence,
-                    }
-                )
-
-        for log in logs:
-            if log.status != "success" or log.tool_name not in EVIDENCE_SOURCE_TOOLS:
-                continue
-            observation = _json_loads_dict(log.observation)
-            data = observation.get("data") if isinstance(observation.get("data"), dict) else {}
-            if log.tool_name == "document_search_tool":
-                chunks = data.get("chunks")
-                if isinstance(chunks, list):
-                    for index, chunk in enumerate(chunks, start=1):
-                        metadata = chunk.get("metadata") if isinstance(chunk, dict) else {}
-                        has_locator = bool(
-                            isinstance(chunk, dict)
-                            and str(chunk.get("content") or "").strip()
-                            and isinstance(metadata, dict)
-                            and (metadata.get("page_number") is not None or metadata.get("section_title") or metadata.get("chunk_id"))
-                        )
-                        checks.append(
-                            {
-                                "tool_name": log.tool_name,
-                                "claim_type": "retrieval_chunk",
-                                "index": index,
-                                "passed": has_locator,
-                            }
-                        )
-            elif log.tool_name == "document_risk_tool":
-                verify_claims(log.tool_name, "risk", data.get("risks"))
-            elif log.tool_name == "document_conflict_tool":
-                conflicts = data.get("conflicts")
-                if isinstance(conflicts, list):
-                    for index, conflict in enumerate(conflicts, start=1):
-                        sources = [
-                            conflict.get("source_a") if isinstance(conflict, dict) else None,
-                            conflict.get("source_b") if isinstance(conflict, dict) else None,
-                        ]
-                        for source_index, source in enumerate(sources, start=1):
-                            has_locator = isinstance(source, dict) and bool(
-                                str(source.get("source_text") or "").strip()
-                                and (
-                                    source.get("chunk_id") is not None
-                                    or source.get("page_number") is not None
-                                    or source.get("section_title")
-                                )
-                            )
-                            checks.append(
-                                {
-                                    "tool_name": log.tool_name,
-                                    "claim_type": "cross_document_conflict",
-                                    "index": index,
-                                    "source_index": source_index,
-                                    "passed": has_locator,
-                                }
-                            )
-            else:
-                verify_claims(log.tool_name, "decision", data.get("decisions"))
-                verify_claims(log.tool_name, "action_item", data.get("action_items"))
-                verify_claims(log.tool_name, "risk", data.get("risks"))
-
-        failed = [item for item in checks if not item["passed"]]
-        return {
-            "applicable": bool(checks),
-            "passed": not failed,
-            "checked_claims": len(checks),
-            "failed_claims": len(failed),
-            "issues": failed[:20],
-        }
-
-    def _latest_evidence_verification(self, logs: list[ToolCallLog]) -> dict[str, Any] | None:
-        for log in reversed(logs):
-            if log.tool_name != "evidence_verifier" or not log.observation:
-                continue
-            observation = _json_loads_dict(log.observation)
-            data = observation.get("data")
-            if isinstance(data, dict):
-                return data
-        return None
 
     def _record_run_summary(self, *, run: AgentRun, status: str, duration_ms: int, error_message: str | None = None) -> None:
         parsed_result = _json_loads_dict(run.result)

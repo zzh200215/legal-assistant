@@ -57,7 +57,7 @@ def _tail(path: Path, n: int = 50) -> list[str]:
     return lines[-n:]
 
 
-def run_check(*, url: str, database_url: str, uvicorn_err: Path, alert: bool) -> dict:
+def run_check(*, url: str, database_url: str, uvicorn_err: Path, alert: bool, cost_warn_cny: float | None = None) -> dict:
     now = datetime.now(timezone.utc)
     checks: dict[str, dict] = {}
     findings: list[str] = []
@@ -117,6 +117,10 @@ def run_check(*, url: str, database_url: str, uvicorn_err: Path, alert: bool) ->
             rate = pricing.get(item["model"], (0.004, 0.012))
             cost += float(item["prompt_tokens"] or 0) / 1000 * rate[0] + float(item["completion_tokens"] or 0) / 1000 * rate[1]
         checks["cost_24h"] = {"ok": True, "cost_cny": round(cost, 4), "by_model": rows}
+        if cost_warn_cny is not None and cost > cost_warn_cny:
+            checks["cost_24h"]["ok"] = False
+            checks["cost_24h"]["warn_threshold_cny"] = cost_warn_cny
+            findings.append(f"cost_24h: ¥{round(cost, 4)} exceeds warn threshold ¥{cost_warn_cny}")
     except Exception as exc:  # noqa: BLE001
         checks["cost_24h"] = {"ok": False, "detail": str(exc)}
         cost_ok = False
@@ -158,13 +162,14 @@ def main() -> int:
     parser.add_argument("--url", default="http://127.0.0.1:8001")
     parser.add_argument("--uvicorn-err", default=str(Path(os.environ.get("TEMP", "C:/Users/TX/AppData/Local/Temp")) / "opencode/uvicorn_err.log"))
     parser.add_argument("--alert", action="store_true")
+    parser.add_argument("--cost-warn", type=float, default=float(os.getenv("PILOT_COST_WARN_CNY", "50")), help="Warn when 24h LLM cost exceeds this CNY amount (default 50)")
     args = parser.parse_args()
 
     database_url = os.getenv("DATABASE_URL", "").strip() or _read_env("DATABASE_URL")
     if not database_url:
         print(json.dumps({"status": "error", "message": "DATABASE_URL is not set (env or .env)"}))
         return 2
-    result = run_check(url=args.url, database_url=database_url, uvicorn_err=Path(args.uvicorn_err), alert=args.alert)
+    result = run_check(url=args.url, database_url=database_url, uvicorn_err=Path(args.uvicorn_err), alert=args.alert, cost_warn_cny=args.cost_warn)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["healthy"] else 1
 

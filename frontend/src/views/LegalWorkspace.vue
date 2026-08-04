@@ -638,6 +638,14 @@
             <span v-else class="muted">—</span>
           </el-descriptions-item>
           <el-descriptions-item v-if="sourceDetail.jurisdiction" label="适用地域">{{ sourceDetail.jurisdiction }}</el-descriptions-item>
+          <el-descriptions-item v-if="sourceDetail.verification?.verification_note" label="核验提示">
+            <el-tag :type="verificationTagType(sourceDetail.verification)" size="small" effect="plain">{{ sourceDetail.verification.verification_note }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="sourceDetail.verification?.recommended_source" label="建议引用现行版本">
+            <span>{{ sourceDetail.verification.recommended_source.title }}</span>
+            <el-tag size="small" type="success" style="margin-left: 6px">{{ sourceDetail.verification.recommended_source.version }}</el-tag>
+            <el-button size="small" link type="primary" style="margin-left: 6px" @click="openRecommendedSource(sourceDetail.verification.recommended_source)">查看</el-button>
+          </el-descriptions-item>
         </el-descriptions>
       </template>
       <el-divider content-position="left">条文（供核对原文）</el-divider>
@@ -1019,6 +1027,11 @@ const sourceDetailVisible = ref(false)
 const sourceDetail = ref(null)
 const sourceDetailArticles = ref([])
 const sourceDetailLoading = ref(false)
+const openRecommendedSource = async (recommended) => {
+  if (!recommended?.source_id) return
+  openSourceDetail({ ...recommended, source_id: recommended.source_id })
+}
+
 const openSourceDetail = async (refItem) => {
   sourceDetail.value = refItem
   sourceDetailArticles.value = []

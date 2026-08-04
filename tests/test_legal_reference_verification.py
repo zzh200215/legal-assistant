@@ -89,6 +89,37 @@ class LegalReferenceVerificationTests(unittest.TestCase):
         self.assertEqual(info["amended_by"], [])
         self.assertIn("已被后续法规修订", info["verification_note"])
 
+    # ---------- AI-4 收尾：recommended_source ----------
+
+    def test_superseded_source_recommends_active_reviser(self):
+        info = verify_source(self.superseded, db=self.db)
+        self.assertTrue(info["superseded"])
+        recommended = info["recommended_source"]
+        self.assertIsNotNone(recommended)
+        self.assertEqual(recommended["source_id"], self.reviser.id)
+        self.assertEqual(recommended["title"], "劳动合同法（2024修正）")
+        self.assertEqual(recommended["version"], "v2")
+
+    def test_active_source_has_no_recommendation(self):
+        info = verify_source(self.current, db=self.db)
+        self.assertFalse(info["superseded"])
+        self.assertIsNone(info["recommended_source"])
+
+    def test_inactive_source_without_active_reviser_has_no_recommendation(self):
+        self.reviser.status = "inactive"
+        self.db.commit()
+        info = verify_source(self.superseded, db=self.db)
+        self.assertTrue(info["superseded"])
+        self.assertIsNone(info["recommended_source"])
+
+    def test_inactive_source_recommends_active_reviser(self):
+        self.superseded.status = "inactive"
+        self.db.commit()
+        info = verify_source(self.superseded, db=self.db)
+        self.assertEqual(info["status"], "inactive")
+        self.assertIsNotNone(info["recommended_source"])
+        self.assertEqual(info["recommended_source"]["source_id"], self.reviser.id)
+
     # ---------- enrich_references ----------
 
     def test_enrich_references_attaches_verification(self):

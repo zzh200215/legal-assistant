@@ -63,6 +63,19 @@ def verify_source(source: LegalSource, db: Session | None = None) -> dict:
     active = source.status == "active"
     current_effective = active and not superseded
 
+    # AI-4 收尾：被修订/废止时推荐现行有效版本（修订链中 status=active 的第一项）
+    recommended = None
+    if superseded:
+        for item in amended_by:
+            if item["status"] == "active":
+                recommended = {
+                    "source_id": item["source_id"],
+                    "title": item["title"],
+                    "version": item["version"],
+                    "effective_date": item["effective_date"],
+                }
+                break
+
     if source.status == "inactive":
         note = _STATUS_NOTES["inactive"]
     elif source.status == "pending_update":
@@ -83,6 +96,7 @@ def verify_source(source: LegalSource, db: Session | None = None) -> dict:
         "current_effective": current_effective,
         "superseded": superseded,
         "amended_by": amended_by,
+        "recommended_source": recommended,
         "verification_note": note,
     }
 
