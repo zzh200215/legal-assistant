@@ -98,6 +98,32 @@ def collect(engine, week_start: str) -> dict:
     except Exception:  # noqa: BLE001
         cursor = 0
 
+    # #85/portal 指标：周访问次数、独立令牌、新链接数（含被拒访问 result）
+    portal = _rows(engine, f"""
+        SELECT
+          (SELECT COUNT(*) FROM legal_portal_access_logs WHERE accessed_at >= '{week_start}T00:00:00') AS access_count,
+          (SELECT COUNT(DISTINCT portal_link_id) FROM legal_portal_access_logs WHERE accessed_at >= '{week_start}T00:00:00') AS active_links,
+          (SELECT COUNT(*) FROM legal_portal_access_logs WHERE accessed_at >= '{week_start}T00:00:00' AND result IN ('denied','not_found','expired')) AS denied_access,
+          (SELECT COUNT(*) FROM legal_portal_links WHERE created_at >= '{week_start}T00:00:00') AS links_created
+    """)[0]
+
+    # #85/NPS 与退出问卷：周回收数 + 汇总分布
+    nps_stats = _rows(engine, f"""
+        SELECT
+          (SELECT COUNT(*) FROM nps_responses WHERE created_at >= '{week_start}T00:00:00') AS week_responses,
+          (SELECT COUNT(*) FROM nps_responses) AS total_responses,
+          COALESCE((SELECT ROUND(100.0 * (SUM(score >= 9) - SUM(score <= 6)) / COUNT(*), 1) FROM nps_responses), 0) AS nps
+    """)[0]
+    survey_week = _rows(engine, f"""
+        SELECT COUNT(*) AS cnt,
+               COALESCE(SUM(pay_intent = 'renew'), 0) AS renew,
+               COALESCE(SUM(pay_intent = 'try_more'), 0) AS try_more,
+               COALESCE(SUM(pay_intent = 'expensive'), 0) AS expensive,
+               COALESCE(SUM(pay_intent = 'wont'), 0) AS wont
+        FROM exit_surveys
+        WHERE created_at >= '{week_start}T00:00:00'
+    """)[0]
+
     return {
         "week_start": week_start,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -108,6 +134,9 @@ def collect(engine, week_start: str) -> dict:
         "review_actions_by_type": reviews_by_action,
         "feedback": feedback,
         "feedback_cursor_last_action_id": cursor,
+        "portal": portal,
+        "nps": nps_stats,
+        "exit_surveys_week": survey_week,
     }
 
 
@@ -140,6 +169,16 @@ def render_markdown(report: dict) -> str:
         "## 5. 质量反馈",
         "",
         f"- 端侧 👍/👎：{json.dumps(report['feedback'], ensure_ascii=False)}",
+        "",
+        "## 6. 客户门户（#85）",
+        "",
+        f"- 周访问：{int(report['portal']['access_count'])}（活跃链接 {int(report['portal']['active_links'])}，被拒 {int(report['portal']['denied_access'])})",
+        f"- 本周新链接：{int(report['portal']['links_created'])}",
+        "",
+        "## 7. NPS 与退出问卷（#85）",
+        "",
+        f"- NPS 累计回收：{int(report['nps']['total_responses'])}（本周 {int(report['nps']['week_responses'])}），NPS={report['nps']['nps']}",
+        f"- 本周退出问卷：{int(report['exit_surveys_week']['cnt'])} 份（续费 {int(report['exit_surveys_week']['renew'])} / 再试 {int(report['exit_surveys_week']['try_more'])} / 偏高 {int(report['exit_surveys_week']['expensive'])} / 不用 {int(report['exit_surveys_week']['wont'])}）",
         "",
     ]
     return "\n".join(lines)
