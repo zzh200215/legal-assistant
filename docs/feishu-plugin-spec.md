@@ -4,6 +4,7 @@
 > 状态：M1（单聊咨询 + 法条核对）、M2（合同初筛 + 文件解析）、M3（文书生成 + 审核队列）、M4（提醒类基础管线：激活引导 + 周报回访）
 > 已于 2026-08-05 完成（app/services/feishu_service.py，含 card.action.trigger 卡片交互 + dispatch_feishu_reminders beat 任务）；
 > 出站待企业自建应用凭据接入；M4 期限提醒/闭环进度场景按 §5 待试点数据决策。
+> 接入步骤（申请/权限/事件订阅/加密签名/端到端测试）见 docs/feishu-app-integration-guide.md。
 > 原则：后端零新功能——全部复用现有 API，飞书端只做适配层（卡片/回调/文件上传）。
 
 ## 1. 范围与里程碑

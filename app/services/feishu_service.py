@@ -749,6 +749,7 @@ class FeishuMessenger:
         client = await self._client()
         resp = await client.get(
             f"{self.base_url}/im/v1/files/{file_key}",
+            params={"type": "file"},
             headers={"Authorization": f"Bearer {token}"},
         )
         content_type = resp.headers.get("content-type", "")
@@ -766,6 +767,7 @@ class FeishuMessenger:
         client = await self._client()
         resp = await client.post(
             f"{self.base_url}/im/v1/messages",
+            params={"receive_id_type": "open_id"},
             headers={"Authorization": f"Bearer {token}"},
             json={
                 "receive_id": receive_id,
