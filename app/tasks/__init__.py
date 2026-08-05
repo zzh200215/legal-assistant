@@ -1125,6 +1125,8 @@ def create_pilot_backup_task():
     command = [sys.executable, str(script), "--confirm", "--output-dir", settings.BACKUP_OUTPUT_DIR]
     for data_dir in settings.BACKUP_DATA_DIRS:
         command.extend(["--data-dir", data_dir])
+    if settings.BACKUP_OFFSITE_DIR:
+        command.extend(["--offsite-dir", settings.BACKUP_OFFSITE_DIR])
     try:
         process = subprocess.run(command, capture_output=True, text=True, env=env, timeout=180)
     except (subprocess.SubprocessError, OSError) as exc:
@@ -1137,3 +1139,18 @@ def create_pilot_backup_task():
         return {"status": "ok", "backup_dir": payload.get("backup_dir")}
     message = payload.get("message") or (process.stderr or "").strip() or f"exit_code={process.returncode}"
     return {"status": "error", "message": sanitize_background_error_message(message)}
+
+
+@celery_app.task(name="dispatch_feishu_reminders")
+def dispatch_feishu_reminders_task():
+    """M4：向已绑定飞书用户推送激活引导/周报回访卡片（出站未配置凭据时自动跳过）。"""
+    _record_beat_heartbeat()
+    db = SessionLocal()
+    try:
+        import asyncio
+
+        from app.services.feishu_service import dispatch_feishu_reminders
+
+        return asyncio.run(dispatch_feishu_reminders(db))
+    finally:
+        db.close()

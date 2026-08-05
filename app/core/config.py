@@ -154,6 +154,8 @@ class Settings(BaseSettings):
     # 备份（等保自评差距 #1 整改：每日全量定时备份，见 app/tasks.create_pilot_backup_task）
     BACKUP_OUTPUT_DIR: str = "data/backups"
     BACKUP_DATA_DIRS: list[str] = ["data/uploads", "data/chroma_db"]
+    # 异地副本目标目录（等保差距 #1 异地部分）：非空时备份完成后复制一份到此（可指向挂载的对象存储/NAS）。
+    BACKUP_OFFSITE_DIR: str = ""
     VITE_WS_HOST: str = "localhost:8001"
 
     # 支付配置

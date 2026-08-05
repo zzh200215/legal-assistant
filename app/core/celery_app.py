@@ -75,6 +75,10 @@ celery_app.conf.update(
             "task": "create_pilot_backup",
             "schedule": crontab(minute=0, hour=2),  # 每日 02:00 全量备份
         },
+        "dispatch-feishu-reminders": {
+            "task": "dispatch_feishu_reminders",
+            "schedule": crontab(minute=0, hour=9),  # 每日 09:00 飞书提醒（激活/周报）
+        },
     },
 )
 

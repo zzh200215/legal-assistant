@@ -55,11 +55,38 @@ class PilotBackupTaskTests(unittest.TestCase):
             mock_settings.return_value.DATABASE_URL = "mysql+pymysql://lawyer:secret@db.example:3306/legal"
             mock_settings.return_value.BACKUP_OUTPUT_DIR = "data/backups"
             mock_settings.return_value.BACKUP_DATA_DIRS = ["data/uploads", "data/chroma_db"]
+            mock_settings.return_value.BACKUP_OFFSITE_DIR = ""
 
             result = create_pilot_backup_task()
 
         self.assertEqual(result["status"], "error")
         self.assertTrue(result["message"])
+
+    def test_create_backup_copies_to_offsite_dir(self):
+        import tempfile
+        from pathlib import Path
+
+        from scripts.create_pilot_backup import create_backup
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "backups"
+            offsite = root / "offsite"
+            with patch("scripts.create_pilot_backup._dump_database",
+                       side_effect=lambda url, path: path.write_text("dummy") or "mysql_sql"), \
+                 patch("scripts.create_pilot_backup._sha256", return_value="d41d8cd98f00b204e9800998ecf8427e"):
+                result = create_backup(
+                    database_url="mysql+pymysql://lawyer:secret@db.example:3306/legal",
+                    output_dir=output,
+                    data_dirs=[root / "uploads"],
+                    offsite_dir=offsite,
+                )
+            backup_dir = Path(result["backup_dir"])
+            self.assertTrue((backup_dir / "manifest.json").exists())
+            self.assertIsNotNone(result["offsite_copy"])
+            offsite_copy = Path(result["offsite_copy"])
+            self.assertTrue((offsite_copy / "manifest.json").exists())
+            self.assertTrue(offsite_copy.name == backup_dir.name)
 
 
 if __name__ == "__main__":

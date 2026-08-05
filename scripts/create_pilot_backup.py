@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -89,7 +90,7 @@ def _archive_directories(paths: list[Path], output_path: Path) -> list[str]:
     return included
 
 
-def create_backup(*, database_url: str, output_dir: Path, data_dirs: list[Path]) -> dict:
+def create_backup(*, database_url: str, output_dir: Path, data_dirs: list[Path], offsite_dir: Path | None = None) -> dict:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup_dir = output_dir.resolve() / f"pilot-backup-{timestamp}"
     backup_dir.mkdir(parents=True, exist_ok=False)
@@ -113,7 +114,13 @@ def create_backup(*, database_url: str, output_dir: Path, data_dirs: list[Path])
         "restore_requirement": "Restore only into an isolated environment and record the recovery result.",
     }
     (backup_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"backup_dir": str(backup_dir), "manifest": manifest}
+    # 异地副本（等保差距 #1 异地部分）：目标目录非空时复制整份备份。
+    offsite_copy = None
+    if offsite_dir:
+        target = offsite_dir.resolve() / backup_dir.name
+        shutil.copytree(backup_dir, target, dirs_exist_ok=False)
+        offsite_copy = str(target)
+    return {"backup_dir": str(backup_dir), "manifest": manifest, "offsite_copy": offsite_copy}
 
 
 def main() -> int:
@@ -121,6 +128,7 @@ def main() -> int:
     parser.add_argument("--output-dir", default="data/backups", help="Directory for a new timestamped backup folder.")
     parser.add_argument("--database-url-env", default="DATABASE_URL", help="Environment variable containing the database URL.")
     parser.add_argument("--data-dir", action="append", default=["data/uploads", "data/chroma_db"], help="Local directory to archive; may be repeated.")
+    parser.add_argument("--offsite-dir", default="", help="Optional offsite target directory; backup is copied there when set.")
     parser.add_argument("--confirm", action="store_true", help="Required before commands write a backup.")
     args = parser.parse_args()
 
@@ -136,6 +144,7 @@ def main() -> int:
             database_url=database_url,
             output_dir=Path(args.output_dir),
             data_dirs=[Path(item) for item in args.data_dir],
+            offsite_dir=Path(args.offsite_dir) if args.offsite_dir else None,
         )
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False))

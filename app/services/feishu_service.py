@@ -14,6 +14,7 @@ import logging
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -604,6 +605,96 @@ def _resolve_bound_user(open_id: str, db):
     if not binding:
         return None
     return db.query(User).filter(User.id == binding.user_id).first()
+
+
+# ── M4：提醒类（激活引导 / 周报回访；期限提醒与闭环进度按 spec §5 待试点数据决策）────────
+
+def user_activity_stats(db, user_id: int) -> dict:
+    from app.models.legal import ContractReview, LegalConsultation, LegalDraft
+
+    return {
+        "consultation_count": db.query(LegalConsultation).filter(LegalConsultation.user_id == user_id).count(),
+        "review_count": db.query(ContractReview).filter(ContractReview.user_id == user_id).count(),
+        "draft_count": db.query(LegalDraft).filter(LegalDraft.user_id == user_id).count(),
+    }
+
+
+def build_activation_card(user_name: str) -> dict:
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {"template": "blue", "title": {"tag": "plain_text", "content": "欢迎使用律智检"}},
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"你好，{user_name}。可以直接在这里：\n"
+                        "· 发送法律问题 → 法条核对卡片\n"
+                        "· 发送合同文件 → 合同风险初筛\n"
+                        "· 回复「待审核」→ 审核队列"
+                    ),
+                },
+            },
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": "AI 结果仅供参考，不构成最终法律意见。"}]},
+        ],
+    }
+
+
+def build_weekly_digest_card(stats: dict, pending_count: int) -> dict:
+    body = (
+        f"本周动态：咨询 {stats['consultation_count']} 次、审查 {stats['review_count']} 次、"
+        f"文书 {stats['draft_count']} 份。待审核 {pending_count} 项。"
+    )
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {"template": "orange", "title": {"tag": "plain_text", "content": "律智检 · 周报回访"}},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": "回复「待审核」可处理审核队列。"}]},
+        ],
+    }
+
+
+def _reminder_due(open_id: str, kind: str) -> bool:
+    """发送冷却（best-effort）：激活每 30 天一次；周报每周一次。Redis 不可用则放行。"""
+    try:
+        import redis as redis_lib
+
+        client = redis_lib.from_url(get_settings().REDIS_URL, socket_connect_timeout=1)
+        base_key = f"aibg:feishu:reminder:{kind}:{open_id}"
+        if kind == "activation":
+            return client.set(base_key, "1", nx=True, ex=30 * 86400) is not None
+        week = datetime.now(timezone.utc).strftime("%G-W%V")
+        return client.set(f"{base_key}:{week}", "1", nx=True, ex=8 * 86400) is not None
+    except Exception:  # noqa: BLE001 - 冷却失败不阻断推送
+        return True
+
+
+async def dispatch_feishu_reminders(db) -> dict:
+    """M4 beat 任务：向已绑定用户推送激活引导（无活动）或周报回访（有活动）。"""
+    from app.services.legal_workspace_service import legal_workspace_read_module
+
+    bindings = db.query(FeishuBinding).filter(FeishuBinding.status == "active").all()
+    messenger = FeishuMessenger(get_settings().FEISHU_APP_ID, get_settings().FEISHU_APP_SECRET)
+    sent_activation = 0
+    sent_digest = 0
+    for binding in bindings:
+        user = db.query(User).filter(User.id == binding.user_id).first()
+        if not user:
+            continue
+        stats = user_activity_stats(db, user.id)
+        active = (stats["consultation_count"] + stats["review_count"] + stats["draft_count"]) > 0
+        pending = len(legal_workspace_read_module.review_queue(db, user))
+        if not active and _reminder_due(binding.open_id, "activation"):
+            result = await messenger.send_card(binding.open_id, build_activation_card(user.username))
+            if result.get("sent"):
+                sent_activation += 1
+        elif active and _reminder_due(binding.open_id, "digest"):
+            result = await messenger.send_card(binding.open_id, build_weekly_digest_card(stats, pending))
+            if result.get("sent"):
+                sent_digest += 1
+    return {"bindings": len(bindings), "sent_activation": sent_activation, "sent_digest": sent_digest}
 
 
 class FeishuMessenger:
