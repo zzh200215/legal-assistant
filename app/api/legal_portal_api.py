@@ -21,7 +21,7 @@ from app.core.auth import verify_case_access
 from app.core.error_codes import err, PORTAL_LINK_UNAVAILABLE, PORTAL_OTP_INVALID, PORTAL_OTP_LOCKED
 from app.models.user import User
 from app.models.legal import LegalCase
-from app.models.org import OrganizationMember
+from app.models.org import OrganizationMember, Organization
 from app.models.legal_portal import (
     LegalDeadline, LegalPortalLink, LegalPortalLinkItem, LegalPortalAccessLog,
     LegalCaseMember, LegalCaseProgressUpdate, LegalCaseProgressRead,
@@ -100,6 +100,53 @@ def _require_organization_member(db: Session, org_id: int, user_id: int) -> Orga
     if not member:
         raise HTTPException(400, detail="用户不是该组织成员")
     return member
+
+
+class PortalBrandingIn(BaseModel):
+    portal_logo_url: str | None = Field(None, max_length=512)
+    portal_welcome_message: str | None = Field(None, max_length=256)
+
+
+@router.get("/orgs/{org_id}/portal-branding")
+def get_portal_branding(
+    org_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_organization_member(db, org_id, current_user.id)
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(404, detail="组织不存在")
+    return {
+        "organization_id": org.id,
+        "name": org.name,
+        "portal_logo_url": org.portal_logo_url,
+        "portal_welcome_message": org.portal_welcome_message,
+    }
+
+
+@router.put("/orgs/{org_id}/portal-branding")
+def update_portal_branding(
+    org_id: int,
+    body: PortalBrandingIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    member = _require_organization_member(db, org_id, current_user.id)
+    if member.legal_role not in ("admin", "reviewer"):
+        raise HTTPException(403, detail="仅组织管理员或审核律师可配置门户品牌")
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(404, detail="组织不存在")
+    org.portal_logo_url = (body.portal_logo_url or "").strip() or None
+    org.portal_welcome_message = (body.portal_welcome_message or "").strip() or None
+    db.commit()
+    return {
+        "organization_id": org.id,
+        "name": org.name,
+        "portal_logo_url": org.portal_logo_url,
+        "portal_welcome_message": org.portal_welcome_message,
+    }
 
 
 def _require_progress_editor(db: Session, user_id: int, org_id: int, case_id: int) -> LegalCase:
@@ -655,11 +702,18 @@ def portal_get_content(
     # #93：进展按发布时间倒序（时间线展示）
     progress_updates.sort(key=lambda u: u["published_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
+    org = db.query(Organization).filter(Organization.id == link.organization_id).first()
+
     return {
         "link_id": link.id,
         "case_id": link.case_id,
         "progress_updates": progress_updates,
         "documents": documents,
+        "organization": {
+            "name": org.name if org else None,
+            "portal_logo_url": org.portal_logo_url if org else None,
+            "portal_welcome_message": org.portal_welcome_message if org else None,
+        },
     }
 
 

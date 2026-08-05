@@ -82,6 +82,12 @@ export default {
   revokePortalLink(linkId) {
     return http.post(`/legal/portal-links/${linkId}/revoke`)
   },
+  getPortalBranding(orgId) {
+    return http.get(`/legal/orgs/${orgId}/portal-branding`)
+  },
+  updatePortalBranding(orgId, payload) {
+    return http.put(`/legal/orgs/${orgId}/portal-branding`, payload)
+  },
   listCaseMembers(orgId, caseId) {
     return http.get(`/legal/orgs/${orgId}/cases/${caseId}/members`)
   },

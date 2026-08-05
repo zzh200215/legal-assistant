@@ -25,6 +25,8 @@ class Organization(Base):
     name = Column(String(128), unique=True, nullable=False, index=True)
     code = Column(String(64), unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)
+    portal_logo_url = Column(String(512), nullable=True, comment="客户门户展示的律所 logo 图片 URL")
+    portal_welcome_message = Column(String(256), nullable=True, comment="客户门户顶部欢迎语")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

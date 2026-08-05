@@ -15581,6 +15581,104 @@
         }
       }
     },
+    "/api/legal/orgs/{org_id}/portal-branding": {
+      "get": {
+        "tags": [
+          "Legal Portal"
+        ],
+        "summary": "Get Portal Branding",
+        "operationId": "get_portal_branding_api_legal_orgs__org_id__portal_branding_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Legal Portal"
+        ],
+        "summary": "Update Portal Branding",
+        "operationId": "update_portal_branding_api_legal_orgs__org_id__portal_branding_put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortalBrandingIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/orgs/{org_id}/cases/{case_id}/deadlines": {
       "post": {
         "tags": [
@@ -23979,6 +24077,36 @@
           "payment_method"
         ],
         "title": "PaymentCreate"
+      },
+      "PortalBrandingIn": {
+        "properties": {
+          "portal_logo_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portal Logo Url"
+          },
+          "portal_welcome_message": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portal Welcome Message"
+          }
+        },
+        "type": "object",
+        "title": "PortalBrandingIn"
       },
       "PortalLinkCreate": {
         "properties": {

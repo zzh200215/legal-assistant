@@ -27,6 +27,13 @@
     </div>
 
     <div v-else-if="step === 'content'" class="portal-content">
+      <div v-if="portalContent.organization && (portalContent.organization.portal_logo_url || portalContent.organization.portal_welcome_message || portalContent.organization.name)" class="portal-brand">
+        <img v-if="portalContent.organization.portal_logo_url" :src="portalContent.organization.portal_logo_url" class="portal-logo" alt="logo" />
+        <div class="portal-brand-text">
+          <div v-if="portalContent.organization.portal_welcome_message" class="portal-welcome">{{ portalContent.organization.portal_welcome_message }}</div>
+          <div v-if="portalContent.organization.name" class="portal-org-name">{{ portalContent.organization.name }}</div>
+        </div>
+      </div>
       <el-card shadow="never">
         <template #header>
           <div class="result-header">
@@ -273,6 +280,37 @@ onUnmounted(() => {
   justify-content: center;
   align-items: center;
   min-height: 40vh;
+}
+
+.portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  background: var(--color-bg-card, #fff);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.portal-logo {
+  max-height: 56px;
+  max-width: 140px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.portal-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.portal-welcome {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary, #1f2d3d);
+}
+.portal-org-name {
+  font-size: 13px;
+  color: var(--color-text-muted, #8a94a6);
 }
 
 .otp-actions {

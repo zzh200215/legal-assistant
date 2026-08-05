@@ -107,6 +107,29 @@ def collect(engine, week_start: str) -> dict:
           (SELECT COUNT(*) FROM legal_portal_links WHERE created_at >= '{week_start}T00:00:00') AS links_created
     """)[0]
 
+    # #95/P2-1 门户访问行为：去重访客（IP 哈希）、重复访客、时段分布
+    portal_behavior = _rows(engine, f"""
+        SELECT
+          (SELECT COUNT(DISTINCT ip_hash) FROM legal_portal_access_logs WHERE accessed_at >= '{week_start}T00:00:00') AS unique_visitors,
+          (SELECT COUNT(*) FROM (
+             SELECT ip_hash, portal_link_id FROM legal_portal_access_logs
+             WHERE accessed_at >= '{week_start}T00:00:00'
+             GROUP BY ip_hash, portal_link_id HAVING COUNT(*) >= 2
+           ) t) AS repeat_visits,
+          (SELECT COUNT(DISTINCT DATE(accessed_at)) FROM legal_portal_access_logs
+           WHERE accessed_at >= '{week_start}T00:00:00') AS active_days
+    """)[0]
+    hours = _rows(engine, f"""
+        SELECT HOUR(accessed_at) AS h, COUNT(*) AS cnt
+        FROM legal_portal_access_logs
+        WHERE accessed_at >= '{week_start}T00:00:00'
+        GROUP BY HOUR(accessed_at)
+    """)
+    portal["hourly_distribution"] = {int(h["h"]): int(h["cnt"]) for h in hours}
+    portal["unique_visitors"] = int(portal_behavior["unique_visitors"])
+    portal["repeat_visits"] = int(portal_behavior["repeat_visits"])
+    portal["active_days"] = int(portal_behavior["active_days"])
+
     # #85/NPS 与退出问卷：周回收数 + 汇总分布
     nps_stats = _rows(engine, f"""
         SELECT
@@ -174,6 +197,8 @@ def render_markdown(report: dict) -> str:
         "",
         f"- 周访问：{int(report['portal']['access_count'])}（活跃链接 {int(report['portal']['active_links'])}，被拒 {int(report['portal']['denied_access'])})",
         f"- 本周新链接：{int(report['portal']['links_created'])}",
+        f"- 访客/重复访问：去重访客 {int(report['portal']['unique_visitors'])}，重复访问 {int(report['portal']['repeat_visits'])}，活跃天数 {int(report['portal']['active_days'])}",
+        f"- 时段分布（小时:次数）：{json.dumps(report['portal']['hourly_distribution'], ensure_ascii=False)}",
         "",
         "## 7. NPS 与退出问卷（#85）",
         "",

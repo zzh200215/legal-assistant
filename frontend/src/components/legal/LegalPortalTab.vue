@@ -3,6 +3,23 @@
     <el-card shadow="never">
       <template #header>
         <div class="result-header">
+          <span class="card-title">客户门户品牌</span>
+          <el-button size="small" :loading="brandingSaving" @click="saveBranding">保存品牌配置</el-button>
+        </div>
+      </template>
+      <el-form label-width="120px" label-position="left">
+        <el-form-item label="律所 Logo URL">
+          <el-input v-model="branding.portal_logo_url" placeholder="https://... 图片直链（可选）" maxlength="512" clearable />
+        </el-form-item>
+        <el-form-item label="欢迎语">
+          <el-input v-model="branding.portal_welcome_message" placeholder="客户打开门户时展示的欢迎语（可选）" maxlength="256" clearable />
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never">
+      <template #header>
+        <div class="result-header">
           <span class="card-title">客户门户链接</span>
           <el-button size="small" type="primary" @click="showPortalDialog = true">创建门户链接</el-button>
         </div>
@@ -109,7 +126,7 @@
 </template>
 
 <script setup>
-import { onMounted, watch } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElCard } from 'element-plus/es/components/card/index'
@@ -154,10 +171,41 @@ const {
   caseId: props.caseId,
 })
 
+const branding = reactive({ portal_logo_url: '', portal_welcome_message: '' })
+const brandingSaving = ref(false)
+
+async function loadBranding() {
+  if (!props.organizationId) return
+  try {
+    const res = await legalWorkspace.getPortalBranding(props.organizationId)
+    const d = res?.data?.data ?? res?.data ?? res
+    branding.portal_logo_url = d.portal_logo_url || ''
+    branding.portal_welcome_message = d.portal_welcome_message || ''
+  } catch (e) {
+    /* 品牌接口失败不影响门户功能 */
+  }
+}
+
+async function saveBranding() {
+  brandingSaving.value = true
+  try {
+    await legalWorkspace.updatePortalBranding(props.organizationId, {
+      portal_logo_url: branding.portal_logo_url || null,
+      portal_welcome_message: branding.portal_welcome_message || null,
+    })
+    ElMessage.success('品牌配置已保存')
+  } catch (e) {
+    ElMessage.error('保存失败，请重试')
+  } finally {
+    brandingSaving.value = false
+  }
+}
+
 onMounted(() => {
   loadPortalLinks()
   loadProgressUpdates()
   loadCaseMembers()
+  loadBranding()
 })
 watch(
   () => [props.organizationId, props.caseId],
@@ -165,6 +213,7 @@ watch(
     loadPortalLinks()
     loadProgressUpdates()
     loadCaseMembers()
+    loadBranding()
   },
 )
 </script>

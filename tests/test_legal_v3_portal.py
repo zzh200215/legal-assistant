@@ -157,6 +157,43 @@ class PortalTokenAuthTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["data"]["link"]["organization_id"], self.org_id)
 
+
+    def test_get_branding_defaults_empty(self):
+        r = self.client.get(f'/api/legal/orgs/{self.org_id}/portal-branding', headers=self.headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIsNone(r.json()['data']['portal_logo_url'])
+        self.assertIsNone(r.json()['data']['portal_welcome_message'])
+
+    def test_put_branding_and_content_returns_org(self):
+        r = self.client.put(f'/api/legal/orgs/{self.org_id}/portal-branding', headers=self.headers, json={
+            'portal_logo_url': 'https://x.com/logo.png', 'portal_welcome_message': '欢迎您',
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+        raw, link = self._make_link()
+        r2 = self.client.get(f'/api/legal/portal/{raw}/content')
+        self.assertEqual(r2.status_code, 200, r2.text)
+        org = r2.json()['data']['organization']
+        self.assertEqual(org['name'], 'PortalOrg')
+        self.assertEqual(org['portal_logo_url'], 'https://x.com/logo.png')
+        self.assertEqual(org['portal_welcome_message'], '欢迎您')
+
+    def test_branding_update_requires_org_admin(self):
+        from app.models.org import OrganizationMember
+        self.db.query(OrganizationMember).filter_by(user_id=self.user.id).update({'legal_role': 'client'})
+        self.db.commit()
+        r = self.client.put(f'/api/legal/orgs/{self.org_id}/portal-branding', headers=self.headers, json={
+            'portal_welcome_message': 'x',
+        })
+        self.assertEqual(r.status_code, 403, r.text)
+
+    def test_branding_update_strips_and_nulls(self):
+        r = self.client.put(f'/api/legal/orgs/{self.org_id}/portal-branding', headers=self.headers, json={
+            'portal_logo_url': '   ', 'portal_welcome_message': '  欢迎  ',
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIsNone(r.json()['data']['portal_logo_url'])
+        self.assertEqual(r.json()['data']['portal_welcome_message'], '欢迎')
+
     def test_outsider_cannot_manage_case_deadlines(self):
         outsider = User(
             username="outsider",
