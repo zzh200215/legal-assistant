@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from app.core.time import utc_now
+from app.core.config import get_settings
 
 from app.models.subscription import (
     SubscriptionPlan, UserSubscription, QuotaUsage,
@@ -178,17 +179,43 @@ class SubscriptionService:
         db.refresh(sub)
         return sub
 
+    def expire_overdue_subscriptions(self, db: Session) -> int:
+        """周期任务：将已过 current_period_end 的 active 订阅置为 expired。
+
+        过期后 get_active_subscription 返回 None，用户配额自动回落到免费版
+        （check_quota 依据 get_user_plan 的 free 计划）。
+        """
+        now = datetime.now(timezone.utc)
+        overdue = db.query(UserSubscription).filter(
+            UserSubscription.status == SubscriptionStatus.active.value,
+            UserSubscription.current_period_end.isnot(None),
+            UserSubscription.current_period_end < now,
+        ).all()
+        for sub in overdue:
+            sub.status = SubscriptionStatus.expired.value
+            sub.cancelled_at = now
+        if overdue:
+            db.commit()
+        return len(overdue)
+
     def ensure_default_plans(self, db: Session) -> None:
-        """确保默认计划存在（应用启动时调用）"""
+        """确保默认计划存在（应用启动时调用）。
+
+        M-3：free 档位配额从 settings 读取（FREE_PLAN_*_QUOTA），且对已存在的
+        free 行同步配额，使 A/B 档位（5→8）参数化后无需迁移即可生效。
+        """
+        _settings = get_settings()
         defaults = [
             {
                 "tier": PlanTier.free.value,
                 "name": "免费版",
-                "description": "每月咨询5次、合同审查2次、文书生成2次",
+                "description": f"每月咨询{_settings.FREE_PLAN_CONSULTATION_QUOTA}次、"
+                               f"合同审查{_settings.FREE_PLAN_REVIEW_QUOTA}次、"
+                               f"文书生成{_settings.FREE_PLAN_DRAFT_QUOTA}次",
                 "price_monthly": 0,
-                "quota_consultation": PLAN_QUOTAS[PlanTier.free]["consultation"],
-                "quota_review": PLAN_QUOTAS[PlanTier.free]["review"],
-                "quota_draft": PLAN_QUOTAS[PlanTier.free]["draft"],
+                "quota_consultation": _settings.FREE_PLAN_CONSULTATION_QUOTA,
+                "quota_review": _settings.FREE_PLAN_REVIEW_QUOTA,
+                "quota_draft": _settings.FREE_PLAN_DRAFT_QUOTA,
             },
             {
                 "tier": PlanTier.pro.value,
@@ -210,9 +237,15 @@ class SubscriptionService:
             },
         ]
         for d in defaults:
-            exists = db.query(SubscriptionPlan).filter(SubscriptionPlan.tier == d["tier"]).first()
-            if not exists:
+            plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.tier == d["tier"]).first()
+            if not plan:
                 db.add(SubscriptionPlan(**d))
+            elif d["tier"] == PlanTier.free.value:
+                # free 档位随配置同步（M-3 参数化）
+                plan.description = d["description"]
+                plan.quota_consultation = d["quota_consultation"]
+                plan.quota_review = d["quota_review"]
+                plan.quota_draft = d["quota_draft"]
         db.commit()
 
 

@@ -52,6 +52,11 @@ class Settings(BaseSettings):
         '{"qwen-plus":{"input_per_1k":0.004,"output_per_1k":0.012},'
         '"text-embedding-v3":{"input_per_1k":0.0005,"output_per_1k":0.0}}'
     )
+    # M-3 免费版转化 A/B：免费档位配额参数化（B 组咨询 5→8 / 审查 2→3 / 文书 2→3）。
+    # ensure_default_plans 启动时按此同步 free 计划；不改 DB schema。
+    FREE_PLAN_CONSULTATION_QUOTA: int = Field(default=5, ge=0, le=100)
+    FREE_PLAN_REVIEW_QUOTA: int = Field(default=2, ge=0, le=100)
+    FREE_PLAN_DRAFT_QUOTA: int = Field(default=2, ge=0, le=100)
     LLM_RATE_LIMIT_WINDOW_SECONDS: int = 60
     LLM_RATE_LIMIT_MAX_REQUESTS: int = 20
     LLM_DAILY_REQUEST_LIMIT: int = 200

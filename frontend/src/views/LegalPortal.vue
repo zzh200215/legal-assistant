@@ -82,7 +82,31 @@
           <el-descriptions-item label="金额">¥{{ portalContent.invoice.total_amount }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ invoiceStatusLabel(portalContent.invoice.status) }}</el-descriptions-item>
           <el-descriptions-item label="账期">{{ portalContent.invoice.period_start }} ~ {{ portalContent.invoice.period_end }}</el-descriptions-item>
+          <el-descriptions-item v-if="portalContent.invoice.paid_amount != null" label="已收">¥{{ portalContent.invoice.paid_amount }}</el-descriptions-item>
+          <el-descriptions-item v-if="portalContent.invoice.due_date" label="应付款日">{{ portalContent.invoice.due_date }}</el-descriptions-item>
         </el-descriptions>
+      </el-card>
+
+      <el-card shadow="never" style="margin-top:20px">
+        <template #header><span class="card-title">服务反馈</span></template>
+        <div v-if="feedbackDone" class="feedback-done">
+          <el-tag size="small" :type="feedbackValue === 1 ? 'success' : 'info'" effect="plain">
+            {{ feedbackValue === 1 ? '已收到反馈：有帮助' : '已收到反馈：待改进' }}
+          </el-tag>
+          <span class="muted">感谢您的评价。</span>
+        </div>
+        <div v-else class="feedback-row">
+          <span class="feedback-label">本次服务对您有帮助吗？</span>
+          <el-button size="small" type="success" plain :loading="feedbackSubmitting === 1" @click="submitFeedback(1)">有帮助</el-button>
+          <el-button size="small" type="warning" plain :loading="feedbackSubmitting === -1" @click="submitFeedback(-1)">待改进</el-button>
+          <div v-if="feedbackNoteOpen" class="feedback-panel">
+            <el-input v-model="feedbackNote" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="补充说明（可选，最多500字）" />
+            <div class="feedback-actions">
+              <el-button size="small" type="primary" @click="confirmFeedback">提交反馈</el-button>
+              <el-button size="small" @click="feedbackNoteOpen = false; feedbackNote = ''">取消</el-button>
+            </div>
+          </div>
+        </div>
       </el-card>
 
       <el-card v-if="portalContent.sign_requests?.length" shadow="never" style="margin-top:20px">
@@ -148,6 +172,39 @@ const portalContent = ref({})
 const portalSession = ref(sessionStorage.getItem(`portal-session:${token}`) || '')
 const progressUpdates = ref([])
 const publishedDocs = ref([])
+
+const feedbackValue = ref(null)
+const feedbackDone = ref(false)
+const feedbackSubmitting = ref(0)
+const feedbackNoteOpen = ref(false)
+const feedbackNote = ref('')
+
+const submitFeedback = (score) => {
+  if (score === 1) {
+    doSubmitFeedback(1)
+  } else {
+    feedbackNoteOpen.value = true
+  }
+}
+
+const confirmFeedback = async () => {
+  await doSubmitFeedback(-1)
+}
+
+const doSubmitFeedback = async (score) => {
+  feedbackSubmitting.value = score
+  try {
+    const note = feedbackNote.value.trim()
+    await api.portalSubmitFeedback(token, { score, note: note || null }, portalSession.value)
+    feedbackValue.value = score
+    feedbackDone.value = true
+    feedbackNoteOpen.value = false
+    ElMessage.success('反馈已提交')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '反馈提交失败')
+  }
+  feedbackSubmitting.value = 0
+}
 
 const initOtp = async () => {
   try {
@@ -385,6 +442,39 @@ onUnmounted(() => {
 .progress-next p {
   margin: 4px 0 0;
   line-height: 1.6;
+}
+
+.feedback-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.feedback-label {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.feedback-done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.feedback-panel {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  margin-top: 4px;
+}
+
+.feedback-actions {
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 640px) {

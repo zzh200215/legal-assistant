@@ -616,3 +616,190 @@ class PortalP003HardeningTests(unittest.TestCase):
         mock_redis.smembers.assert_called_once()
         # delete called: one for each session + the sset_key itself
         self.assertTrue(mock_redis.delete.called)
+
+
+class PortalP3FeedbackBillingTests(unittest.TestCase):
+    """P3 客户反馈入口 + 对账展示：反馈落表、管理端可见、账单快照返回"""
+
+    def setUp(self):
+        self.engine = _make_engine()
+        Session = sessionmaker(bind=self.engine, autoflush=False, autocommit=False)
+        Base.metadata.create_all(bind=self.engine)
+        self.db = Session()
+
+        org = Organization(name="P3Org", code="P3F")
+        self.db.add(org)
+        self.db.flush()
+
+        self.admin = User(
+            username="p3admin",
+            email="p3admin@t.com",
+            hashed_password=hash_password("pw"),
+            role="user",
+            status=UserStatus.active.value,
+            organization_id=org.id,
+        )
+        self.db.add(self.admin)
+        self.db.flush()
+        self.db.add(OrganizationMember(
+            organization_id=org.id, user_id=self.admin.id, legal_role="admin"))
+        self.db.flush()
+
+        self.case = LegalCase(
+            title="P3Case", case_type="other",
+            organization_id=org.id, user_id=self.admin.id,
+        )
+        self.db.add(self.case)
+        self.db.commit()
+
+        self.org_id = org.id
+
+        def _override_db():
+            yield self.db
+
+        app.dependency_overrides[get_db] = _override_db
+        token = create_access_token({"sub": str(self.admin.id)})
+        self.client = TestClient(app, raise_server_exceptions=False)
+        self.headers = {"Authorization": f"Bearer {token}"}
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        self.db.close()
+
+    def _make_link(self, require_email_verification: int = 0) -> tuple[str, LegalPortalLink]:
+        raw_token = secrets.token_urlsafe(32)
+        link = LegalPortalLink(
+            organization_id=self.org_id,
+            case_id=self.case.id,
+            token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+            token_prefix=raw_token[:8],
+            status="active",
+            is_permanent=1,
+            require_email_verification=require_email_verification,
+            created_by=self.admin.id,
+        )
+        self.db.add(link)
+        self.db.commit()
+        self.db.refresh(link)
+        return raw_token, link
+
+    def test_submit_positive_feedback_persists(self):
+        raw, _ = self._make_link()
+        resp = self.client.post(
+            f"/api/legal/portal/{raw}/feedback",
+            json={"score": 1, "note": " 服务很专业 "},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertTrue(resp.json()["data"]["ok"])
+        from app.models.legal_portal import LegalPortalFeedback
+        rows = self.db.query(LegalPortalFeedback).all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].score, 1)
+        self.assertEqual(rows[0].note, "服务很专业")
+
+    def test_submit_negative_without_note_allowed(self):
+        raw, _ = self._make_link()
+        resp = self.client.post(
+            f"/api/legal/portal/{raw}/feedback",
+            json={"score": -1},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+    def test_score_zero_rejected(self):
+        raw, _ = self._make_link()
+        resp = self.client.post(
+            f"/api/legal/portal/{raw}/feedback",
+            json={"score": 0},
+        )
+        self.assertEqual(resp.status_code, 422)
+
+    def test_feedback_on_invalid_token_404(self):
+        resp = self.client.post(
+            "/api/legal/portal/not-a-real-token/feedback",
+            json={"score": 1},
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_manager_can_list_org_feedback(self):
+        raw, link = self._make_link()
+        self.client.post(
+            f"/api/legal/portal/{raw}/feedback",
+            json={"score": 1, "note": "很好"},
+        )
+        self.client.post(
+            f"/api/legal/portal/{raw}/feedback",
+            json={"score": -1, "note": "回复慢了"},
+        )
+        resp = self.client.get(f"/api/legal/orgs/{self.org_id}/portal-feedback",
+                               headers=self.headers)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()["data"]
+        self.assertEqual(len(data), 2)
+        self.assertEqual({d["score"] for d in data}, {1, -1})
+        self.assertTrue(all(d["case_id"] == self.case.id for d in data))
+
+    def test_manager_list_feedback_requires_org_member(self):
+        outsider = User(
+            username="outsider3", email="out3@t.com",
+            hashed_password=hash_password("pw"), role="user",
+            status=UserStatus.active.value, organization_id=self.org_id,
+        )
+        self.db.add(outsider)
+        self.db.commit()
+        token = create_access_token({"sub": str(outsider.id)})
+        resp = self.client.get(
+            f"/api/legal/orgs/{self.org_id}/portal-feedback",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_content_returns_billing_snapshot_for_sent_invoice(self):
+        from datetime import date
+        from app.models.legal_billing import LegalInvoice
+        self.db.add(LegalInvoice(
+            organization_id=self.org_id,
+            case_id=self.case.id,
+            invoice_no="INV-P3-001",
+            client_display_name="张三",
+            issue_date=date(2026, 8, 1),
+            billing_period_start=date(2026, 7, 1),
+            billing_period_end=date(2026, 7, 31),
+            subtotal=10000,
+            tax_amount=600,
+            total_amount=10600,
+            status="sent",
+            created_by=self.admin.id,
+        ))
+        self.db.commit()
+
+        raw, _ = self._make_link()
+        resp = self.client.get(f"/api/legal/portal/{raw}/content")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        inv = resp.json()["data"]["invoice"]
+        self.assertIsNotNone(inv)
+        self.assertEqual(inv["invoice_number"], "INV-P3-001")
+        self.assertEqual(inv["total_amount"], 10600.0)
+        self.assertEqual(inv["status"], "sent")
+        self.assertEqual(inv["period_start"], "2026-07-01")
+        self.assertEqual(inv["period_end"], "2026-07-31")
+        self.assertEqual(inv["paid_amount"], 0.0)
+
+    def test_content_omits_billing_for_draft_invoice(self):
+        from datetime import date
+        from app.models.legal_billing import LegalInvoice
+        self.db.add(LegalInvoice(
+            organization_id=self.org_id,
+            case_id=self.case.id,
+            invoice_no="INV-P3-DRAFT",
+            client_display_name="李四",
+            issue_date=date(2026, 8, 1),
+            total_amount=500,
+            status="draft",
+            created_by=self.admin.id,
+        ))
+        self.db.commit()
+
+        raw, _ = self._make_link()
+        resp = self.client.get(f"/api/legal/portal/{raw}/content")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertIsNone(resp.json()["data"]["invoice"])

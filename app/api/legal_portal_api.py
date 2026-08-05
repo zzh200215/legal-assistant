@@ -25,6 +25,7 @@ from app.models.org import OrganizationMember, Organization
 from app.models.legal_portal import (
     LegalDeadline, LegalPortalLink, LegalPortalLinkItem, LegalPortalAccessLog,
     LegalCaseMember, LegalCaseProgressUpdate, LegalCaseProgressRead,
+    LegalPortalFeedback,
 )
 
 router = APIRouter()
@@ -174,6 +175,47 @@ def _require_portal_session(link: LegalPortalLink, session_token: str | None) ->
         raise HTTPException(503, detail="门户验证服务暂不可用") from exc
     if linked_id != str(link.id):
         raise HTTPException(401, detail=err(PORTAL_OTP_INVALID))
+
+
+def _portal_billing_snapshot(db: Session, link: LegalPortalLink) -> dict | None:
+    """按案件维度取最近一张非草稿发票，供客户门户对账展示（P3）。
+
+    字段命名与前端 LegalPortal.vue 账单占位卡一致（invoice_number / total_amount /
+    status / period_start / period_end），invoice_no 与 billing_period_* 为 DB 列名。
+    """
+    from app.models.legal_billing import LegalInvoice, LegalInvoiceItem, LegalPaymentRecord
+    invoice = (
+        db.query(LegalInvoice)
+        .filter(
+            LegalInvoice.organization_id == link.organization_id,
+            LegalInvoice.case_id == link.case_id,
+            LegalInvoice.status != "draft",
+        )
+        .order_by(LegalInvoice.issue_date.desc(), LegalInvoice.id.desc())
+        .first()
+    )
+    if not invoice:
+        return None
+    items = db.query(LegalInvoiceItem).filter(LegalInvoiceItem.invoice_id == invoice.id).all()
+    payments = db.query(LegalPaymentRecord).filter(
+        LegalPaymentRecord.invoice_id == invoice.id,
+        LegalPaymentRecord.status != "refunded",
+    ).all()
+    paid_total = sum(float(p.amount or 0) for p in payments)
+    return {
+        "invoice_number": invoice.invoice_no,
+        "total_amount": float(invoice.total_amount or 0),
+        "status": invoice.status,
+        "payment_progress": invoice.payment_progress,
+        "period_start": invoice.billing_period_start.isoformat() if invoice.billing_period_start else None,
+        "period_end": invoice.billing_period_end.isoformat() if invoice.billing_period_end else None,
+        "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+        "paid_amount": round(paid_total, 2),
+        "items": [
+            {"title": it.title, "amount": float(it.amount or 0)}
+            for it in items
+        ],
+    }
 
 
 def _validate_portal_items(db: Session, case: LegalCase, items: List[dict]) -> list[dict]:
@@ -709,12 +751,75 @@ def portal_get_content(
         "case_id": link.case_id,
         "progress_updates": progress_updates,
         "documents": documents,
+        "invoice": _portal_billing_snapshot(db, link),
         "organization": {
             "name": org.name if org else None,
             "portal_logo_url": org.portal_logo_url if org else None,
             "portal_welcome_message": org.portal_welcome_message if org else None,
         },
     }
+
+
+class PortalFeedbackIn(BaseModel):
+    score: int = Field(..., ge=-1, le=1, description="1=有帮助 / -1=待改进")
+    note: Optional[str] = Field(None, max_length=500, description="待改进时的补充说明，≤500字")
+
+
+@router.post("/portal/{token}/feedback")
+def portal_submit_feedback(
+    token: str,
+    body: PortalFeedbackIn,
+    request: Request,
+    x_portal_session: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+):
+    """客户对律师服务的反馈（👍/👎 + 备注）。令牌鉴权同 content，落到 legal_portal_feedback。"""
+    token_hash = _hash_token(token)
+    link = _get_active_link(token_hash, db)
+    _require_portal_session(link, x_portal_session)
+    if body.score == 0:
+        raise HTTPException(422, detail="score 只允许 1（有帮助）或 -1（待改进）")
+
+    ip_hash = _hash_ip(request.client.host if request.client else None)
+    db.add(LegalPortalFeedback(
+        portal_link_id=link.id,
+        organization_id=link.organization_id,
+        case_id=link.case_id,
+        score=body.score,
+        note=(body.note or "").strip() or None,
+    ))
+    db.add(LegalPortalAccessLog(
+        portal_link_id=link.id,
+        organization_id=link.organization_id,
+        ip_hash=ip_hash,
+        action="feedback",
+        result="success",
+    ))
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/orgs/{org_id}/portal-feedback")
+def list_portal_feedback(
+    org_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """管理端：某组织下所有门户反馈（按时间倒序）。"""
+    _require_organization_member(db, org_id, current_user.id)
+    rows = db.query(LegalPortalFeedback).filter(
+        LegalPortalFeedback.organization_id == org_id,
+    ).order_by(LegalPortalFeedback.created_at.desc()).all()
+    return [
+        {
+            "id": r.id,
+            "case_id": r.case_id,
+            "score": r.score,
+            "note": r.note,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/portal/{token}/documents/{document_id}/download")

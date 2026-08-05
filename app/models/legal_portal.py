@@ -116,6 +116,21 @@ class LegalCaseProgressUpdate(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class LegalPortalFeedback(Base):
+    """客户门户反馈：客户通过链接对律师服务的 👍/👎 评价（P3，独立表而非落到 AI 输出列）。"""
+
+    __tablename__ = "legal_portal_feedback"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    portal_link_id = Column(Integer, ForeignKey("legal_portal_links.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    case_id = Column(Integer, ForeignKey("legal_cases.id"), nullable=False, index=True)
+    score = Column(Integer, nullable=False, comment="1=有帮助 / -1=待改进")
+    note = Column(Text, nullable=True, comment="待改进时的补充说明，≤500字")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class LegalCaseProgressRead(Base):
     __tablename__ = "legal_case_progress_reads"
 

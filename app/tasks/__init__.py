@@ -762,6 +762,19 @@ def scan_expired_portal_links_task():
         db.close()
 
 
+@celery_app.task(name="scan_expired_subscriptions")
+def scan_expired_subscriptions_task():
+    """每小时：将已过 current_period_end 的 active 订阅置为 expired（配额回落免费版）。"""
+    _record_beat_heartbeat()
+    from app.services.subscription_service import subscription_service
+
+    db = SessionLocal()
+    try:
+        return {"expired_subscriptions": subscription_service.expire_overdue_subscriptions(db)}
+    finally:
+        db.close()
+
+
 @celery_app.task(name="scan_contract_expiry_alerts")
 def scan_contract_expiry_alerts_task():
     """每天：扫描已确认的合同里程碑，提前90/30/7天各创建一次通知事件。"""

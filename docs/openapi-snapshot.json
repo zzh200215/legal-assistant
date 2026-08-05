@@ -16241,6 +16241,119 @@
         }
       }
     },
+    "/api/legal/portal/{token}/feedback": {
+      "post": {
+        "tags": [
+          "Legal Portal"
+        ],
+        "summary": "Portal Submit Feedback",
+        "description": "客户对律师服务的反馈（👍/👎 + 备注）。令牌鉴权同 content，落到 legal_portal_feedback。",
+        "operationId": "portal_submit_feedback_api_legal_portal__token__feedback_post",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          },
+          {
+            "name": "x-portal-session",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Portal-Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortalFeedbackIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/orgs/{org_id}/portal-feedback": {
+      "get": {
+        "tags": [
+          "Legal Portal"
+        ],
+        "summary": "List Portal Feedback",
+        "description": "管理端：某组织下所有门户反馈（按时间倒序）。",
+        "operationId": "list_portal_feedback_api_legal_orgs__org_id__portal_feedback_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/portal/{token}/documents/{document_id}/download": {
       "get": {
         "tags": [
@@ -24107,6 +24220,35 @@
         },
         "type": "object",
         "title": "PortalBrandingIn"
+      },
+      "PortalFeedbackIn": {
+        "properties": {
+          "score": {
+            "type": "integer",
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Score",
+            "description": "1=有帮助 / -1=待改进"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "待改进时的补充说明，≤500字"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score"
+        ],
+        "title": "PortalFeedbackIn"
       },
       "PortalLinkCreate": {
         "properties": {

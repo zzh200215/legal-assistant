@@ -50,6 +50,10 @@ celery_app.conf.update(
             "task": "scan_expired_portal_links",
             "schedule": 3600.0,
         },
+        "scan-expired-subscriptions": {
+            "task": "scan_expired_subscriptions",
+            "schedule": 3600.0,  # 每小时
+        },
         "scan-contract-expiry-alerts": {
             "task": "scan_contract_expiry_alerts",
             "schedule": 86400.0,  # 每天

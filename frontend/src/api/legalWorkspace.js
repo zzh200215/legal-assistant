@@ -106,4 +106,12 @@ export default {
   listProgressUpdates(orgId, caseId) {
     return http.get(`/legal/orgs/${orgId}/cases/${caseId}/progress-updates`)
   },
+  portalSubmitFeedback(token, payload, session) {
+    return http.post(`/legal/portal/${token}/feedback`, payload, {
+      headers: session ? { 'X-Portal-Session': session } : {},
+    })
+  },
+  listPortalFeedback(orgId) {
+    return http.get(`/legal/orgs/${orgId}/portal-feedback`)
+  },
 }

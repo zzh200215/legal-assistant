@@ -1,4 +1,5 @@
 """Phase 10 Week 2 tests: subscription plans, quota management, payment webhook"""
+from datetime import datetime
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -156,6 +157,27 @@ class SubscriptionServiceTests(unittest.TestCase):
         self.assertEqual(summary["consultation"]["quota"], 5)
         self.assertEqual(summary["consultation"]["used"], 0)
 
+    # ── M-3 免费档参数化（B 组 8/3/3） ──
+
+    def test_free_plan_quota_parameterized_via_settings(self):
+        """M-3：FREE_PLAN_*_QUOTA 配置应同步到 free 计划配额与描述，无需迁移。"""
+        from app.core.config import get_settings
+        with patch.object(get_settings(), "FREE_PLAN_CONSULTATION_QUOTA", 8), \
+             patch.object(get_settings(), "FREE_PLAN_REVIEW_QUOTA", 3), \
+             patch.object(get_settings(), "FREE_PLAN_DRAFT_QUOTA", 3):
+            subscription_service.ensure_default_plans(self.db)
+
+        free_plan = self.db.query(SubscriptionPlan).filter(SubscriptionPlan.tier == "free").first()
+        self.assertEqual(free_plan.quota_consultation, 8)
+        self.assertEqual(free_plan.quota_review, 3)
+        self.assertEqual(free_plan.quota_draft, 3)
+        self.assertIn("咨询8次", free_plan.description)
+
+        # pro/team 不受影响
+        pro_plan = self.db.query(SubscriptionPlan).filter(SubscriptionPlan.tier == "pro").first()
+        self.assertEqual(pro_plan.quota_consultation, 50)
+        self.assertEqual(subscription_service.get_usage_summary(self.db, self.user.id)["consultation"]["quota"], 8)
+
     # ── 激活订阅 ──
 
     def test_activate_subscription_replaces_old(self):
@@ -192,6 +214,68 @@ class SubscriptionServiceTests(unittest.TestCase):
         sub = subscription_service.cancel_subscription(self.db, self.user.id)
         self.assertEqual(sub.status, SubscriptionStatus.cancelled.value)
         self.assertIsNone(subscription_service.get_active_subscription(self.db, self.user.id))
+
+    # ── 过期流转（P1 状态机补全：active→expired）──
+
+    def test_expire_overdue_subscriptions(self):
+        """已过 current_period_end 的 active 订阅置为 expired，未过期不受影响。"""
+        from datetime import timedelta, timezone
+
+        pro_plan = self.db.query(SubscriptionPlan).filter(SubscriptionPlan.tier == "pro").first()
+        now = datetime.now(timezone.utc)
+
+        # 已过期订阅（用户1）
+        self.db.add(UserSubscription(
+            user_id=self.user.id, plan_id=pro_plan.id,
+            status=SubscriptionStatus.active.value,
+            current_period_start=now - timedelta(days=40),
+            current_period_end=now - timedelta(days=10),
+        ))
+        # 未过期订阅（用户2）
+        user2 = User(
+            username="sub_user2", email="sub2@test.com",
+            hashed_password=hash_password("pw"), role="user",
+            status=UserStatus.active.value,
+        )
+        self.db.add(user2)
+        self.db.commit()
+        self.db.refresh(user2)
+        self.db.add(UserSubscription(
+            user_id=user2.id, plan_id=pro_plan.id,
+            status=SubscriptionStatus.active.value,
+            current_period_start=now - timedelta(days=5),
+            current_period_end=now + timedelta(days=25),
+        ))
+        self.db.commit()
+
+        n = subscription_service.expire_overdue_subscriptions(self.db)
+        self.assertEqual(n, 1)
+
+        # 过期用户：无活跃订阅，配额回落到 free
+        self.assertIsNone(subscription_service.get_active_subscription(self.db, self.user.id))
+        self.assertEqual(subscription_service.get_user_plan(self.db, self.user.id).tier, "free")
+        # 未过期用户：保持 pro
+        self.assertIsNotNone(subscription_service.get_active_subscription(self.db, user2.id))
+        self.assertEqual(subscription_service.get_user_plan(self.db, user2.id).tier, "pro")
+
+    def test_expire_ignores_cancelled_and_pending(self):
+        """cancelled/pending 订阅即使已过周期也不应被误置 expired。"""
+        from datetime import timedelta, timezone
+
+        pro_plan = self.db.query(SubscriptionPlan).filter(SubscriptionPlan.tier == "pro").first()
+        now = datetime.now(timezone.utc)
+        for status in (SubscriptionStatus.cancelled.value, SubscriptionStatus.pending.value):
+            self.db.add(UserSubscription(
+                user_id=self.user.id, plan_id=pro_plan.id,
+                status=status,
+                current_period_end=now - timedelta(days=1),
+            ))
+        self.db.commit()
+
+        n = subscription_service.expire_overdue_subscriptions(self.db)
+        self.assertEqual(n, 0)
+        statuses = {s.status for s in self.db.query(UserSubscription).all()}
+        self.assertEqual(statuses, {SubscriptionStatus.cancelled.value, SubscriptionStatus.pending.value})
 
 
 class SubscriptionApiTests(unittest.TestCase):

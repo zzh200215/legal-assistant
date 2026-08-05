@@ -23,6 +23,7 @@
 | 套餐/配额 DB | ✅ |
 | 配额消耗/拦截（quota_usages） | ✅ |
 | 订阅状态 API（subscription_api /subscriptions） | ✅ 查询 |
+| **订阅升级 API（checkout / webhook / cancel + 状态机 active/expired/cancelled）** | ✅ 已实现（2026-08-05 复核：webhook 验签 + 升级意图埋点已就绪；补全 expired 自动流转 beat 任务，测试 29 passed） |
 | **前端套餐价格展示 + 购买入口** | ❌ 无（配额耗尽用户无自助升级 UI，也无余额/支付页面） |
 | **支付渠道接入** | ❌ 无（payment_records.provider 为占位；无微信/支付宝/对公转账流程） |
 | **发票（平台开给企业客户）** | ❌ 无（legal_invoices 是律所→其客户方向；平台收款开票未做） |
@@ -33,7 +34,7 @@
 1. **定价文案已统一**（¥999/月），销售/文档口径一致；playbook D7 问卷题同步修正。
 2. **支付路径为商业化硬缺口**，列入 9 月 checklist A 组：
    - P1：前端定价页（free/pro/team 三档 + 配额说明 + 购买按钮，埋点升级意图）
-   - P1：订阅升级 API（user_subscriptions 状态机：active/expired/cancelled + 支付回调占位）
+   - P1：订阅升级 API（user_subscriptions 状态机：active/expired/cancelled + 支付回调占位）— ✅ **已完成**（2026-08-05：checkout/webhook/cancel 已在 subscription_api 落地并补 expired 自动流转 beat 任务）
    - P2：对公转账收款流程（付款凭证上传 + 人工确认 + 开票登记），对接 LegalBilling 发票模型（platform 方向复用 invoice 结构）
 3. 试点阶段不受影响（内测免费 + 配额供给），支付上线在 POC 转正式时点。
 

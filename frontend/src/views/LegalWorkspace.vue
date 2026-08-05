@@ -37,6 +37,7 @@
               <template #header>
                 <div class="result-header">
                   <span class="card-title">咨询结果</span>
+                  <el-tag v-if="quotaHint('consultation')" size="small" effect="plain" :type="quotaSummary?.consultation?.remaining <= 0 ? 'danger' : 'warning'">{{ quotaHint('consultation') }}</el-tag>
                   <el-tag :type="riskTagType(consultResult.risk_level)" size="small">{{ riskLabel(consultResult.risk_level) }}</el-tag>
                   <el-tag v-if="consultResult.confidence !== undefined" :type="confidenceTagType(consultResult.confidence)" size="small" effect="plain">置信度 {{ consultResult.confidence }}%</el-tag>
                   <el-button v-if="consultResult" size="small" type="success" plain @click="goToReviewFromConsult" style="margin-left:auto">进入合同审查</el-button>
@@ -132,6 +133,7 @@
               <template #header>
                 <div class="result-header">
                   <span class="card-title">审查意见</span>
+                  <el-tag v-if="quotaHint('review')" size="small" effect="plain" :type="quotaSummary?.review?.remaining <= 0 ? 'danger' : 'warning'">{{ quotaHint('review') }}</el-tag>
                   <el-tag :type="contractResult.status === 'needs_lawyer_review' ? 'danger' : 'warning'" size="small">{{ statusLabel(contractResult.status) }}</el-tag>
                   <el-tag v-if="contractResult.confidence !== undefined" :type="confidenceTagType(contractResult.confidence)" size="small" effect="plain">置信度 {{ contractResult.confidence }}%</el-tag>
                   <el-button size="small" @click="exportReview" style="margin-left:auto">导出意见书</el-button>
@@ -347,6 +349,7 @@
               <template #header>
                 <div class="result-header">
                   <span class="card-title">{{ draftResult.title }}</span>
+                  <el-tag v-if="quotaHint('draft')" size="small" effect="plain" :type="quotaSummary?.draft?.remaining <= 0 ? 'danger' : 'warning'">{{ quotaHint('draft') }}</el-tag>
                   <el-tag v-if="draftResult.missing_fields?.length" type="danger" size="small">缺失 {{ draftResult.missing_fields.length }} 项</el-tag>
                   <el-tag v-else type="success" size="small">字段完整</el-tag>
                   <el-tag v-if="draftResult.confidence !== undefined" :type="confidenceTagType(draftResult.confidence)" size="small" effect="plain">置信度 {{ draftResult.confidence }}%</el-tag>
@@ -724,6 +727,7 @@ import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tabs/style/css'
 import 'element-plus/es/components/tag/style/css'
 import { legalWorkspace } from '../api'
+import { subscription as subscriptionApi } from '../api'
 import AiOutputFeedback from '../components/AiOutputFeedback.vue'
 import { useLegalConsultations } from '../composables/useLegalConsultations'
 import { useContractReviews } from '../composables/useContractReviews'
@@ -759,6 +763,28 @@ const caseDialogVisible = ref(false)
 const caseCreating = ref(false)
 const caseForm = ref({ title: '', case_type: 'labor_dispute', description: '' })
 
+// M-3 B 组：结果卡剩余额度提示（配额来自 /billing/subscriptions/quota）
+const quotaSummary = ref(null)
+
+const loadQuota = async () => {
+  try {
+    const { data } = await subscriptionApi.myQuota()
+    quotaSummary.value = data
+  } catch (e) {
+    // 配额接口不可用时静默降级，不阻塞主流程
+    quotaSummary.value = null
+  }
+}
+
+const quotaHint = (type) => {
+  const q = quotaSummary.value?.[type]
+  if (!q || q.unlimited) return ''
+  if (q.remaining <= 0) return `本月${typeLabel(type)}额度已用尽，升级解锁更多`
+  return `本月${typeLabel(type)}剩余 ${q.remaining}/${q.quota}`
+}
+
+const typeLabel = (t) => ({ consultation: '咨询', review: '审查', draft: '文书' }[t] || t)
+
 const currentDraftFields = computed(() => draftFieldMap.value[draftForm.value.document_type] || [])
 
 const {
@@ -790,7 +816,10 @@ const {
   jumpToRisk,
 } = useContractRiskPresentation({ contractForm, contractResult, contractReviews })
 
-const submitContractReview = () => runContractReview(resetRiskFilter)
+const submitContractReview = () => {
+  runContractReview(resetRiskFilter)
+  loadQuota()
+}
 const handleContractUpload = (file) => uploadContractReview(file, resetRiskFilter)
 
 const {
@@ -803,8 +832,13 @@ const {
   loadTemplates,
   setTemplateFields,
   loadDrafts,
-  submitDraft,
+  submitDraft: runDraftSubmit,
 } = useLegalDrafts({ client: legalWorkspace, message: ElMessage, caseId: currentCaseId })
+
+const submitDraft = () => {
+  runDraftSubmit()
+  loadQuota()
+}
 
 const { compareForm, compareLoading, compareResult, submitCompare } = useContractComparison({
   client: legalWorkspace, message: ElMessage,
@@ -908,7 +942,7 @@ const {
   followupQuestion,
   followupLoading,
   loadConsultations,
-  submitConsultation,
+  submitConsultation: runConsultation,
   submitFollowup,
   submitConsultForReview,
 } = useLegalConsultations({
@@ -918,6 +952,11 @@ const {
   caseId: currentCaseId,
   onReviewSubmitted: () => reviewTabRef.value?.refresh(),
 })
+
+const submitConsultation = () => {
+  runConsultation()
+  loadQuota()
+}
 
 const exportCompare = () => {
   if (!compareResult.value) return
@@ -1051,6 +1090,7 @@ const openSourceDetail = async (refItem) => {
 onMounted(async () => {
   await loadOverview()
   await loadCases()
+  loadQuota()
   setTemplateFields({
     labor_arbitration_application: ['申请人', '被申请人', '劳动关系起止时间', '仲裁请求', '事实与理由', '证据清单'],
     private_lending_complaint: ['原告', '被告', '借款金额', '借款日期', '诉讼请求', '事实与理由', '证据清单'],
