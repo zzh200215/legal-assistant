@@ -123,7 +123,7 @@ def extract_file_event(payload: dict) -> Optional[dict]:
 
 
 def handle_event(payload: dict) -> dict:
-    """事件分派入口（回调内调用）。消息/文件事件 ack 后转后台处理，快速回包。"""
+    """事件分派入口（回调内调用）。消息/文件/卡片动作 ack 后转后台处理，快速回包。"""
     event_type = (payload.get("header") or {}).get("event_type") or payload.get("type")
     if event_type == "url_verification":
         return {"type": "url_verification", "challenge": payload.get("challenge", "")}
@@ -134,7 +134,56 @@ def handle_event(payload: dict) -> dict:
             _spawn_reply(text_event)
         elif file_event and file_event.get("file_key"):
             _spawn_file_review(file_event)
+    elif event_type == "card.action.trigger":
+        card_event = extract_card_action(payload)
+        if card_event:
+            _spawn_card_action(card_event)
     return {"received": True, "event_type": event_type}
+
+
+def _extract_operator_open_id(event: dict) -> Optional[str]:
+    operator = event.get("operator") or {}
+    operator_id = operator.get("operator_id") or operator.get("sender_id") or {}
+    open_id = operator_id.get("open_id")
+    if open_id:
+        return open_id
+    context = event.get("context") or {}
+    return context.get("open_id")
+
+
+def extract_card_action(payload: dict) -> Optional[dict]:
+    """从 card.action.trigger 事件提取 {open_id, value}。value 需含 kind 路由键。"""
+    event = payload.get("event") if isinstance(payload, dict) else None
+    if not isinstance(event, dict):
+        return None
+    action = event.get("action") or {}
+    if not isinstance(action, dict) or action.get("tag") != "button":
+        return None
+    value = action.get("value")
+    if not isinstance(value, dict) or not value.get("kind"):
+        return None
+    open_id = _extract_operator_open_id(event)
+    if not open_id:
+        return None
+    return {"open_id": open_id, "value": value}
+
+
+def _spawn_card_action(event: dict) -> None:
+    import asyncio
+
+    asyncio.create_task(_background_card_action(event))
+
+
+async def _background_card_action(event: dict) -> None:
+    from app.core.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        await handle_card_action(event["open_id"], event["value"], db)
+    except Exception as exc:  # noqa: BLE001 - 后台任务兜底
+        logger.error("飞书 M3 卡片动作处理失败: %s", exc, exc_info=True)
+    finally:
+        db.close()
 
 
 def _spawn_reply(event: dict) -> None:
@@ -154,7 +203,7 @@ async def _background_reply(event: dict) -> None:
 
     db = SessionLocal()
     try:
-        await answer_consultation(event["open_id"], event["text"], db)
+        await answer_text_message(event["open_id"], event["text"], db)
     except Exception as exc:  # noqa: BLE001 - 后台任务兜底
         logger.error("飞书 M1 咨询处理失败: %s", exc, exc_info=True)
     finally:
@@ -241,16 +290,11 @@ async def build_consultation_card(question: str, user_id: int, db) -> dict:
 async def answer_consultation(open_id: str, question: str, db) -> dict:
     """按 open_id 解析绑定用户并回复咨询卡片；未绑定/未配置出站时返回状态说明。"""
     messenger = FeishuMessenger(get_settings().FEISHU_APP_ID, get_settings().FEISHU_APP_SECRET)
-    binding = db.query(FeishuBinding).filter(
-        FeishuBinding.open_id == open_id, FeishuBinding.status == "active"
-    ).first()
-    if not binding:
+    user = _resolve_bound_user(open_id, db)
+    if user is None:
         return await messenger.send_text(
             open_id, "你尚未绑定律智检账号。请先在律智检「设置-飞书绑定」完成扫码绑定后再发起咨询。"
         )
-    user = db.query(User).filter(User.id == binding.user_id).first()
-    if not user:
-        return {"configured": True, "sent": False, "reason": "user_not_found"}
     card = await build_consultation_card(question, user.id, db)
     return await messenger.send_card(open_id, card)
 
@@ -323,16 +367,11 @@ async def answer_file_review(open_id: str, file_key: str, file_name: str, db) ->
     from app.services.legal_service import review_contract
 
     messenger = FeishuMessenger(get_settings().FEISHU_APP_ID, get_settings().FEISHU_APP_SECRET)
-    binding = db.query(FeishuBinding).filter(
-        FeishuBinding.open_id == open_id, FeishuBinding.status == "active"
-    ).first()
-    if not binding:
+    user = _resolve_bound_user(open_id, db)
+    if user is None:
         return await messenger.send_text(
             open_id, "你尚未绑定律智检账号。请先在律智检「设置-飞书绑定」完成扫码绑定后再发送文件。"
         )
-    user = db.query(User).filter(User.id == binding.user_id).first()
-    if not user:
-        return {"configured": True, "sent": False, "reason": "user_not_found"}
 
     file_bytes = await messenger.download_file(file_key)
     if file_bytes is None:
@@ -347,6 +386,224 @@ async def answer_file_review(open_id: str, file_key: str, file_name: str, db) ->
     risks, summary = await review_contract(text, user_id=user.id)
     card = build_contract_review_card(risks, summary, file_name)
     return await messenger.send_card(open_id, card)
+
+
+# ── M3：文本路由（审核队列 / 文书生成 / 咨询）───────────────────────────────
+
+REVIEW_COMMAND_WORDS = ("待审核", "审核队列")
+DRAFT_TYPE_KEYWORDS = {
+    "labor_arbitration_application": ("劳动仲裁", "仲裁申请书"),
+    "private_lending_complaint": ("民间借贷", "借款起诉"),
+    "consumer_complaint": ("消费投诉", "消费纠纷"),
+    "supplementary_agreement": ("补充协议",),
+}
+DRAFT_TYPE_LABELS = {
+    "labor_arbitration_application": "劳动人事争议仲裁申请书",
+    "private_lending_complaint": "民间借贷纠纷起诉状",
+    "consumer_complaint": "消费纠纷投诉书",
+    "supplementary_agreement": "补充协议",
+}
+REVIEW_ITEM_TYPE_LABELS = {"consultation": "咨询", "contract_review": "审查", "draft": "文书"}
+REVIEW_STATUS_LABELS = {
+    "pending_review": "待审核", "needs_lawyer_review": "需律师复核", "needs_facts": "待补充事实",
+    "lawyer_approved": "已通过", "returned_for_facts": "已退回补充", "archived": "已归档",
+}
+
+
+async def answer_text_message(open_id: str, text: str, db) -> dict:
+    """M3 文本路由：待审核命令 → 审核队列；文书关键词 → 文书生成；否则走咨询卡片。"""
+    if any(word in text for word in REVIEW_COMMAND_WORDS):
+        return await answer_review_queue(open_id, db)
+    if detect_draft_type(text):
+        return await answer_draft_request(open_id, text, db)
+    return await answer_consultation(open_id, text, db)
+
+
+def detect_draft_type(message: str) -> Optional[str]:
+    for document_type, keywords in DRAFT_TYPE_KEYWORDS.items():
+        if any(keyword in message for keyword in keywords):
+            return document_type
+    return None
+
+
+def parse_draft_fields(message: str, document_type: str) -> dict:
+    """从"申请人:张三 被申请人:公司"式消息解析文书字段，忽略与模板无关的键。"""
+    import re
+
+    from app.services.legal_service import DRAFT_FIELDS
+
+    fields: dict[str, str] = {}
+    for line in re.split(r"[\s\n,，;；]+", message):
+        if ":" not in line and "：" not in line:
+            continue
+        key, value = re.split(r"[:：]", line, 1)
+        key = key.strip()
+        value = value.strip()
+        if key and value and key in DRAFT_FIELDS.get(document_type, []):
+            fields[key] = value
+    return fields
+
+
+async def answer_review_queue(open_id: str, db) -> dict:
+    """S4：拉取当前用户的待审核队列，逐项发送审核卡片（通过/退回/关闭按钮）。"""
+    from app.services.legal_workspace_service import legal_workspace_read_module
+
+    messenger = FeishuMessenger(get_settings().FEISHU_APP_ID, get_settings().FEISHU_APP_SECRET)
+    user = _resolve_bound_user(open_id, db)
+    if user is None:
+        return await messenger.send_text(
+            open_id, "你尚未绑定律智检账号。请先在律智检「设置-飞书绑定」完成扫码绑定后再使用审核队列。"
+        )
+    items = legal_workspace_read_module.review_queue(db, user)
+    if not items:
+        return await messenger.send_text(open_id, "当前没有待审核事项。")
+    sent = 0
+    for item in items[:3]:
+        result = await messenger.send_card(open_id, build_review_item_card(item))
+        if result.get("sent"):
+            sent += 1
+    return {"configured": True, "sent": bool(sent), "total": len(items), "cards_sent": sent}
+
+
+def build_review_item_card(item: dict) -> dict:
+    """单条待审核事项卡片：内容预览 + 通过/退回按钮，value 携带回写路由。"""
+    kind = REVIEW_ITEM_TYPE_LABELS.get(item.get("target_type"), item.get("target_type"))
+    title = item.get("question") or item.get("title") or item.get("document_type") or f"#{item.get('id')}"
+    title_short = str(title)[:40]
+    preview = item.get("advice") or item.get("summary") or item.get("question") or ""
+    status_label = REVIEW_STATUS_LABELS.get(item.get("status"), item.get("status"))
+    target_type = item["target_type"]
+    target_id = item["id"]
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "template": "red",
+            "title": {"tag": "plain_text", "content": f"待审核 · {kind}"},
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**{title_short}**（{status_label}）"}},
+            {"tag": "div", "text": {"tag": "lark_md", "content": str(preview)[:200]}},
+            {"tag": "hr"},
+            {
+                "tag": "action",
+                "actions": [
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "通过"}, "type": "primary",
+                     "value": {"kind": "review", "action": "approve", "target_type": target_type,
+                               "target_id": target_id, "title": title_short}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "退回"}, "type": "danger",
+                     "value": {"kind": "review", "action": "return", "target_type": target_type,
+                               "target_id": target_id, "title": title_short,
+                               "note": "飞书一键退回，请到 Web 端补充原因"}},
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "关闭"}, "type": "default",
+                     "value": {"kind": "review", "action": "close", "target_type": target_type,
+                               "target_id": target_id, "title": title_short}},
+                ],
+            },
+            {
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": "审核结果与 Web 审核队列实时一致（AI-2 回流）。"}],
+            },
+        ],
+    }
+
+
+async def handle_card_action(open_id: str, value: dict, db) -> dict:
+    """M3 卡片动作分派：kind=review → 审核回写；kind=draft → 文书续写。"""
+    kind = value.get("kind")
+    if kind == "review":
+        return await _handle_review_action(open_id, value, db)
+    if kind == "draft":
+        return await _handle_draft_action(open_id, value, db)
+    return {"configured": True, "sent": False, "reason": f"unknown_kind:{kind}"}
+
+
+async def _handle_review_action(open_id: str, value: dict, db) -> dict:
+    from app.services.legal_workspace_service import legal_workspace_read_module
+
+    messenger = FeishuMessenger(get_settings().FEISHU_APP_ID, get_settings().FEISHU_APP_SECRET)
+    user = _resolve_bound_user(open_id, db)
+    if user is None:
+        return await messenger.send_text(open_id, "你尚未绑定律智检账号。")
+    action = value.get("action")
+    target_type = value.get("target_type")
+    target_id = value.get("target_id")
+    note = value.get("note") or ""
+    label = value.get("title") or f"{target_type}#{target_id}"
+    try:
+        result = legal_workspace_read_module.apply_review_action(
+            db, user, target_type=target_type, target_id=target_id, action=action, note=note,
+        )
+    except (LookupError, PermissionError, ValueError) as exc:
+        return await messenger.send_text(open_id, f"审核动作失败：{exc}")
+    status_label = REVIEW_STATUS_LABELS.get(result.get("status"), result.get("status"))
+    return await messenger.send_text(open_id, f"审核完成：{label} → {status_label}")
+
+
+def build_draft_card(row, document_type: str, missing_required: list) -> dict:
+    """文书草稿卡片：内容预览 + 待补充字段提示。"""
+    label = DRAFT_TYPE_LABELS.get(document_type, document_type)
+    content = str(getattr(row, "content", "") or "")[:300]
+    missing = list(missing_required or getattr(row, "missing_fields", None) or [])[:6]
+    missing_block = "\n".join(f"· {m}" for m in missing) or "无（可补充更多细节）"
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "template": "blue",
+            "title": {"tag": "plain_text", "content": f"文书草稿 · {label}"},
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": content or "（空草稿）"}},
+            {"tag": "hr"},
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**待补充字段**\n{missing_block}"}},
+            {
+                "tag": "note",
+                "elements": [
+                    {"tag": "plain_text", "content": "可在 Web 端补全字段后导出 DOCX。继续回复字段内容即可生成新草稿。"}
+                ],
+            },
+        ],
+    }
+
+
+async def answer_draft_request(open_id: str, message: str, db) -> dict:
+    """S3：识别文书类型 → 解析字段 → 生成草稿卡片。"""
+    from app.services.legal_workspace_service import legal_workspace_module
+
+    messenger = FeishuMessenger(get_settings().FEISHU_APP_ID, get_settings().FEISHU_APP_SECRET)
+    user = _resolve_bound_user(open_id, db)
+    if user is None:
+        return await messenger.send_text(
+            open_id, "你尚未绑定律智检账号。请先在律智检「设置-飞书绑定」完成扫码绑定后再生成文书。"
+        )
+    document_type = detect_draft_type(message)
+    if not document_type:
+        return await messenger.send_text(open_id, "未识别文书类型。可尝试：文书 劳动仲裁申请书 / 民间借贷起诉状 / 补充协议。")
+    fields = parse_draft_fields(message, document_type)
+    try:
+        row, missing_required = await legal_workspace_module.create_draft(
+            db, user, document_type=document_type, fields=fields, case_id=None,
+        )
+    except ValueError as exc:
+        if str(exc) == "QUOTA_EXCEEDED":
+            return await messenger.send_text(open_id, "本月文书生成配额已用完，请升级订阅。")
+        raise
+    card = build_draft_card(row, document_type, missing_required)
+    return await messenger.send_card(open_id, card)
+
+
+async def _handle_draft_action(open_id: str, value: dict, db) -> dict:
+    """文书续写（占位）：value 携带 document_type，后续按需扩展。"""
+    messenger = FeishuMessenger(get_settings().FEISHU_APP_ID, get_settings().FEISHU_APP_SECRET)
+    return await messenger.send_text(open_id, "文书续写请在 Web 端完成（本版本仅支持一键生成草稿）。")
+
+
+def _resolve_bound_user(open_id: str, db):
+    binding = db.query(FeishuBinding).filter(
+        FeishuBinding.open_id == open_id, FeishuBinding.status == "active"
+    ).first()
+    if not binding:
+        return None
+    return db.query(User).filter(User.id == binding.user_id).first()
 
 
 class FeishuMessenger:
