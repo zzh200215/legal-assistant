@@ -165,6 +165,9 @@ class Settings(BaseSettings):
     PAYMENT_WEBHOOK_SECRET: str = ""
     # 飞书事件回调 encrypt_key（#87/M1 前置）
     FEISHU_EVENT_ENCRYPT_KEY: str = ""
+    # 飞书回调验签模式（指南 §6）：auto=按 V2→V1→hex 顺序任一通过即有效；v2/v1=仅对应算法；off=跳过验签（临时排查）。
+    # 注：V2 签名串拼接需以接入时飞书官方文档复核。
+    FEISHU_CALLBACK_VERIFY: str = "auto"
     # 飞书企业自建应用凭据（M1 出站消息；留空则出站禁用、回调仍可解密验签）
     FEISHU_APP_ID: str = ""
     FEISHU_APP_SECRET: str = ""

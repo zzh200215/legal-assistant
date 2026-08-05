@@ -1,4 +1,5 @@
 """#87/飞书绑定与回调 API 回归测试"""
+import base64
 import hashlib
 import hmac
 import unittest
@@ -116,12 +117,12 @@ class FeishuApiTests(unittest.TestCase):
     def test_callback_signature_verified_when_key_configured(self):
         import json
 
-        from app.core.config import get_settings
         import app.api.feishu_api as feishu_api
 
         payload = json.dumps({"type": "message", "event": {"x": 1}}).encode("utf-8")
         with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
             mock_settings.FEISHU_EVENT_ENCRYPT_KEY = "enc_key_test"
+            mock_settings.FEISHU_CALLBACK_VERIFY = "auto"
             mock_settings.ALERT_WEBHOOK_URL = ""
             # 无签名 → 400
             r = self.client.post(
@@ -130,7 +131,7 @@ class FeishuApiTests(unittest.TestCase):
                 headers={"Content-Type": "application/json"},
             )
             self.assertEqual(r.status_code, 400, r.text)
-            # 正确签名 → 200
+            # 正确签名 → 200（auto 模式：V2/V1 都不匹配，落到兼容 hex 分支）
             sig = hmac.new(b"enc_key_test", payload, hashlib.sha256).hexdigest()
             r = self.client.post(
                 "/api/feishu/callbacks/event",
@@ -139,6 +140,92 @@ class FeishuApiTests(unittest.TestCase):
             )
             self.assertEqual(r.status_code, 200, r.text)
             self.assertTrue(r.json()["success"])
+
+    def test_callback_signature_v2(self):
+        import json
+
+        import app.api.feishu_api as feishu_api
+
+        payload = json.dumps({"type": "message", "event": {"x": 1}}).encode("utf-8")
+        ts, nonce = "1720000000", "rand123"
+        with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
+            mock_settings.FEISHU_EVENT_ENCRYPT_KEY = "enc_key_test"
+            mock_settings.FEISHU_CALLBACK_VERIFY = "auto"
+            mock_settings.ALERT_WEBHOOK_URL = ""
+            # V2：base64(HmacSHA256(timestamp+nonce+encrypt_key+body, encrypt_key))
+            v2_input = f"{ts}{nonce}enc_key_test".encode("utf-8") + payload
+            sig = base64.b64encode(
+                hmac.new(b"enc_key_test", v2_input, hashlib.sha256).digest()
+            ).decode("utf-8")
+            r = self.client.post(
+                "/api/feishu/callbacks/event",
+                content=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-lark-signature": sig,
+                    "x-lark-request-timestamp": ts,
+                    "x-lark-request-nonce": nonce,
+                },
+            )
+            self.assertEqual(r.status_code, 200, r.text)
+
+    def test_callback_signature_v1(self):
+        import json
+
+        import app.api.feishu_api as feishu_api
+
+        payload = json.dumps({"type": "message", "event": {"x": 1}}).encode("utf-8")
+        with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
+            mock_settings.FEISHU_EVENT_ENCRYPT_KEY = "enc_key_test"
+            mock_settings.FEISHU_CALLBACK_VERIFY = "auto"
+            mock_settings.ALERT_WEBHOOK_URL = ""
+            # V1：base64(HmacSHA256(body, encrypt_key))
+            sig = base64.b64encode(
+                hmac.new(b"enc_key_test", payload, hashlib.sha256).digest()
+            ).decode("utf-8")
+            r = self.client.post(
+                "/api/feishu/callbacks/event",
+                content=payload,
+                headers={"Content-Type": "application/json", "x-lark-signature": sig},
+            )
+            self.assertEqual(r.status_code, 200, r.text)
+
+    def test_callback_signature_v2_only_mode(self):
+        import json
+
+        import app.api.feishu_api as feishu_api
+
+        payload = json.dumps({"type": "message", "event": {"x": 1}}).encode("utf-8")
+        with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
+            mock_settings.FEISHU_EVENT_ENCRYPT_KEY = "enc_key_test"
+            mock_settings.FEISHU_CALLBACK_VERIFY = "v2"
+            mock_settings.ALERT_WEBHOOK_URL = ""
+            # v2 模式：hex 与 V1 均不应通过，仅 V2 通过
+            hex_sig = hmac.new(b"enc_key_test", payload, hashlib.sha256).hexdigest()
+            r = self.client.post(
+                "/api/feishu/callbacks/event",
+                content=payload,
+                headers={"Content-Type": "application/json", "x-lark-signature": hex_sig},
+            )
+            self.assertEqual(r.status_code, 400, r.text)
+
+    def test_callback_signature_off_mode_skips_verification(self):
+        import json
+
+        import app.api.feishu_api as feishu_api
+
+        payload = json.dumps({"type": "url_verification", "challenge": "abc"}).encode("utf-8")
+        with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
+            mock_settings.FEISHU_EVENT_ENCRYPT_KEY = "enc_key_test"
+            mock_settings.FEISHU_CALLBACK_VERIFY = "off"
+            mock_settings.ALERT_WEBHOOK_URL = ""
+            # off：无签名也放行（临时排查）
+            r = self.client.post(
+                "/api/feishu/callbacks/event",
+                content=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(r.status_code, 200, r.text)
 
 
 if __name__ == "__main__":

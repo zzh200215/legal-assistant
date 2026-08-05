@@ -3,6 +3,7 @@
 回调安全复用 webhook HMAC 模式（tasks/__init__.py 同款），开发立项时接入飞书回调。
 """
 
+import base64
 import hashlib
 import hmac
 from typing import Optional
@@ -28,15 +29,42 @@ class BindRequest(BaseModel):
     app_id: str = Field(..., min_length=4, max_length=64)
 
 
-def _verify_callback_signature(raw_body: bytes, signature: str | None) -> bool:
-    """飞书事件回调验签：X-Lark-Signature = HMAC-SHA256(encrypt_key, raw_body)"""
+def _verify_callback_signature(
+    raw_body: bytes,
+    signature: str | None,
+    timestamp: Optional[str] = None,
+    nonce: Optional[str] = None,
+) -> bool:
+    """飞书事件回调验签（指南 §6）。
+
+    FEISHU_CALLBACK_VERIFY 取值：
+    - auto（默认）：按 V2 → V1 → 旧 hex 顺序尝试，任中即通过；
+    - v2：仅 base64(HmacSHA256(timestamp+nonce+encrypt_key+raw_body, encrypt_key))；
+    - v1：仅 base64(HmacSHA256(raw_body, encrypt_key))；
+    - off：跳过验签（临时排查用）。
+    """
     secret = settings.FEISHU_EVENT_ENCRYPT_KEY
-    if not secret:
-        return True  # 未配置密钥时跳过（开发/测试）
+    mode = (settings.FEISHU_CALLBACK_VERIFY or "auto").lower()
+    if not secret or mode == "off":
+        return True  # 未配置密钥时跳过（开发/测试）；off 为临时排查
     if not signature:
         return False
-    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    key = secret.encode("utf-8")
+    if mode in {"v2", "auto"} and timestamp is not None and nonce is not None:
+        v2_input = f"{timestamp}{nonce}{secret}".encode("utf-8") + raw_body
+        v2_sig = base64.b64encode(hmac.new(key, v2_input, hashlib.sha256).digest()).decode("utf-8")
+        if hmac.compare_digest(v2_sig, signature):
+            return True
+    if mode in {"v1", "auto"}:
+        v1_sig = base64.b64encode(hmac.new(key, raw_body, hashlib.sha256).digest()).decode("utf-8")
+        if hmac.compare_digest(v1_sig, signature):
+            return True
+    if mode == "auto":
+        # 兼容早期简化实现（hex），新接入环境勿依赖
+        hex_sig = hmac.new(key, raw_body, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(hex_sig, signature):
+            return True
+    return False
 
 
 @router.post("/bindings")
@@ -96,6 +124,8 @@ def my_binding(
 async def feishu_event_callback(
     request: Request,
     x_lark_signature: Optional[str] = Header(None),
+    x_lark_request_timestamp: Optional[str] = Header(None),
+    x_lark_request_nonce: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
     """飞书事件回调（M1 咨询卡片等）：验签 + 解密 + 分派。
@@ -107,7 +137,9 @@ async def feishu_event_callback(
     from app.services import feishu_service
 
     raw = await request.body()
-    if not _verify_callback_signature(raw, x_lark_signature):
+    if not _verify_callback_signature(
+        raw, x_lark_signature, timestamp=x_lark_request_timestamp, nonce=x_lark_request_nonce
+    ):
         raise api_error(400, "飞书回调签名无效", code="INVALID_FEISHU_SIGNATURE")
     try:
         payload = feishu_service.parse_event_body(raw, settings.FEISHU_EVENT_ENCRYPT_KEY)

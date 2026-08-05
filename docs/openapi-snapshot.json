@@ -11759,6 +11759,38 @@
               ],
               "title": "X-Lark-Signature"
             }
+          },
+          {
+            "name": "x-lark-request-timestamp",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lark-Request-Timestamp"
+            }
+          },
+          {
+            "name": "x-lark-request-nonce",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lark-Request-Nonce"
+            }
           }
         ],
         "responses": {

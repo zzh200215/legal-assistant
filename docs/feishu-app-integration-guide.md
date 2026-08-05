@@ -3,7 +3,7 @@
 > 用途：飞书 M1-M4 代码管线已就绪（app/services/feishu_service.py，48 项测试），本指南是把「出站占位」切换为「真实出站」的唯一前提文档。
 > 前置：企业管理员权限（开通开发者 + 审核应用版本）。预计一次接入 30 分钟（不含审核等待）。
 > 对接代码：`app/api/feishu_api.py`（绑定 + 回调）、`app/services/feishu_service.py`（事件处理 + 出站）、`app/core/config.py`（凭据配置）。
-> ⚠️ 接入第一步：**修正回调签名校验算法**（见 §6），现有实现为简化版，与飞书线上签名不一致。
+> 签名校验：V2/V1/hex 兼容已实现（`FEISHU_CALLBACK_VERIFY=auto`，见 §6）；接入时以飞书官方文档复核 V2 签名串拼接。
 
 ## 1. 申请企业自建应用
 
@@ -63,31 +63,28 @@
 - `GET {BASE}/im/v1/files/{file_key}`，query `type=file`，header `Authorization: Bearer <token>` → 文件二进制。
 - 现有代码：FeishuMessenger.download_file。
 
-## 6. ⚠️ 回调签名校验（接入时必须核对/修正）
+## 6. 回调签名校验（已实现，2026-08-05）
 
-飞书事件回调的签名校验现行两套，**现有代码实现的是简化版（hex），与飞书线上发送的 base64 签名不一致**，真实接入时回调将被拒（400 INVALID_FEISHU_SIGNATURE）。
+> 飞书事件回调的签名现行两套（V2 现行 / V1 旧版）。代码已支持 V2/V1 与旧简化版 hex 兼容。
 
-### 6.1 现有实现（app/api/feishu_api.py `_verify_callback_signature`）
-```python
-expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()  # hex，旧简化版
-```
-仅比对请求头 `X-Lark-Signature`，用 encrypt_key 对原始 body 做 HMAC-SHA256 的 **hex**。
+### 6.1 实现（app/api/feishu_api.py `_verify_callback_signature`）
 
-### 6.2 飞书现行校验（V2，推荐）
-请求头：`X-Lark-Request-Timestamp`、`X-Lark-Request-Nonce`、`X-Lark-Signature`。
-```text
-signature = base64(HmacSHA256(timestamp + nonce + encrypt_key + raw_body, encrypt_key))
-```
-### 6.3 V1 旧版
-```text
-signature = base64(HmacSHA256(raw_body, encrypt_key))   # base64，非 hex
-```
+按 `FEISHU_CALLBACK_VERIFY`（默认 `auto`）选择算法：
 
-### 6.4 接入时改动建议
-- 新增配置 `FEISHU_CALLBACK_VERIFY=auto|v2|v1|off`（默认 `auto`）。
-- `_verify_callback_signature` 按 V2（优先）→ V1 → 现有 hex 兜底顺序校验，任中即通过；`off` 用于临时排查。
-- **校验逻辑需以接入时飞书官方文档为准**（签名串拼接、编码可能在版本间微调），本指南只给方向性结论。
+| 模式 | 算法 | 说明 |
+|---|---|---|
+| `auto`（默认） | V2 → V1 → 旧 hex 顺序尝试 | 任一通过即有效；兼容旧实现 |
+| `v2` | `base64(HmacSHA256(timestamp + nonce + encrypt_key + raw_body, encrypt_key))` | 需回调带 `X-Lark-Request-Timestamp`/`X-Lark-Request-Nonce` 头 |
+| `v1` | `base64(HmacSHA256(raw_body, encrypt_key))` | 旧版 |
+| `off` | 跳过验签 | 仅临时排查用 |
+
+回调端点已读取 `X-Lark-Request-Timestamp`、`X-Lark-Request-Nonce`、`X-Lark-Signature` 三个请求头。
+
+### 6.2 接入时注意
+
+- **V2 签名串拼接、编码需以接入时飞书官方文档复核**：`timestamp + nonce + encrypt_key + raw_body` 的拼接顺序与编码（string concat 与 bytes 拼接）可能在版本间微调。当前实现按字符串 concat 后与 body bytes 拼接。
 - 建议用飞书开发者后台「事件订阅」页的调试工具，先跑通 `url_verification` 再测消息事件。
+- 若回调被拒（400 INVALID_FEISHU_SIGNATURE）：先用 `FEISHU_CALLBACK_VERIFY=off` 临时排查载荷格式，再逐一对比签名算法。
 
 ## 7. 环境变量配置（.env）
 
@@ -96,6 +93,7 @@ FEISHU_APP_ID=cli_xxxxxxxx            # 凭证与基础信息 → App ID
 FEISHU_APP_SECRET=xxxxxxxx            # 凭证与基础信息 → App Secret
 FEISHU_EVENT_ENCRYPT_KEY=xxxxxxxx     # 事件订阅 → 加密策略 → Encrypt Key
 # 可选
+FEISHU_CALLBACK_VERIFY=auto           # 回调验签模式：auto(默认)/v2/v1/off，见 §6
 STRUCTURED_LOG_JSON_LINES=true        # 等保日志汇聚（对接 SLS/SIEM 时开）
 ```
 
