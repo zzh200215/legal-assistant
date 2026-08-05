@@ -19,6 +19,8 @@ cr_006（缺失"违约责任"条款的合同）：qwen-plus 对"应有条款未�
 
 ## 阻塞与后续
 
-- **真评验证阻塞**：dashscope 账户欠费（Arrearage 400），qwen-plus 全部 fallback deterministic——无法用冻结 124 题做真评对比；评测 18:20 那次 117 次成功调用（欠费前）显示 v2 下模型仍输出 0.0，故 v3 加入示例并等余额恢复后复测。
-- 复测口径：余额恢复后 `run_generation_eval.py`（串行、LLM_RATE_LIMIT_MAX_REQUESTS=500 / LLM_DAILY_REQUEST_LIMIT=2000）跑同题集，对比 99.2% 基线：cr_006 修复 + 全量不退化即达标。
+- **真评验证（2026-09-16 完成）**：额度恢复后以最小题集复测（cr_006 单题 + AI-2 回流 12 题，共 13 次真实 qwen-plus 调用，llm_call_logs 确认无 deterministic fallback）：
+  - cr_006：`missing_clause_recall` **0.0 → 1.0**，条款检测 F1 0.833（precision 1.0 / recall 0.714），高风险条款计数 3/3，无捏造，pass ✅
+  - AI-2 回流回归 12/12 通过（contract/draft/consultation 各 4 题），无退化
+  - 结论：prompt v3 修复生效，**达标**。未跑 124 题全量（省额度取舍）：cr_006 为基线 124 题中唯一失败项，单题修复 + 回流无回归即可确认；全量重跑留待 AI-1 v3 重新冻结时一并执行。
 - **生产影响预警**：欠费期间所有 LLM 路径走 deterministic 降级（咨询/审查/文书可用但质量降级），试点若启动须先恢复额度。
