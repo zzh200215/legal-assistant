@@ -29,6 +29,14 @@ class OperationLogService:
         db.add(entry)
         db.commit()
         db.refresh(entry)
+        # 等保差距 #2：STRUCTURED_LOG_JSON_LINES 开启时同步输出 JSON 行（懒导入避免循环）
+        from app.core.observability import structured_log_json
+
+        structured_log_json(
+            source="operation_log", module=module, action=action,
+            actor=str(user_id) if user_id else None,
+            target_type=target_type, target_id=target_id, detail=detail, ip_address=ip_address,
+        )
         return entry
 
     def list_logs(

@@ -74,6 +74,14 @@ class AuditLogService:
         db.add(log)
         db.commit()
         db.refresh(log)
+        # 等保差距 #2：STRUCTURED_LOG_JSON_LINES 开启时同步输出 JSON 行
+        from app.core.observability import structured_log_json
+
+        structured_log_json(
+            source="audit_log", module="audit", action=action, actor=operator.username,
+            target_type=target_type, target_id=target_id, target_name=target_name,
+            detail=detail, ip_address=ip_address,
+        )
         return log
 
     def log_user_action(

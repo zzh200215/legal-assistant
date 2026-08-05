@@ -534,3 +534,93 @@ def get_subscription_revenue(
         "breakdown": breakdown,
         "active_paid_subscriptions": len([s for s in active_subs if plans.get(s.plan_id) and float(plans[s.plan_id].price_monthly) > 0]),
     }
+
+
+# ── 等保差距 #2：集中日志检索（双轨 + 登录日志）──────────────────────────────
+
+def _iso(dt) -> Optional[str]:
+    return dt.isoformat() if dt else None
+
+
+@router.get("/logs/search")
+def search_logs(
+    source: Optional[str] = Query(None, description="operation_log / audit_log / login_log；空=全部"),
+    keyword: Optional[str] = Query(None, description="跨字段模糊匹配（action/module/detail/actor 等）"),
+    action: Optional[str] = Query(None),
+    module: Optional[str] = Query(None, description="仅 operation_log"),
+    user_id: Optional[int] = Query(None),
+    days: int = Query(30, ge=1, le=365),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(_require_admin),
+):
+    """集中检索三轨日志（操作/审计/登录），时间倒序合并分页。供等保审计/集中排查。"""
+    since = _days_ago(days)
+
+    def _match_keyword(*fields) -> bool:
+        if not keyword:
+            return True
+        return any(keyword in str(field or "") for field in fields)
+
+    rows = []
+    if source in (None, "operation_log"):
+        from app.models.operation_log import OperationLog
+
+        q = db.query(OperationLog).filter(OperationLog.created_at >= since)
+        if action:
+            q = q.filter(OperationLog.action == action)
+        if module:
+            q = q.filter(OperationLog.module == module)
+        if user_id:
+            q = q.filter(OperationLog.user_id == user_id)
+        for r in q.order_by(OperationLog.created_at.desc()).limit(500).all():
+            if _match_keyword(r.action, r.module, r.detail or ""):
+                rows.append({
+                    "source": "operation_log", "id": r.id, "user_id": r.user_id, "module": r.module,
+                    "action": r.action, "target_type": r.target_type, "target_id": r.target_id,
+                    "detail": r.detail, "ip_address": r.ip_address, "created_at": _iso(r.created_at),
+                })
+
+    if source in (None, "audit_log"):
+        from app.models.auth_log import AdminAuditLog
+
+        q = db.query(AdminAuditLog).filter(AdminAuditLog.created_at >= since)
+        if action:
+            q = q.filter(AdminAuditLog.action == action)
+        if user_id:
+            q = q.filter(AdminAuditLog.operator_id == user_id)
+        for r in q.order_by(AdminAuditLog.created_at.desc()).limit(500).all():
+            if _match_keyword(r.action, r.operator_name, r.target_name or "", r.detail or ""):
+                rows.append({
+                    "source": "audit_log", "id": r.id, "operator_id": r.operator_id,
+                    "operator_name": r.operator_name, "action": r.action,
+                    "target_type": r.target_type, "target_id": r.target_id, "target_name": r.target_name,
+                    "detail": r.detail, "ip_address": r.ip_address, "created_at": _iso(r.created_at),
+                })
+
+    if source in (None, "login_log"):
+        from app.models.auth_log import LoginLog
+
+        q = db.query(LoginLog).filter(LoginLog.created_at >= since)
+        if action:
+            q = q.filter(LoginLog.event_type == action)
+        if user_id:
+            q = q.filter(LoginLog.user_id == user_id)
+        for r in q.order_by(LoginLog.created_at.desc()).limit(500).all():
+            if _match_keyword(r.event_type, r.username or "", r.detail or ""):
+                rows.append({
+                    "source": "login_log", "id": r.id, "user_id": r.user_id, "username": r.username,
+                    "action": r.event_type, "target_type": None, "target_id": None,
+                    "detail": r.detail, "ip_address": r.ip_address, "created_at": _iso(r.created_at),
+                })
+
+    rows.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    total = len(rows)
+    start = (page - 1) * page_size
+    return {
+        "items": rows[start:start + page_size],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }

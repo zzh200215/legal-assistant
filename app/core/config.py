@@ -184,6 +184,9 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     OTEL_ENABLED: bool = False
     OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
+    # 等保差距 #2：开启后双轨日志（操作/审计/登录）以 JSON 行输出到 audit.json 日志，
+    # 供集中日志/SIEM 汇聚；关闭（默认）时零开销。
+    STRUCTURED_LOG_JSON_LINES: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",

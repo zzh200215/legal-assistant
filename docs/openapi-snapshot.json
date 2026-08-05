@@ -11741,7 +11741,7 @@
           "Feishu"
         ],
         "summary": "Feishu Event Callback",
-        "description": "飞书事件回调（M1 咨询卡片事件等）：验签 + 解密 + 分派占位\n\n当前仅回显握手；事件分派（卡片/消息）在 10 月 M1 开发中接入。",
+        "description": "飞书事件回调（M1 咨询卡片等）：验签 + 解密 + 分派。\n\n- encrypt_key 模式：body 为 {\"encrypt\": ...}，AES-256-CBC 解密后分派；\n- url_verification 握手：回显 challenge；\n- im.message.receive_v1：ack 后转后台处理（咨询卡片回复），不阻塞回调。",
         "operationId": "feishu_event_callback_api_feishu_callbacks_event_post",
         "parameters": [
           {
@@ -12262,6 +12262,164 @@
             "OAuth2PasswordBearer": []
           }
         ]
+      }
+    },
+    "/api/admin/logs/search": {
+      "get": {
+        "tags": [
+          "Admin Dashboard"
+        ],
+        "summary": "Search Logs",
+        "description": "集中检索三轨日志（操作/审计/登录），时间倒序合并分页。供等保审计/集中排查。",
+        "operationId": "search_logs_api_admin_logs_search_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "operation_log / audit_log / login_log；空=全部",
+              "title": "Source"
+            },
+            "description": "operation_log / audit_log / login_log；空=全部"
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "跨字段模糊匹配（action/module/detail/actor 等）",
+              "title": "Keyword"
+            },
+            "description": "跨字段模糊匹配（action/module/detail/actor 等）"
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "name": "module",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "仅 operation_log",
+              "title": "Module"
+            },
+            "description": "仅 operation_log"
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "default": 30,
+              "title": "Days"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/prompts/": {
