@@ -50,7 +50,7 @@
 1. 数据保留/删除策略（用户注销后数据处置流程）——✅ SLA 草案 docs/data-retention-sla-draft.md + 注销流程已实现（#95/0061）
 2. 隐私政策与用户协议文本（法务出）——✅ 草案 docs/privacy-policy-and-user-agreement-draft.md，待法务确认
 3. 供应商清单（LLM 供应商 qwen + 数据出境说明）——✅ 草案 docs/supplier-list-and-data-transfer-draft.md（主链路 dashscope 境内不涉出境），待法务书面确认
-4. 等保测评（等保二级起步）——✅ POC 阶段自评 docs/etc-protection-poc-self-assessment.md，正式商用前委托测评
+4. 等保测评（等保二级起步）——✅ POC 阶段自评 docs/etc-protection-poc-self-assessment.md（含制度文本：docs/security-policy-compilation-draft.md + docs/emergency-response-plan-draft.md），正式商用前委托测评
 
 ## 8. 关联
 

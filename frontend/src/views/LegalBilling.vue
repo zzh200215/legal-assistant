@@ -144,7 +144,7 @@
       </div>
       <el-table :data="invoices" stripe size="small" style="margin-top:12px">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="invoice_number" label="通知单号" width="140" />
+        <el-table-column prop="invoice_no" label="通知单号" width="140" />
         <el-table-column prop="client_display_name" label="客户" show-overflow-tooltip />
         <el-table-column label="金额" width="120">
           <template #default="{ row }">¥{{ row.total_amount }}</template>

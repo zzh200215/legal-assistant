@@ -98,22 +98,22 @@ async def feishu_event_callback(
     x_lark_signature: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ):
-    """飞书事件回调（M1 咨询卡片事件等）：验签 + 解密 + 分派占位
+    """飞书事件回调（M1 咨询卡片等）：验签 + 解密 + 分派。
 
-    当前仅回显握手；事件分派（卡片/消息）在 10 月 M1 开发中接入。
+    - encrypt_key 模式：body 为 {"encrypt": ...}，AES-256-CBC 解密后分派；
+    - url_verification 握手：回显 challenge；
+    - im.message.receive_v1：ack 后转后台处理（咨询卡片回复），不阻塞回调。
     """
+    from app.services import feishu_service
+
     raw = await request.body()
     if not _verify_callback_signature(raw, x_lark_signature):
         raise api_error(400, "飞书回调签名无效", code="INVALID_FEISHU_SIGNATURE")
-    import json
-
     try:
-        payload = json.loads(raw)
+        payload = feishu_service.parse_event_body(raw, settings.FEISHU_EVENT_ENCRYPT_KEY)
     except Exception:
-        raise api_error(400, "无法解析飞书回调载荷", code="INVALID_PAYLOAD")
-    if payload.get("type") == "url_verification":
-        return {"challenge": payload.get("challenge", "")}
-    return {"received": True, "event_type": payload.get("type")}
+        raise api_error(400, "无法解析/解密飞书回调载荷", code="INVALID_PAYLOAD")
+    return feishu_service.handle_event(payload)
 
 
 @router.get("/admin/bindings")

@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -69,6 +70,10 @@ celery_app.conf.update(
         "confirm-account-deletions": {
             "task": "confirm_account_deletions",
             "schedule": 86400.0,  # 每天
+        },
+        "create-pilot-backup": {
+            "task": "create_pilot_backup",
+            "schedule": crontab(minute=0, hour=2),  # 每日 02:00 全量备份
         },
     },
 )

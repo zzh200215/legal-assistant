@@ -151,6 +151,9 @@ class Settings(BaseSettings):
 
     STORAGE_PROVIDER: str = "local"
     STORAGE_LOCAL_DIR: str = "./data/uploads"
+    # 备份（等保自评差距 #1 整改：每日全量定时备份，见 app/tasks.create_pilot_backup_task）
+    BACKUP_OUTPUT_DIR: str = "data/backups"
+    BACKUP_DATA_DIRS: list[str] = ["data/uploads", "data/chroma_db"]
     VITE_WS_HOST: str = "localhost:8001"
 
     # 支付配置
@@ -160,6 +163,9 @@ class Settings(BaseSettings):
     PAYMENT_WEBHOOK_SECRET: str = ""
     # 飞书事件回调 encrypt_key（#87/M1 前置）
     FEISHU_EVENT_ENCRYPT_KEY: str = ""
+    # 飞书企业自建应用凭据（M1 出站消息；留空则出站禁用、回调仍可解密验签）
+    FEISHU_APP_ID: str = ""
+    FEISHU_APP_SECRET: str = ""
     # 评测 bundle 导出目录（#90：测试用临时目录，避免写仓库内跟踪文件；空=默认 eval/bundles/feedback_autogen）
     EVAL_BUNDLE_OUTPUT_DIR: str = ""
 

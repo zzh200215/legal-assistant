@@ -1,5 +1,8 @@
 import asyncio
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from app.core.celery_app import celery_app
@@ -1102,3 +1105,35 @@ def confirm_account_deletions_task():
         return {"confirmed_count": confirmed_count}
     finally:
         db.close()
+
+
+@celery_app.task(name="create_pilot_backup")
+def create_pilot_backup_task():
+    """Beat 任务：每日全量备份（数据库 + 本地数据目录），调度即授权 --confirm。
+
+    仅支持 MySQL/PostgreSQL 驱动；sqlite（默认开发库）等驱动直接跳过。
+    """
+    _record_beat_heartbeat()
+    settings = get_settings()
+    database_url = settings.DATABASE_URL or ""
+    driver = database_url.split(":", 1)[0]
+    if not database_url or not driver.startswith(("mysql", "postgres")):
+        return {"status": "skipped", "reason": f"unsupported_database_driver: {driver or 'empty'}"}
+    script = Path(__file__).resolve().parents[2] / "scripts" / "create_pilot_backup.py"
+    env = os.environ.copy()
+    env["DATABASE_URL"] = database_url
+    command = [sys.executable, str(script), "--confirm", "--output-dir", settings.BACKUP_OUTPUT_DIR]
+    for data_dir in settings.BACKUP_DATA_DIRS:
+        command.extend(["--data-dir", data_dir])
+    try:
+        process = subprocess.run(command, capture_output=True, text=True, env=env, timeout=180)
+    except (subprocess.SubprocessError, OSError) as exc:
+        return {"status": "error", "message": sanitize_background_error_message(str(exc))}
+    try:
+        payload = json.loads(process.stdout or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    if process.returncode == 0 and payload.get("status") == "ok":
+        return {"status": "ok", "backup_dir": payload.get("backup_dir")}
+    message = payload.get("message") or (process.stderr or "").strip() or f"exit_code={process.returncode}"
+    return {"status": "error", "message": sanitize_background_error_message(message)}
