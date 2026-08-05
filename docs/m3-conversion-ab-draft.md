@@ -29,6 +29,14 @@ H3：免费版**额度档位**（5 vs 8 次咨询）影响 7 天留存与转化�
    - 无显著差异 → 保持现状，成本最低
 4. 数据来源：oplogs upgrade_intent（#81）+ funnel（周报脚本）+ 留存（/api/admin/retention）
 
+## 4. 判定工具（已预置，2026-08-05）
+
+- `scripts/evaluate_ab_conversion.py`：从真实库一键出数并判定（分组 `user_id % 2`，A=偶/B=奇；转化=oplog upgrade_intent ÷ 注册；D7 留存口径同 /api/admin/retention）。
+- 判定：转化提升 ≥30% 且 χ² 显著（scipy p<0.05）且 7 天留存不降 → 推广 B 组；显著但留存降 → mixed 复验；无显著 → 保持现状。
+- 用法：`python -B scripts/evaluate_ab_conversion.py [--min-sample 30] [--output docs/ab-result.md]`。
+- 验证：单元测试 5 项（tests/test_ab_conversion.py）+ 模拟库端到端跑通（docs/ab-result-sim.md：39 人、p=0.0723 未显著 → keep_status_quo）。
+- 触发条件：试点真实用户 ≥30 人（当前不满足，以真实启动后第 2 周数据为准）。
+
 ## 5. 变更面（执行时）
 
 - frontend：LegalWorkspace 结果卡加剩余额度提示（B 组）
