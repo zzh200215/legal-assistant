@@ -90,7 +90,24 @@ def _archive_directories(paths: list[Path], output_path: Path) -> list[str]:
     return included
 
 
-def create_backup(*, database_url: str, output_dir: Path, data_dirs: list[Path], offsite_dir: Path | None = None) -> dict:
+def _prune_old_backups(directory: Path, retention_count: int) -> list[str]:
+    """保留最近 retention_count 份 `pilot-backup-*`，删除更旧的。返回被删目录名。"""
+    if retention_count <= 0:
+        return []
+    if not directory.exists() or not directory.is_dir():
+        return []
+    backups = sorted(
+        [path for path in directory.iterdir() if path.is_dir() and path.name.startswith("pilot-backup-")],
+        key=lambda path: path.name,  # timestamp 前缀可字典序比较
+    )
+    removed = []
+    for stale in backups[:-retention_count]:
+        shutil.rmtree(stale, ignore_errors=True)
+        removed.append(stale.name)
+    return removed
+
+
+def create_backup(*, database_url: str, output_dir: Path, data_dirs: list[Path], offsite_dir: Path | None = None, retention_count: int = 0) -> dict:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup_dir = output_dir.resolve() / f"pilot-backup-{timestamp}"
     backup_dir.mkdir(parents=True, exist_ok=False)
@@ -120,7 +137,15 @@ def create_backup(*, database_url: str, output_dir: Path, data_dirs: list[Path],
         target = offsite_dir.resolve() / backup_dir.name
         shutil.copytree(backup_dir, target, dirs_exist_ok=False)
         offsite_copy = str(target)
-    return {"backup_dir": str(backup_dir), "manifest": manifest, "offsite_copy": offsite_copy}
+    # 保留策略（等保运维）：清理本地与异地最旧备份，避免无限累积占盘。
+    pruned_local = _prune_old_backups(output_dir.resolve(), retention_count)
+    pruned_offsite = _prune_old_backups(offsite_dir.resolve(), retention_count) if offsite_dir else []
+    return {
+        "backup_dir": str(backup_dir),
+        "manifest": manifest,
+        "offsite_copy": offsite_copy,
+        "pruned": {"local": pruned_local, "offsite": pruned_offsite},
+    }
 
 
 def main() -> int:
@@ -129,6 +154,7 @@ def main() -> int:
     parser.add_argument("--database-url-env", default="DATABASE_URL", help="Environment variable containing the database URL.")
     parser.add_argument("--data-dir", action="append", default=["data/uploads", "data/chroma_db"], help="Local directory to archive; may be repeated.")
     parser.add_argument("--offsite-dir", default="", help="Optional offsite target directory; backup is copied there when set.")
+    parser.add_argument("--retention-count", type=int, default=0, help="Keep this many newest backups, prune older ones (0=never prune).")
     parser.add_argument("--confirm", action="store_true", help="Required before commands write a backup.")
     args = parser.parse_args()
 
@@ -145,6 +171,7 @@ def main() -> int:
             output_dir=Path(args.output_dir),
             data_dirs=[Path(item) for item in args.data_dir],
             offsite_dir=Path(args.offsite_dir) if args.offsite_dir else None,
+            retention_count=args.retention_count,
         )
     except (OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False))

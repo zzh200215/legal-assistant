@@ -1127,6 +1127,7 @@ def create_pilot_backup_task():
         command.extend(["--data-dir", data_dir])
     if settings.BACKUP_OFFSITE_DIR:
         command.extend(["--offsite-dir", settings.BACKUP_OFFSITE_DIR])
+    command.extend(["--retention-count", str(settings.BACKUP_RETENTION_COUNT)])
     try:
         process = subprocess.run(command, capture_output=True, text=True, env=env, timeout=180)
     except (subprocess.SubprocessError, OSError) as exc:

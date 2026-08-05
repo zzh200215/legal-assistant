@@ -2,7 +2,13 @@ import unittest
 from unittest.mock import patch
 
 from app.tasks import create_pilot_backup_task
-from scripts.create_pilot_backup import _mysql_dump_command, _postgres_dump_command, _safe_database_label
+from scripts.create_pilot_backup import (
+    _archive_directories,
+    _mysql_dump_command,
+    _postgres_dump_command,
+    _prune_old_backups,
+    _safe_database_label,
+)
 from sqlalchemy.engine import make_url
 
 
@@ -87,6 +93,65 @@ class PilotBackupTaskTests(unittest.TestCase):
             offsite_copy = Path(result["offsite_copy"])
             self.assertTrue((offsite_copy / "manifest.json").exists())
             self.assertTrue(offsite_copy.name == backup_dir.name)
+
+    def test_prune_old_backups_keeps_newest_and_removes_rest(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dirs = [root / f"pilot-backup-2026080{i}T000000Z" for i in range(5)]
+            for d in dirs:
+                d.mkdir()
+                (d / "manifest.json").write_text("{}")
+            root.joinpath("unrelated").mkdir()
+
+            removed = _prune_old_backups(root, retention_count=2)
+
+            self.assertEqual(len(removed), 3)
+            self.assertEqual(removed, [dirs[0].name, dirs[1].name, dirs[2].name])
+            self.assertTrue(dirs[3].exists())
+            self.assertTrue(dirs[4].exists())
+            self.assertTrue(root.joinpath("unrelated").exists(), "非备份目录不应被清理")
+
+    def test_prune_old_backups_zero_or_missing_dir(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pilot-backup-20260801T000000Z").mkdir()
+            self.assertEqual(_prune_old_backups(root, retention_count=0), [])
+            self.assertEqual(_prune_old_backups(root / "does-not-exist", retention_count=5), [])
+
+    def test_retention_forwarded_by_beat_task(self):
+        with patch("app.tasks.get_settings") as mock_settings, patch("app.tasks.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = '{"status":"ok","backup_dir":"/x"}'
+            mock_settings.return_value.DATABASE_URL = "mysql+pymysql://lawyer:secret@db.example:3306/legal"
+            mock_settings.return_value.BACKUP_OUTPUT_DIR = "data/backups"
+            mock_settings.return_value.BACKUP_DATA_DIRS = ["data/uploads"]
+            mock_settings.return_value.BACKUP_OFFSITE_DIR = "data/offsite"
+            mock_settings.return_value.BACKUP_RETENTION_COUNT = 14
+
+            result = create_pilot_backup_task()
+
+            command = mock_run.call_args[0][0]
+            self.assertIn("--retention-count", command)
+            self.assertEqual(command[command.index("--retention-count") + 1], "14")
+            self.assertEqual(result["status"], "ok")
+
+    def test_archive_directories_includes_only_existing(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            present = root / "present"
+            present.mkdir()
+            included = _archive_directories([present, root / "missing"], root / "out.tar.gz")
+            self.assertEqual(included, ["present"])
+            self.assertTrue((root / "out.tar.gz").exists())
 
 
 if __name__ == "__main__":
