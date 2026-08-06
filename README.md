@@ -46,21 +46,74 @@
 - 四类审核动作：通过、退回补充事实、转线下咨询、归档
 - 审核记录留痕：审核人、时间、意见、版本
 - 权限控制：仅管理员和审核律师可执行审核动作
+- 审核反馈回流：通过/退回决策落库，用于生成质量评测闭环（AI-2）
+
+### 5. 飞书插件（企业自建应用）
+
+平台核心能力通过飞书机器人复用，飞书端仅做适配层，后端零新功能：
+
+- **M1 单聊咨询**：@插件发文本 → 咨询分类卡片（风险等级/法条引用/待补充事实/追问入口）
+- **M2 合同初筛**：单聊发 `.pdf/.docx` → 风险条款卡片 + 深度审查入口
+- **M3 文书生成 + 审核队列**：模板表单 → 草稿卡片；"待审核"命令 → 逐项卡片 → 通过/退回回写 Web 审核队列
+- **M4 提醒管线**：每日 09:00 beat 任务 → 激活引导卡 / 周报回访卡
+- 回调安全：AES-256-CBC 事件解密 + HMAC 签名校验（V2/V1 兼容，`FEISHU_CALLBACK_VERIFY=auto`）
+
+接入指南见 [docs/feishu-app-integration-guide.md](docs/feishu-app-integration-guide.md)。
+
+### 6. 客户门户（POC 交付）
+
+面向客户的只读门户，按组织隔离：
+
+- 链接时效：默认 30 天过期，拒绝访问可追踪
+- 品牌化：律所 logo + 自定义欢迎语
+- 访问行为分析：去重访客 / 重复访问 / 活跃天数 / 时段分布（并入周报口径）
+- 客户反馈：👍/👎 + 待改进说明
+- 账单对账：账单摘要 / 已收 / 应付款日
+
+### 7. 订阅与计费
+
+- 三级计划：free / pro / team，额度与上限配置化（`FREE_PLAN_*_QUOTA`）
+- 升级意图埋点（`upgrade_intent` oplog），支撑 M-3 转化 A/B 实验
+- 对公转账支付流程 + 发票快照；Stripe webhook HMAC 验签（可选）
+- 过期自动流转、发票逾期扫描、订阅到期扫描（beat 任务）
+
+## 安全与合规（等保二级对标）
+
+平台按 GB/T 22239-2019 第二级要求实现并自评（见 docs/etc-protection-poc-self-assessment.md）：
+
+| 域 | 实现 |
+|---|---|
+| 身份鉴别 | 密码 bcrypt + 全站 HTTPS/TLS + JWT；客户门户 OTP 一次性验证码 |
+| 访问控制 | 角色四级 RBAC + 资源级鉴权 + 门户按组织隔离 |
+| 数据保密 | 敏感字段 AES-256-GCM 静态加密（独立密钥）；LLM 出站 PII 脱敏；邮件 DLP |
+| 安全审计 | 操作/审计/登录双轨日志 + 集中检索 `/api/admin/logs/search` + 结构化 JSON 导出（`STRUCTURED_LOG_JSON_LINES`） |
+| 备份恢复 | Celery beat 每日 02:00 全量备份 + SHA256 校验 + 异地副本（`BACKUP_OFFSITE_DIR`）+ 保留策略（`BACKUP_RETENTION_COUNT`） |
+| 登录防护 | 5 次失败锁定 30 分钟 |
+| 合规材料 | 隐私政策/用户协议/供应商清单/数据保留 SLA/制度汇编/应急预案/任命文件（草案，待法务确认） |
+
+## 可观测性
+
+- **Sentry**：前端与 API 错误上报（`SENTRY_DSN`，可留空关闭）
+- **OpenTelemetry**：FastAPI 请求 + SQLAlchemy 链路追踪 → OTLP collector（`OTEL_ENABLED` + `OTEL_EXPORTER_OTLP_ENDPOINT`，`https://` 前缀自动启用 TLS）
+- **告警**：Webhook 告警（`ALERT_WEBHOOK_URL`）+ 模型路由健康检查
+- **成本核算**：按 token 用量记账，日额度/速率治理
 
 ## 技术架构
 
 ### 后端技术栈
 
 - **FastAPI**：异步 API 服务
-- **SQLAlchemy + MySQL / PostgreSQL**：元数据与业务台账
-- **Celery + Redis**：异步任务与计划任务
-- **Chroma / Qdrant**：向量检索
-- **千问 / Ollama**：LLM 推理与向量化
+- **SQLAlchemy + MySQL / PostgreSQL / SQLite**：元数据与业务台账（生产建议 MySQL/PostgreSQL）
+- **Celery + Redis**：异步任务与计划任务（beat：每日备份、提醒、到期扫描、告警等 15+ 计划任务）
+- **Chroma（默认）/ Qdrant**：向量检索
+- **千问 / Ollama**：LLM 推理与向量化（qwen-plus 主模型 + 简单请求路由小模型）
+- **OpenTelemetry + Sentry**：链路追踪与错误上报（可选开关）
+- **AES-256-GCM**：敏感字段静态加密
 
 ### 前端技术栈
 
 - **Vue 3 + TypeScript**
-- **Element Plus**：UI 组件库
+- **Element Plus**：UI 组件库（按需导入）
 - **Vite**：构建工具
 
 ### 核心技术机制
@@ -91,6 +144,8 @@ LLM_VISION_MODEL=qwen-vl-max
 EMBEDDING_MODEL=text-embedding-v3
 VITE_WS_HOST=localhost:8001
 ```
+
+飞书插件、客户门户、支付网关、Sentry/OTel 均为可选，未配置时对应功能自动降级（见 docs/CONFIG.md）。
 
 ## 快速启动
 
@@ -261,12 +316,16 @@ POST /api/legal/review-queue/{target_type}/{target_id}/actions
 
 ## 评测与质量保证
 
-### 评测数据集
+### 评测体系
 
-项目内置演示评测集 `eval/bundles/demo_legal/`，包含：
-- 法律咨询样例题
-- 合同审查样例
-- 文书字段校验样例
+项目内置多层评测（`eval/` 目录 + CI 评测回归门禁）：
+
+- **生成质量评测**：咨询/合同审查/文书字段校验样例（`eval/bundles/demo_legal/`），含引用完整率、拒答准确率、事实完整性
+- **法律检索评测**：`run_legal_retrieval_eval.py`（法源召回）
+- **混合检索 / Graph RAG 评测**：`run_hybrid_retrieval_eval.py` / `run_graph_rag_eval.py`
+- **审核反馈回流评测（AI-2）**：`run_generation_eval --review-feedback`，用真实/模拟审核决策回归生成质量
+- **模型对比（AI-6）**：`compare_models.py` / `run_experiments.py`
+- **语料评测集（AI-1）**：`eval/bundles/` 冻结题集 + `export_real_corpus_eval.py` 换真实语料
 
 生成真实业务评测集：
 
@@ -282,6 +341,21 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 - **拒答准确率**：无依据、高风险、证据不足时是否正确拒答或转人工
 - **事实完整性**：文书生成对关键字段缺失是否明确提示，不自行编造
 - **律师审核率**：高风险咨询和合同是否正确进入审核队列
+- **缺失条款召回**：合同审查对常见缺失条款的召回率（cr_006 专项）
+- **北极星与留存**：活跃律师数、7/30 日留存（/api/admin/north-star、/api/admin/retention）
+- **成本**：LLM 用量按动作核算，日额度/速率治理
+
+## 运营工具（scripts/）
+
+| 脚本 | 用途 |
+|---|---|
+| `pilot_weekly_report.py` | 试点周报：漏斗/留存/成本/NPS/门户行为（排除供给账号） |
+| `evaluate_ab_conversion.py` | M-3 转化 A/B 判定（χ² 显著 + ≥30% 提升 + D7 留存，样本≥30） |
+| `create_pilot_backup.py` | 每日全量备份（DB + 数据目录 + SHA256 + 异地副本 + 保留策略） |
+| `check_openapi_contract.py` | OpenAPI 契约快照一致性门禁 |
+| `export_review_feedback.py` / `export_exit_surveys.py` | 审核反馈 / 退出问卷导出 |
+| `loadtest_legal_paths.py` | 主路径压测 |
+| `check_pilot_readiness.py` | 试点环境门禁自检 |
 
 ## 运营看板
 
@@ -292,15 +366,6 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 - 高风险咨询数、高风险合同数
 - 退回原因统计
 - 审核状态分布
-
-## 安全与合规
-
-1. **法律资料来源**：所有法规必须记录来源、生效日期和版本，不使用来源不明的法规或案例
-2. **敏感信息脱敏**：用户案情、合同和身份信息在展示和日志中对敏感字段脱敏
-3. **高风险拦截**：涉及刑事、人身损害、时效临近、证据不足的问题强制触发律师审核
-4. **文书草稿声明**：所有文书页面展示"AI 辅助草稿，建议经专业人士审核"提示
-5. **操作审计**：所有检索、生成、审核和导出操作记录审计日志，支持版本回溯
-6. **数据隔离**：禁止将用户材料用于无授权模型训练或跨用户检索
 
 ## 演示建议路径
 
@@ -314,37 +379,31 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 
 推荐在交付前至少做这几步：
 
-1. `python -m unittest discover -s tests`
-2. `npm run build`（在 `frontend/` 下执行）
-3. `docker compose config`
-4. `docker compose up --build`
+1. `python -m pytest -q`（全量测试，当前 742 项通过）
+2. `ruff check --select E9,F821,F823,F632,F706,F811 app scripts tests`（CI 静态门禁）
+3. `python scripts/check_openapi_contract.py`（OpenAPI 契约快照一致性）
+4. `npm run build`（在 `frontend/` 下执行）
+5. `docker compose config`
+6. `docker compose up --build`
 
 ## 项目结构
 
 ```
 ├── app/                    # 后端代码
-│   ├── api/                # API 路由
-│   │   ├── legal_api.py    # 法律工作台 API
-│   │   └── ...
-│   ├── services/           # 业务逻辑
-│   │   ├── legal_service.py # 法律咨询、合同审查、文书生成
-│   │   └── ...
-│   ├── models/             # 数据模型
-│   │   ├── legal.py        # 法律相关表
-│   │   └── ...
+│   ├── api/                # API 路由（legal/feishu/portal/subscription/dashboard/admin…）
+│   ├── services/           # 业务逻辑（legal_service / feishu_service / prompt_service…）
+│   ├── models/             # 数据模型（legal / legal_billing / subscription / feishu_binding…）
 │   ├── tools/              # Agent 工具
-│   │   ├── legal_tool.py   # 法律 Agent 工具
-│   │   └── ...
-│   └── core/               # 核心模块
-├── frontend/               # 前端代码
-│   ├── src/
-│   │   ├── views/
-│   │   │   ├── LegalWorkspace.vue  # 法律工作台
-│   │   │   └── ...
-│   │   └── ...
-├── eval/                   # 评测脚本
-│   ├── bundles/demo_legal/ # 演示评测集
-│   └── ...
+│   ├── tasks/              # Celery 任务（beat 计划任务、备份、飞书提醒）
+│   └── core/               # 核心模块（config/auth/telemetry/observability/encryption…）
+├── frontend/               # 前端代码（Vue 3 + Element Plus）
+│   └── src/
+│       ├── views/          # LegalWorkspace / LegalPortal / LegalBilling / Pricing…
+│       └── components/legal/
+├── eval/                   # 评测（bundle 构建、LLM 评测、法律检索/图谱评测、反馈回流评测）
+├── scripts/                # 运维与数据脚本（备份、周报、A/B 判定、契约检查、压测…）
+├── docs/                   # 产品/合规/接入文档（含等保自评、飞书接入指南、合规四件套）
+├── alembic/                # 数据库迁移版本
 ├── FL.md                   # 法律平台需求文档
 └── README.md               # 本文件
 ```
