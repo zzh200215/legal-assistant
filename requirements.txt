@@ -35,8 +35,9 @@ mcp>=1.0.0
 jsonschema>=4.20.0
 # E-5 可观测性（Sentry 错误上报 + OpenTelemetry 链路追踪）
 sentry-sdk>=2.0
-opentelemetry-api>=1.27.0
-opentelemetry-sdk>=1.27.0
-opentelemetry-exporter-otlp>=1.27.0
-opentelemetry-instrumentation-fastapi>=0.48b0
-opentelemetry-instrumentation-sqlalchemy>=0.48b0
+# OTel 需统一版本组合，否则 `>=` 会解析出互不兼容的版本（api/sdk 与 instrumentation 需配套）
+opentelemetry-api==1.42.1
+opentelemetry-sdk==1.42.1
+opentelemetry-exporter-otlp-proto-grpc==1.42.1
+opentelemetry-instrumentation-fastapi==0.63b1
+opentelemetry-instrumentation-sqlalchemy==0.63b1

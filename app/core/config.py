@@ -194,6 +194,8 @@ class Settings(BaseSettings):
     # 等保差距 #2：开启后双轨日志（操作/审计/登录）以 JSON 行输出到 audit.json 日志，
     # 供集中日志/SIEM 汇聚；关闭（默认）时零开销。
     STRUCTURED_LOG_JSON_LINES: bool = False
+    # STRUCTURED_LOG_JSON_LINES 开启时的落盘文件（SIEM 采集端），目录不存在会自动创建。
+    STRUCTURED_LOG_FILE: str = "data/logs/audit.jsonl"
 
     model_config = SettingsConfigDict(
         env_file=".env",

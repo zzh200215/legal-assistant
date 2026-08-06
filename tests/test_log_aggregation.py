@@ -82,6 +82,40 @@ class StructuredLogTests(unittest.TestCase):
         self.assertEqual(payload["actor"], "admin")
         self.assertEqual(payload["ip_address"], "1.2.3.4")
 
+    def test_auto_file_handler_writes_audit_file_and_is_idempotent(self):
+        import os
+        import tempfile
+        from pathlib import Path
+
+        import app.core.observability as observability
+
+        with tempfile.TemporaryDirectory() as tmp:
+            audit_file = Path(tmp) / "nested" / "audit.jsonl"  # 验证目录自动创建
+            mock_settings = MagicMock()
+            mock_settings.STRUCTURED_LOG_JSON_LINES = True
+            mock_settings.STRUCTURED_LOG_FILE = str(audit_file)
+
+            # 重置模块级标志与 logger handlers，确保本次独立
+            observability._audit_handler_configured = False
+            logger = logging.getLogger(AUDIT_LOGGER)
+            saved_handlers = list(logger.handlers)
+            logger.handlers.clear()
+            logger.propagate = False
+            try:
+                with patch("app.core.observability.get_settings", return_value=mock_settings):
+                    structured_log_json(source="operation_log", action="upgrade_intent", actor="demo")
+                    structured_log_json(source="login_log", action="login_success", actor="demo")
+            finally:
+                observability._audit_handler_configured = False
+                logger.handlers = saved_handlers
+
+            self.assertTrue(audit_file.exists(), "STRUCTURED_LOG_FILE 目录应自动创建并落盘")
+            lines = audit_file.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), 2, "两行日志各占一行 JSON")
+            for line in lines:
+                obj = json.loads(line)
+                self.assertIn(obj["source"], {"operation_log", "login_log"})
+
     def test_oplog_and_audit_writes_emit_structured_line(self):
         engine = _make_engine()
         Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
