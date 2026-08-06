@@ -127,8 +127,15 @@ class DocumentService:
         if not created:
             return doc, False
 
-        segments = _extract_segments(str(file_path), file_ext)
-        chunks = _split_text(segments)
+        try:
+            segments = _extract_segments(str(file_path), file_ext)
+            chunks = _split_text(segments)
+        except Exception:
+            # 解析失败：删除已落库的孤儿行，避免内容哈希去重导致重试永远“已存在”
+            db.query(DocumentChunk).filter(DocumentChunk.document_id == doc.id).delete()
+            db.delete(doc)
+            db.commit()
+            raise
         db.add_all(
             [
                 DocumentChunk(

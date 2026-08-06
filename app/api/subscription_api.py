@@ -141,8 +141,12 @@ def _verify_stripe_signature(raw_body: bytes, signature: str | None, secret: str
     provided = parts.get("v1", "")
     if not timestamp or not provided:
         raise api_error(400, "签名头格式不正确", code="INVALID_WEBHOOK_SIGNATURE")
-    if abs(int(_time.time()) - int(timestamp)) > 300:
-        raise api_error(400, "Webhook 签名已过期", code="WEBHOOK_SIGNATURE_EXPIRED")
+    try:
+        if abs(int(_time.time()) - int(timestamp)) > 300:
+            raise api_error(400, "Webhook 签名已过期", code="WEBHOOK_SIGNATURE_EXPIRED")
+    except ValueError:
+        # 非数字时间戳：按格式错误处理，避免 500
+        raise api_error(400, "签名头格式不正确", code="INVALID_WEBHOOK_SIGNATURE")
     expected = hmac.new(secret.encode("utf-8"), f"{timestamp}.{raw_body.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, provided):
         raise api_error(400, "Webhook 签名无效", code="INVALID_WEBHOOK_SIGNATURE")

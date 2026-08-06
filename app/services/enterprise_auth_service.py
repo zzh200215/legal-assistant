@@ -297,7 +297,11 @@ class EnterpriseAuthService:
 
         # 检查是否锁定
         if user.status == UserStatus.locked.value:
-            if user.locked_until and datetime.now(timezone.utc) < user.locked_until:
+            locked_until = user.locked_until
+            if locked_until and locked_until.tzinfo is None:
+                # SQLite/MySQL 读回无 tzinfo，统一按 UTC 处理
+                locked_until = locked_until.replace(tzinfo=timezone.utc)
+            if locked_until and datetime.now(timezone.utc) < locked_until:
                 self._record_login_event(
                     db, user.id, user.username, LoginEventType.login_failed,
                     ip_address, user_agent, "Account locked"

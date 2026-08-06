@@ -3,13 +3,13 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.observability import log_async_task_event
 from app.core.observability_sanitizer import sanitize_background_error_message
+from app.core.time import utc_now
 from app.models.document import Document, DocumentChunk
 from app.models.connector import ConnectorSyncJob, ExternalConnector
 from app.models.schedule import WorkflowExecution
@@ -669,7 +669,7 @@ def check_legal_deadline_reminders_task():
     import json
 
     db = SessionLocal()
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     created = 0
     try:
         active_deadlines = db.query(LegalDeadline).filter(
@@ -681,6 +681,8 @@ def check_legal_deadline_reminders_task():
             for offset_days in offsets:
                 from datetime import timedelta
                 remind_at = dl.deadline_at - timedelta(days=offset_days)
+                if remind_at.tzinfo:
+                    remind_at = remind_at.replace(tzinfo=None)  # 与 naive 列/utc_now 一致
                 if remind_at > now:
                     continue
                 # 幂等：同一 deadline + offset 不重复
@@ -747,7 +749,7 @@ def scan_expired_portal_links_task():
     from app.models.legal_portal import LegalPortalLink
 
     db = SessionLocal()
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     updated = 0
     try:
         expired = db.query(LegalPortalLink).filter(
@@ -789,7 +791,7 @@ def scan_contract_expiry_alerts_task():
     from datetime import timedelta
 
     db = SessionLocal()
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     created = 0
     try:
         milestones = db.query(LegalContractMilestone).filter(
@@ -803,6 +805,8 @@ def scan_contract_expiry_alerts_task():
                 continue
             for offset_days in [90, 30, 7]:
                 remind_at = ms.standard_date - timedelta(days=offset_days)
+                if remind_at.tzinfo:
+                    remind_at = remind_at.replace(tzinfo=None)  # 与 naive 列/utc_now 一致
                 if remind_at > now:
                     continue
                 dedupe_key = f"milestone:{ms.id}:offset:{offset_days}"
@@ -844,7 +848,7 @@ def retry_failed_webhook_deliveries_task():
     from app.models.legal_platform import WebhookDelivery, DeveloperApp
 
     db = SessionLocal()
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     retried = 0
     try:
         pending = db.query(WebhookDelivery).filter(
@@ -864,6 +868,8 @@ def retry_failed_webhook_deliveries_task():
             if delivery.last_attempted_at:
                 from datetime import timedelta
                 next_try = delivery.last_attempted_at + timedelta(seconds=backoff)
+                if next_try.tzinfo:
+                    next_try = next_try.replace(tzinfo=None)  # 与 naive 列/utc_now 一致
                 if next_try > now:
                     continue
 
@@ -926,14 +932,14 @@ def process_open_contract_review_task(job_id: int):
             return {"skipped": True}
         source = db.query(LegalAsyncJobInput).filter(LegalAsyncJobInput.job_id == job.id).first()
         if not source:
-            job.status = "failed"; job.error_summary = "受控输入不存在"; job.ended_at = datetime.now(timezone.utc)
+            job.status = "failed"; job.error_summary = "受控输入不存在"; job.ended_at = utc_now()
             db.commit(); return {"failed": True}
-        job.status = "processing"; job.started_at = datetime.now(timezone.utc); job.progress = 10; db.commit()
+        job.status = "processing"; job.started_at = utc_now(); job.progress = 10; db.commit()
         content = source.content_ciphertext or ""
         # 可预测的最小审查摘要；实际模型审查可替换该消费者，不改变状态契约。
         flags = [word for word in ("违约", "赔偿", "争议", "保密", "期限") if word in content]
         job.result_summary = json.dumps({"title": source.title, "risk_keywords": flags, "content_length": len(content)}, ensure_ascii=False)
-        job.status = "succeeded"; job.progress = 100; job.ended_at = datetime.now(timezone.utc)
+        job.status = "succeeded"; job.progress = 100; job.ended_at = utc_now()
         db.commit()
         return {"succeeded": True}
     except Exception:
@@ -941,7 +947,7 @@ def process_open_contract_review_task(job_id: int):
         job = db.query(LegalAsyncJob).filter(LegalAsyncJob.id == job_id).first()
         if job:
             job.status = "failed"; job.retry_count = (job.retry_count or 0) + 1
-            job.error_summary = "合同审查任务处理失败，可重试"; job.ended_at = datetime.now(timezone.utc)
+            job.error_summary = "合同审查任务处理失败，可重试"; job.ended_at = utc_now()
             db.commit()
         raise
     finally:
@@ -1044,7 +1050,7 @@ def check_legal_approval_timeouts_task():
     from app.models.legal import LegalApprovalChain, LegalApprovalStep
 
     db = SessionLocal()
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     timed_out_steps = 0
     timed_out_chains = 0
     try:

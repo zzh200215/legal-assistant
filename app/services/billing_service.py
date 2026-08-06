@@ -8,7 +8,7 @@ import io
 import json
 import logging
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Sequence
 
@@ -16,6 +16,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
+from app.core.time import utc_now
 from app.models.legal import LegalCase
 from app.models.legal_billing import (
     LegalBillingRule,
@@ -260,7 +261,7 @@ class BillingService:
             if existing:
                 return existing
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         entry = LegalTimeEntry(
             organization_id=organization_id,
             case_id=case_id,
@@ -288,7 +289,7 @@ class BillingService:
         if entry.status != "running":
             raise ValueError(f"计时条目状态为 {entry.status}，无法停止")
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         entry.ended_at = now
         if entry.started_at:
             delta = now - entry.started_at
@@ -309,7 +310,7 @@ class BillingService:
 
         entry.billable = billable
         entry.confirmed_by = confirmed_by
-        entry.confirmed_at = datetime.now(timezone.utc)
+        entry.confirmed_at = utc_now()
 
         if billable == 1:
             rate = self._resolve_hourly_rate(db, entry)
@@ -611,7 +612,7 @@ class BillingService:
             raise ValueError("已有付款记录的账单不可作废，请先退款")
 
         invoice.status = "voided"
-        invoice.voided_at = datetime.now(timezone.utc)
+        invoice.voided_at = utc_now()
         invoice.void_reason = reason
         db.commit()
         db.refresh(invoice)
@@ -729,7 +730,7 @@ class BillingService:
         if paid_total >= total and total > ZERO:
             invoice.payment_progress = "fully_paid"
             invoice.status = "paid"
-            invoice.paid_at = invoice.paid_at or datetime.now(timezone.utc)
+            invoice.paid_at = invoice.paid_at or utc_now()
         elif paid_total > ZERO:
             invoice.payment_progress = "partial_paid"
             if invoice.status == "paid":
@@ -820,7 +821,7 @@ class BillingService:
         if refund.status != "pending":
             raise ValueError("退款申请已处理")
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         if approved:
             refund.status = "completed"
             refund.approved_by = approved_by
@@ -885,7 +886,7 @@ class BillingService:
             return reminder
 
         reminder.status = "sent"
-        reminder.sent_at = datetime.now(timezone.utc)
+        reminder.sent_at = utc_now()
         db.commit()
         db.refresh(reminder)
         return reminder

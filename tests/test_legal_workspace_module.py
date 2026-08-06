@@ -114,15 +114,18 @@ class LegalWorkspaceModuleCaseTests(unittest.TestCase):
         user = SimpleNamespace(organization_id=2)
         self.assertIsNone(self.module._resolve_case_id(self.db, user, None))
 
-    def test_resolve_case_id_accepts_same_org(self):
-        user = SimpleNamespace(organization_id=2)
-        case = SimpleNamespace(id=5, organization_id=2)
-        self.db.query.return_value.filter.return_value.first.return_value = case
+    @patch("app.services.legal_workspace_service.verify_case_access")
+    def test_resolve_case_id_accepts_same_org(self, mock_verify):
+        user = SimpleNamespace(id=1, organization_id=2)
+        # verify_case_access 通过（不抛错）→ 返回 case_id
         self.assertEqual(self.module._resolve_case_id(self.db, user, 5), 5)
+        mock_verify.assert_called_once_with(5, user.id, self.db)
 
-    def test_resolve_case_id_rejects_foreign_org(self):
-        user = SimpleNamespace(organization_id=2)
-        self.db.query.return_value.filter.return_value.first.return_value = None
+    @patch("app.services.legal_workspace_service.verify_case_access")
+    def test_resolve_case_id_rejects_foreign_org(self, mock_verify):
+        user = SimpleNamespace(id=1, organization_id=2)
+        from fastapi import HTTPException
+        mock_verify.side_effect = HTTPException(404)
         with self.assertRaisesRegex(LookupError, "LEGAL_CASE_NOT_FOUND"):
             self.module._resolve_case_id(self.db, user, 5)
 

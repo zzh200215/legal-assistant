@@ -156,8 +156,8 @@ def register(req: UserCreate, db: Session = Depends(get_db)):
         full_name=req.full_name,
         role=UserRole.user.value,
         status=UserStatus.active.value,
-        organization_id=req.organization_id,
-        department_id=req.department_id,
+        # 自注册不接受 organization_id/department_id，防止伪造归属读取组织级数据；
+        # 组织归属须经管理员/组织邀请流程分配
         job_title=req.job_title,
         employee_id=req.employee_id,
     )

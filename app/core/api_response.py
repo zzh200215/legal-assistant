@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from http import HTTPStatus
 from typing import Any
 
@@ -8,6 +9,8 @@ from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+
+logger = logging.getLogger(__name__)
 
 
 def success_payload(data: Any = None, message: str = "OK") -> dict[str, Any]:
@@ -163,6 +166,8 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError) 
 
 
 async def unhandled_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    # 记录完整堆栈到服务端日志，避免 500 在生产静默不可见（Sentry 未配置时唯一线索）
+    logger.exception("未处理异常: %s", exc)
     return JSONResponse(
         status_code=500,
         content=error_payload("服务器内部错误", code="INTERNAL_SERVER_ERROR", detail="服务器内部错误"),

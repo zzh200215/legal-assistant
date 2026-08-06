@@ -1,6 +1,6 @@
 """Phase 11 — 计时计费 API"""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.time import utc_now
 from app.core.auth import (
     get_current_user,
     verify_case_access,
@@ -104,7 +105,7 @@ def create_time_entry(
         case_id=case_id,
         operator_id=current_user.id,
         billing_rule_id=body.billing_rule_id,
-        started_at=body.started_at or datetime.now(timezone.utc),
+        started_at=body.started_at or utc_now(),
         ended_at=body.ended_at,
         duration_minutes=body.duration_minutes,
         status="completed" if body.duration_minutes or body.ended_at else "running",
@@ -127,6 +128,13 @@ def patch_time_entry(
     # 验证访问权限
     entry = verify_time_entry_access(entry_id, current_user, db)
 
+    # 归属校验：仅本人或 admin/reviewer 可操作/修改他人计时条目，防止篡改他人计费工时
+    if entry.operator_id != current_user.id:
+        try:
+            verify_resource_access("time_entry", entry_id, current_user.id, db, min_role=LegalMemberRole.reviewer)
+        except HTTPException:
+            raise HTTPException(403, detail="无权操作他人的计时条目")
+
     action = body.action
     if action is not None:
         allowed_transitions = {
@@ -137,7 +145,7 @@ def patch_time_entry(
         if action not in allowed_transitions.get(entry.status, []):
             raise HTTPException(409, detail=f"Cannot {action} a {entry.status} entry")
 
-    now = datetime.now(timezone.utc)
+    now = utc_now()
     if action == "pause":
         entry.status = "paused"
     elif action == "resume":
@@ -330,15 +338,18 @@ def payment_webhook(
     amount: Decimal,
     provider: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    invoice = db.query(LegalInvoice).filter(LegalInvoice.id == invoice_id).first()
-    if not invoice:
-        raise HTTPException(404)
+    # 与 record_payment 一致：仅 admin/reviewer 可确认外部支付到账，避免匿名篡改账单支付状态
+    invoice = verify_invoice_access(
+        invoice_id, current_user, db,
+        required_roles=[LegalMemberRole.admin, LegalMemberRole.reviewer]
+    )
     try:
         record = billing_service.record_payment(
             db=db, invoice_id=invoice_id, organization_id=invoice.organization_id,
             amount=amount, payment_method="provider", transaction_id=transaction_id,
-            provider=provider, recorded_by=0,
+            provider=provider, recorded_by=current_user.id,
         )
         return record
     except ValueError as exc:

@@ -437,6 +437,8 @@ def create_sign_request(
             name=party.get("name"),
             phone_masked=party.get("phone_masked"),
             sign_order=party.get("sign_order", i + 1),
+            # 持久化服务商签署方ID：供回调 rejected 分支按 party 匹配（此前从未写入导致死逻辑）
+            provider_sign_id=party.get("provider_sign_id"),
         ))
 
     db.commit()
@@ -516,8 +518,7 @@ def create_sign_revision(
     if not original:
         raise HTTPException(404)
 
-    # 检查用户权限
-    from app.services.org_service import org_service
+    # 检查用户权限（org_service 已模块级导入，避免重复 import 触发 F811）
     member = org_service.get_user_org_member(
         db=db,
         user_id=current_user.id,
@@ -576,8 +577,7 @@ def send_sign_request(
     if not req:
         raise HTTPException(404)
 
-    # 检查用户权限
-    from app.services.org_service import org_service
+    # 检查用户权限（org_service 已模块级导入，避免重复 import 触发 F811）
     member = org_service.get_user_org_member(
         db=db,
         user_id=current_user.id,
@@ -844,15 +844,8 @@ def get_sign_request(
     if not req:
         raise HTTPException(404)
 
-    # 检查用户权限
-    from app.services.org_service import org_service
-    member = org_service.get_user_org_member(
-        db=db,
-        user_id=current_user.id,
-        org_id=req.organization_id
-    )
-    if not member:
-        raise HTTPException(404)  # 返回404避免资源泄露
+    # 与 list_sign_requests 一致：强制合同/案件级访问控制（严格案件非成员返回404）
+    verify_contract_access(req.contract_id, current_user, db)
 
     parties = db.query(LegalSignParty).filter(LegalSignParty.sign_request_id == request_id).all()
     return {"request": req, "parties": parties}
@@ -869,9 +862,8 @@ def get_sign_evidence(
     if not req:
         raise HTTPException(404)
 
-    member = org_service.get_user_org_member(db=db, user_id=current_user.id, org_id=req.organization_id)
-    if not member:
-        raise HTTPException(404)  # 返回404避免资源泄露
+    # 与 list_sign_requests 一致：强制合同/案件级访问控制
+    verify_contract_access(req.contract_id, current_user, db)
 
     events = db.query(LegalSignEvent).filter(
         LegalSignEvent.sign_request_id == request_id

@@ -455,6 +455,9 @@ async def consultation_payload(question: str, sources: list[LegalSource], user_i
             advice = parsed.get("advice", "")
             risk = parsed.get("risk_level", "medium")
             refs = parsed.get("references", [])
+            if not isinstance(refs, list):
+                refs = []
+            refs = [r for r in refs if isinstance(r, dict)]
             # Ensure references include source_id if available
             for ref in refs:
                 if "source_id" not in ref:
@@ -508,8 +511,9 @@ async def review_contract(content: str, user_id: int | None = None):
 
     if llm_result:
         parsed = _parse_json_safe(llm_result)
-        if parsed and "risks" in parsed:
-            risks = parsed["risks"]
+        risks = parsed.get("risks") if isinstance(parsed, dict) else None
+        # 形状校验：risks 必须是字典列表；畸形输出走确定性兜底，避免下游 KeyError/500
+        if isinstance(risks, list) and all(isinstance(item, dict) for item in risks):
             summary = parsed.get("summary", "")
             if not summary:
                 high_count = sum(1 for item in risks if item.get("risk_level") == "high")
@@ -671,6 +675,9 @@ async def consultation_followup(
             advice = parsed.get("advice", "")
             risk = parsed.get("risk_level", "medium")
             refs = parsed.get("references", [])
+            if not isinstance(refs, list):
+                refs = []
+            refs = [r for r in refs if isinstance(r, dict)]
             for ref in refs:
                 if "source_id" not in ref:
                     for s in ranked_sources:

@@ -662,7 +662,7 @@ def list_document_parse_jobs(
 ):
     from app.models.document import DocumentParseJob
 
-    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role)
+    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role, organization_id=current_user.organization_id, department_id=current_user.department_id)
     if not doc:
         raise api_error(404, "文档不存在", code="DOCUMENT_NOT_FOUND")
     query = db.query(DocumentParseJob).filter(
@@ -688,7 +688,7 @@ def retry_document_parse(
 ):
     from app.tasks import parse_document_task
 
-    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role)
+    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role, organization_id=current_user.organization_id, department_id=current_user.department_id)
     if not doc:
         raise api_error(404, "文档不存在", code="DOCUMENT_NOT_FOUND")
     job = document_job_service.create_job(
@@ -715,7 +715,7 @@ def list_document_versions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role)
+    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role, organization_id=current_user.organization_id, department_id=current_user.department_id)
     if not doc:
         raise api_error(404, "文档不存在", code="DOCUMENT_NOT_FOUND")
     root_id = doc.parent_document_id or doc.id
@@ -737,7 +737,7 @@ def list_document_versions(
             "created_at": row.created_at,
         }
         for row in rows
-        if document_service.get(row.id, db, user_id=current_user.id, role=current_user.role)
+        if document_service.get(row.id, db, user_id=current_user.id, role=current_user.role, organization_id=current_user.organization_id, department_id=current_user.department_id)
     ]
     return {"document_id": document_id, "items": items, "total": len(items)}
 
@@ -752,7 +752,7 @@ def list_document_qa_records(
 ):
     from app.models.document import DocumentQARecord
 
-    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role)
+    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role, organization_id=current_user.organization_id, department_id=current_user.department_id)
     if not doc:
         raise api_error(404, "文档不存在", code="DOCUMENT_NOT_FOUND")
     query = db.query(DocumentQARecord).filter(
@@ -780,7 +780,7 @@ def list_document_qa_replays(
 ):
     from app.models.document import DocumentQARecord
 
-    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role)
+    doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role, organization_id=current_user.organization_id, department_id=current_user.department_id)
     if not doc:
         raise api_error(404, "文档不存在", code="DOCUMENT_NOT_FOUND")
     query = db.query(DocumentQARecord).filter(

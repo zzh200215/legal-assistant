@@ -74,7 +74,7 @@ class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    subscription_id = Column(Integer, ForeignKey("webhook_subscriptions.id"), nullable=False, index=True)
+    subscription_id = Column(Integer, ForeignKey("webhook_subscriptions.id"), nullable=True, index=True)
     app_id = Column(Integer, ForeignKey("developer_apps.id"), nullable=False, index=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     event_type = Column(String(64), nullable=False)

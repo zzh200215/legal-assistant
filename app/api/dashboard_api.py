@@ -128,14 +128,17 @@ def get_dashboard(
         current_month = utc_now().strftime("%Y-%m")
         free_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.tier == "free").first()
         if free_plan:
-            free_user_ids = [
-                uid for uid in range(1, total_users + 1)
-                if uid not in subscribed_user_ids
-            ]
-            at_risk_usages = db.query(QuotaUsage).filter(
-                QuotaUsage.year_month == current_month,
-                QuotaUsage.consultation_count >= int(free_plan.quota_consultation * 0.8),
-            ).limit(50).all()
+            # 免费用户 = 全部用户 - 活跃订阅用户（不假设 id 连续）
+            all_user_ids = {row[0] for row in db.query(User.id).all()}
+            free_user_ids = list(all_user_ids - subscribed_user_ids)
+            quota_threshold = int(free_plan.quota_consultation * 0.8)
+            at_risk_usages = []
+            if free_user_ids and quota_threshold > 0:
+                at_risk_usages = db.query(QuotaUsage).filter(
+                    QuotaUsage.year_month == current_month,
+                    QuotaUsage.consultation_count >= quota_threshold,
+                    QuotaUsage.user_id.in_(free_user_ids),
+                ).limit(50).all()
 
             for u in at_risk_usages:
                 user = db.query(User).filter(User.id == u.user_id).first()

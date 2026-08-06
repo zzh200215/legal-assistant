@@ -10,10 +10,12 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from fastapi import HTTPException
+
+from app.core.auth import verify_case_access
 from app.core.time import utc_now
 from app.models.legal import (
     ContractReview,
-    LegalCase,
     LegalConsultation,
     LegalDocumentVersion,
     LegalDraft,
@@ -179,16 +181,18 @@ class LegalWorkspaceModule:
         self.audit = audit or AuditLogService()
 
     def _resolve_case_id(self, db: Session, user: User, case_id: int | None) -> int | None:
-        """校验案件归属（同组织）后返回 case_id；未关联返回 None，无权访问抛错。"""
+        """校验案件访问权限后返回 case_id；未关联返回 None，无权访问抛错。
+
+        复用 verify_case_access：组织成员 + 严格案件成员 + 撤销状态一并校验，
+        防止非成员向严格案件注入内容。
+        """
         if case_id is None:
             return None
-        case = db.query(LegalCase).filter(
-            LegalCase.id == case_id,
-            LegalCase.organization_id == user.organization_id,
-        ).first()
-        if not case:
+        try:
+            verify_case_access(case_id, user.id, db)
+        except HTTPException:
             raise LookupError("LEGAL_CASE_NOT_FOUND")
-        return case.id
+        return case_id
 
     async def create_consultation(
         self, db: Session, user: User, question: str, *, case_id: int | None = None,
@@ -286,7 +290,7 @@ class LegalWorkspaceModule:
             references_json=json.dumps(refs, ensure_ascii=False),
             review_policy_id=review_policy_id, review_policy_version=policy_version,
             review_policy_snapshot_json=json.dumps(policy_snapshot or {}, ensure_ascii=False),
-            status="needs_lawyer_review" if any(item["risk_level"] == "high" for item in risks) else "pending_review",
+            status="needs_lawyer_review" if any(isinstance(item, dict) and item.get("risk_level") == "high" for item in risks) else "pending_review",
         )
         db.add(row)
         db.commit()
@@ -301,6 +305,10 @@ class LegalWorkspaceModule:
     async def create_consultation_followup(
         self, db: Session, user: User, *, consultation_id: int, question: str,
     ) -> LegalConsultation:
+        # 追问同样消耗咨询配额（与 create_consultation 一致），防止配额耗尽后无限追问
+        subscription_service.ensure_default_plans(db)
+        if not subscription_service.check_quota(db, user.id, "consultation"):
+            raise ValueError("QUOTA_EXCEEDED")
         previous = db.query(LegalConsultation).filter(
             LegalConsultation.id == consultation_id, LegalConsultation.user_id == user.id
         ).first()
@@ -325,6 +333,7 @@ class LegalWorkspaceModule:
         db.add(row)
         db.commit()
         db.refresh(row)
+        subscription_service.record_usage(db, user.id, "consultation")
         self.audit.log(
             db, user, "legal_followup_create", target_type="consultation",
             target_id=row.id, detail=f"followup to #{consultation_id}",
@@ -359,7 +368,7 @@ class LegalWorkspaceModule:
         row.summary = summary
         row.risks_json = json.dumps(risks, ensure_ascii=False)
         row.references_json = json.dumps(refs, ensure_ascii=False)
-        row.status = "needs_lawyer_review" if any(item["risk_level"] == "high" for item in risks) else "pending_review"
+        row.status = "needs_lawyer_review" if any(isinstance(item, dict) and item.get("risk_level") == "high" for item in risks) else "pending_review"
         row.reviewer_id = None
         row.review_note = None
         row.reviewed_at = None

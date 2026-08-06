@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
+from app.core.time import utc_now
 from app.models.legal_notifications import LegalNotificationEvent, LegalNotificationPreference, LegalNotificationPolicy
 from app.models.legal_portal import LegalDeadline
 from app.models.user import User
@@ -40,7 +41,9 @@ class DeadlineService:
         返回已创建的通知事件列表。
         同一 (deadline_id, channel, offset) 组合只发送一次。
         """
-        current = now or datetime.now(timezone.utc)
+        current = now or utc_now()
+        if current.tzinfo:
+            current = current.replace(tzinfo=None)
         created_events: list[dict] = []
 
         active_deadlines = db.query(LegalDeadline).filter(
@@ -55,7 +58,7 @@ class DeadlineService:
                 # 在关键日期所在时区计算提醒触发时间
                 deadline_local = dl.deadline_at.astimezone(deadline_tz) if dl.deadline_at.tzinfo else dl.deadline_at.replace(tzinfo=deadline_tz)
                 remind_at = deadline_local - timedelta(days=offset_days)
-                remind_at_utc = remind_at.astimezone(timezone.utc)
+                remind_at_utc = remind_at.astimezone(timezone.utc).replace(tzinfo=None)
 
                 # 提醒时间还未到，跳过
                 if remind_at_utc > current:
@@ -281,7 +284,7 @@ class DeadlineService:
         """站内通知直接标记为 delivered。"""
         try:
             event.status = "delivered"
-            event.sent_at = datetime.now(timezone.utc)
+            event.sent_at = utc_now()
             db.flush()
             return True
         except Exception as exc:
@@ -315,7 +318,7 @@ class DeadlineService:
 
         返回合并后的提醒列表。
         """
-        today_start = datetime.now(timezone.utc).replace(
+        today_start = utc_now().replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         today_end = today_start + timedelta(days=1)
@@ -379,7 +382,7 @@ class DeadlineService:
         for event in failed_events:
             # 简单重试计数：使用 event 的 acked_at 字段来记录重试次数
             # 实际上 model 没有 retry_count 字段，所以基于创建时间来限流
-            if event.created_at and (datetime.now(timezone.utc) - event.created_at).total_seconds() < 300:
+            if event.created_at and (utc_now() - event.created_at).total_seconds() < 300:
                 # 5分钟内不重试
                 continue
 
@@ -430,7 +433,9 @@ class DeadlineService:
 
         由定时任务调用。返回标记数量。
         """
-        current = now or datetime.now(timezone.utc)
+        current = now or utc_now()
+        if current.tzinfo:
+            current = current.replace(tzinfo=None)
         due_deadlines = db.query(LegalDeadline).filter(
             LegalDeadline.status == "active",
             LegalDeadline.deadline_at <= current,

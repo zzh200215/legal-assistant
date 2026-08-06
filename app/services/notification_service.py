@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Sequence
 
 from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
+from app.core.time import utc_now
 from app.models.legal_notifications import (
     LegalNotificationEvent,
     LegalNotificationPreference,
@@ -216,7 +217,7 @@ class NotificationService:
         stats = {"delivered": 0, "failed": 0, "skipped": 0}
         for event in pending:
             # 如果 scheduled_at 在未来，跳过
-            if event.scheduled_at and event.scheduled_at > datetime.now(timezone.utc):
+            if event.scheduled_at and event.scheduled_at > utc_now():
                 stats["skipped"] += 1
                 continue
 
@@ -252,7 +253,7 @@ class NotificationService:
     def _deliver_site(self, db: Session, event: LegalNotificationEvent) -> bool:
         """站内通知：直接标记为 delivered。"""
         event.status = "delivered"
-        event.sent_at = datetime.now(timezone.utc)
+        event.sent_at = utc_now()
         return True
 
     def _deliver_email(self, db: Session, event: LegalNotificationEvent) -> bool:
@@ -266,13 +267,15 @@ class NotificationService:
             event_type=event.event_type,
             reference_type=event.reference_type,
             reference_id=event.reference_id,
+            event_id=event.id,
         )
 
     def send_email_notification(self, *, db: Session, user_id: int,
                                 organization_id: int, subject: str, body: str,
                                 event_type: str | None = None,
                                 reference_type: str | None = None,
-                                reference_id: int | None = None) -> bool:
+                                reference_id: int | None = None,
+                                event_id: int | None = None) -> bool:
         """发送邮件通知，更新对应事件状态。"""
         try:
             user = db.query(User).filter(User.id == user_id).first()
@@ -295,8 +298,17 @@ class NotificationService:
             db.add(draft)
             db.commit()
 
-            # 更新关联通知事件状态
-            if reference_type and reference_id:
+            # 更新关联通知事件状态：优先按当前事件 id（覆盖无 reference 事件，
+            # 避免投递成功后仍为 pending 导致每轮 beat 重复发送）
+            if event_id:
+                evt = db.query(LegalNotificationEvent).filter(
+                    LegalNotificationEvent.id == event_id,
+                    LegalNotificationEvent.status == "pending",
+                ).first()
+                if evt:
+                    evt.status = "sent"
+                    evt.sent_at = utc_now()
+            elif reference_type and reference_id:
                 events = db.query(LegalNotificationEvent).filter(
                     LegalNotificationEvent.reference_type == reference_type,
                     LegalNotificationEvent.reference_id == reference_id,
@@ -305,7 +317,7 @@ class NotificationService:
                 ).all()
                 for evt in events:
                     evt.status = "sent"
-                    evt.sent_at = datetime.now(timezone.utc)
+                    evt.sent_at = utc_now()
 
             return True
         except Exception as exc:
@@ -339,7 +351,7 @@ class NotificationService:
 
             # 创建微信推送记录（简化实现：标记为 sent）
             event.status = "sent"
-            event.sent_at = datetime.now(timezone.utc)
+            event.sent_at = utc_now()
             return True
         except Exception as exc:
             logger.error("微信通知发送失败: %s", exc)
@@ -361,7 +373,7 @@ class NotificationService:
                 return False
 
             event.status = "sent"
-            event.sent_at = datetime.now(timezone.utc)
+            event.sent_at = utc_now()
             return True
         except Exception as exc:
             logger.error("飞书通知发送失败: %s", exc)
@@ -383,7 +395,7 @@ class NotificationService:
         retried = 0
         for event in failed_events:
             # 简化重试计数：基于创建后时长限流
-            age_minutes = (datetime.now(timezone.utc) - event.created_at).total_seconds() / 60 if event.created_at else 999
+            age_minutes = (utc_now() - event.created_at).total_seconds() / 60 if event.created_at else 999
             if age_minutes < 5:
                 continue  # 5分钟内不重试
 
@@ -511,7 +523,7 @@ class NotificationService:
             raise ValueError("通知不存在")
         if event.status in ("delivered", "sent"):
             event.status = "read"
-            event.acknowledged_at = datetime.now(timezone.utc)
+            event.acknowledged_at = utc_now()
             db.commit()
             db.refresh(event)
         return event
@@ -523,7 +535,7 @@ class NotificationService:
             LegalNotificationEvent.channel == CHANNEL_SITE,
             LegalNotificationEvent.status.in_(["delivered", "sent"]),
         ).all()
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         count = 0
         for event in unread:
             event.status = "read"

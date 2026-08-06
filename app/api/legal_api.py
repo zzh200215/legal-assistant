@@ -659,6 +659,10 @@ def followup_consultation(item_id: int, req: FollowupIn, db: Session = Depends(g
         if str(exc) == "LEGAL_CONSULTATION_NOT_FOUND":
             raise api_error(404, "原咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
         raise
+    except ValueError as exc:
+        if str(exc) == "QUOTA_EXCEEDED":
+            raise api_error(429, "本月咨询配额已用完，请升级订阅", code="QUOTA_EXCEEDED")
+        raise
     return serialize(row)
 
 

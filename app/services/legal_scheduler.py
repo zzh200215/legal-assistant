@@ -14,10 +14,11 @@ Celery periodic tasks for legal domain:
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date
 
 from app.core.celery_app import celery_app
 from app.core.database import SessionLocal
+from app.core.time import utc_now
 from app.services.oplog_service import oplog_service
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ def _heartbeat() -> None:
         from app.core.config import get_settings
         redis.from_url(get_settings().REDIS_URL).set(
             "aibg:operations:legal_beat:last_tick",
-            datetime.now(timezone.utc).isoformat(),
+            utc_now().isoformat(),
             ex=180,
         )
     except Exception:
@@ -95,7 +96,7 @@ def legal_scan_overdue_invoices_task() -> dict:
         from app.models.legal_billing import LegalInvoice
 
         today = date.today()
-        now = datetime.now(timezone.utc)
+        now = utc_now()
 
         # 标记逾期账单
         overdue_invoices = db.query(LegalInvoice).filter(
@@ -153,7 +154,7 @@ def legal_scan_expired_portal_links_task() -> dict:
     try:
         from app.models.legal_portal import LegalPortalLink
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
 
         # 标记过期链接
         expired_links = db.query(LegalPortalLink).filter(
@@ -251,7 +252,7 @@ def legal_scan_collection_reminders_task() -> dict:
         from app.models.legal_billing import LegalInvoice, LegalCollectionReminder
         from datetime import timedelta
 
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         overdue_threshold = date.today() - timedelta(days=7)
 
         # 查找需要催收的账单
