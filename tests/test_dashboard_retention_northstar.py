@@ -15,9 +15,14 @@ from app.models.user import User, UserStatus
 from app.models.legal import LegalCase, LegalConsultation, ContractReview, LegalDraft
 from app.api.dashboard_api import _week_start
 
+# 固定"当前时间"为 2026-08-03（周一），消除对运行日期的依赖：
+# seed 里 uA draft 在 now-10d = 7/24，落 north-star 的桶1（7/20~7/27），不污染 prev 桶。
+# 注意 naive UTC：与 app.core.time.utc_now() 返回类型一致（项目 legacy 列不存时区）。
+FIXED_NOW = datetime(2026, 8, 3, 12, 0, 0)
+
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return FIXED_NOW
 
 
 class DashboardRetentionNorthStarTests(unittest.TestCase):
@@ -31,6 +36,11 @@ class DashboardRetentionNorthStarTests(unittest.TestCase):
         Session = sessionmaker(bind=self.engine, autoflush=False, autocommit=False)
         Base.metadata.create_all(bind=self.engine)
         self.db = Session()
+        # 端点内部 utc_now() 同样固定到 FIXED_NOW，保证 retention/north-star 分桶日期无关
+        patcher = __import__("unittest.mock").mock.patch("app.api.dashboard_api.utc_now", return_value=FIXED_NOW)
+        self._utc_now_patcher = patcher
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self._seed()
 
         app.dependency_overrides[get_db] = lambda: self.db
