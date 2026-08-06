@@ -2,7 +2,6 @@ import http from './http'
 
 export default {
   getFeatureFlags() { return http.get('/legal/features') },
-  listArticles(sourceId) { return http.get(`/legal/sources/${sourceId}/articles`) },
   searchArticles(q) { return http.get(`/legal/article-search?q=${encodeURIComponent(q)}`) },
   listDeveloperApps(orgId) { return http.get(`/legal/orgs/${orgId}/apps`) },
   createDeveloperApp(orgId, payload) { return http.post(`/legal/orgs/${orgId}/apps`, payload) },

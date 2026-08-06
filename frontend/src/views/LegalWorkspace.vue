@@ -120,7 +120,7 @@
                   :before-upload="handleContractUpload"
                   accept=".pdf,.docx,.doc,.txt,.md"
                 >
-                  <el-button :loading="uploadLoading" icon="Upload">上传合同文件（PDF/DOCX/TXT）</el-button>
+                  <el-button :loading="uploadLoading" :icon="Upload">上传合同文件（PDF/DOCX/TXT）</el-button>
                 </el-upload>
                 <span class="muted">或直接粘贴文本后点击审查</span>
               </div>

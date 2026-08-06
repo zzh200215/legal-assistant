@@ -1,5 +1,6 @@
 <template>
   <div class="legal-deadlines">
+    <div v-if="noCase" class="no-case-hint">当前未选择案件。「创建期限」「期限列表」需在顶部案件选择器中选择案件后使用。</div>
     <el-card shadow="never">
       <template #header><span class="card-title">创建期限</span></template>
       <el-form :model="deadlineForm" label-width="100px" size="small" @submit.prevent="submitDeadline">
@@ -154,8 +155,10 @@ import api from '../api'
 
 const props = defineProps({
   orgId: { type: Number, required: true },
-  caseId: { type: Number, required: true },
+  caseId: { type: Number, required: false, default: null },
 })
+
+const noCase = computed(() => !props.caseId)
 
 const orgMembers = ref([])
 const loadOrgMembers = async () => {
@@ -189,6 +192,7 @@ const deadlineForm = ref({ deadline_type: 'hearing', deadline_at: '', owner_id: 
 const deadlineLoading = ref(false)
 
 const submitDeadline = async () => {
+  if (noCase.value) return ElMessage.warning('请先在顶部选择案件')
   if (!deadlineForm.value.deadline_at) return ElMessage.warning('请选择截止日期')
   if (!deadlineForm.value.owner_id) return ElMessage.warning('请选择负责人')
   deadlineLoading.value = true
@@ -220,6 +224,7 @@ const deadlineTotal = ref(0)
 const deadlineFilter = ref('')
 
 const loadDeadlines = async () => {
+  if (noCase.value) { deadlines.value = []; deadlineTotal.value = 0; return }
   try {
     const { data } = await api.listDeadlines(props.orgId, props.caseId, deadlineFilter.value, deadlinePage.value, deadlinePageSize.value)
     deadlines.value = data.items || data
@@ -330,6 +335,16 @@ onMounted(() => {
 .card-title {
   font-weight: 700;
   font-size: 15px;
+}
+
+.no-case-hint {
+  background: #fdf6ec;
+  border: 1px solid #f5dab1;
+  color: #b88230;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
 }
 
 .result-header {

@@ -1,5 +1,6 @@
 <template>
   <div class="legal-billing">
+    <div v-if="noCase" class="no-case-hint">当前未选择案件。「工时计时」「手动录入」「工时记录」需在顶部案件选择器中选择案件后使用。</div>
     <el-card shadow="never">
       <template #header><span class="card-title">工时计时器</span></template>
       <div class="timer-section">
@@ -301,8 +302,10 @@ import api from '../api'
 
 const props = defineProps({
   orgId: { type: Number, required: true },
-  caseId: { type: Number, required: true },
+  caseId: { type: Number, required: false, default: null },
 })
+
+const noCase = computed(() => !props.caseId)
 
 // --- Timer ---
 const timerDescription = ref('')
@@ -311,6 +314,7 @@ const elapsedSeconds = ref(0)
 let timerInterval = null
 
 const startTimer = async () => {
+  if (noCase.value) return ElMessage.warning('请先在顶部选择案件')
   try {
     const { data } = await api.createTimeEntry(props.orgId, props.caseId, {
       description: timerDescription.value,
@@ -375,6 +379,7 @@ const manualForm = ref({ description: '', duration_minutes: 30 })
 const manualLoading = ref(false)
 
 const submitManualEntry = async () => {
+  if (noCase.value) return ElMessage.warning('请先在顶部选择案件')
   if (!manualForm.value.description.trim()) return ElMessage.warning('请输入描述')
   manualLoading.value = true
   try {
@@ -399,6 +404,7 @@ const entryPageSize = ref(20)
 const entryTotal = ref(0)
 
 const loadTimeEntries = async () => {
+  if (noCase.value) { timeEntries.value = []; entryTotal.value = 0; runningEntry.value = null; stopInterval(); return }
   try {
     const { data } = await api.listTimeEntries(props.orgId, props.caseId, entryPage.value, entryPageSize.value)
     timeEntries.value = data.items || data
@@ -517,6 +523,7 @@ const voidInvoiceHandler = async (row) => {
     ElMessage.success('账单已作废')
     loadInvoices()
   } catch (e) {
+    if (e === 'cancel' || e === 'close') return
     ElMessage.error(e.response?.data?.detail || '费用通知单加载失败')
   }
 }
@@ -632,6 +639,16 @@ onUnmounted(() => {
 .legal-billing {
   max-width: 1200px;
   margin: 0 auto;
+}
+
+.no-case-hint {
+  background: #fdf6ec;
+  border: 1px solid #f5dab1;
+  color: #b88230;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
 }
 
 .card-title {

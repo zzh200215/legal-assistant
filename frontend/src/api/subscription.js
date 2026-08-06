@@ -3,7 +3,7 @@ import http from './http'
 // 后端 subscription_api 挂在 /api/billing 前缀下（app/main.py），路径必须带 billing。
 export default {
   listPlans() {
-    return http.get('/billing/subscriptions/plans')
+    return http.get('/billing/plans')
   },
   mySubscription() {
     return http.get('/billing/subscriptions/me')

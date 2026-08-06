@@ -66,11 +66,11 @@ const isCurrent = (plan) => myPlan.value?.tier === plan.tier
 
 const load = async () => {
   try {
-    const data = await subscriptionApi.listPlans()
+    const { data } = await subscriptionApi.listPlans()
     plans.value = data || []
   } catch { plans.value = [] }
   try {
-    const me = await subscriptionApi.mySubscription()
+    const { data: me } = await subscriptionApi.mySubscription()
     myPlan.value = me?.plan || null
   } catch { myPlan.value = null }
 }
@@ -79,7 +79,7 @@ const buy = async (plan) => {
   buyingTier.value = plan.tier
   checkoutMessage.value = ''
   try {
-    const res = await subscriptionApi.checkout(plan.tier)
+    const { data: res } = await subscriptionApi.checkout(plan.tier)
     if (res?.configured && res.checkout_url) {
       window.location.href = res.checkout_url
     } else {
