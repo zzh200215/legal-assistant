@@ -3,10 +3,10 @@ import http from './http'
 export default {
   getFeatureFlags() { return http.get('/legal/features') },
   searchArticles(q) { return http.get(`/legal/article-search?q=${encodeURIComponent(q)}`) },
-  listDeveloperApps(orgId) { return http.get(`/legal/orgs/${orgId}/apps`) },
-  createDeveloperApp(orgId, payload) { return http.post(`/legal/orgs/${orgId}/apps`, payload) },
-  rotateDeveloperKey(orgId, appId) { return http.post(`/legal/orgs/${orgId}/apps/${appId}/keys/rotate`) },
-  getOperationsSummary(orgId) { return http.get(`/legal/orgs/${orgId}/operations/summary`) },
+  listDeveloperApps(orgId) { return http.get(`/developer/orgs/${orgId}/apps`) },
+  createDeveloperApp(orgId, payload) { return http.post(`/developer/orgs/${orgId}/apps`, payload) },
+  rotateDeveloperKey(orgId, appId) { return http.post(`/developer/orgs/${orgId}/apps/${appId}/keys/rotate`) },
+  getOperationsSummary(orgId) { return http.get(`/developer/orgs/${orgId}/operations/summary`) },
   // Contract lifecycle
   createLegalContract(orgId, payload) { return http.post(`/legal/orgs/${orgId}/contracts`, payload) },
   listLegalContracts(orgId, caseId) {
