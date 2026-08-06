@@ -165,6 +165,25 @@ def list_contracts(
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
+@router.get("/contracts/expiry-alerts")
+def expiry_alerts(
+    org_id: int,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    verify_org_member_access(org_id, current_user.id, db)
+    q = db.query(LegalContractMilestone).filter(
+        LegalContractMilestone.organization_id == org_id,
+        LegalContractMilestone.milestone_type.in_(["expiry", "renewal"]),
+        LegalContractMilestone.status == "confirmed",
+    ).order_by(LegalContractMilestone.standard_date)
+    total = q.count()
+    items = q.offset((page - 1) * page_size).limit(page_size).all()
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
 @router.get("/contracts/{contract_id}")
 def get_contract(
     contract_id: int,
@@ -362,25 +381,6 @@ def confirm_milestone(
     db.commit()
     db.refresh(ms)
     return ms
-
-
-@router.get("/contracts/expiry-alerts")
-def expiry_alerts(
-    org_id: int,
-    page: int = 1,
-    page_size: int = 20,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    verify_org_member_access(org_id, current_user.id, db)
-    q = db.query(LegalContractMilestone).filter(
-        LegalContractMilestone.organization_id == org_id,
-        LegalContractMilestone.milestone_type.in_(["expiry", "renewal"]),
-        LegalContractMilestone.status == "confirmed",
-    ).order_by(LegalContractMilestone.standard_date)
-    total = q.count()
-    items = q.offset((page - 1) * page_size).limit(page_size).all()
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 # ── Sign Requests ─────────────────────────────────────────────────────────────

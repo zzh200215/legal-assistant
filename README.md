@@ -354,6 +354,7 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 | `create_pilot_backup.py` | 每日全量备份（DB + 数据目录 + SHA256 + 异地副本 + 保留策略） |
 | `check_openapi_contract.py` | OpenAPI 契约快照一致性门禁 |
 | `check_frontend_backend_contract.py` | 前后端联调门禁：前端全部 API 调用 vs 后端路由交叉比对（防 404 级漂移） |
+| `integration_smoke.py` / `integration_deep_smoke.py` | 联调冒烟：真实登录命中前端路径（读 + case 级 + 写入 + LLM 降级，需后端已启动） |
 | `export_review_feedback.py` / `export_exit_surveys.py` | 审核反馈 / 退出问卷导出 |
 | `loadtest_legal_paths.py` | 主路径压测 |
 | `check_pilot_readiness.py` | 试点环境门禁自检 |
