@@ -24,4 +24,4 @@
 ## 关联
 
 - #70 实现：scripts/pilot_daily_check.py（--cost-warn）
-- #71 周报 #4 数据包：docs/pilot-weekly-report-2026-09-01.md（周成本 ¥0.0，试点未启动如实标注）
+- #71 周报数据包：`scripts/pilot_weekly_report.py` 输出（试点未启动时周成本 ¥0.0 如实标注）

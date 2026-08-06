@@ -2,7 +2,7 @@
 
 > 生成时间：2026-08-04T01:57:13Z；已排除供给账号 20 个。
 > 标注：**预演版**——本周（08-10~08-16）尚未真实发生，数据为截止 08-04 的真实库读数。
-> 正式周报在 08-17 以同一脚本重跑：`python -B scripts/pilot_weekly_report.py --output docs/pilot-weekly-report-2026-08-17.md`。
+> 正式周报用同一脚本重跑：`python -B scripts/pilot_weekly_report.py --output docs/pilot-weekly-report.md`。
 
 ## 1. 漏斗（近 30 天真实读数）
 
