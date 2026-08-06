@@ -225,9 +225,18 @@ class SchedulerService:
         messages = query.order_by(MailboxMessage.importance.desc(), MailboxMessage.received_at.desc()).limit(50).all()
         lines = [f"- [{message.importance}] {message.subject or '无主题'}｜{message.sender or '未知发件人'}｜{message.summary or ''}" for message in messages]
         content = "\n".join(["# 每日邮件摘要", "", "## 过去 24 小时", *(lines or ["- 暂无新邮件。"]), "", "该内容为只读摘要草稿，未发送给任何外部地址。"])
+        # 幂等：同一用户当日已建摘要草稿则复用，避免重试/重复执行产生多份草稿
+        subject = f"每日邮件摘要｜{datetime.now().date().isoformat()}"
+        existing = db.query(EmailDraft).filter(
+            EmailDraft.user_id == user.id,
+            EmailDraft.generation_type == "daily_mail_digest",
+            EmailDraft.subject == subject,
+        ).first()
+        if existing:
+            return existing
         draft = EmailDraft(
             user_id=user.id, organization_id=user.organization_id, department_id=user.department_id,
-            subject=f"每日邮件摘要｜{datetime.now().date().isoformat()}", recipient=config.get("recipient") or None,
+            subject=subject, recipient=config.get("recipient") or None,
             content=content, purpose="每日邮件摘要", key_points=json.dumps([message.subject for message in messages[:10]], ensure_ascii=False),
             need_action=False, generation_type="daily_mail_digest", tone="professional", status="draft",
             metadata_json=json.dumps({"source_type": "scheduled_daily_mail_digest", "message_ids": [message.id for message in messages], "schedule_id": schedule.id}, ensure_ascii=False),
@@ -242,9 +251,18 @@ class SchedulerService:
             raise ValueError("会后提醒计划需要 meeting_id")
         tasks = db.query(Task).filter(Task.user_id == user.id, Task.source_type == "meeting", Task.source_id == meeting_id, Task.status.in_(["todo", "in_progress"])).all()
         content = "\n".join([f"# 会后待办提醒｜会议 {meeting_id}", "", "## 待推进事项", *([f"- {task.title}" for task in tasks] or ["- 暂无待推进的会议任务。"]), "", "请确认负责人、截止时间和处理进度。"])
+        # 幂等：同一用户同一会议的提醒草稿已存在则复用，避免重试重复创建
+        subject = f"会后待办提醒｜会议 {meeting_id}"
+        existing = db.query(EmailDraft).filter(
+            EmailDraft.user_id == user.id,
+            EmailDraft.generation_type == "meeting_followup",
+            EmailDraft.subject == subject,
+        ).first()
+        if existing:
+            return existing
         draft = EmailDraft(
             user_id=user.id, organization_id=user.organization_id, department_id=user.department_id,
-            subject=f"会后待办提醒｜会议 {meeting_id}", recipient=config.get("recipient") or None,
+            subject=subject, recipient=config.get("recipient") or None,
             content=content, purpose="会后待办提醒", key_points=json.dumps([task.title for task in tasks], ensure_ascii=False),
             need_action=True, generation_type="meeting_followup", tone="professional", status="draft",
             metadata_json=json.dumps({"source_type": "scheduled_meeting_followup", "meeting_ids": [meeting_id], "task_ids": [task.id for task in tasks], "schedule_id": schedule.id}, ensure_ascii=False),

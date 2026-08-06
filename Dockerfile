@@ -8,6 +8,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 备份任务依赖 mysqldump（docker compose 使用 MySQL 8.4）
+RUN apt-get update && apt-get install -y --no-install-recommends default-mysql-client \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY alembic ./alembic
 COPY app ./app
 COPY alembic.ini .

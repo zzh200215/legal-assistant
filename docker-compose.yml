@@ -149,10 +149,14 @@ services:
       ALERT_WEBHOOK_TIMEOUT_SECONDS: ${ALERT_WEBHOOK_TIMEOUT_SECONDS:-5}
       ALERT_WEBHOOK_MIN_SEVERITY: ${ALERT_WEBHOOK_MIN_SEVERITY:-high}
       ACCESS_TOKEN_EXPIRE_MINUTES: 60
+      # 备份任务：输出与数据目录须匹配容器内挂载点（默认相对路径 data/ 在镜像内不存在，会静默产出空归档）
+      BACKUP_OUTPUT_DIR: /app/backups
+      BACKUP_DATA_DIRS: '["/app/uploads", "/app/chroma_db"]'
     command: celery -A app.core.celery_app.celery_app worker --loglevel=info --hostname=worker@%h
     volumes:
       - ./data/uploads:/app/uploads
       - ./data/chroma_db:/app/chroma_db
+      - ./data/backups:/app/backups
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery_app.celery_app inspect ping -d worker@$$HOSTNAME --timeout=5 | grep -q pong"]
       interval: 30s

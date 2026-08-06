@@ -964,8 +964,16 @@ def parse_contract_versions_task():
     db = SessionLocal()
     processed = 0
     try:
+        # 陈旧重扫：parsing 状态超过 15 分钟视为 worker 崩溃残留，重新解析；
+        # 活跃 parsing（updated_at 较新）不会被重复拾取
+        from datetime import timedelta
+        stale_cutoff = utc_now() - timedelta(minutes=15)
         pending = db.query(LegalContractVersion).filter(
-            LegalContractVersion.parse_status == "uploading"
+            LegalContractVersion.parse_status == "uploading",
+        ).limit(20).all()
+        pending += db.query(LegalContractVersion).filter(
+            LegalContractVersion.parse_status == "parsing",
+            LegalContractVersion.updated_at < stale_cutoff,
         ).limit(20).all()
 
         for ver in pending:

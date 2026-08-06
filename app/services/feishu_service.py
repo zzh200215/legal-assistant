@@ -679,21 +679,25 @@ async def dispatch_feishu_reminders(db) -> dict:
     messenger = FeishuMessenger(get_settings().FEISHU_APP_ID, get_settings().FEISHU_APP_SECRET)
     sent_activation = 0
     sent_digest = 0
-    for binding in bindings:
-        user = db.query(User).filter(User.id == binding.user_id).first()
-        if not user:
-            continue
-        stats = user_activity_stats(db, user.id)
-        active = (stats["consultation_count"] + stats["review_count"] + stats["draft_count"]) > 0
-        pending = len(legal_workspace_read_module.review_queue(db, user))
-        if not active and _reminder_due(binding.open_id, "activation"):
-            result = await messenger.send_card(binding.open_id, build_activation_card(user.username))
-            if result.get("sent"):
-                sent_activation += 1
-        elif active and _reminder_due(binding.open_id, "digest"):
-            result = await messenger.send_card(binding.open_id, build_weekly_digest_card(stats, pending))
-            if result.get("sent"):
-                sent_digest += 1
+    try:
+        for binding in bindings:
+            user = db.query(User).filter(User.id == binding.user_id).first()
+            if not user:
+                continue
+            stats = user_activity_stats(db, user.id)
+            active = (stats["consultation_count"] + stats["review_count"] + stats["draft_count"]) > 0
+            pending = len(legal_workspace_read_module.review_queue(db, user))
+            if not active and _reminder_due(binding.open_id, "activation"):
+                result = await messenger.send_card(binding.open_id, build_activation_card(user.username))
+                if result.get("sent"):
+                    sent_activation += 1
+            elif active and _reminder_due(binding.open_id, "digest"):
+                result = await messenger.send_card(binding.open_id, build_weekly_digest_card(stats, pending))
+                if result.get("sent"):
+                    sent_digest += 1
+    finally:
+        # 释放 httpx 连接池，避免每轮 beat 泄漏一个 AsyncClient
+        await messenger.aclose()
     return {"bindings": len(bindings), "sent_activation": sent_activation, "sent_digest": sent_digest}
 
 
