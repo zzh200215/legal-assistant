@@ -614,7 +614,16 @@ let agentWs = null
 
 const finalAnswer = computed(() => runResult.value?.final_answer || runResult.value?.result || '')
 const demoPreset = computed(() => getAgentDemoPreset(demoContext.value.type, demoContext.value))
-const artifactGroups = computed(() => runResult.value?.artifacts || { documents: [], meetings: [], tasks: [], emails: [] })
+const artifactGroups = computed(() => {
+  const a = runResult.value?.artifacts || {}
+  // 后端 artifacts 可能缺失部分 key（旧数据/异常结果），逐 key 兜底避免模板 .length 崩溃
+  return {
+    documents: Array.isArray(a.documents) ? a.documents : [],
+    meetings: Array.isArray(a.meetings) ? a.meetings : [],
+    tasks: Array.isArray(a.tasks) ? a.tasks : [],
+    emails: Array.isArray(a.emails) ? a.emails : [],
+  }
+})
 const supervisorPlan = computed(() => runResult.value?.supervisor_plan || {})
 const hasArtifacts = computed(() =>
   ['documents', 'meetings', 'tasks', 'emails'].some((key) => (artifactGroups.value[key] || []).length)
