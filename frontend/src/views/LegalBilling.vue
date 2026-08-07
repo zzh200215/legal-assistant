@@ -16,7 +16,7 @@
           </div>
         </div>
         <div v-else class="timer-start">
-          <el-input v-model="timerDescription" placeholder="计时描述（可选）" style="width:300px" />
+          <el-input v-model="timerDescription" placeholder="计时描述" style="width:300px" />
           <el-button type="primary" @click="startTimer">开始计时</el-button>
         </div>
       </div>
@@ -315,6 +315,8 @@ let timerInterval = null
 
 const startTimer = async () => {
   if (noCase.value) return ElMessage.warning('请先在顶部选择案件')
+  // 与手动录入一致：后端 TimeEntryCreate.description min_length=1，空描述会 422
+  if (!timerDescription.value.trim()) return ElMessage.warning('请输入计时描述')
   try {
     const { data } = await api.createTimeEntry(props.orgId, props.caseId, {
       description: timerDescription.value,
