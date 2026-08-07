@@ -17,6 +17,10 @@ frontend/node_modules/
 dist/
 frontend/dist/
 
+# Playwright artifacts
+frontend/test-results/
+frontend/playwright-report/
+
 # Chroma
 chroma_db/
 
