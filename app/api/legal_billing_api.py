@@ -166,7 +166,14 @@ def patch_time_entry(
     if body.description:
         entry.description = body.description
     if body.billable is not None:
-        entry.billable = body.billable
+        # 走确认流程固化 hourly_rate/billed_amount 快照；直接设 billable 会留下
+        # billed_amount=None，导致该条目永远无法生成费用通知单（invoice 过滤 billed_amount is not None）
+        try:
+            entry = billing_service.confirm_time_entry(
+                db=db, entry_id=entry_id, confirmed_by=current_user.id, billable=body.billable,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, detail={"code": "TIME_ENTRY_CONFIRM_REJECTED", "message": str(exc)}) from exc
 
     db.commit()
     db.refresh(entry)

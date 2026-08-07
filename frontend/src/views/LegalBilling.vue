@@ -488,10 +488,14 @@ const submitInvoice = async () => {
   if (!invoiceForm.value.issue_date) return ElMessage.warning('请输入通知日期')
   invoiceCreating.value = true
   try {
-    await api.createInvoice(props.orgId, {
+    // 账期可空字段以 null 发送（后端 Optional[date] 拒绝空串）
+    const payload = {
       ...invoiceForm.value,
+      billing_period_start: invoiceForm.value.billing_period_start || null,
+      billing_period_end: invoiceForm.value.billing_period_end || null,
       case_id: props.caseId,
-    })
+    }
+    await api.createInvoice(props.orgId, payload)
     ElMessage.success('费用通知单已创建')
     invoiceDialogVisible.value = false
     invoiceForm.value = { client_display_name: '', issue_date: '', billing_period_start: '', billing_period_end: '' }
