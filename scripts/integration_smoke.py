@@ -4,7 +4,7 @@ import os
 import sys
 import httpx
 
-BASE = "http://127.0.0.1:8011"
+BASE = os.environ.get("INTEGRATION_BASE", "http://127.0.0.1:8001")
 
 
 def _load_env_admin() -> tuple[str, str]:

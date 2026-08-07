@@ -1,13 +1,14 @@
 """深度联调：case 级读路径 + 写入路径 + LLM 降级验证（真实 MySQL 库）。
 
-依赖后端已启动（默认 127.0.0.1:8011）。输出每个路径的状态码；4xx/5xx 视为异常（LLM 降级除外）。
+依赖后端已启动（默认 127.0.0.1:8001，可用 INTEGRATION_BASE 覆盖）。输出每个路径的状态码；4xx/5xx 视为异常（LLM 降级除外）。
 """
 import json
+import os
 import sys
 import time
 import httpx
 
-BASE = "http://127.0.0.1:8011"
+BASE = os.environ.get("INTEGRATION_BASE", "http://127.0.0.1:8001")
 USER, PASS = "pilot01-lawyer", "Pilot@2026"
 
 ok, fail = [], []

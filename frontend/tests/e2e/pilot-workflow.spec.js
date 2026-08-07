@@ -47,6 +47,32 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
       return
     }
 
+    // U-1 角色化引导落地页（登录后路由到 /legal-onboarding）
+    if (method === 'GET' && path === '/developer/onboarding') {
+      await route.fulfill({ json: success({ user_role: 'solo_lawyer', completed_steps_json: '[]' }) })
+      return
+    }
+
+    // 工作台首屏：案件列表 + 剩余配额 + 门户品牌（避免 unexpected API 500）
+    if (method === 'GET' && path === '/legal/orgs/1/cases') {
+      await route.fulfill({ json: success([{ id: 1, title: '试点案件', status: 'in_progress', case_type: 'labor_dispute', organization_id: 1 }]) })
+      return
+    }
+    if (method === 'GET' && path === '/billing/subscriptions/quota') {
+      await route.fulfill({
+        json: success({
+          consultation: { quota: 8, remaining: 8 },
+          review: { quota: 8, remaining: 8 },
+          draft: { quota: 8, remaining: 8 },
+        }),
+      })
+      return
+    }
+    if (method === 'GET' && path === '/legal/orgs/1/portal-branding') {
+      await route.fulfill({ json: success({ portal_logo_url: '', portal_welcome_message: '' }) })
+      return
+    }
+
     if (request.headers().authorization !== 'Bearer pilot-e2e-token') {
       unexpectedApiRequests.push(`missing authorization: ${method} ${path}`)
       await route.fulfill({ status: 401, json: { detail: 'missing authorization' } })
@@ -111,7 +137,7 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
     }
 
     if (method === 'GET' && path === '/legal/review-stats') {
-      await route.fulfill({ json: success({}) })
+      await route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
       return
     }
 
@@ -124,22 +150,27 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
   await loginInputs.nth(0).fill('pilot_lawyer')
   await loginInputs.nth(1).fill('test-password')
   await page.getByRole('button', { name: '登录', exact: true }).click()
-  await expect(page).toHaveURL(/\/$/)
+  await expect(page).toHaveURL(/\/legal-onboarding/)
+  // U-1：引导落地页点「进入工作台」到达 /legal-workspace
+  await page.getByRole('button', { name: /进入工作台/ }).click()
+  await expect(page).toHaveURL(/\/legal-workspace/)
 
   await page.getByRole('tab', { name: '合同审查', exact: true }).click()
-  await page.getByPlaceholder('例如：技术服务合同').fill('试点技术服务合同')
+  await page.getByRole('textbox', { name: '合同标题' }).fill('试点技术服务合同')
   await page.getByPlaceholder('粘贴合同全文或主要条款...').fill('付款应以阶段验收完成为前提。')
   await page.getByRole('button', { name: '开始审查', exact: true }).click()
   await expect(page.getByText('付款与验收条款存在高风险，需要人工复核。')).toBeVisible()
   expect(requests.contractReview).toEqual({
     title: '试点技术服务合同',
     content: '付款应以阶段验收完成为前提。',
+    case_id: 1,
   })
 
   await page.getByRole('tab', { name: '关键日期', exact: true }).click()
   await page.getByPlaceholder('YYYY-MM-DD').fill('2026-08-15')
-  await page.getByPlaceholder('选择负责人').click()
-  await page.getByText('王律师', { exact: true }).click()
+  // EP 2.8+ el-select 的 placeholder 是 <span> 而非 input 属性，getByPlaceholder 匹配不到
+  await page.locator('.el-select:has-text("选择负责人")').click()
+  await page.getByRole('option', { name: '王律师' }).click()
   await page.getByPlaceholder('期限相关说明...').fill('提交答辩材料')
   await page.getByRole('button', { name: '创建期限', exact: true }).click()
   await expect.poll(() => requests.deadline).not.toBeNull()
@@ -156,7 +187,7 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
   await dialog.getByRole('button', { name: '创建', exact: true }).click()
   await expect(page.getByText('门户链接已创建，令牌前缀：pilot-otp')).toBeVisible()
   expect(requests.portal).toEqual({
-    client_email: 'client@example.com', expires_days: 7, require_email_verification: true,
+    client_email: 'client@example.com', expires_days: 30, require_email_verification: true,
   })
 
   expect(unexpectedApiRequests).toEqual([])

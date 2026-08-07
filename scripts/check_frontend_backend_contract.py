@@ -1,4 +1,4 @@
-"""前后端联调检测：前端 api/*.js 的每个 HTTP 调用 vs 后端真实路由。
+"""前后端联调检测：前端 api/*.js 及 src 下视图/组件里的每个 HTTP 调用 vs 后端真实路由。
 
 用法: python scripts/check_frontend_backend_contract.py
 输出: 不匹配列表（前端调用但后端无此路由 = 联调 404 风险）。
@@ -8,14 +8,20 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FRONTEND_API = ROOT / "frontend" / "src" / "api"
+FRONTEND_SRC = ROOT / "frontend" / "src"
 
 
 def extract_frontend_calls() -> list[tuple[str, str, str]]:
-    """返回 [(文件, METHOD, 规范化路径)]，路径参数 `${x}` → `{}`，去掉 query。"""
+    """返回 [(文件, METHOD, 规范化路径)]，路径参数 `${x}` → `{}`，去掉 query。
+
+    覆盖 api/*.js 的方法体，以及视图/组件里直接 `http.get('/...')` 的调用。
+    """
     calls = []
     method_re = re.compile(r"http\.(get|post|put|patch|delete)\s*\(")
-    for f in sorted(FRONTEND_API.glob("*.js")):
+    files = sorted(list(FRONTEND_SRC.rglob("*.js")) + list(FRONTEND_SRC.rglob("*.vue")))
+    for f in files:
+        if "node_modules" in f.parts:
+            continue
         src = f.read_text(encoding="utf-8")
         for m in method_re.finditer(src):
             method = m.group(1).upper()

@@ -126,7 +126,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElCard } from 'element-plus/es/components/card/index'
@@ -167,8 +167,8 @@ const {
   client: legalWorkspace,
   message: ElMessage,
   confirm: ElMessageBox.confirm,
-  organizationId: props.organizationId,
-  caseId: props.caseId,
+  organizationId: computed(() => props.organizationId),
+  caseId: computed(() => props.caseId),
 })
 
 const branding = reactive({ portal_logo_url: '', portal_welcome_message: '' })

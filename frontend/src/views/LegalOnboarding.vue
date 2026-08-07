@@ -48,7 +48,7 @@ const steps = computed(() => ({
 
 onMounted(async () => {
   try {
-    const { data } = await http.get('/legal/onboarding')
+    const { data } = await http.get('/developer/onboarding')
     if (data) {
       role.value = data.user_role || role.value
       completed.value = JSON.parse(data.completed_steps_json || '[]')
@@ -58,7 +58,7 @@ onMounted(async () => {
 
 async function complete() {
   completed.value = steps.value
-  await http.put('/legal/onboarding', { user_role: role.value, completed_steps_json: JSON.stringify(completed.value) })
+  await http.put('/developer/onboarding', { user_role: role.value, completed_steps_json: JSON.stringify(completed.value) })
   ElMessage.success('引导进度已保存')
 }
 

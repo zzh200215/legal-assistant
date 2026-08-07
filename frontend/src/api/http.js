@@ -38,8 +38,10 @@ http.interceptors.response.use(
   (err) => {
     const status = err.response?.status
     const isPublicPortalRequest = err.config?.url?.startsWith('/legal/portal/')
+    const onPublicRoute = router.currentRoute.value.meta?.public === true
 
-    if (status === 401 && !isPublicPortalRequest && !redirectPromise) {
+    // 公开路由（如客户门户 /portal/c/:token）上的 401 不应强制跳登录——组件自行处理错误态
+    if (status === 401 && !isPublicPortalRequest && !onPublicRoute && !redirectPromise) {
       localStorage.removeItem('token')
       redirectPromise = router.push('/login').finally(() => { redirectPromise = null })
     }

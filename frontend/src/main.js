@@ -111,4 +111,9 @@ window.addEventListener('unhandledrejection', (event) => {
 app.directive('loading', ElLoadingDirective)
 app.use(router)
 router.onError(showRuntimeError)
-app.mount('#app')
+// 等初始导航解析完成再挂载：否则 App.vue 挂载时 route 还是初始空路由，
+// isPublicRoute 判断为 false，会在公开路由（客户门户 /portal/c/:token）上误触发 /auth/me
+router.isReady()
+  .then(() => app.mount('#app'))
+  // 懒加载失败等导航异常时仍挂载，由 router.onError 展示错误而非白屏
+  .catch(() => app.mount('#app'))
