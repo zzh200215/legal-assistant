@@ -209,7 +209,7 @@ const doSubmitFeedback = async (score) => {
 const initOtp = async () => {
   try {
     const { data } = await api.portalSendOtp(token)
-    maskedEmail.value = data.masked_email || ''
+    maskedEmail.value = data.email_masked || ''
     startCooldown()
   } catch (e) {
     const detail = e.response?.data?.detail
@@ -239,7 +239,7 @@ const resendOtp = async () => {
   resendLoading.value = true
   try {
     const { data } = await api.portalSendOtp(token)
-    maskedEmail.value = data.masked_email || maskedEmail.value
+    maskedEmail.value = data.email_masked || maskedEmail.value
     startCooldown()
     ElMessage.success('验证码已重新发送')
   } catch (e) {
