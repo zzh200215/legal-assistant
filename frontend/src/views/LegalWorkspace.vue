@@ -618,7 +618,8 @@
         <LegalContracts :org-id="currentOrgId" :case-id="currentCaseId" />
       </el-tab-pane>
 
-      <el-tab-pane label="客户门户" name="portal">
+      <el-tab-pane label="客户门户" name="portal" lazy>
+        <!-- lazy：避免工作台加载时用默认 orgId=1 提前发出错误的 portal-branding 请求 -->
         <LegalPortalTab :organization-id="currentOrgId" :case-id="currentCaseId" />
       </el-tab-pane>
     </el-tabs>
