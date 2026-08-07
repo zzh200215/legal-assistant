@@ -38,11 +38,36 @@ import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import api from '../api'
-const orgId = Number(localStorage.getItem('organization_id') || 1)
+// org 不能从 localStorage 取：全项目从未写入 organization_id，恒为 1，非 org-1 的 admin 必然 403。
+// 从 /auth/me 解析真实组织，localStorage 仅作兜底。
+const orgId = ref(null)
 const apps = ref([]), summary = ref({}), name = ref(''), oneTimeKey = ref(''), error = ref('')
-async function load() { try { [apps.value, summary.value] = [(await api.listDeveloperApps(orgId)).data, (await api.getOperationsSummary(orgId)).data] } catch (e) { error.value = e.response?.data?.detail || '无管理员权限或数据加载失败' } }
-async function createApp() { if (!name.value.trim()) return; try { const { data } = await api.createDeveloperApp(orgId, { name: name.value }); oneTimeKey.value = data.api_key; name.value = ''; await load() } catch (e) { ElMessage.error(e.response?.data?.detail || '创建失败') } }
-async function rotate(row) { try { const { data } = await api.rotateDeveloperKey(orgId, row.id); oneTimeKey.value = data.new_api_key } catch (e) { ElMessage.error(e.response?.data?.detail || '轮换失败') } }
+async function load() {
+  try {
+    const { data } = await api.getMe()
+    orgId.value = Number(data?.organization_id) || Number(localStorage.getItem('organization_id')) || null
+  } catch {
+    orgId.value = Number(localStorage.getItem('organization_id')) || null
+  }
+  if (!orgId.value) { error.value = '无法解析组织信息，请重新登录'; return }
+  try {
+    const [appsRes, summaryRes] = await Promise.all([
+      api.listDeveloperApps(orgId.value),
+      api.getOperationsSummary(orgId.value),
+    ])
+    apps.value = appsRes.data
+    summary.value = summaryRes.data
+  } catch (e) { error.value = e.response?.data?.detail || '无管理员权限或数据加载失败' }
+}
+async function createApp() {
+  if (!orgId.value) return ElMessage.error('组织信息缺失，请刷新重试')
+  if (!name.value.trim()) return
+  try { const { data } = await api.createDeveloperApp(orgId.value, { name: name.value }); oneTimeKey.value = data.api_key; name.value = ''; await load() } catch (e) { ElMessage.error(e.response?.data?.detail || '创建失败') }
+}
+async function rotate(row) {
+  if (!orgId.value) return ElMessage.error('组织信息缺失，请刷新重试')
+  try { const { data } = await api.rotateDeveloperKey(orgId.value, row.id); oneTimeKey.value = data.new_api_key } catch (e) { ElMessage.error(e.response?.data?.detail || '轮换失败') }
+}
 onMounted(load)
 </script>
 <style scoped>.developer-page{max-width:1100px;margin:24px auto;padding:0 20px}.section{margin-top:16px}</style>

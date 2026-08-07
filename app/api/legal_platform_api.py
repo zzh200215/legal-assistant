@@ -45,7 +45,8 @@ class AppCreate(BaseModel):
 def _gen_open_api_key() -> tuple[str, str, str]:
     raw = "lzj_op_" + secrets.token_urlsafe(32)
     key_hash = hashlib.sha256(raw.encode()).hexdigest()
-    key_prefix = raw[:16]
+    # 列宽 String(12)，与 api_key_api 一致；超过 12 会触发 MySQL 1406
+    key_prefix = raw[:12]
     return raw, key_hash, key_prefix
 
 
