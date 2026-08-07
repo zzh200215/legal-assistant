@@ -50,3 +50,6 @@ scripts/review_feedback_state.json
 
 # Eval run artifacts (generated reports; dataset & scripts are tracked)
 eval/outputs/
+
+# External repo export artifacts (_repo_main.py, _repo_meta.json, etc.)
+_repo_*
