@@ -43,6 +43,10 @@ celery_app.conf.update(
             "task": "check_legal_deadline_reminders",
             "schedule": 900.0,  # 每15分钟
         },
+        "dispatch-notification-events": {
+            "task": "dispatch_notification_events",
+            "schedule": 60.0,
+        },
         "scan-overdue-invoices": {
             "task": "scan_overdue_invoices",
             "schedule": 3600.0,  # 每小时

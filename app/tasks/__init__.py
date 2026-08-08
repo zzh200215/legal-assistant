@@ -900,6 +900,23 @@ def scan_contract_expiry_alerts_task():
         db.close()
 
 
+@celery_app.task(name="dispatch_notification_events")
+def dispatch_notification_events_task():
+    """每60秒：投递已到提醒时间的 pending 通知事件。
+
+    站内通知标记为 delivered（进入铃铛未读），邮件渠道走 OutboundEmailService。
+    尚未到 scheduled_at 的事件跳过，到点后由后续 tick 投递。
+    """
+    _record_beat_heartbeat()
+    from app.services.notification_service import notification_service
+
+    db = SessionLocal()
+    try:
+        return notification_service.dispatch_pending(db=db)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="retry_failed_webhook_deliveries")
 def retry_failed_webhook_deliveries_task():
     """每5分钟：对失败次数 < 3 的 Webhook 投递进行指数退避重试（含 HMAC-SHA256 签名头）。"""
