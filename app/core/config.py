@@ -119,6 +119,8 @@ class Settings(BaseSettings):
     RAG_LLM_RERANK_ENABLED: bool = False
     RAG_LLM_RERANK_TOP_N: int = 5
     RAG_LLM_RERANK_MAX_CHARS: int = 400
+    LEGAL_DENSE_RECALL_MULTIPLIER: int = 3
+    LEGAL_DENSE_MIN_CANDIDATES: int = 30
     AGENTIC_RAG_ENABLED: bool = True
     AGENTIC_RAG_PLANNER_ENABLED: bool = True
     AGENTIC_RAG_MAX_RETRIEVAL_ROUNDS: int = Field(default=2, ge=1, le=3)

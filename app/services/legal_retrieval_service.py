@@ -17,9 +17,11 @@ import jieba
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.llm_client import LLMClient
+from app.core.llm_client import LLMClient, llm_client
 from app.models.legal import LegalArticle, LegalSource
 from app.services.legal_knowledge_graph_service import legal_knowledge_graph_service
+from app.services.rag_cache import rag_embedding_cache
+from app.services.rerank import LLMReranker
 from app.services.vector_store import build_vector_store
 
 logger = logging.getLogger(__name__)
@@ -84,7 +86,14 @@ class LegalRetrievalService:
             f"{source.title} {article.article_number} {article.title or ''}\n{article.content}"
             for article, source in rows
         ]
-        embeddings = await self.client.embed(documents, user_id=user_id, action="embedding")
+        if settings.RAG_EMBED_CACHE_ENABLED:
+            # RAG① 内容寻址：未变文章命中缓存不再重算嵌入
+            embeddings = await rag_embedding_cache.get_or_compute_batch(
+                documents,
+                lambda ms: self.client.embed(ms, user_id=user_id, action="embedding"),
+            )
+        else:
+            embeddings = await self.client.embed(documents, user_id=user_id, action="embedding")
         if len(embeddings) != len(rows):
             raise RuntimeError("embedding result count does not match legal articles")
         collection.add(
@@ -156,11 +165,22 @@ class LegalRetrievalService:
 
         dense_ids: list[int] = []
         try:
-            embedding = (await self.client.embed([query], user_id=user_id, action="embedding"))[0]
+            if settings.RAG_EMBED_CACHE_ENABLED:
+                query_embeddings = await rag_embedding_cache.get_or_compute_batch(
+                    [query],
+                    lambda ms: self.client.embed(ms, user_id=user_id, action="embedding"),
+                )
+                embedding = query_embeddings[0]
+            else:
+                embedding = (await self.client.embed([query], user_id=user_id, action="embedding"))[0]
+            n_results = max(
+                limit * settings.LEGAL_DENSE_RECALL_MULTIPLIER,
+                settings.LEGAL_DENSE_MIN_CANDIDATES,
+            )
             result = await asyncio.to_thread(
                 self._collection().query,
                 query_embeddings=[embedding],
-                n_results=max(limit * 3, 30),
+                n_results=n_results,
                 where={"user_id": user_id, "status": {"$ne": "inactive"}},
             )
             for metadata in (result.get("metadatas") or [[]])[0]:
@@ -195,7 +215,7 @@ class LegalRetrievalService:
 
         by_id = {item["article_id"]: item for item in article_data}
         ranked_ids = sorted(fused, key=lambda article_id: fused[article_id], reverse=True)[:limit]
-        return [
+        results = [
             {
                 "id": by_id[article_id]["article_id"],
                 "source_id": by_id[article_id]["source_id"],
@@ -210,6 +230,39 @@ class LegalRetrievalService:
             }
             for article_id in ranked_ids
         ]
+        return await self._maybe_llm_rerank(query, results, user_id)
+
+    async def _maybe_llm_rerank(self, query: str, ranked: list[dict], user_id: int) -> list[dict]:
+        """RAG④：开启 LLM 重排时对融合 top-N 用 qwen-plus 打分重排；失败回退融合顺序。"""
+        if not settings.RAG_LLM_RERANK_ENABLED or len(ranked) < 2:
+            return ranked
+        top_n = ranked[: settings.RAG_LLM_RERANK_TOP_N]
+        if len(top_n) < 2:
+            return ranked
+        try:
+            prompt = self._build_llm_rerank_prompt(query, top_n)
+            response = await llm_client.generate(
+                prompt, temperature=0.0, action="rag_rerank", user_id=user_id,
+            )
+            scores = LLMReranker._parse_scores(response)
+            reordered = LLMReranker._apply_scores(top_n, scores)
+            return (reordered + ranked[len(top_n):])[: len(ranked)]
+        except Exception as exc:  # noqa: BLE001 - 重排失败不阻断检索
+            logger.warning("Legal LLM rerank failed; keeping fused order (%s)", type(exc).__name__)
+            return ranked
+
+    @staticmethod
+    def _build_llm_rerank_prompt(query: str, candidates: list[dict]) -> str:
+        lines = []
+        for index, candidate in enumerate(candidates):
+            snippet = (candidate.get("content") or "")[: settings.RAG_LLM_RERANK_MAX_CHARS]
+            lines.append(f"[{index}] {snippet}")
+        return (
+            "你是法律检索相关性评判。请按与问题的相关程度给每个法条片段打分（0-10 整数，越高越相关）。"
+            "只输出 JSON：{\"scores\":[<int>,...]}，不要输出其他内容。\n"
+            f"问题：{query}\n"
+            + "\n".join(lines)
+        )
 
 
 legal_retrieval_service = LegalRetrievalService()

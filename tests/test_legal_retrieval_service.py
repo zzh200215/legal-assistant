@@ -4,7 +4,7 @@ Tests run entirely in-process: in-memory SQLite, ephemeral Chroma collection,
 and mocked embed calls.  No external services, no disk writes.
 """
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import chromadb
 from sqlalchemy import create_engine
@@ -102,6 +102,57 @@ class LegalRetrievalServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(results), 0)
         ids = [r["id"] for r in results]
         self.assertIn(art.id, ids)
+
+    async def test_search_uses_embedding_cache(self):
+        """RAG①：同一查询两次，查询嵌入只算一次（第二次命中缓存）。"""
+        src = _fake_source(self.db, title="劳动合同法", citation="劳动合同法")
+        _fake_article(self.db, src.id, article_number="第47条", content="经济补偿按工作年限计算")
+        self.db.commit()
+
+        await self.service.search(self.db, "经济补偿", user_id=USER_ID)
+        await self.service.search(self.db, "经济补偿", user_id=USER_ID)
+        self.assertEqual(self.fake_llm.embed.call_count, 1)
+
+    async def test_index_source_skips_unchanged_embeddings(self):
+        """RAG①：同一 source 重复索引，未变文章不重算嵌入。"""
+        src = _fake_source(self.db, title="劳动合同法", citation="劳动合同法")
+        _fake_article(self.db, src.id, article_number="第47条", content="经济补偿按工作年限计算")
+        self.db.commit()
+
+        await self.service.index_source(self.db, src.id, USER_ID)
+        await self.service.index_source(self.db, src.id, USER_ID)
+        self.assertEqual(self.fake_llm.embed.call_count, 1)
+
+    async def test_llm_rerank_reorders_when_enabled(self):
+        """RAG④：开启 LLM 重排后，融合结果按 LLM 分数重排并附 llm_rerank_score。"""
+        src = _fake_source(self.db, title="劳动合同法", citation="劳动合同法")
+        art1 = _fake_article(self.db, src.id, article_number="第47条", content="经济补偿按工作年限计算")
+        art2 = _fake_article(self.db, src.id, article_number="第48条", content="经济补偿标准为本地区平均工资")
+        self.db.commit()
+        self.assertEqual(self.fake_llm.embed.call_count, 0)
+
+        with patch("app.services.legal_retrieval_service.settings.RAG_LLM_RERANK_ENABLED", True), patch(
+            "app.services.legal_retrieval_service.llm_client.generate",
+            new=AsyncMock(return_value='{"scores": [5, 9]}'),
+        ) as mock_gen:
+            results = await self.service.search(self.db, "经济补偿", user_id=USER_ID)
+        mock_gen.assert_awaited()
+        self.assertGreater(len(results), 0)
+        self.assertEqual(results[0]["llm_rerank_score"], 9)
+
+    async def test_llm_rerank_disabled_keeps_fused_order(self):
+        """RAG④：默认关闭时不调用 LLM，顺序保持融合结果。"""
+        src = _fake_source(self.db, title="劳动合同法", citation="劳动合同法")
+        _fake_article(self.db, src.id, article_number="第47条", content="经济补偿按工作年限计算")
+        self.db.commit()
+
+        with patch("app.services.legal_retrieval_service.settings.RAG_LLM_RERANK_ENABLED", False), patch(
+            "app.services.legal_retrieval_service.llm_client.generate",
+            new=AsyncMock(),
+        ) as mock_gen:
+            results = await self.service.search(self.db, "经济补偿", user_id=USER_ID)
+        mock_gen.assert_not_awaited()
+        self.assertFalse(any("llm_rerank_score" in r for r in results))
 
     async def test_citation_pattern_boosts_matching_article_number(self):
         src = _fake_source(self.db, title="劳动合同法", citation="劳动合同法")
