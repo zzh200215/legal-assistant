@@ -27,6 +27,13 @@
       <el-table :data="portalLinks" stripe size="small">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="token_prefix" label="令牌前缀" width="120" />
+        <el-table-column label="类型" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.aggregate_case ? 'primary' : 'info'" size="small" effect="plain">
+              {{ row.aggregate_case ? '聚合' : '定向' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="有效期">
           <template #default="{ row }">
             <span>{{ formatDate(row.expires_at) }}</span>
@@ -116,6 +123,10 @@
           </el-select>
         </el-form-item>
         <el-form-item label="邮箱验证"><el-tag type="success">强制启用</el-tag></el-form-item>
+        <el-form-item label="聚合全部">
+          <el-switch v-model="portalForm.aggregate_case" />
+          <div class="aggregate-hint">开启后该链接自动展示本案件全部已发布客户可见内容（进度+文书），一个案件一个URL</div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showPortalDialog = false">取消</el-button>
@@ -136,6 +147,8 @@ import { ElInput } from 'element-plus/es/components/input/index'
 import { ElOption, ElSelect } from 'element-plus/es/components/select/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import { ElTag } from 'element-plus/es/components/tag/index'
+import { ElSwitch } from 'element-plus/es/components/switch/index'
+import 'element-plus/es/components/switch/style/css'
 import { legalWorkspace } from '../../api'
 import { useLegalCaseCollaboration } from '../../composables/useLegalCaseCollaboration'
 import { formatDate } from '../../composables/useLegalWorkspacePresentation'
@@ -244,5 +257,11 @@ watch(
 .tab-panel {
   display: grid;
   gap: 20px;
+}
+.aggregate-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin-top: 4px;
 }
 </style>

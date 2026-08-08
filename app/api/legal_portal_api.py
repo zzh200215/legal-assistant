@@ -412,6 +412,8 @@ class PortalLinkCreate(BaseModel):
     expires_days: int = Field(default=30, description="链接有效天数，只允许 7/30/90，默认 30（#93）")
     max_access_count: Optional[int] = Field(None, ge=1)
     require_email_verification: int = Field(1, ge=0, le=1)
+    aggregate_case: int = Field(0, ge=0, le=1,
+                                description="1=聚合该案件全部已发布客户可见内容（一个案件一个URL）")
     items: List[dict] = Field(default_factory=list, description="[{item_type, item_id}]")
 
     @field_validator("client_email")
@@ -471,6 +473,10 @@ def create_portal_link(
             db=db,
         )
 
+    # 聚合案件门户聚合全部已发布内容（含文书），一律要求邮箱验证
+    if body.aggregate_case and require_verification == 0:
+        raise HTTPException(400, detail="聚合案件门户必须开启邮箱验证")
+
     raw_token = secrets.token_urlsafe(32)
     token_hash = _hash_token(raw_token)
     token_prefix = raw_token[:8]
@@ -487,6 +493,7 @@ def create_portal_link(
         is_permanent=0,
         max_access_count=body.max_access_count,
         require_email_verification=require_verification,
+        aggregate_case=body.aggregate_case,
         created_by=current_user.id,
     )
     db.add(link)
@@ -714,32 +721,57 @@ def portal_get_content(
     progress_updates = []
     documents = []
     from app.models.document import Document
-    for item in items:
-        if item.item_type == "progress_update":
-            update = db.query(LegalCaseProgressUpdate).filter(
-                LegalCaseProgressUpdate.id == item.item_id,
-                LegalCaseProgressUpdate.case_id == link.case_id,
-                LegalCaseProgressUpdate.organization_id == link.organization_id,
-                LegalCaseProgressUpdate.visibility == "client_visible",
-                LegalCaseProgressUpdate.status == "published",
-            ).first()
-            if update:
-                progress_updates.append({"id": update.id, "title": update.title, "body": update.body,
-                                         "next_steps": update.next_steps,
-                                         "published_at": update.published_at,
-                                         "status": update.status})
-        elif item.item_type == "document":
-            document = db.query(Document).filter(
-                Document.id == item.item_id,
-                Document.organization_id == link.organization_id,
-                Document.download_enabled.is_(True),
-            ).first()
+
+    if link.aggregate_case:
+        # 聚合：#79 P2 一个案件一个URL——自动包含该案全部已发布客户可见内容
+        all_updates = db.query(LegalCaseProgressUpdate).filter(
+            LegalCaseProgressUpdate.case_id == link.case_id,
+            LegalCaseProgressUpdate.organization_id == link.organization_id,
+            LegalCaseProgressUpdate.visibility == "client_visible",
+            LegalCaseProgressUpdate.status == "published",
+        ).all()
+        progress_updates = [{"id": u.id, "title": u.title, "body": u.body,
+                             "next_steps": u.next_steps,
+                             "published_at": u.published_at, "status": u.status}
+                            for u in all_updates]
+        all_docs = db.query(Document).filter(
+            Document.organization_id == link.organization_id,
+            Document.download_enabled.is_(True),
+        ).all()
+        for document in all_docs:
             try:
                 metadata = json.loads(document.metadata_json or "{}") if document else {}
             except (TypeError, ValueError):
                 metadata = {}
-            if document and metadata.get("case_id") == link.case_id:
+            if metadata.get("case_id") == link.case_id:
                 documents.append({"id": document.id, "title": document.title, "file_type": document.file_type})
+    else:
+        for item in items:
+            if item.item_type == "progress_update":
+                update = db.query(LegalCaseProgressUpdate).filter(
+                    LegalCaseProgressUpdate.id == item.item_id,
+                    LegalCaseProgressUpdate.case_id == link.case_id,
+                    LegalCaseProgressUpdate.organization_id == link.organization_id,
+                    LegalCaseProgressUpdate.visibility == "client_visible",
+                    LegalCaseProgressUpdate.status == "published",
+                ).first()
+                if update:
+                    progress_updates.append({"id": update.id, "title": update.title, "body": update.body,
+                                             "next_steps": update.next_steps,
+                                             "published_at": update.published_at,
+                                             "status": update.status})
+            elif item.item_type == "document":
+                document = db.query(Document).filter(
+                    Document.id == item.item_id,
+                    Document.organization_id == link.organization_id,
+                    Document.download_enabled.is_(True),
+                ).first()
+                try:
+                    metadata = json.loads(document.metadata_json or "{}") if document else {}
+                except (TypeError, ValueError):
+                    metadata = {}
+                if document and metadata.get("case_id") == link.case_id:
+                    documents.append({"id": document.id, "title": document.title, "file_type": document.file_type})
 
     # #93：进展按发布时间倒序（时间线展示）
     progress_updates.sort(key=lambda u: u["published_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
@@ -837,13 +869,15 @@ def portal_download_document(
     _require_portal_session(link, x_portal_session)
     ip_hash = _hash_ip(request.client.host if request.client else None)
 
-    item = db.query(LegalPortalLinkItem).filter(
-        LegalPortalLinkItem.portal_link_id == link.id,
-        LegalPortalLinkItem.item_type == "document",
-        LegalPortalLinkItem.item_id == document_id,
-    ).first()
-    if not item:
-        raise HTTPException(404, detail=err(PORTAL_LINK_UNAVAILABLE))
+    # 非聚合链接仅允许下载已显式发布到该链接的文书；聚合链接放开到案件维度（仍校验属于该案）
+    if not link.aggregate_case:
+        item = db.query(LegalPortalLinkItem).filter(
+            LegalPortalLinkItem.portal_link_id == link.id,
+            LegalPortalLinkItem.item_type == "document",
+            LegalPortalLinkItem.item_id == document_id,
+        ).first()
+        if not item:
+            raise HTTPException(404, detail=err(PORTAL_LINK_UNAVAILABLE))
 
     from app.models.document import Document
     from app.services.document_delivery_service import DocumentDeliveryError, document_delivery_service

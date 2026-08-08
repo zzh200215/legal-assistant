@@ -4,7 +4,7 @@ export function useLegalCaseCollaboration({ client, message, confirm, organizati
   const portalLinks = ref([])
   const showPortalDialog = ref(false)
   const portalCreating = ref(false)
-  const portalForm = ref({ client_email: '', expires_days: 30, require_email_verification: true })
+  const portalForm = ref({ client_email: '', expires_days: 30, require_email_verification: true, aggregate_case: false })
   const progressUpdates = ref([])
   const progressForm = ref({ title: '', body: '', next_steps: '', visibility: 'internal' })
   const progressLoading = ref(false)
@@ -21,7 +21,7 @@ export function useLegalCaseCollaboration({ client, message, confirm, organizati
       const { data } = await client.createPortalLink(organizationId.value, caseId.value, portalForm.value)
       message.success(`门户链接已创建，令牌前缀：${data.token_prefix}`)
       showPortalDialog.value = false
-      portalForm.value = { client_email: '', expires_days: 30, require_email_verification: true }
+      portalForm.value = { client_email: '', expires_days: 30, require_email_verification: true, aggregate_case: false }
       await loadPortalLinks()
     } catch (error) { message.error(error.response?.data?.detail || '创建失败') } finally { portalCreating.value = false }
   }

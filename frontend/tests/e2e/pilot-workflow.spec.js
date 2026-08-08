@@ -193,7 +193,7 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
   await dialog.getByRole('button', { name: '创建', exact: true }).click()
   await expect(page.getByText('门户链接已创建，令牌前缀：pilot-otp')).toBeVisible()
   expect(requests.portal).toEqual({
-    client_email: 'client@example.com', expires_days: 30, require_email_verification: true,
+    client_email: 'client@example.com', expires_days: 30, require_email_verification: true, aggregate_case: false,
   })
 
   expect(unexpectedApiRequests).toEqual([])

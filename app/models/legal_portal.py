@@ -43,6 +43,8 @@ class LegalPortalLink(Base):
     max_access_count = Column(Integer, nullable=True, comment="NULL=不限次数")
     access_count = Column(Integer, nullable=False, default=0)
     require_email_verification = Column(Integer, nullable=False, default=1)
+    aggregate_case = Column(Integer, nullable=False, default=0,
+                            comment="1=聚合该案件全部已发布客户可见内容（一个案件一个URL，#79 P2）")
     status = Column(String(16), nullable=False, default="active", index=True,
                     comment="active / expired / revoked / access_limited")
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
