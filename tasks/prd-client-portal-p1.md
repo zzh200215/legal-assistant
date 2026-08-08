@@ -125,5 +125,6 @@ US-001~US-004 已全部实现并通过验证：
 - **浏览器验证**：Playwright 10/10（铃铛未读=2→全部已读、状态列三态、375px 无横向滚动）。
 - **e2e 回归**：16 个 spec 补充 notifications mock + 修复 tasks-flow toast 双匹配脆弱点；全量 24 passed / 3 skipped / 0 failed。
 - 提交：`1dacaea feat(portal): notify lawyers on link expiry, add notification center + mobile polish`
+- 后续补齐：`9577e0c` 新增 `dispatch_notification_events` beat 任务调度 `notification_service.dispatch_pending`，deadline/contract/审批等 pending 通知投递为 delivered 进入铃铛未读（此前对律师不可见）。
 
-遗留（非本次范围，见 Non-Goals）：P2 门户访问分析入周报、多链接聚合页、P3 客户可见账单对账、deadline/contract 通知 pending 状态对铃铛不可见。
+遗留（非本次范围，见 Non-Goals）：P2 门户访问分析入周报、多链接聚合页、P3 客户可见账单对账。
