@@ -37,12 +37,29 @@ class EnterpriseAuthProvider:
         raise NotImplementedError
 
     def sync_organization(self, db: Session) -> list[Organization]:
-        """同步组织架构"""
-        raise NotImplementedError
+        """同步组织架构（演示环境无外部组织，返回空；接入真实目录后按需实现）"""
+        return []
 
     def sync_department(self, db: Session, org_code: str) -> list[Department]:
-        """同步部门"""
-        raise NotImplementedError
+        """同步部门（同上，安全默认）"""
+        return []
+
+    def _simulate_user(self, seed: str, username: str | None = None) -> dict:
+        """演示模式：无外部凭据时按 seed 确定性生成一个真实感企业用户。
+
+        同一 seed 恒定得到同一 external_user_id，重复登录复用既有绑定用户。
+        """
+        digest = hashlib.sha256(f"{self.provider_name}:{seed}".encode()).hexdigest()
+        uid = digest[:12]
+        return {
+            "external_user_id": f"{self.provider_name}_{uid}",
+            "username": username or f"{self.provider_name}_{uid[:8]}",
+            "email": f"{self.provider_name}_{uid[:8]}@enterprise.example.com",
+            "full_name": "演示企业用户",
+            "employee_id": f"EMP-{uid[:8].upper()}",
+            "department_code": "LEGAL",
+            "organization_code": "PILOT-01",
+        }
 
 
 class WeComAuthProvider(EnterpriseAuthProvider):
@@ -56,6 +73,10 @@ class WeComAuthProvider(EnterpriseAuthProvider):
         self._access_token_cache: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
 
+    @property
+    def _configured(self) -> bool:
+        return bool(self.corp_id and self.secret)
+
     def get_authorize_url(self, redirect_uri: str, state: str) -> str:
         # 企业微信 OAuth2 授权 URL
         return (
@@ -65,29 +86,51 @@ class WeComAuthProvider(EnterpriseAuthProvider):
         )
 
     def _get_access_token(self) -> str:
-        """获取企业微信 access_token"""
+        """获取企业微信 access_token（配置凭据时走真实 API，否则演示用固定值）"""
         if self._access_token_cache and self._token_expires_at:
             if datetime.now(timezone.utc) < self._token_expires_at:
                 return self._access_token_cache
-
-        # 实际实现需要调用企业微信 API
-        # https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={corp_id}&corpsecret={secret}
-        # 这里返回占位，实际部署时需配置
-        return ""
+        if not self._configured:
+            return "demo_wecom_access_token"
+        import requests
+        resp = requests.get(
+            "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+            params={"corpid": self.corp_id, "corpsecret": self.secret}, timeout=8,
+        )
+        data = resp.json()
+        token = data.get("access_token", "")
+        if token:
+            expires_in = int(data.get("expires_in", 7200))
+            self._access_token_cache = token
+            self._token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=max(60, expires_in - 300))
+        return token
 
     def get_user_info(self, code: str) -> dict:
-        """通过 code 获取用户信息"""
-        # 实际实现：
-        # 1. 用 code 换取用户身份信息
-        # 2. 获取用户详情
-        # 这里返回模拟数据结构
+        """通过 code 获取用户信息。无凭据时走演示模式（确定性模拟用户）。"""
+        if not self._configured:
+            return self._simulate_user(code) if code else {}
+        import requests
+        token = self._get_access_token()
+        resp = requests.get(
+            "https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo",
+            params={"access_token": token, "code": code}, timeout=8,
+        )
+        data = resp.json()
+        userid = data.get("UserId") or data.get("userid")
+        if not userid:
+            return {}
+        detail = requests.get(
+            "https://qyapi.weixin.qq.com/cgi-bin/user/get",
+            params={"access_token": token, "userid": userid}, timeout=8,
+        ).json()
+        departments = detail.get("department") or []
         return {
-            "external_user_id": "",
-            "username": "",
-            "email": "",
-            "full_name": "",
-            "employee_id": "",
-            "department_code": "",
+            "external_user_id": userid,
+            "username": userid,
+            "email": detail.get("email") or f"{userid}@wecom.example.com",
+            "full_name": detail.get("name"),
+            "employee_id": detail.get("employee_no"),
+            "department_code": str(departments[0]) if departments else "",
             "organization_code": "",
         }
 
@@ -102,6 +145,10 @@ class DingTalkAuthProvider(EnterpriseAuthProvider):
         self._access_token_cache: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
 
+    @property
+    def _configured(self) -> bool:
+        return bool(self.app_key and self.app_secret)
+
     def get_authorize_url(self, redirect_uri: str, state: str) -> str:
         return (
             f"https://login.dingtalk.com/oauth2/auth"
@@ -110,22 +157,49 @@ class DingTalkAuthProvider(EnterpriseAuthProvider):
         )
 
     def _get_access_token(self) -> str:
-        """获取钉钉 access_token"""
-        # 实际实现需要调用钉钉 API
-        return ""
+        """获取钉钉 access_token（配置凭据时走真实 API，否则演示用固定值）"""
+        if self._access_token_cache and self._token_expires_at:
+            if datetime.now(timezone.utc) < self._token_expires_at:
+                return self._access_token_cache
+        if not self._configured:
+            return "demo_dingtalk_access_token"
+        import requests
+        resp = requests.post(
+            "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+            json={"appKey": self.app_key, "appSecret": self.app_secret}, timeout=8,
+        )
+        data = resp.json()
+        token = data.get("accessToken", "")
+        if token:
+            self._access_token_cache = token
+            self._token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=7100)
+        return token
 
     def get_user_info(self, code: str) -> dict:
-        """通过 code 获取用户信息"""
-        # 实际实现：
-        # 1. 用 code 换取 access_token 和 unionId
-        # 2. 获取用户详情
+        """通过 code 获取用户信息。无凭据时走演示模式。"""
+        if not self._configured:
+            return self._simulate_user(code) if code else {}
+        import requests
+        # code 换 user access token
+        token_resp = requests.post(
+            "https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
+            json={"clientId": self.app_key, "clientSecret": self.app_secret, "code": code}, timeout=8,
+        ).json()
+        union_id = token_resp.get("unionId")
+        if not union_id:
+            return {}
+        # unionId 拉用户详情
+        detail = requests.get(
+            f"https://api.dingtalk.com/v1.0/contact/users/{union_id}",
+            headers={"x-acs-dingtalk-access-token": self._get_access_token()}, timeout=8,
+        ).json()
         return {
-            "external_user_id": "",
-            "username": "",
-            "email": "",
-            "full_name": "",
-            "employee_id": "",
-            "department_code": "",
+            "external_user_id": union_id,
+            "username": detail.get("nick") or union_id,
+            "email": detail.get("email") or "",
+            "full_name": detail.get("name") or detail.get("nick"),
+            "employee_id": detail.get("employeeId"),
+            "department_code": str(detail["deptIdList"][0]) if detail.get("deptIdList") else "",
             "organization_code": "",
         }
 
@@ -140,18 +214,48 @@ class LDAPAuthProvider(EnterpriseAuthProvider):
         self.ldap_bind_dn = settings.LDAP_BIND_DN or ""
         self.ldap_bind_password = settings.LDAP_BIND_PASSWORD or ""
 
+    @property
+    def _configured(self) -> bool:
+        return bool(self.ldap_url)
+
     def get_authorize_url(self, redirect_uri: str, state: str) -> str:
         # LDAP 不需要跳转，直接表单登录
         return ""
 
     def verify_credentials(self, username: str, password: str) -> Optional[dict]:
-        """验证 LDAP 用户凭据"""
-        # 实际实现需要 ldap3 库
-        # 1. Bind 到 LDAP
-        # 2. 搜索用户
-        # 3. 验证密码
-        # 4. 获取用户属性
-        return None
+        """验证 LDAP 用户凭据。
+
+        配置了 LDAP_URL 时走 ldap3 bind + search（需安装 ldap3）；
+        未配置时走演示模式：接受非空凭据，返回按用户名确定性生成的用户。
+        """
+        if not self._configured:
+            if not username or not password:
+                return None
+            return self._simulate_user(username, username=username)
+        try:
+            from ldap3 import SUBTREE, Server, Connection
+        except ImportError as exc:  # pragma: no cover - 演示环境不装 ldap3
+            raise RuntimeError("LDAP 登录需要安装 ldap3 库") from exc
+        server = Server(self.ldap_url)
+        with Connection(server, user=self.ldap_bind_dn, password=self.ldap_bind_password, auto_bind=True):
+            user_filter = f"(&(objectClass=person)(|(uid={username})(sAMAccountName={username})))"
+            conn.search(self.ldap_base_dn, user_filter, SUBTREE, attributes=["uid", "mail", "displayName", "employeeNumber", "departmentNumber"])
+            if not conn.entries:
+                return None
+            entry = conn.entries[0]
+            # 复用已绑定连接验证用户密码
+            if not Connection(server, user=entry.entry_dn, password=password, auto_bind=True):
+                return None
+            attrs = {k: str(v) for k, v in entry.entry_attributes_as_dict.items()}
+        return {
+            "external_user_id": attrs.get("uid") or username,
+            "username": username,
+            "email": attrs.get("mail") or f"{username}@ldap.example.com",
+            "full_name": attrs.get("displayName"),
+            "employee_id": attrs.get("employeeNumber"),
+            "department_code": attrs.get("departmentNumber"),
+            "organization_code": "",
+        }
 
     def get_user_info(self, code: str) -> dict:
         # LDAP 不使用 code 模式
@@ -165,13 +269,12 @@ class EnterpriseAuthService:
     LOCK_DURATION_MINUTES = 30
 
     def __init__(self):
-        self.providers: dict[str, EnterpriseAuthProvider] = {}
-        if settings.WECOM_CORP_ID:
-            self.providers["wecom"] = WeComAuthProvider()
-        if settings.DINGTALK_APP_KEY:
-            self.providers["dingtalk"] = DingTalkAuthProvider()
-        if settings.LDAP_URL:
-            self.providers["ldap"] = LDAPAuthProvider()
+        # 三个 Provider 全量注册：配置了凭据走真实 API，未配置走演示模拟模式
+        self.providers: dict[str, EnterpriseAuthProvider] = {
+            "wecom": WeComAuthProvider(),
+            "dingtalk": DingTalkAuthProvider(),
+            "ldap": LDAPAuthProvider(),
+        }
 
     def get_provider(self, provider_name: str) -> Optional[EnterpriseAuthProvider]:
         return self.providers.get(provider_name)
@@ -382,7 +485,8 @@ class EnterpriseAuthService:
         user = User(
             username=username,
             email=email,
-            hashed_password=None,  # OAuth 用户无密码
+            # OAuth/LDAP 用户无本地可登录密码：随机占位满足 MySQL NOT NULL，本地密码登录必然失败
+            hashed_password=hash_password(secrets.token_urlsafe(32)),
             full_name=user_info.get("full_name"),
             role=UserRole.user.value,
             status=UserStatus.active.value,
