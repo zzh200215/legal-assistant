@@ -322,6 +322,92 @@ class RagServiceTests(unittest.TestCase):
         self.assertIn("[视觉摘要]", captured["texts"][0])
         self.assertIn("公司公章", captured["texts"][0])
 
+    def test_dense_multi_recall_uses_embedding_cache(self):
+        """RAG①：同一查询两次，查询嵌入只计算一次（第二次命中缓存）。"""
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1, 0.2] for _ in texts]
+
+        fake_query = {
+            "ids": [["doc1_chunk0"]],
+            "documents": [["内容"]],
+            "metadatas": [[{"document_id": 1}]],
+            "distances": [[0.2]],
+        }
+
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+            rag_service.collection, "query", return_value=fake_query,
+        ):
+            asyncio.run(rag_service._dense_multi_recall(["同一查询问题"], where=None, candidate_limit=3, user_id=7))
+            asyncio.run(rag_service._dense_multi_recall(["同一查询问题"], where=None, candidate_limit=3, user_id=7))
+        self.assertEqual(mock_embed.call_count, 1)
+
+    def test_index_document_skips_unchanged_chunk_embeddings(self):
+        """RAG①：同一文档重复索引，未变 chunk 不重算嵌入。"""
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1, 0.2] for _ in texts]
+
+        chunks = [{"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "不变的内容", "section_path": []}]
+
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+            rag_service.collection, "get", return_value={"ids": [], "documents": []},
+        ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
+            rag_service.collection, "add", return_value=None,
+        ):
+            rag_service.index_document(5, chunks, user_id=7)
+            rag_service.index_document(5, chunks, user_id=7)
+        self.assertEqual(mock_embed.call_count, 1)
+
+    def test_build_where_includes_knowledge_base_and_status(self):
+        """RAG②：_build_where 追加 knowledge_base_id / document_status 等值子句；None 不产生子句。"""
+        w = rag_service._build_where(document_id=1, user_id=7, knowledge_base_id=3, document_status="indexed")
+        self.assertIn({"knowledge_base_id": 3}, w["$and"])
+        self.assertIn({"document_status": "indexed"}, w["$and"])
+        # 默认行为不变：无过滤时仅按 document_id
+        w2 = rag_service._build_where(document_id=1)
+        self.assertEqual(w2, {"document_id": 1})
+
+    def test_index_document_writes_scope_metadata(self):
+        """RAG②：index_document 将 knowledge_base_id / document_status 写入 upsert 元数据。"""
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1] for _ in texts]
+
+        added = {}
+        class FakeAdd:
+            def __call__(self, **kwargs):
+                added.update(kwargs)
+
+        chunks = [{"embedding_id": "doc6_chunk0", "chunk_index": 0, "content": "内容", "section_path": []}]
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
+            rag_service.collection, "get", return_value={"ids": [], "documents": []},
+        ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
+            rag_service.collection, "add", new=FakeAdd(),
+        ):
+            rag_service.index_document(6, chunks, user_id=7, knowledge_base_id=3, document_status="indexed")
+        meta = added["metadatas"][0]
+        self.assertEqual(meta["knowledge_base_id"], 3)
+        self.assertEqual(meta["document_status"], "indexed")
+
+    def test_search_async_threads_scope_filters(self):
+        """RAG②：search_async 把 knowledge_base_id / document_status 传给 _build_where。"""
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1] for _ in texts]
+
+        captured = {}
+        def spy(**kwargs):
+            captured.update(kwargs)
+            return None
+
+        with patch.object(rag_service, "_build_where", side_effect=spy), patch(
+            "app.services.rag_service.llm_client.embed", side_effect=fake_embed,
+        ), patch.object(rag_service.collection, "query", return_value={
+            "ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]],
+        }), patch.object(rag_service.collection, "get", return_value={
+            "ids": [], "documents": [], "metadatas": [],
+        }):
+            asyncio.run(rag_service.search_async("测试", knowledge_base_id=3, document_status="indexed", user_id=7))
+        self.assertEqual(captured.get("knowledge_base_id"), 3)
+        self.assertEqual(captured.get("document_status"), "indexed")
+
     def test_keyword_multi_recall_boosts_section_path_match(self):
         fake_rows = {
             "ids": ["doc1_chunk0", "doc1_chunk1"],

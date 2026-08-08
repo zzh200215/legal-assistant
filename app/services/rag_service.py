@@ -7,7 +7,9 @@ from app.core.config import get_settings
 from app.core.llm_client import llm_client
 from app.services.llm_observability_service import llm_observability_service
 from app.services.prompt_service import prompt_service
+from app.services.rag_cache import rag_embedding_cache
 from app.services.rag_runtime import resolve_runtime_config
+from app.services.rerank import build_reranker
 from app.services.vector_store import build_vector_store
 
 settings = get_settings()
@@ -19,6 +21,12 @@ class RAGService:
         self.store = build_vector_store()
         self.client = getattr(self.store, "client", None)
         self.collection = self.store.collection
+        # RAG③：内存 BM25 关键词索引（懒构建、索引后失效重建，替代每次全表扫描）
+        self._bm25_index = None
+        self._bm25_items: list[tuple] = []
+        self._bm25_stale = True
+        # RAG④：可插拔重排（默认启发式，RAG_LLM_RERANK_ENABLED 时用 LLM 重排）
+        self._reranker = build_reranker(self)
 
     def get_runtime_config(
         self,
@@ -42,7 +50,8 @@ class RAGService:
             context_max_chunks=context_max_chunks,
         )
 
-    def index_document(self, document_id: int, chunks: list[dict], user_id: int | None = None):
+    def index_document(self, document_id: int, chunks: list[dict], user_id: int | None = None,
+                       *, knowledge_base_id: int | None = None, document_status: str | None = None):
         if not chunks:
             return
         ids = [chunk["embedding_id"] for chunk in chunks]
@@ -63,33 +72,62 @@ class RAGService:
                     "visual_evidence": chunk.get("visual_evidence"),
                     "visual_region": chunk.get("visual_region"),
                     "user_id": user_id,
+                    "knowledge_base_id": knowledge_base_id,
+                    "document_status": document_status,
                 }
             )
             for chunk in chunks
         ]
         contents = [chunk.get("index_content") or chunk["content"] for chunk in chunks]
-        embeddings = asyncio.run(llm_client.embed(contents, user_id=user_id, action="embedding"))
+
+        # 旧 chunk 内容 hash 收集（供缓存清除），随后按 document_id 全删
+        old_hashes: list[str] = []
+        try:
+            old_rows = self.collection.get(where={"document_id": document_id}, include=["documents"])
+            old_hashes = [doc for doc in (old_rows.get("documents") or [])]
+        except Exception:
+            pass
         try:
             self.collection.delete(where={"document_id": document_id})
         except Exception:
             pass
+
+        if settings.RAG_EMBED_CACHE_ENABLED:
+            # 内容寻址：未变 chunk 命中缓存不再重算嵌入
+            embeddings = asyncio.run(
+                rag_embedding_cache.get_or_compute_batch(
+                    contents,
+                    lambda ms: llm_client.embed(ms, user_id=user_id, action="embedding"),
+                )
+            )
+            for old in old_hashes:
+                rag_embedding_cache.remove(old)
+        else:
+            embeddings = asyncio.run(llm_client.embed(contents, user_id=user_id, action="embedding"))
+
         self.collection.add(
             ids=ids,
             embeddings=embeddings,
             documents=contents,
             metadatas=metadatas,
         )
+        self._invalidate_bm25()
 
     @staticmethod
     def _compact_metadata(metadata: dict) -> dict:
         return {key: value for key, value in metadata.items() if value is not None}
 
-    def _build_where(self, document_id: int | None = None, user_id: int | None = None) -> dict | None:
+    def _build_where(self, document_id: int | None = None, user_id: int | None = None,
+                     knowledge_base_id: int | None = None, document_status: str | None = None) -> dict | None:
         clauses = []
         if document_id is not None:
             clauses.append({"document_id": document_id})
         if user_id is not None:
             clauses.append({"user_id": user_id})
+        if knowledge_base_id is not None:
+            clauses.append({"knowledge_base_id": knowledge_base_id})
+        if document_status is not None:
+            clauses.append({"document_status": document_status})
         if not clauses:
             return None
         if len(clauses) == 1:
@@ -105,6 +143,9 @@ class RAGService:
         min_recall_candidates: int | None = None,
         recall_multiplier: int | None = None,
         query_variant_limit: int | None = None,
+        *,
+        knowledge_base_id: int | None = None,
+        document_status: str | None = None,
     ) -> list[dict]:
         runtime_config = self.get_runtime_config(
             top_k=top_k,
@@ -112,7 +153,12 @@ class RAGService:
             recall_multiplier=recall_multiplier,
             query_variant_limit=query_variant_limit,
         )
-        where = self._build_where(document_id=document_id, user_id=user_id)
+        where = self._build_where(
+            document_id=document_id,
+            user_id=user_id,
+            knowledge_base_id=knowledge_base_id,
+            document_status=document_status,
+        )
         query_variants = self._rewrite_queries(query, limit=runtime_config["query_variant_limit"])
         candidate_limit = max(
             runtime_config["top_k"] * runtime_config["recall_multiplier"],
@@ -126,11 +172,12 @@ class RAGService:
             dense_candidates=dense_candidates,
             keyword_candidates=keyword_candidates,
         )
-        return self._rerank_candidates(
+        return await self._reranker.rerank(
             query=query,
             query_variants=query_variants,
-            fused_candidates=fused_candidates,
+            candidates=fused_candidates,
             top_k=runtime_config["top_k"],
+            user_id=user_id,
         )
 
     def search(
@@ -142,6 +189,9 @@ class RAGService:
         min_recall_candidates: int | None = None,
         recall_multiplier: int | None = None,
         query_variant_limit: int | None = None,
+        *,
+        knowledge_base_id: int | None = None,
+        document_status: str | None = None,
     ) -> list[dict]:
         return asyncio.run(
             self.search_async(
@@ -152,6 +202,8 @@ class RAGService:
                 min_recall_candidates=min_recall_candidates,
                 recall_multiplier=recall_multiplier,
                 query_variant_limit=query_variant_limit,
+                knowledge_base_id=knowledge_base_id,
+                document_status=document_status,
             )
         )
 
@@ -167,6 +219,9 @@ class RAGService:
         query_variant_limit: int | None = None,
         context_neighbor_window: int | None = None,
         context_max_chunks: int | None = None,
+        *,
+        knowledge_base_id: int | None = None,
+        document_status: str | None = None,
     ) -> dict:
         runtime_config = self.get_runtime_config(
             top_k=top_k,
@@ -187,6 +242,8 @@ class RAGService:
             min_recall_candidates=runtime_config["min_recall_candidates"],
             recall_multiplier=runtime_config["recall_multiplier"],
             query_variant_limit=runtime_config["query_variant_limit"],
+            knowledge_base_id=knowledge_base_id,
+            document_status=document_status,
         )
         retrieval_duration_ms = int((time.time() - retrieval_started) * 1000)
         return await self.answer_from_chunks_async(
@@ -197,6 +254,8 @@ class RAGService:
             runtime_config=runtime_config,
             started=started,
             retrieval_duration_ms=retrieval_duration_ms,
+            knowledge_base_id=knowledge_base_id,
+            document_status=document_status,
         )
 
     async def answer_from_chunks_async(
@@ -210,6 +269,8 @@ class RAGService:
         started: float | None = None,
         retrieval_duration_ms: int = 0,
         log_query: str | None = None,
+        knowledge_base_id: int | None = None,
+        document_status: str | None = None,
     ) -> dict:
         """Generate a grounded answer from already retrieved chunks.
 
@@ -241,6 +302,8 @@ class RAGService:
             user_id=user_id,
             neighbor_window=runtime_config["context_neighbor_window"],
             max_chunks=runtime_config["context_max_chunks"],
+            knowledge_base_id=knowledge_base_id,
+            document_status=document_status,
         )
         context = self._build_prompt_context(context_chunks)
         prompt = prompt_service.render_by_name(
@@ -320,6 +383,9 @@ class RAGService:
         query_variant_limit: int | None = None,
         context_neighbor_window: int | None = None,
         context_max_chunks: int | None = None,
+        *,
+        knowledge_base_id: int | None = None,
+        document_status: str | None = None,
     ) -> dict:
         return asyncio.run(
             self.answer_async(
@@ -333,6 +399,8 @@ class RAGService:
                 query_variant_limit=query_variant_limit,
                 context_neighbor_window=context_neighbor_window,
                 context_max_chunks=context_max_chunks,
+                knowledge_base_id=knowledge_base_id,
+                document_status=document_status,
             )
         )
 
@@ -524,13 +592,20 @@ class RAGService:
         user_id: int | None,
         neighbor_window: int,
         max_chunks: int,
+        knowledge_base_id: int | None = None,
+        document_status: str | None = None,
     ) -> list[dict]:
         if not chunks:
             return []
         if document_id is None or (neighbor_window <= 0 and max_chunks <= len(chunks)):
             return chunks[:max_chunks]
 
-        where = self._build_where(document_id=document_id, user_id=user_id)
+        where = self._build_where(
+            document_id=document_id,
+            user_id=user_id,
+            knowledge_base_id=knowledge_base_id,
+            document_status=document_status,
+        )
         try:
             rows = await asyncio.to_thread(
                 self.collection.get,
@@ -689,7 +764,13 @@ class RAGService:
     ) -> list[dict]:
         if not query_variants:
             return []
-        embeddings = await llm_client.embed(query_variants, user_id=user_id, action="embedding")
+        if settings.RAG_EMBED_CACHE_ENABLED:
+            embeddings = await rag_embedding_cache.get_or_compute_batch(
+                query_variants,
+                lambda ms: llm_client.embed(ms, user_id=user_id, action="embedding"),
+            )
+        else:
+            embeddings = await llm_client.embed(query_variants, user_id=user_id, action="embedding")
         result_sets = await asyncio.gather(
             *[
                 asyncio.to_thread(
@@ -738,6 +819,102 @@ class RAGService:
                 candidate["matched_variants"].add(variant)
         return list(merged.values())
 
+    @staticmethod
+    def _metadata_matches_where(metadata: dict, where: dict | None) -> bool:
+        if not where:
+            return True
+        if "$and" in where:
+            return all(RAGService._metadata_matches_where(metadata, clause) for clause in where["$and"])
+        if "$or" in where:
+            return any(RAGService._metadata_matches_where(metadata, clause) for clause in where["$or"])
+        return all(metadata.get(field) == value for field, value in where.items())
+
+    def _bm25_tokenize(self, text: str) -> list[str]:
+        return sorted(self._extract_query_units(text))
+
+    def _invalidate_bm25(self) -> None:
+        self._bm25_stale = True
+
+    def _build_bm25_index(self) -> None:
+        """懒构建内存 BM25 索引（一次全量取回，后续查询命中不再全表扫描）。"""
+        self._bm25_items = []
+        self._bm25_index = None
+        try:
+            rows = self.collection.get(include=["documents", "metadatas"])
+        except Exception as exc:
+            logger.warning("BM25 index build unavailable; falling back (%s)", type(exc).__name__)
+            self._bm25_stale = True
+            return
+        ids = rows.get("ids") or []
+        docs = rows.get("documents") or []
+        metas = rows.get("metadatas") or []
+        corpus_tokens = []
+        for i, chunk_id in enumerate(ids):
+            content = docs[i] if i < len(docs) else ""
+            metadata = metas[i] if i < len(metas) else {}
+            self._bm25_items.append((chunk_id, content, metadata))
+            corpus_text = self._build_keyword_corpus(content, metadata)
+            corpus_tokens.append(self._bm25_tokenize(corpus_text))
+        if corpus_tokens:
+            try:
+                from rank_bm25 import BM25Okapi
+                self._bm25_index = BM25Okapi(corpus_tokens)
+            except Exception:
+                self._bm25_index = None
+        self._bm25_stale = False
+
+    def _bm25_keyword_recall(self, query_variants: list[str], *, where: dict | None,
+                             candidate_limit: int) -> list[dict] | None:
+        """BM25 关键词召回；未装 rank_bm25 / 无索引时返回 None 触发 jieba 回退。"""
+        try:
+            from rank_bm25 import BM25Okapi  # noqa: F401
+        except ImportError:
+            return None
+        if self._bm25_stale or self._bm25_index is None:
+            self._build_bm25_index()
+        if self._bm25_index is None:
+            return None
+        scored: dict[str, dict] = {}
+        for variant in query_variants:
+            tokens = self._bm25_tokenize(variant)
+            if not tokens:
+                continue
+            scores = self._bm25_index.get_scores(tokens)
+            for idx, raw_score in enumerate(scores):
+                if idx >= len(self._bm25_items):
+                    continue
+                chunk_id, content, metadata = self._bm25_items[idx]
+                # 全局索引必须按 where 元数据剪枝，否则跨用户/范围泄漏
+                if not self._metadata_matches_where(metadata, where):
+                    continue
+                if raw_score <= 0:
+                    continue
+                entry = scored.setdefault(
+                    str(chunk_id),
+                    {
+                        "id": chunk_id,
+                        "content": content,
+                        "metadata": metadata,
+                        "distance": None,
+                        "dense_score": 0.0,
+                        "keyword_score": 0.0,
+                        "routes": {"keyword"},
+                        "matched_variants": set(),
+                        "_raw_bm25": 0.0,
+                    },
+                )
+                entry["_raw_bm25"] = max(entry["_raw_bm25"], float(raw_score))
+                entry["matched_variants"].add(variant)
+        candidates = list(scored.values())
+        if not candidates:
+            return []
+        max_score = max(c["_raw_bm25"] for c in candidates)
+        for c in candidates:
+            c["keyword_score"] = (c["_raw_bm25"] / max_score) if max_score > 0 else 0.0
+            c.pop("_raw_bm25", None)
+        candidates.sort(key=lambda item: (item["keyword_score"], len(item["matched_variants"])), reverse=True)
+        return candidates[:candidate_limit]
+
     async def _keyword_multi_recall(
         self,
         query_variants: list[str],
@@ -745,6 +922,20 @@ class RAGService:
         where: dict | None,
         candidate_limit: int,
     ) -> list[dict]:
+        if settings.RAG_BM25_ENABLED:
+            try:
+                bm25_candidates = await asyncio.to_thread(
+                    self._bm25_keyword_recall,
+                    query_variants,
+                    where=where,
+                    candidate_limit=candidate_limit,
+                )
+                # 非空才用 BM25；空结果（小语料下 Okapi idf 退化）回退 jieba 扫描保证召回
+                if bm25_candidates:
+                    return bm25_candidates
+            except Exception as exc:
+                logger.warning("BM25 keyword recall error; falling back to scan (%s)", type(exc).__name__)
+        # 回退：jieba 全表扫描（原行为）
         try:
             rows = await asyncio.to_thread(
                 self.collection.get,

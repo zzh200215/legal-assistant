@@ -51,6 +51,35 @@ class AgenticRAGServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["agentic_rag"]["retrieval_rounds"], 1)
         self.assertEqual(result["agentic_rag"]["steps"][-1]["node"], "assess_evidence")
 
+    async def test_threads_scope_filters_to_search_and_generate(self):
+        """RAG②：knowledge_base_id / document_status 穿透到检索与生成。"""
+        previous = self.service.settings.AGENTIC_RAG_PLANNER_ENABLED
+        self.service.settings.AGENTIC_RAG_PLANNER_ENABLED = False
+        try:
+            with patch(
+                "app.services.agentic_rag_service.rag_service.search_async",
+                new=AsyncMock(return_value=[self.chunk]),
+            ) as search, patch(
+                "app.services.agentic_rag_service.rag_service._estimate_confidence",
+                return_value=0.8,
+            ), patch(
+                "app.services.agentic_rag_service.rag_service.answer_from_chunks_async",
+                new=AsyncMock(return_value=dict(self.answer)),
+            ) as answer, patch(
+                "app.services.agentic_rag_service.llm_observability_service.log_event",
+            ):
+                await self.service.answer_async(
+                    "差旅报销多久内提交", document_id=1, user_id=7,
+                    knowledge_base_id=3, document_status="indexed",
+                )
+        finally:
+            self.service.settings.AGENTIC_RAG_PLANNER_ENABLED = previous
+
+        self.assertEqual(search.await_args.kwargs.get("knowledge_base_id"), 3)
+        self.assertEqual(search.await_args.kwargs.get("document_status"), "indexed")
+        self.assertEqual(answer.await_args.kwargs.get("knowledge_base_id"), 3)
+        self.assertEqual(answer.await_args.kwargs.get("document_status"), "indexed")
+
     async def test_refines_once_when_first_retrieval_is_insufficient(self):
         weak_chunk = {**self.chunk, "content": "这是其他制度说明。"}
         previous = self.service.settings.AGENTIC_RAG_PLANNER_ENABLED

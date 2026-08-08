@@ -75,6 +75,19 @@ class DocumentChunkingTests(unittest.TestCase):
         self.assertEqual(chunks[0]["segment_type"], "table")
         self.assertTrue(chunks[0]["table_like"])
 
+    def test_split_text_reads_config_chunk_size_when_not_explicit(self):
+        """RAG③：不传 chunk_size/overlap 时读 settings.RAG_CHUNK_SIZE/_OVERLAP；显式传参优先。"""
+        from app.core.config import get_settings
+        s = get_settings()
+        long_text = "法律文书测试内容" * 30  # 270 字
+        with patch.object(s, "RAG_CHUNK_SIZE", 80), patch.object(s, "RAG_CHUNK_OVERLAP", 0):
+            chunks = _split_text(long_text)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(c["content"]) <= 80 for c in chunks))
+        # 显式传参（测试/eval）仍优先于配置
+        chunks2 = _split_text(long_text, chunk_size=800, chunk_overlap=100)
+        self.assertGreater(len(chunks2[0]["content"]), 80)
+
     def test_split_text_derives_visual_tags_for_signature_ocr_segment(self):
         segments = [
             _build_segment(
@@ -318,10 +331,12 @@ class DocumentChunkingTests(unittest.TestCase):
         ]
         captured = {}
 
-        def fake_index_document(document_id, chunks, user_id=None):
+        def fake_index_document(document_id, chunks, user_id=None, knowledge_base_id=None, document_status=None):
             captured["document_id"] = document_id
             captured["chunks"] = chunks
             captured["user_id"] = user_id
+            captured["knowledge_base_id"] = knowledge_base_id
+            captured["document_status"] = document_status
 
         with patch("app.services.document_service._extract_segments", return_value=fake_segments), patch(
             "app.services.document_service.rag_service.index_document",
@@ -331,6 +346,8 @@ class DocumentChunkingTests(unittest.TestCase):
 
         self.assertEqual(captured["document_id"], doc.id)
         self.assertEqual(captured["user_id"], self.user.id)
+        self.assertEqual(captured["knowledge_base_id"], doc.knowledge_base_id)
+        self.assertEqual(captured["document_status"], "indexed")
         self.assertEqual(captured["chunks"][0]["section_path"], ["商务条款", "付款计划"])
         self.assertEqual(captured["chunks"][0]["segment_type"], "table")
         self.assertTrue(captured["chunks"][0]["table_like"])

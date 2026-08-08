@@ -107,6 +107,18 @@ class Settings(BaseSettings):
     RAG_QUERY_VARIANT_LIMIT: int = 4
     RAG_CONTEXT_NEIGHBOR_WINDOW: int = 1
     RAG_CONTEXT_MAX_CHUNKS: int = 8
+    RAG_CHUNK_SIZE: int = 800
+    RAG_CHUNK_OVERLAP: int = 100
+    RAG_EMBED_CACHE_ENABLED: bool = True
+    RAG_EMBED_CACHE_CAPACITY: int = 256
+    RAG_EMBED_CACHE_REDIS_ENABLED: bool = False
+    RAG_EMBED_CACHE_TTL_SECONDS: int = 86400
+    RAG_EMBED_CACHE_REDIS_PREFIX: str = "aibg:rag:embed"
+    RAG_BM25_ENABLED: bool = True
+    RAG_BM25_TOP_N: int = 100
+    RAG_LLM_RERANK_ENABLED: bool = False
+    RAG_LLM_RERANK_TOP_N: int = 5
+    RAG_LLM_RERANK_MAX_CHARS: int = 400
     AGENTIC_RAG_ENABLED: bool = True
     AGENTIC_RAG_PLANNER_ENABLED: bool = True
     AGENTIC_RAG_MAX_RETRIEVAL_ROUNDS: int = Field(default=2, ge=1, le=3)

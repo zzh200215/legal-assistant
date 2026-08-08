@@ -52,12 +52,15 @@ VISION_SUPPORTED_FILE_TYPES = IMAGE_FILE_TYPES | {"pdf", ".pdf"}
 
 
 
-def _try_index_document(document_id: int, chunks: list[dict], *, user_id: int | None = None) -> Exception | None:
+def _try_index_document(document_id: int, chunks: list[dict], *, user_id: int | None = None,
+                        knowledge_base_id: int | None = None) -> Exception | None:
     try:
         rag_service.index_document(
             document_id,
             _prepare_chunks_for_indexing(document_id, chunks),
             user_id=user_id,
+            knowledge_base_id=knowledge_base_id,
+            document_status=DOCUMENT_STATUS_INDEXED,
         )
         return None
     except Exception as exc:
@@ -155,7 +158,7 @@ class DocumentService:
             ]
         )
         db.commit()
-        index_error = _try_index_document(doc.id, chunks, user_id=user_id)
+        index_error = _try_index_document(doc.id, chunks, user_id=user_id, knowledge_base_id=doc.knowledge_base_id)
         if index_error is None:
             doc.status = DOCUMENT_STATUS_INDEXED
             db.commit()
@@ -405,7 +408,7 @@ class DocumentService:
         db.add_all(db_chunks)
         db.commit()
 
-        index_error = _try_index_document(doc.id, chunks, user_id=user_id)
+        index_error = _try_index_document(doc.id, chunks, user_id=user_id, knowledge_base_id=doc.knowledge_base_id)
         if index_error is None:
             doc.status = DOCUMENT_STATUS_INDEXED
             db.commit()

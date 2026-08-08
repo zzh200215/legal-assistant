@@ -88,6 +88,8 @@ class AgenticRAGService:
             min_recall_candidates=state["runtime_config"]["min_recall_candidates"],
             recall_multiplier=state["runtime_config"]["recall_multiplier"],
             query_variant_limit=state["runtime_config"]["query_variant_limit"],
+            knowledge_base_id=state.get("knowledge_base_id"),
+            document_status=state.get("document_status"),
         )
         duration_ms = int((time.time() - started) * 1000)
         confidence = rag_service._estimate_confidence(state["question"], chunks) if chunks else 0.0
@@ -151,6 +153,8 @@ class AgenticRAGService:
             started=state["started"],
             retrieval_duration_ms=state["retrieval_duration_ms"],
             log_query=state["question"],
+            knowledge_base_id=state.get("knowledge_base_id"),
+            document_status=state.get("document_status"),
         )
         trace = {
             "enabled": True,
@@ -180,6 +184,8 @@ class AgenticRAGService:
         *,
         document_id: int | None = None,
         user_id: int | None = None,
+        knowledge_base_id: int | None = None,
+        document_status: str | None = None,
         **runtime_overrides: Any,
     ) -> dict[str, Any]:
         runtime_config = rag_service.get_runtime_config(**runtime_overrides)
@@ -188,6 +194,8 @@ class AgenticRAGService:
                 question,
                 document_id=document_id,
                 user_id=user_id,
+                knowledge_base_id=knowledge_base_id,
+                document_status=document_status,
                 **runtime_overrides,
             )
             result["agentic_rag"] = {"enabled": False, "reason": "feature_disabled"}
@@ -196,6 +204,8 @@ class AgenticRAGService:
             "question": question,
             "document_id": document_id,
             "user_id": user_id,
+            "knowledge_base_id": knowledge_base_id,
+            "document_status": document_status,
             "runtime_config": runtime_config,
             "max_rounds": self.settings.AGENTIC_RAG_MAX_RETRIEVAL_ROUNDS,
             "round": 0,

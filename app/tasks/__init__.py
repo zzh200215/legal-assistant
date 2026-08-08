@@ -142,7 +142,10 @@ def parse_document_task(self, document_id: int, file_path: str, file_type: str):
         )
 
         # 向量化入库
-        index_error = _try_index_document(document_id, chunks, user_id=doc.user_id)
+        index_error = _try_index_document(
+            document_id, chunks, user_id=doc.user_id,
+            knowledge_base_id=getattr(doc, "knowledge_base_id", None),
+        )
 
         # 更新状态为已完成
         doc.status = DOCUMENT_STATUS_INDEXED if index_error is None else DOCUMENT_STATUS_PARSED

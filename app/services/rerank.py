@@ -1,0 +1,115 @@
+"""RAG④ 可插拔重排：启发式默认 + 可选 LLM 重排（qwen-plus 打分，失败回退启发式）。
+
+用法：`build_reranker(rag_service)` 返回 Reranker，search_async 委托其 rerank。
+"""
+from __future__ import annotations
+
+import json
+import logging
+from abc import ABC, abstractmethod
+from typing import Any, Optional
+
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+class Reranker(ABC):
+    @abstractmethod
+    async def rerank(
+        self,
+        *,
+        query: str,
+        query_variants: list[str],
+        candidates: list[dict],
+        top_k: int,
+        user_id: Optional[int] = None,
+    ) -> list[dict]:
+        ...
+
+
+class HeuristicReranker(Reranker):
+    """委托现有启发式权重重排（默认，行为不变）。"""
+
+    def __init__(self, service: Any):
+        self._service = service
+
+    async def rerank(self, *, query, query_variants, candidates, top_k, user_id=None) -> list[dict]:
+        return self._service._rerank_candidates(
+            query=query,
+            query_variants=query_variants,
+            fused_candidates=candidates,
+            top_k=top_k,
+        )
+
+
+class LLMReranker(Reranker):
+    """LLM 重排：先启发式排序取 top-N，再用 qwen-plus 打分重排；异常/解析失败回退启发式。"""
+
+    def __init__(self, service: Any):
+        self._service = service
+        self._heuristic = HeuristicReranker(service)
+
+    async def rerank(self, *, query, query_variants, candidates, top_k, user_id=None) -> list[dict]:
+        if not candidates:
+            return []
+        from app.core.llm_client import llm_client
+
+        ordered = await self._heuristic.rerank(
+            query=query, query_variants=query_variants,
+            candidates=candidates, top_k=len(candidates), user_id=user_id,
+        )
+        top_n = ordered[: settings.RAG_LLM_RERANK_TOP_N]
+        if not top_n:
+            return ordered[:top_k]
+        try:
+            prompt = self._build_prompt(query, top_n)
+            response = await llm_client.generate(
+                prompt, temperature=0.0, action="rag_rerank", user_id=user_id,
+            )
+            scores = self._parse_scores(response)
+            ranked = self._apply_scores(top_n, scores)
+            return (ranked + ordered[len(top_n):])[:top_k]
+        except Exception as exc:  # noqa: BLE001 - 重排失败不阻断主链路
+            logger.warning("LLM rerank failed; falling back to heuristic (%s)", type(exc).__name__)
+            return ordered[:top_k]
+
+    def _build_prompt(self, query: str, candidates: list[dict]) -> str:
+        lines = []
+        for index, candidate in enumerate(candidates):
+            snippet = (candidate.get("content") or "")[: settings.RAG_LLM_RERANK_MAX_CHARS]
+            lines.append(f"[{index}] {snippet}")
+        return (
+            "你是法律检索相关性评判。请按与问题的相关程度给每个片段打分（0-10 整数，越高越相关）。"
+            "只输出 JSON：{\"scores\":[<int>,...]}，不要输出其他内容。\n"
+            f"问题：{query}\n"
+            + "\n".join(lines)
+        )
+
+    @staticmethod
+    def _parse_scores(response: str) -> list[int]:
+        text = response.strip()
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end < start:
+            raise ValueError("LLM 重排响应缺少 JSON")
+        data = json.loads(text[start:end + 1])
+        scores = data.get("scores")
+        if not isinstance(scores, list):
+            raise ValueError("LLM 重排响应缺少 scores 数组")
+        return [int(score) for score in scores]
+
+    @staticmethod
+    def _apply_scores(candidates: list[dict], scores: list[int]) -> list[dict]:
+        scored = [(index, candidate, scores[index] if index < len(scores) else 0)
+                  for index, candidate in enumerate(candidates)]
+        scored.sort(key=lambda item: item[2], reverse=True)
+        return [{**candidate, "llm_rerank_score": score}
+                for _, candidate, score in scored]
+
+
+def build_reranker(service: Any) -> Reranker:
+    if settings.RAG_LLM_RERANK_ENABLED:
+        return LLMReranker(service)
+    return HeuristicReranker(service)

@@ -907,7 +907,12 @@ def _supports_visual_analysis(file_type: str) -> bool:
     return (file_type or "").lower() in VISION_SUPPORTED_FILE_TYPES
 
 
-def _split_text(text_or_segments: str | list[dict], chunk_size: int = 800, chunk_overlap: int = 100) -> list[dict]:
+def _split_text(text_or_segments: str | list[dict], chunk_size: int | None = None, chunk_overlap: int | None = None) -> list[dict]:
+    # RAG③：chunk 尺寸可配置（RAG_CHUNK_SIZE/_OVERLAP），显式传参（测试/eval）优先
+    if chunk_size is None:
+        chunk_size = settings.RAG_CHUNK_SIZE
+    if chunk_overlap is None:
+        chunk_overlap = settings.RAG_CHUNK_OVERLAP
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,

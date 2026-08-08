@@ -63,3 +63,16 @@ def _ensure_upload_fixtures() -> None:
 
 
 _ensure_upload_fixtures()
+
+
+# RAG① 嵌入缓存单例跨测试共享，会污染 patch(llm_client.embed) 的调用次数断言，
+# 每个测试前/后清空内存缓存。
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clear_rag_embedding_cache():
+    from app.services.rag_cache import rag_embedding_cache
+    rag_embedding_cache.clear()
+    yield
+    rag_embedding_cache.clear()

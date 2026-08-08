@@ -49,6 +49,7 @@ async def chat(
                 last_message,
                 document_id=req.document_id,
                 user_id=current_user.id,
+                knowledge_base_id=doc.knowledge_base_id,
             )
             qa_record = document_qa_service.record(
                 document_id=req.document_id,

@@ -107,6 +107,7 @@ async def ws_chat(
                     content,
                     document_id=document_id,
                     user_id=user.id,
+                    knowledge_base_id=doc.knowledge_base_id,
                 )
                 chunks = result["hit_chunks"]
                 citations = result["citations"]
