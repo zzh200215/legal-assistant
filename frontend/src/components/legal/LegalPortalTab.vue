@@ -35,7 +35,7 @@
         <el-table-column prop="access_count" label="访问次数" width="100" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status }}</el-tag>
+            <el-tag :type="portalStatus(row).type" size="small">{{ portalStatus(row).label }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="160">
@@ -199,6 +199,18 @@ async function saveBranding() {
   } finally {
     brandingSaving.value = false
   }
+}
+
+const portalStatus = (row) => {
+  if (row.status !== 'active') {
+    const labels = { expired: '已过期', revoked: '已撤销', access_limited: '已达访问上限' }
+    return { type: 'info', label: labels[row.status] || row.status }
+  }
+  if (row.expires_at) {
+    const ms = new Date(String(row.expires_at)).getTime() - Date.now()
+    if (!Number.isNaN(ms) && ms / 86400000 <= 3) return { type: 'warning', label: '即将到期' }
+  }
+  return { type: 'success', label: '生效中' }
 }
 
 onMounted(() => {

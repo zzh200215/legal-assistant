@@ -744,25 +744,85 @@ def scan_overdue_invoices_task():
 
 @celery_app.task(name="scan_expired_portal_links")
 def scan_expired_portal_links_task():
-    """每小时：将已过 expires_at 的门户链接状态改为 expired。"""
+    """每小时：将已过 expires_at 的门户链接置为 expired，并通知创建律师。
+
+    同一链接只通知一次（reference_type=portal_link + body 去重键）：
+    - 过期（active→expired）：portal_link:{id}:expired
+    - 即将到期（3 天内）：portal_link:{id}:expiring_soon
+    """
     _record_beat_heartbeat()
+    from datetime import timedelta
+    from app.models.legal import LegalCase
     from app.models.legal_portal import LegalPortalLink
+    from app.models.legal_notifications import LegalNotificationEvent
 
     db = SessionLocal()
     now = utc_now()
-    updated = 0
+
+    def _notify_once(link: LegalPortalLink, dedupe_key: str, title_factory) -> int:
+        exists = db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.reference_type == "portal_link",
+            LegalNotificationEvent.reference_id == link.id,
+            LegalNotificationEvent.body == dedupe_key,
+        ).first()
+        if exists:
+            return 0
+        case_title = db.query(LegalCase.title).filter(LegalCase.id == link.case_id).scalar()
+        db.add(LegalNotificationEvent(
+            organization_id=link.organization_id,
+            user_id=link.created_by,
+            case_id=link.case_id,
+            event_type="portal",
+            title=title_factory(case_title),
+            body=dedupe_key,
+            channel="site",
+            status="delivered",
+            sent_at=now,
+            reference_type="portal_link",
+            reference_id=link.id,
+        ))
+        return 1
+
     try:
-        expired = db.query(LegalPortalLink).filter(
+        expired_links = db.query(LegalPortalLink).filter(
             LegalPortalLink.status == "active",
             LegalPortalLink.is_permanent == 0,
             LegalPortalLink.expires_at.isnot(None),
             LegalPortalLink.expires_at < now,
         ).all()
-        for link in expired:
+        expired_count = 0
+        expired_notified = 0
+        for link in expired_links:
             link.status = "expired"
-            updated += 1
+            expired_count += 1
+            expired_notified += _notify_once(
+                link,
+                f"portal_link:{link.id}:expired",
+                lambda t: f"客户门户链接已到期：{t or f'案件#{link.case_id}'}",
+            )
+
+        expiring_soon = db.query(LegalPortalLink).filter(
+            LegalPortalLink.status == "active",
+            LegalPortalLink.is_permanent == 0,
+            LegalPortalLink.expires_at.isnot(None),
+            LegalPortalLink.expires_at > now,
+            LegalPortalLink.expires_at <= now + timedelta(days=3),
+        ).all()
+        expiring_notified = 0
+        for link in expiring_soon:
+            days_left = max(1, (link.expires_at - now).days)
+            expiring_notified += _notify_once(
+                link,
+                f"portal_link:{link.id}:expiring_soon",
+                lambda t: f"门户链接即将到期（{days_left} 天内）：{t or f'案件#{link.case_id}'}",
+            )
+
         db.commit()
-        return {"expired_links": updated}
+        return {
+            "expired_links": expired_count,
+            "expired_notified": expired_notified,
+            "expiring_notified": expiring_notified,
+        }
     finally:
         db.close()
 

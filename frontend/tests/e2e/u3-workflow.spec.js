@@ -82,6 +82,11 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       await route.fulfill({ json: success({ user_role: 'solo_lawyer', completed_steps_json: '[]' }) })
       return
     }
+    // 通知铃铛首屏加载（US-002）
+    if (method === 'GET' && path === '/developer/notifications/me') {
+      await route.fulfill({ json: success({ items: [], unread: 0 }) })
+      return
+    }
 
     if (request.headers().authorization !== 'Bearer u3-e2e-token') {
       unexpectedApiRequests.push(`missing authorization: ${method} ${path}`)

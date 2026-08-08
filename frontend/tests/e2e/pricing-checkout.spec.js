@@ -29,6 +29,7 @@ test('订阅购买：方案列表 + checkout 未配置网关提示', async ({ pa
     const method = request.method()
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success({ id: 15, username: 'pilot01-lawyer', role: 'dept_admin', status: 'active' }) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/billing/plans') return route.fulfill({ json: success(PLANS) })
     if (method === 'GET' && path === '/billing/subscriptions/me') return route.fulfill({ json: success({ plan: { tier: 'free', name: '免费版', status: 'active' } }) })
     if (method === 'POST' && path === '/billing/subscriptions/checkout') {

@@ -47,6 +47,7 @@
       <div class="topbar-actions">
         <span class="workspace-pill">法律知识空间</span>
         <span v-if="user?.role" class="role-badge">{{ user.role === 'admin' ? '管理员' : '成员' }}</span>
+        <NotificationBell />
         <button class="status-pill" @click="onMenuSelect('/system')">
           <span class="status-dot"></span>
           平台状态
@@ -107,6 +108,7 @@ import {
   ScaleToOriginal,
 } from '@element-plus/icons-vue'
 import api from './api'
+import NotificationBell from './components/legal/NotificationBell.vue'
 
 const route = useRoute()
 const router = useRouter()

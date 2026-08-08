@@ -53,6 +53,12 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
       return
     }
 
+    // 通知铃铛首屏加载（US-002）
+    if (method === 'GET' && path === '/developer/notifications/me') {
+      await route.fulfill({ json: success({ items: [], unread: 0 }) })
+      return
+    }
+
     // 工作台首屏：案件列表 + 剩余配额 + 门户品牌（避免 unexpected API 500）
     if (method === 'GET' && path === '/legal/orgs/1/cases') {
       await route.fulfill({ json: success([{ id: 1, title: '试点案件', status: 'in_progress', case_type: 'labor_dispute', organization_id: 1 }]) })

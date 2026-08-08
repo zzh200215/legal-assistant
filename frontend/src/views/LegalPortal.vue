@@ -14,7 +14,7 @@
         </el-alert>
         <el-form @submit.prevent="verifyOtp">
           <el-form-item label="6位验证码">
-            <el-input v-model="otpCode" maxlength="6" placeholder="请输入验证码" style="width:240px" @input="otpCode = otpCode.replace(/\D/g, '')" />
+            <el-input v-model="otpCode" maxlength="6" placeholder="请输入验证码" class="otp-input" @input="otpCode = otpCode.replace(/\D/g, '')" />
           </el-form-item>
           <div class="otp-actions">
             <el-button type="primary" :loading="verifyLoading" @click="verifyOtp">验证</el-button>
@@ -77,7 +77,7 @@
 
       <el-card v-if="portalContent.invoice" shadow="never" style="margin-top:20px">
         <template #header><span class="card-title">账单摘要</span></template>
-        <el-descriptions :column="2" border size="small">
+        <el-descriptions :column="2" border size="small" class="invoice-desc">
           <el-descriptions-item label="账单号">{{ portalContent.invoice.invoice_number }}</el-descriptions-item>
           <el-descriptions-item label="金额">¥{{ portalContent.invoice.total_amount }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ invoiceStatusLabel(portalContent.invoice.status) }}</el-descriptions-item>
@@ -316,6 +316,10 @@ onUnmounted(() => {
   min-height: 60vh;
 }
 
+.otp-input {
+  width: 240px;
+}
+
 .card-title {
   font-weight: 700;
   font-size: 15px;
@@ -482,6 +486,15 @@ onUnmounted(() => {
     max-width: 100%;
     margin: 16px auto;
     padding: 0 12px;
+  }
+
+  .otp-input {
+    width: 100%;
+  }
+
+  .invoice-desc :deep(.el-descriptions__table) {
+    table-layout: fixed;
+    word-break: break-all;
   }
 
   .progress-header {

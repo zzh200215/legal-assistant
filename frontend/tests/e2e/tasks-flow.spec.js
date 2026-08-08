@@ -42,6 +42,7 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
     requests.push(`${method} ${path}${qs ? `?${qs}` : ''}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') {
       const scope = url.searchParams.get('scope') || 'all'
       return route.fulfill({ json: success({ items: [ownerTask(), sharedTask()], total: 2, page: 1, page_size: 12, scope }) })
@@ -126,6 +127,7 @@ test('共享任务只读 + 新建任务 + scope 筛选 + 同步邮件', async ({
     requests.push(`${method} ${path}${qs ? `?${qs}` : ''}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') return route.fulfill({ json: success({ items: [ownerTask(), sharedTask()], total: 2, page: 1, page_size: 12 }) })
     if (method === 'GET' && path === '/tasks/202/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
     if (method === 'GET' && path === '/tasks/202/comments') return route.fulfill({ json: success([]) })
@@ -175,7 +177,7 @@ test('共享任务只读 + 新建任务 + scope 筛选 + 同步邮件', async ({
 
   requests.syncEmail = null
   await page.getByRole('button', { name: '仅逾期任务邮件' }).click()
-  await expect(page.getByText(/已生成邮件草稿 #42/)).toBeVisible()
+  await expect(page.getByText(/已生成邮件草稿 #42/).last()).toBeVisible()
   expect(requests.syncEmail).toEqual({ include_overdue_only: true, purpose: '逾期任务催办', tone: 'professional', need_action: true, scope: 'mine' })
 
   expect(failed).toEqual([])
@@ -198,6 +200,7 @@ test('路由 taskId 深链：不在列表中的任务经 GET /tasks/{id} 拉取�
     requests.push(`${method} ${path}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') return route.fulfill({ json: success({ items: [ownerTask()], total: 1, page: 1, page_size: 12 }) })
     if (method === 'GET' && path === '/tasks/999') {
       requests.deepGet = true

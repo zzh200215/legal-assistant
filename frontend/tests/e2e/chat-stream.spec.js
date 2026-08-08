@@ -24,6 +24,11 @@ test('对话 WebSocket：发送消息→流式 chunk→done 完成', async ({ pa
     else route.continue()
   })
 
+  // 通知铃铛首屏加载（US-002）
+  await page.route('**/api/developer/notifications/me', (route) => {
+    route.fulfill({ json: success({ items: [], unread: 0 }) })
+  })
+
   // WebSocket mock：流式返回
   await page.routeWebSocket('ws://localhost:8001/api/ws/chat', (route) => {
     route.onMessage((message) => {

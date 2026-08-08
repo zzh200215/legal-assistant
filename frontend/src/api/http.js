@@ -38,10 +38,12 @@ http.interceptors.response.use(
   (err) => {
     const status = err.response?.status
     const isPublicPortalRequest = err.config?.url?.startsWith('/legal/portal/')
+    const isBackgroundNotification = err.config?.url?.startsWith('/developer/notifications')
     const onPublicRoute = router.currentRoute.value.meta?.public === true
 
     // 公开路由（如客户门户 /portal/c/:token）上的 401 不应强制跳登录——组件自行处理错误态
-    if (status === 401 && !isPublicPortalRequest && !onPublicRoute && !redirectPromise) {
+    // 通知铃铛属后台轮询：401 不应触发强制登出（会话过期由 getMe 等关键请求负责兜底）
+    if (status === 401 && !isPublicPortalRequest && !isBackgroundNotification && !onPublicRoute && !redirectPromise) {
       localStorage.removeItem('token')
       redirectPromise = router.push('/login').finally(() => { redirectPromise = null })
     }

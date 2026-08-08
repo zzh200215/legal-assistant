@@ -710,6 +710,49 @@ def acknowledge_notification(
     return notif
 
 
+# ── Notification Center ───────────────────────────────────────────────────────
+
+@router.get("/notifications/me")
+def get_my_notifications(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """当前用户最近 50 条站内通知 + 未读数（delivered/sent 计为未读）。"""
+    from app.services.notification_service import notification_service
+    events = notification_service.get_user_notifications(
+        db=db, user_id=current_user.id, limit=50,
+    )
+    items = [notification_service.serialize_event(e) for e in events if e.status != "failed"]
+    unread = notification_service.get_unread_count(db=db, user_id=current_user.id)
+    return {"items": items, "unread": unread}
+
+
+@router.post("/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """标记单条站内通知为已读；非本人或不存在返回 404。"""
+    from app.services.notification_service import notification_service
+    try:
+        notification_service.mark_as_read(db=db, event_id=notification_id, user_id=current_user.id)
+    except ValueError:
+        raise HTTPException(404, detail="通知不存在")
+    return {"ok": True}
+
+
+@router.post("/notifications/read-all")
+def mark_all_notifications_read(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """标记当前用户全部站内通知为已读。"""
+    from app.services.notification_service import notification_service
+    updated = notification_service.mark_all_as_read(db=db, user_id=current_user.id)
+    return {"ok": True, "updated": updated}
+
+
 # ── Onboarding ────────────────────────────────────────────────────────────────
 
 class OnboardingUpdate(BaseModel):

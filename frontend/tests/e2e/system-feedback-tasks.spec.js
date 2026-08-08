@@ -33,6 +33,7 @@ test('System 反馈处理 + 任务重试', async ({ page }) => {
     const method = request.method()
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success({ id: 3, username: 'admin', role: 'admin', status: 'active' }) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/health') return route.fulfill({ json: success({ status: 'ok', checks: { database: { status: 'ok' }, redis: { status: 'ok' }, llm_provider: { status: 'ok' } } }) })
     if (method === 'GET' && path === '/analytics/tokens/my-stats') return route.fulfill({ json: success({ by_action: {}, by_date: {}, by_model: {}, governance: { today: {}, rate_limit: {}, policy: {} } }) })
     if (method === 'GET' && path === '/analytics/tokens/global-stats') return route.fulfill({ json: success({ by_model: {}, governance: { today: {}, policy: {} } }) })

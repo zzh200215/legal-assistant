@@ -27,6 +27,10 @@ test('开发者视图从 /auth/me 解析 org，创建应用走正确组织', asy
       await route.fulfill({ json: success({ id: 15, organization_id: 5, role: 'dept_admin' }) })
       return
     }
+    if (method === 'GET' && path === '/developer/notifications/me') {
+      await route.fulfill({ json: success({ items: [], unread: 0 }) })
+      return
+    }
     if (method === 'GET' && path === '/developer/orgs/5/apps') {
       await route.fulfill({ json: success([]) })
       return

@@ -33,6 +33,7 @@ test('System 组织架构：admin 列表 + 创建组织/部门 + 归属分配', 
     const method = request.method()
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success({ id: 3, username: 'admin', role: 'admin', status: 'active' }) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
 
     // System 挂载健康端点
     if (method === 'GET' && path === '/health') return route.fulfill({ json: success({ status: 'ok', timestamp: '2026-08-07T10:00:00', checks: { database: { status: 'ok' }, redis: { status: 'ok' }, llm_provider: { status: 'ok' } } }) })
