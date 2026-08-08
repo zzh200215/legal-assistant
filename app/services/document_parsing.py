@@ -26,8 +26,31 @@ class DocumentParsePermanentError(ValueError):
     pass
 
 
+def _is_page_number_line(line: str) -> bool:
+    """页眉/页脚中的纯页码行：'3'、'- 12 -'、'第 3 页'。保守匹配，避免误删正文短行。"""
+    if not line or len(line) > 12:
+        return False
+    compact = re.sub(r"\s+", "", line)
+    if not compact:
+        return False
+    if re.fullmatch(r"[-–—]*\d+[-–—]*", compact):
+        return True
+    return bool(re.fullmatch(r"第[一二三四五六七八九十百0-9]+页", compact))
+
+
 def _normalize_text(text: str) -> str:
+    if not text:
+        return ""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # 去控制字符（保留换行/制表）
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    # 全角空格转半角，连续空格折叠
+    text = text.replace("　", " ")
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    # 剥离页眉/页脚纯页码行
+    lines = text.split("\n")
+    cleaned = [line for line in lines if not _is_page_number_line(line.strip())]
+    text = "\n".join(cleaned)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -907,6 +930,20 @@ def _supports_visual_analysis(file_type: str) -> bool:
     return (file_type or "").lower() in VISION_SUPPORTED_FILE_TYPES
 
 
+def _merge_short_chunks(chunks: list[dict], min_length: int = 40) -> list[dict]:
+    """把同段内的过短片段并入前一块，减少碎块。保持前块 metadata。"""
+    if not chunks:
+        return []
+    merged: list[dict] = []
+    for chunk in chunks:
+        if merged and len(chunk["content"]) < min_length:
+            prev = merged[-1]
+            prev["content"] = prev["content"] + "\n" + chunk["content"]
+        else:
+            merged.append(dict(chunk))
+    return merged
+
+
 def _split_text(text_or_segments: str | list[dict], chunk_size: int | None = None, chunk_overlap: int | None = None) -> list[dict]:
     # RAG③：chunk 尺寸可配置（RAG_CHUNK_SIZE/_OVERLAP），显式传参（测试/eval）优先
     if chunk_size is None:
@@ -918,6 +955,8 @@ def _split_text(text_or_segments: str | list[dict], chunk_size: int | None = Non
         chunk_overlap=chunk_overlap,
         separators=["\n\n", "\n", "。", ".", " ", ""],
     )
+    # 分块优化：表格段只在行边界切分，绝不从行中间断开
+    table_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=0, separators=["\n"])
     if isinstance(text_or_segments, str):
         segments = [_build_segment(text=text_or_segments, page_number=None, section_title="正文", section_path=["正文"])]
     else:
@@ -929,11 +968,18 @@ def _split_text(text_or_segments: str | list[dict], chunk_size: int | None = Non
         segment_text = _normalize_text(segment.get("text", ""))
         if not segment_text:
             continue
-        for content in splitter.split_text(segment_text):
+        is_table = bool(
+            segment.get("segment_type") == "table"
+            or "|" in segment_text
+            or "\t" in segment_text
+        )
+        seg_splitter = table_splitter if is_table else splitter
+        seg_chunks = []
+        for content in seg_splitter.split_text(segment_text):
             normalized = _normalize_text(content)
             if not normalized:
                 continue
-            chunks.append(
+            seg_chunks.append(
                 {
                     "chunk_index": chunk_index,
                     "content": normalized,
@@ -956,6 +1002,8 @@ def _split_text(text_or_segments: str | list[dict], chunk_size: int | None = Non
                 }
             )
             chunk_index += 1
+        # 短块合并（同一段内）：碎块并入前一块，减少检索噪声
+        chunks.extend(_merge_short_chunks(seg_chunks, min_length=40))
     return chunks
 
 

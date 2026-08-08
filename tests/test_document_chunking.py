@@ -83,10 +83,61 @@ class DocumentChunkingTests(unittest.TestCase):
         with patch.object(s, "RAG_CHUNK_SIZE", 80), patch.object(s, "RAG_CHUNK_OVERLAP", 0):
             chunks = _split_text(long_text)
         self.assertGreater(len(chunks), 1)
-        self.assertTrue(all(len(c["content"]) <= 80 for c in chunks))
+        # 短块合并允许末尾碎块并入前块，略超 chunk_size
+        self.assertTrue(all(len(c["content"]) <= 120 for c in chunks))
         # 显式传参（测试/eval）仍优先于配置
         chunks2 = _split_text(long_text, chunk_size=800, chunk_overlap=100)
         self.assertGreater(len(chunks2[0]["content"]), 80)
+
+    def test_normalize_text_strips_page_number_lines(self):
+        """清洗：剥离页眉/页脚中的纯页码行。"""
+        from app.services.document_parsing import _normalize_text
+        cleaned = _normalize_text("合同正文\n第 3 页\n甲方义务\n- 12 -\n乙方权利")
+        self.assertNotIn("第 3 页", cleaned)
+        self.assertNotIn("- 12 -", cleaned)
+        self.assertIn("合同正文", cleaned)
+        self.assertIn("甲方义务", cleaned)
+        self.assertIn("乙方权利", cleaned)
+
+    def test_normalize_text_cleans_control_chars_and_spaces(self):
+        """清洗：去除控制字符、全角空格转半角并折叠连续空格。"""
+        from app.services.document_parsing import _normalize_text
+        cleaned = _normalize_text("a\x00b　c  d\x1f")
+        self.assertEqual(cleaned, "ab c d")
+
+    def test_split_keeps_table_rows_intact(self):
+        """分块：表格段只在行边界切分，绝不从行中间断开（含句号的行不被切断）。"""
+        row = "甲方应支付货款。乙方验收合格后十个工作日内付清。"
+        table_text = "\n".join(f"| {row}{i} |" for i in range(4))
+        segments = [
+            _build_segment(
+                text=table_text, page_number=None, section_title="付款表",
+                section_path=["商务条款", "付款表"], segment_type="table",
+            )
+        ]
+        chunks = _split_text(segments, chunk_size=60, chunk_overlap=0)
+        self.assertGreaterEqual(len(chunks), 1)
+        for chunk in chunks:
+            for line in chunk["content"].split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                self.assertTrue(line.startswith("| ") and line.endswith(" |"),
+                                f"表格行被切断: {line!r}")
+
+    def test_split_merges_short_fragments(self):
+        """分块：过短片段并入前一块，避免碎块。"""
+        from app.services.document_parsing import _merge_short_chunks
+        chunks = [
+            {"chunk_index": 0, "content": "A" * 100, "section_title": "s", "section_path": ["s"]},
+            {"chunk_index": 1, "content": "B" * 10, "section_title": "s", "section_path": ["s"]},
+            {"chunk_index": 2, "content": "C" * 90, "section_title": "s", "section_path": ["s"]},
+        ]
+        merged = _merge_short_chunks(chunks, min_length=40)
+        self.assertEqual(len(merged), 2)
+        self.assertIn("A" * 100, merged[0]["content"])
+        self.assertIn("B" * 10, merged[0]["content"])
+        self.assertIn("C" * 90, merged[1]["content"])
 
     def test_split_text_derives_visual_tags_for_signature_ocr_segment(self):
         segments = [
