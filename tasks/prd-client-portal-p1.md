@@ -126,5 +126,7 @@ US-001~US-004 已全部实现并通过验证：
 - **e2e 回归**：16 个 spec 补充 notifications mock + 修复 tasks-flow toast 双匹配脆弱点；全量 24 passed / 3 skipped / 0 failed。
 - 提交：`1dacaea feat(portal): notify lawyers on link expiry, add notification center + mobile polish`
 - 后续补齐：`9577e0c` 新增 `dispatch_notification_events` beat 任务调度 `notification_service.dispatch_pending`，deadline/contract/审批等 pending 通知投递为 delivered 进入铃铛未读（此前对律师不可见）。
+- P2 聚合页：`553484c` 新增 `aggregate_case` 开关（迁移 `20260808_0066`），开启后该链接自动聚合该案全部已发布客户可见内容（进度+文书），一个案件一个URL；管理端加开关与「聚合」类型标签，7 个后端测试 + 浏览器验证通过。
+- P2 门户访问分析入周报：经核实现有 `scripts/pilot_weekly_report.py` 已包含 portal 指标（访问/访客/重复访问/时段），无需新增。
 
-遗留（非本次范围，见 Non-Goals）：P2 门户访问分析入周报、多链接聚合页、P3 客户可见账单对账。
+遗留（非本次范围，见 Non-Goals）：P3 客户可见账单对账（门户已展示发票快照，完整对账待评估）。
