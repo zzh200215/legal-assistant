@@ -995,15 +995,30 @@ const exportReview = () => {
   downloadText(`${contractForm.value.title || '合同审查意见书'}.md`, lines.join('\n'))
 }
 
-const exportDraft = () => {
-  if (!draftResult.value) return
-  const d = draftResult.value
+const buildDraftMarkdown = (d) => {
   const lines = [`# ${d.title || '法律文书草稿'}`]
   if (d.missing_fields?.length) {
     lines.push('', `**待补充字段：** ${d.missing_fields.join('、')}`)
   }
   lines.push('', '---', d.content || '')
-  downloadText(`${d.title || '法律文书草稿'}.md`, lines.join('\n'))
+  return lines.join('\n')
+}
+
+const exportDraft = async () => {
+  if (!draftResult.value) return
+  const d = draftResult.value
+  try {
+    const { data } = await legalWorkspace.exportLegalDraftDocx(d.id)
+    const url = URL.createObjectURL(data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${d.title || '法律文书草稿'}.docx`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    // 后端 docx 导出不可用时回退到本地 Markdown 导出
+    downloadText(`${d.title || '法律文书草稿'}.md`, buildDraftMarkdown(d))
+  }
 }
 
 const downloadText = (filename, text) => {
