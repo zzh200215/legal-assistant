@@ -138,6 +138,25 @@ class PortalExpiryNotificationTests(unittest.TestCase):
         self._run_scan()
         self.assertEqual(self._events_for(link), [])
 
+    def test_notification_title_falls_back_to_case_id_when_case_missing(self):
+        link = LegalPortalLink(
+            organization_id=self.org.id,
+            case_id=999999,
+            token_hash="g" * 64,
+            token_prefix="fallback1",
+            status="active",
+            is_permanent=0,
+            expires_at=utc_now() - timedelta(hours=1),
+            require_email_verification=1,
+            created_by=self.lawyer.id,
+        )
+        self.db.add(link)
+        self.db.commit()
+        self._run_scan()
+        events = self._events_for(link)
+        self.assertEqual(len(events), 1)
+        self.assertIn(f"案件#{link.case_id}", events[0].title)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,41 +24,41 @@
 **描述：** 作为律师，我希望客户门户链接在即将到期与过期时自动收到系统通知，以便在链接失效前续期或提前联系客户。
 
 **验收标准：**
-- [ ] 每小时扫描任务 `scan_expired_portal_links_task`（`app/tasks/__init__.py:745`）在链接 active→expired 时创建通知给 `link.created_by`
-- [ ] 同一任务对 3 天内将到期（`now < expires_at <= now+3d`）的 active 链接创建「即将到期」提醒
-- [ ] 通知按 `scan_contract_expiry_alerts_task`（`app/tasks/__init__.py:783`）同款去重：`reference_type="portal_link"`, `reference_id=link.id`, 去重键存 body（`portal_link:{id}:expired` / `portal_link:{id}:expiring_soon`），重复运行不重复创建（幂等）
-- [ ] 事件字段：`event_type="portal"`, `channel="site"`, `status="delivered"`（含 `sent_at`），必带 `organization_id` / `case_id` / `user_id`
-- [ ] 通知标题含案件标题（无则回退 `案件#{case_id}`）
-- [ ] 测试验证幂等性与两个触发条件
-- [ ] 无需 DB schema 变更（去重键方案，迁移 head 不变）
+- [x] 每小时扫描任务 `scan_expired_portal_links_task`（`app/tasks/__init__.py:745`）在链接 active→expired 时创建通知给 `link.created_by`
+- [x] 同一任务对 3 天内将到期（`now < expires_at <= now+3d`）的 active 链接创建「即将到期」提醒
+- [x] 通知按 `scan_contract_expiry_alerts_task`（`app/tasks/__init__.py:783`）同款去重：`reference_type="portal_link"`, `reference_id=link.id`, 去重键存 body（`portal_link:{id}:expired` / `portal_link:{id}:expiring_soon`），重复运行不重复创建（幂等）
+- [x] 事件字段：`event_type="portal"`, `channel="site"`, `status="delivered"`（含 `sent_at`），必带 `organization_id` / `case_id` / `user_id`
+- [x] 通知标题含案件标题（无则回退 `案件#{case_id}`）
+- [x] 测试验证幂等性与两个触发条件
+- [x] 无需 DB schema 变更（去重键方案，迁移 head 不变）
 
 ### US-002 最小站内通知中心（通知的可见载体）
 **描述：** 作为律师，我希望在顶部看到一个通知铃铛并点开查看未读系统提醒，以便第一时间处理门户到期等事项。
 
 **验收标准：**
-- [ ] 后端新增 `GET /api/developer/notifications/me` → `{items: 最近50条站内通知(serialize_event), unread: 未读数}`（`delivered`/`sent` 计为未读，前端过滤 `failed`）
-- [ ] 后端新增 `POST /api/developer/notifications/{id}/read`（`mark_as_read`）与 `POST /api/developer/notifications/read-all`（`mark_all_as_read`）
-- [ ] 前端新增 `NotificationBell.vue`（原生 button + CSS 角标 + 下拉列表，不新增 Element Plus 按需引入），挂在 `App.vue` 顶栏 `.topbar-actions`
-- [ ] 前端新增 `api/notifications.js` 并注册到 `api/index.js`
-- [ ] 刷新后未读状态以服务端为准、保持一致
-- [ ] Typecheck 通过；浏览器验证（run skill）
-- [ ] 已知限制可接受：顶栏在 ≤1280px 隐藏（与角色徽章一致），MVP 范围内
+- [x] 后端新增 `GET /api/developer/notifications/me` → `{items: 最近50条站内通知(serialize_event), unread: 未读数}`（`delivered`/`sent` 计为未读，前端过滤 `failed`）
+- [x] 后端新增 `POST /api/developer/notifications/{id}/read`（`mark_as_read`）与 `POST /api/developer/notifications/read-all`（`mark_all_as_read`）
+- [x] 前端新增 `NotificationBell.vue`（原生 button + CSS 角标 + 下拉列表，不新增 Element Plus 按需引入），挂在 `App.vue` 顶栏 `.topbar-actions`
+- [x] 前端新增 `api/notifications.js` 并注册到 `api/index.js`
+- [x] 刷新后未读状态以服务端为准、保持一致
+- [x] Typecheck 通过；浏览器验证（run skill）
+- [x] 已知限制可接受：顶栏在 ≤1280px 隐藏（与角色徽章一致），MVP 范围内
 
 ### US-003 管理端门户链接状态可见性
 **描述：** 作为管理员/审核律师，我希望在客户门户链接列表中直接看到剩余有效期与「即将到期」预警，以便及时处理。
 
 **验收标准：**
-- [ ] `LegalPortalTab.vue` 状态列：active 且 ≤3 天 → warning 标签「即将到期」；active → success「生效中」；其余显示原状态
-- [ ] Typecheck 通过；浏览器验证
+- [x] `LegalPortalTab.vue` 状态列：active 且 ≤3 天 → warning 标签「即将到期」；active → success「生效中」；其余显示原状态
+- [x] Typecheck 通过；浏览器验证
 
 ### US-004 客户门户移动端最小适配
 **描述：** 作为客户，我希望在手机上打开门户链接也能正常查看案件进展并下载文书。
 
 **验收标准：**
-- [ ] 375px 视口下 OTP 验证码输入框宽度自适应（`width:100%`，替换固定 `240px`）
-- [ ] 发票摘要 `el-descriptions` 在窄屏不横向溢出（`table-layout:fixed` + `word-break`）
-- [ ] 主内容（时间线/文档列表/反馈）375px 下无横向滚动
-- [ ] 用 Playwright / run 在 375px 视口验证
+- [x] 375px 视口下 OTP 验证码输入框宽度自适应（`width:100%`，替换固定 `240px`）
+- [x] 发票摘要 `el-descriptions` 在窄屏不横向溢出（`table-layout:fixed` + `word-break`）
+- [x] 主内容（时间线/文档列表/反馈）375px 下无横向滚动
+- [x] 用 Playwright / run 在 375px 视口验证
 
 ## 三、功能需求（Functional Requirements）
 
@@ -115,3 +115,15 @@
 
 - 提前提醒天数（当前固定 3 天）是否需要组织/案件维度可配置？（MVP 不做）
 - 到期通知是否要走邮件/飞书渠道？（当前 demo 站内即可，接入真实投递后再启用）
+
+## 九、执行状态（2026-08-08）
+
+US-001~US-004 已全部实现并通过验证：
+
+- **后端**：`scan_expired_portal_links_task` 增加「已到期/即将到期」幂等通知；新增 `GET /api/developer/notifications/me`、`POST /notifications/{id}/read`、`POST /notifications/read-all`。测试：`tests/test_legal_portal_notification.py`（6 例）、`tests/test_legal_notification_center.py`（6 例）。
+- **前端**：`NotificationBell.vue` 顶栏铃铛、`LegalPortalTab.vue` 状态列（生效中/即将到期/已过期）、`LegalPortal.vue` 移动端适配、`http.js` 通知端点 401 豁免。`vite build` 通过。
+- **浏览器验证**：Playwright 10/10（铃铛未读=2→全部已读、状态列三态、375px 无横向滚动）。
+- **e2e 回归**：16 个 spec 补充 notifications mock + 修复 tasks-flow toast 双匹配脆弱点；全量 24 passed / 3 skipped / 0 failed。
+- 提交：`1dacaea feat(portal): notify lawyers on link expiry, add notification center + mobile polish`
+
+遗留（非本次范围，见 Non-Goals）：P2 门户访问分析入周报、多链接聚合页、P3 客户可见账单对账、deadline/contract 通知 pending 状态对铃铛不可见。
