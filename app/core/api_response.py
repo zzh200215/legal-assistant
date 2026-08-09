@@ -173,3 +173,16 @@ async def unhandled_exception_handler(_: Request, exc: Exception) -> JSONRespons
         content=error_payload("服务器内部错误", code="INTERNAL_SERVER_ERROR", detail="服务器内部错误"),
         headers={"x-api-wrapped": "1"},
     )
+
+
+async def stale_data_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    """乐观锁冲突（version_id_col）：并发修改同一记录时返回 409。"""
+    return JSONResponse(
+        status_code=409,
+        content=error_payload(
+            "数据已被其他请求修改，请刷新后重试",
+            code="CONCURRENT_UPDATE_CONFLICT",
+            detail="并发更新冲突：记录已被他人修改，请重新加载后再操作",
+        ),
+        headers={"x-api-wrapped": "1"},
+    )

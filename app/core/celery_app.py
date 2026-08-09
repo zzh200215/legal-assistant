@@ -83,6 +83,10 @@ celery_app.conf.update(
             "task": "dispatch_feishu_reminders",
             "schedule": crontab(minute=0, hour=9),  # 每日 09:00 飞书提醒（激活/周报）
         },
+        "run-database-archive": {
+            "task": "run_database_archive",
+            "schedule": 86400.0,  # 每天：按保留策略清理过期日志/用量记录（默认 dry-run）
+        },
     },
 )
 

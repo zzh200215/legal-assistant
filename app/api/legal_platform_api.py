@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.auth import get_current_user, verify_org_role_access
-from app.core.error_codes import err, API_KEY_INVALID, API_KEY_IP_DENIED, UNAUTHORIZED
+from app.core.error_codes import err, API_KEY_INVALID, API_KEY_IP_DENIED, IDEMPOTENCY_KEY_CONFLICT, UNAUTHORIZED
+from app.services.idempotency_service import IdempotencyConflictError, idempotency_service
 from app.models.user import User
 from app.models.org import OrganizationMember, LegalMemberRole
 from app.models.legal_platform import (
@@ -340,59 +341,86 @@ def open_create_contract_review(
         "review_policy_id": body.review_policy_id,
     }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
-    if body.idempotency_key:
+    # 通用幂等键：DB 唯一约束兜底并发（scope+key 唯一），失败可重试、过期可清理。
+    ik_scope = "open_api.contract_review"
+    ik_key = body.idempotency_key
+    if ik_key:
+        try:
+            ik = idempotency_service.begin(db, scope=ik_scope, key=ik_key, request_hash=fingerprint)
+        except IdempotencyConflictError as exc:
+            raise HTTPException(409, detail=err(exc.code))
+        if ik["replay"]:
+            snapshot = ik["response_snapshot"]
+            if snapshot:
+                return {**json.loads(snapshot), "idempotent": True}
+        # 兼容历史请求：本机制上线前已用同 key 创建的异步任务
         existing = db.query(LegalAsyncJob).filter(
-            LegalAsyncJob.idempotency_key == body.idempotency_key
+            LegalAsyncJob.idempotency_key == ik_key
         ).first()
         if existing:
             stored = db.query(LegalAsyncJobInput).filter(LegalAsyncJobInput.job_id == existing.id).first()
             if stored and stored.request_fingerprint != fingerprint:
-                raise HTTPException(409, detail="幂等键已用于不同请求载荷")
+                idempotency_service.fail(db, scope=ik_scope, key=ik_key)
+                raise HTTPException(409, detail=err(IDEMPOTENCY_KEY_CONFLICT))
+            snapshot = {"task_id": existing.id, "status": existing.status}
+            idempotency_service.complete(db, scope=ik_scope, key=ik_key, response_snapshot=snapshot)
             return {"task_id": existing.id, "status": existing.status, "idempotent": True}
 
-    job = LegalAsyncJob(
-        organization_id=app.organization_id,
-        job_type="open_contract_review",
-        status="queued",
-        idempotency_key=body.idempotency_key,
-        created_by=0,
-    )
-    db.add(job)
-    db.flush()
-    db.add(LegalAsyncJobInput(
-        job_id=job.id, app_id=app.id, request_fingerprint=fingerprint, title=body.title,
-        content_ciphertext=body.content, contract_type=body.contract_type,
-        review_policy_id=body.review_policy_id,
-    ))
-    db.commit()
-    db.refresh(job)
-
-    # 联动扣减组织管理员的月度审查配额（失败不阻断接口）
     try:
-        from app.models.org import OrganizationMember
-        from app.services.subscription_service import subscription_service
-        admin_member = db.query(OrganizationMember).filter(
-            OrganizationMember.organization_id == app.organization_id,
-            OrganizationMember.legal_role == "admin",
-        ).first()
-        if admin_member:
-            subscription_service.record_usage(db, admin_member.user_id, "review")
-    except Exception:
-        pass
+        job = LegalAsyncJob(
+            organization_id=app.organization_id,
+            job_type="open_contract_review",
+            status="queued",
+            idempotency_key=ik_key,
+            created_by=0,
+        )
+        db.add(job)
+        db.flush()
+        db.add(LegalAsyncJobInput(
+            job_id=job.id, app_id=app.id, request_fingerprint=fingerprint, title=body.title,
+            content_ciphertext=body.content, contract_type=body.contract_type,
+            review_policy_id=body.review_policy_id,
+        ))
+        db.commit()
+        db.refresh(job)
 
-    duration_ms = int((time.monotonic() - started) * 1000)
-    db.add(DeveloperApiUsage(app_id=app.id, organization_id=app.organization_id,
-        endpoint="/v1/contract-reviews", method="POST", status_code=202,
-        duration_ms=duration_ms, stat_date=datetime.now(timezone.utc).date().isoformat(),
-        stat_hour=datetime.now(timezone.utc).hour))
-    db.commit()
-    try:
-        from app.tasks import process_open_contract_review_task
-        process_open_contract_review_task.delay(job.id)
+        # 联动扣减组织管理员的月度审查配额（失败不阻断接口）
+        try:
+            from app.models.org import OrganizationMember
+            from app.services.subscription_service import subscription_service
+            admin_member = db.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == app.organization_id,
+                OrganizationMember.legal_role == "admin",
+            ).first()
+            if admin_member:
+                subscription_service.record_usage(db, admin_member.user_id, "review")
+        except Exception:
+            pass
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        db.add(DeveloperApiUsage(app_id=app.id, organization_id=app.organization_id,
+            endpoint="/v1/contract-reviews", method="POST", status_code=202,
+            duration_ms=duration_ms, stat_date=datetime.now(timezone.utc).date().isoformat(),
+            stat_hour=datetime.now(timezone.utc).hour))
+        db.commit()
+        try:
+            from app.tasks import process_open_contract_review_task
+            process_open_contract_review_task.delay(job.id)
+        except Exception:
+            # Worker unavailable does not lose the queued task; beat can consume it later.
+            pass
     except Exception:
-        # Worker unavailable does not lose the queued task; beat can consume it later.
-        pass
-    return {"task_id": job.id, "status": "queued"}
+        if ik_key:
+            db.rollback()
+            idempotency_service.fail(db, scope=ik_scope, key=ik_key)
+        raise
+
+    if ik_key:
+        idempotency_service.complete(
+            db, scope=ik_scope, key=ik_key,
+            response_snapshot={"task_id": job.id, "status": job.status},
+        )
+    return {"task_id": job.id, "status": job.status}
 
 
 @open_router.get("/v1/tasks/{task_id}")

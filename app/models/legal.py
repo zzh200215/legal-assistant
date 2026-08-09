@@ -5,7 +5,7 @@ existing project's audit-oriented storage and lets us preserve the exact
 evidence payload returned by an agent for later review/versioning.
 """
 
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, func, text
 
 from app.core.database import Base
 from app.core.encryption import EncryptedText
@@ -30,8 +30,12 @@ class LegalCase(Base):
     client_name = Column(EncryptedText, nullable=True, comment="客户姓名（AES-256-GCM）")
     opposing_party = Column(EncryptedText, nullable=True, comment="对方当事人（AES-256-GCM）")
     description = Column(EncryptedText, nullable=True, comment="案情摘要（AES-256-GCM）")
+    # 乐观锁版本号（version_id_col）：案件团队成员并发编辑时防丢失更新。
+    version = Column(Integer, nullable=False, server_default=text("1"), default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version}
 
 
 class LegalSource(Base):
@@ -146,8 +150,13 @@ class ContractReview(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     feedback_score = Column(Integer, nullable=True, comment="用户评分：1=满意 -1=不满意")
     feedback_note = Column(Text, nullable=True, comment="用户反馈备注")
+    # 乐观锁版本号（version_id_col）：审查结论可能被审查人与提交人并发修改。
+    # 与业务上的 version（审查版本迭代号，手动维护）相互独立。
+    row_version = Column(Integer, nullable=False, server_default=text("1"), default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": row_version}
 
 
 class LegalDraft(Base):
@@ -169,8 +178,13 @@ class LegalDraft(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     feedback_score = Column(Integer, nullable=True, comment="用户评分：1=满意 -1=不满意")
     feedback_note = Column(Text, nullable=True, comment="用户反馈备注")
+    # 乐观锁版本号（version_id_col）：文书草稿可能被起草人与审查人并发修改。
+    # 与业务上的 version（草稿版本迭代号，手动维护）相互独立。
+    row_version = Column(Integer, nullable=False, server_default=text("1"), default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": row_version}
 
 
 class LegalDocumentVersion(Base):

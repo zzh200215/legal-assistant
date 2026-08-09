@@ -5,6 +5,7 @@ import redis
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy import text
+from sqlalchemy.orm.exc import StaleDataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import account_deletion_api, agent_api, analytics_api, api_key_api, auth_api, chat_api, connector_api, dashboard_api, document_api, document_conflict_api, email_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mailbox_api, mcp_api, meeting_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, schedule_api, subscription_api, task_api, workflow_api, ws_api
@@ -12,6 +13,7 @@ from app.core.config import get_settings
 from app.core.api_response import (
     ApiResponseMiddleware,
     http_exception_handler,
+    stale_data_exception_handler,
     unhandled_exception_handler,
     validation_exception_handler,
 )
@@ -67,8 +69,12 @@ app.add_middleware(OperationLogMiddleware)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
+# 乐观锁冲突（StaleDataError）→ 409；比通用 Exception 更具体，注册顺序无关。
+app.add_exception_handler(StaleDataError, stale_data_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 settings = get_settings()
+# 生产/试点环境严格配置校验：关键配置缺失则启动失败；开发/测试不校验。
+settings.validate_production_or_raise()
 init_telemetry(app)
 
 

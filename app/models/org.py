@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -27,8 +27,12 @@ class Organization(Base):
     description = Column(Text, nullable=True)
     portal_logo_url = Column(String(512), nullable=True, comment="客户门户展示的律所 logo 图片 URL")
     portal_welcome_message = Column(String(256), nullable=True, comment="客户门户顶部欢迎语")
+    # 乐观锁版本号（version_id_col）：组织管理员并发修改配置时防丢失更新。
+    version = Column(Integer, nullable=False, server_default=text("1"), default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version}
 
     departments = relationship("Department", back_populates="organization")
     members = relationship("OrganizationMember", back_populates="organization")

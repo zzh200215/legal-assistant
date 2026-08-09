@@ -641,6 +641,32 @@ def purge_mailbox_retention_task():
         db.close()
 
 
+@celery_app.task(name="run_database_archive")
+def run_database_archive_task():
+    """按表保留策略批量清理过期日志/用量记录。
+
+    默认关闭且 dry-run；DATABASE_ARCHIVE_ENABLED=true 且 DRY_RUN=false 才真实删除。
+    使用统一事务上下文 session_scope；慢 SQL 日志通过 correlation id 关联到本任务。
+    """
+    _record_beat_heartbeat()
+    from app.core.database import session_scope
+    from app.core.db_monitor import set_db_correlation_id
+
+    run_key = f"archive-{utc_now().strftime('%Y%m%dT%H%M%S')}"
+    set_db_correlation_id(run_key)
+    try:
+        with session_scope() as db:
+            from app.services.archive_service import archive_service
+            from app.services.idempotency_service import idempotency_service
+
+            result = archive_service.run(db=db)
+            # 幂等键 TTL 清理（分批、幂等，可随归档任务安全执行）
+            result["expired_idempotency_keys_deleted"] = idempotency_service.cleanup_expired(db)
+            return result
+    finally:
+        set_db_correlation_id(None)
+
+
 @celery_app.task(bind=True, name="scheduled_workflow_run", max_retries=2)
 def scheduled_workflow_run_task(self, execution_id: int):
     db = SessionLocal()

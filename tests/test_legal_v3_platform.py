@@ -324,6 +324,62 @@ class OpenApiRateLimitTests(unittest.TestCase):
         self.assertIsNotNone(usage)
         self.assertEqual(usage.review_count, 1)
 
+    def _post_review(self, payload, mock_r):
+        with patch("redis.from_url", return_value=mock_r):
+            return self.client.post(
+                "/api/open/v1/contract-reviews", json=payload, headers=self.api_headers,
+            )
+
+    def test_idempotency_replay_returns_same_task(self):
+        """同 key + 同载荷重放：返回首次响应的 task_id，且不重复创建任务。"""
+        mock_r = self._mock_redis_at_count(1)
+        payload = {"title": "幂等合同", "content": "这是一份合同内容，需要审查风险条款。", "idempotency_key": "ik-replay-1"}
+        r1 = self._post_review(payload, mock_r)
+        self.assertEqual(r1.status_code, 200)
+        task_id1 = r1.json()["data"]["task_id"]
+
+        r2 = self._post_review(payload, mock_r)
+        self.assertEqual(r2.status_code, 200)
+        data2 = r2.json()["data"]
+        self.assertEqual(data2["task_id"], task_id1)
+        self.assertTrue(data2["idempotent"])
+        # 只创建了一个异步任务
+        from app.models.legal_platform import LegalAsyncJob
+        jobs = self.db.query(LegalAsyncJob).filter(
+            LegalAsyncJob.idempotency_key == "ik-replay-1").all()
+        self.assertEqual(len(jobs), 1)
+
+    def test_idempotency_same_key_different_body_conflicts(self):
+        """同 key 但请求内容不同：返回 409。"""
+        mock_r = self._mock_redis_at_count(1)
+        base = {"title": "幂等合同", "content": "这是一份合同内容，需要审查风险条款。", "idempotency_key": "ik-diff-1"}
+        r1 = self._post_review(base, mock_r)
+        self.assertEqual(r1.status_code, 200)
+
+        changed = {**base, "content": "这是另一份完全不同的合同内容，用于测试冲突。"}
+        r2 = self._post_review(changed, mock_r)
+        self.assertEqual(r2.status_code, 409)
+        self.assertIn("IDEMPOTENCY_KEY_CONFLICT", r2.text)
+
+    def test_idempotency_in_progress_conflicts(self):
+        """请求正在处理中（并发）：返回 409。"""
+        import json
+        import hashlib
+        from app.services.idempotency_service import idempotency_service
+        payload = {"title": "幂等合同", "content": "这是一份合同内容，需要审查风险条款。", "idempotency_key": "ik-inprog-1"}
+        # 预置 in_progress 行，模拟并发中
+        fingerprint = hashlib.sha256(json.dumps(
+            {"title": "幂等合同", "content": "这是一份合同内容，需要审查风险条款。",
+             "contract_type": None, "review_policy_id": None},
+            sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        idempotency_service.begin(self.db, scope="open_api.contract_review",
+                                  key="ik-inprog-1", request_hash=fingerprint)
+
+        mock_r = self._mock_redis_at_count(1)
+        resp = self._post_review(payload, mock_r)
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("IDEMPOTENCY_KEY_IN_PROGRESS", resp.text)
+
 
 if __name__ == "__main__":
     unittest.main()

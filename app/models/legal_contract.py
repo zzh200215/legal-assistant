@@ -1,6 +1,6 @@
 """Phase 12 — 合同台账 / 版本 / 条款 / 里程碑 / 电子签名 / 审查策略"""
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text, func, text
 
 from app.core.database import Base
 from app.core.encryption import EncryptedText
@@ -24,8 +24,12 @@ class LegalContract(Base):
     risk_level = Column(String(16), nullable=True, comment="low / medium / high")
     description = Column(EncryptedText, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # 乐观锁版本号（version_id_col）：合同状态/责任人由多方并发修改时防丢失更新。
+    version = Column(Integer, nullable=False, server_default=text("1"), default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version}
 
 
 class LegalContractVersion(Base):

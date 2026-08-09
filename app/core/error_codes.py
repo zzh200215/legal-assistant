@@ -38,6 +38,7 @@ EXPORT_ASYNC_REQUIRED         = "EXPORT_ASYNC_REQUIRED"
 
 # ── 幂等 ──────────────────────────────────────────────────────────────────────
 IDEMPOTENCY_KEY_CONFLICT      = "IDEMPOTENCY_KEY_CONFLICT"
+IDEMPOTENCY_KEY_IN_PROGRESS   = "IDEMPOTENCY_KEY_IN_PROGRESS"
 
 # ── 通用 ──────────────────────────────────────────────────────────────────────
 VALIDATION_ERROR              = "VALIDATION_ERROR"
@@ -61,6 +62,7 @@ _DEFAULT_MESSAGES: dict[str, str] = {
     WEBHOOK_SIGNATURE_INVALID:   "Webhook 签名校验失败",
     EXPORT_ASYNC_REQUIRED:       "导出数据量超出同步阈值，已创建异步任务，请通过任务 ID 查询结果",
     IDEMPOTENCY_KEY_CONFLICT:    "相同幂等键已存在但请求体不一致",
+    IDEMPOTENCY_KEY_IN_PROGRESS: "该幂等键请求正在处理中，请稍后重试",
     VALIDATION_ERROR:            "参数校验失败",
     UNAUTHORIZED:                "未登录或登录已失效",
     NOT_FOUND:                   "资源不存在或无权访问",

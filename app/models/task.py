@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, func
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, func, text
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 import enum
@@ -35,8 +35,12 @@ class Task(Base):
     source_type = Column(String(32), nullable=True)
     source_id = Column(Integer, nullable=True)
     parent_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
+    # 乐观锁版本号（version_id_col）：多人更新任务状态时防丢失更新。
+    version = Column(Integer, nullable=False, server_default=text("1"), default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version}
 
     sub_tasks = relationship("Task", backref="parent", remote_side=[id], cascade="all, delete-orphan", single_parent=True)
     logs = relationship("TaskLog", back_populates="task", cascade="all, delete-orphan")
@@ -47,7 +51,7 @@ class TaskLog(Base):
     __tablename__ = "task_logs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
     action = Column(String(64), nullable=False)
     detail = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -59,7 +63,7 @@ class TaskComment(Base):
     __tablename__ = "task_comments"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

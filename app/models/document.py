@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -45,8 +45,13 @@ class Document(Base):
     watermark_required = Column(Boolean, nullable=False, default=False)
     status = Column(String(32), default="pending", nullable=False)
     summary = Column(Text, nullable=True)
+    # 乐观锁版本号（version_id_col）：多人/多任务并发编辑时防丢失更新。
+    # 与业务上的 version_number（文档版本迭代号）相互独立。
+    version = Column(Integer, nullable=False, server_default=text("1"), default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __mapper_args__ = {"version_id_col": version}
 
     knowledge_base = relationship("KnowledgeBase", back_populates="documents")
     parent_document = relationship("Document", remote_side=[id])
@@ -70,7 +75,7 @@ class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
     chunk_index = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
     page_number = Column(Integer, nullable=True)
@@ -90,7 +95,7 @@ class DocumentParseJob(Base):
     __tablename__ = "document_parse_jobs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     job_type = Column(String(64), nullable=False, index=True)
     task_id = Column(String(128), nullable=True, index=True)
@@ -113,7 +118,7 @@ class DocumentQARecord(Base):
     __tablename__ = "document_qa_records"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True, index=True)
     question = Column(Text, nullable=False)

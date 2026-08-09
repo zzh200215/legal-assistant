@@ -41,6 +41,8 @@ from app.models.legal_notifications import (
     LegalNotificationEvent, OrganizationOnboardingProgress,
 )
 from app.models.api_key import APIKey
+from app.models.idempotency import IdempotencyKey
+from app.models.archive import DatabaseArchiveRun
 from app.models.subscription import SubscriptionPlan, UserSubscription, QuotaUsage
 
 __all__ = [
@@ -132,4 +134,6 @@ __all__ = [
     "LegalNotificationEvent",
     "OrganizationOnboardingProgress",
     "APIKey",
+    "IdempotencyKey",
+    "DatabaseArchiveRun",
 ]
