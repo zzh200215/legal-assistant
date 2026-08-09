@@ -115,7 +115,7 @@ class LLMReranker(Reranker):
 class BGEReranker(Reranker):
     """BGE 交叉编码器重排（BAAI/bge-reranker-v2-m3）。
 
-    模型懒加载（FlagEmbedding.FlagReranker），未安装依赖/模型加载失败时回退启发式。
+    模型懒加载（sentence-transformers CrossEncoder），未安装依赖/模型加载失败时回退启发式。
     模型权重经 HF 镜像下载（HF_ENDPOINT 缺省指向 hf-mirror.com）。
     """
     _model = None
@@ -134,8 +134,8 @@ class BGEReranker(Reranker):
                 return cls._model
             try:
                 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-                from FlagEmbedding import FlagReranker
-                cls._model = FlagReranker(settings.RAG_RERANK_MODEL, use_fp16=False)
+                from sentence_transformers import CrossEncoder
+                cls._model = CrossEncoder(settings.RAG_RERANK_MODEL)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("BGE reranker model unavailable; falling back (%s)", type(exc).__name__)
                 cls._model = None
@@ -174,8 +174,9 @@ class BGEReranker(Reranker):
     @staticmethod
     def _score(pairs: list[tuple[str, str]]) -> list[float]:
         model = BGEReranker._model
-        scores = model.compute_score(pairs, normalize=True)
-        if isinstance(scores, list):
+        scores = model.predict(pairs)
+        # predict 可能返回 numpy 数组/list/标量
+        if hasattr(scores, "__len__") and not isinstance(scores, (str, bytes)):
             return [float(s) for s in scores]
         return [float(scores)]
 

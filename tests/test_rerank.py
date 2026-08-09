@@ -87,7 +87,7 @@ class RerankerTests(unittest.IsolatedAsyncioTestCase):
         from app.services.rerank import BGEReranker
         reranker = BGEReranker(rag_service)
         fake_model = MagicMock()
-        fake_model.compute_score.return_value = [0.3, 0.9]
+        fake_model.predict.return_value = [0.3, 0.9]
         with patch.object(BGEReranker, "_model", fake_model):
             result = await reranker.rerank(
                 query="货款", query_variants=["货款"], candidates=self.candidates, top_k=2, user_id=7,
