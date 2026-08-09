@@ -357,6 +357,61 @@ class RagServiceTests(unittest.TestCase):
             rag_service.index_document(5, chunks, user_id=7)
         self.assertEqual(mock_embed.call_count, 1)
 
+    def test_index_document_incremental_skips_unchanged_chunks(self):
+        """索引增量：内容未变的 chunk 不重新嵌入、不 upsert。"""
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1, 0.2] for _ in texts]
+
+        chunks = [{"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "不变的内容", "section_path": []}]
+        existing = {"ids": ["doc5_chunk0"], "documents": ["不变的内容"], "metadatas": [{"document_id": 5}]}
+        added = []
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+            rag_service.collection, "get", return_value=existing,
+        ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
+            rag_service.collection, "add", side_effect=lambda **kw: added.append(kw),
+        ):
+            rag_service.index_document(5, chunks, user_id=7)
+        self.assertEqual(mock_embed.call_count, 0)
+        self.assertEqual(added, [])
+
+    def test_index_document_incremental_upserts_only_changed(self):
+        """索引增量：内容变化的 chunk 才重新嵌入并 upsert。"""
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1, 0.2] for _ in texts]
+
+        new_chunk = {"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "新内容", "section_path": []}
+        existing = {"ids": ["doc5_chunk0"], "documents": ["旧内容"], "metadatas": [{"document_id": 5}]}
+        added = []
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+            rag_service.collection, "get", return_value=existing,
+        ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
+            rag_service.collection, "add", side_effect=lambda **kw: added.append(kw),
+        ):
+            rag_service.index_document(5, [new_chunk], user_id=7)
+        self.assertEqual(mock_embed.call_count, 1)
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0]["documents"], ["新内容"])
+
+    def test_index_document_incremental_removes_removed_chunks(self):
+        """索引增量：新 chunk 中已不存在的旧块被删除。"""
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1, 0.2] for _ in texts]
+
+        chunks = [{"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "内容", "section_path": []}]
+        existing = {
+            "ids": ["doc5_chunk0", "doc5_chunk1"],
+            "documents": ["内容", "旧块"],
+            "metadatas": [{"document_id": 5}, {"document_id": 5}],
+        }
+        deleted = []
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
+            rag_service.collection, "get", return_value=existing,
+        ), patch.object(rag_service.collection, "delete", side_effect=lambda **kw: deleted.append(kw)), patch.object(
+            rag_service.collection, "add", return_value=None,
+        ):
+            rag_service.index_document(5, chunks, user_id=7)
+        self.assertEqual(deleted, [{"ids": ["doc5_chunk1"]}])
+
     def test_build_where_includes_knowledge_base_and_status(self):
         """RAG②：_build_where 追加 knowledge_base_id / document_status 等值子句；None 不产生子句。"""
         w = rag_service._build_where(document_id=1, user_id=7, knowledge_base_id=3, document_status="indexed")
@@ -407,6 +462,50 @@ class RagServiceTests(unittest.TestCase):
             asyncio.run(rag_service.search_async("测试", knowledge_base_id=3, document_status="indexed", user_id=7))
         self.assertEqual(captured.get("knowledge_base_id"), 3)
         self.assertEqual(captured.get("document_status"), "indexed")
+
+    def test_should_use_llm_rewrite_triggers_on_long_or_complex_query(self):
+        self.assertTrue(rag_service._should_use_llm_rewrite("员工工资怎么计算，公司拖欠工资超过三个月该怎么办"))
+        self.assertTrue(rag_service._should_use_llm_rewrite("工资和加班费怎么算"))
+        self.assertFalse(rag_service._should_use_llm_rewrite("工资"))  # 短查询不触发
+
+    def test_rewrite_query_llm_adds_rewritten_and_expand_variants(self):
+        async def fake_generate(prompt, temperature=0.0, action="generate", user_id=None,
+                                prompt_template=None, prompt_version=None):
+            return '{"search_query": "工资 劳动报酬 计算方式", "expand": ["薪资", "劳动报酬"]}'
+        with patch("app.services.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", True), patch(
+            "app.services.rag_service.llm_client.generate", new=fake_generate,
+        ):
+            variants = asyncio.run(rag_service._rewrite_query_llm("员工工资怎么计算，公司拖欠怎么办", user_id=7))
+        self.assertIn("工资 劳动报酬 计算方式", variants)
+        self.assertTrue(any("薪资" in v for v in variants))
+
+    def test_rewrite_query_llm_disabled_or_failure_returns_empty(self):
+        with patch("app.services.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", False):
+            variants = asyncio.run(rag_service._rewrite_query_llm("员工工资怎么计算", user_id=7))
+        self.assertEqual(variants, [])
+
+    def test_search_async_includes_llm_rewrite_variant_when_enabled(self):
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1] for _ in texts]
+        async def fake_generate(prompt, temperature=0.0, action="generate", user_id=None,
+                                prompt_template=None, prompt_version=None):
+            return '{"search_query": "工资 劳动报酬 计算方式", "expand": []}'
+        captured = {}
+        def spy(**kwargs):
+            captured.update(kwargs)
+            return None
+        with patch("app.services.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", True), patch(
+            "app.services.rag_service.llm_client.generate", new=fake_generate,
+        ), patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+            rag_service, "_build_where", side_effect=spy,
+        ), patch.object(rag_service.collection, "query", return_value={
+            "ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]],
+        }), patch.object(rag_service.collection, "get", return_value={
+            "ids": [], "documents": [], "metadatas": [],
+        }):
+            asyncio.run(rag_service.search_async("员工工资怎么计算，公司拖欠怎么办", user_id=7))
+        embedded_texts = [call.args[0] for call in mock_embed.call_args_list]
+        self.assertTrue(any("劳动报酬" in " ".join(texts) for texts in embedded_texts))
 
     def test_build_prompt_context_respects_token_budget(self):
         """上下文处理：token 预算裁剪，超限片段被截断。"""
@@ -974,6 +1073,38 @@ class RagServiceTests(unittest.TestCase):
         self.assertEqual(captured["template_name"], "rag_answer")
         self.assertIn("甲方应于2026年7月1日前支付首付款100万元。", captured["context"])
         self.assertIn("section:付款条款", captured["context"])
+
+    def test_answer_async_injects_conversation_history_into_prompt(self):
+        """会话记忆：把最近对话作为上文注入 prompt，帮助理解追问。"""
+        chunk = {
+            "id": "doc2_chunk0",
+            "content": "经济补偿按劳动者在本单位工作的年限计算。",
+            "metadata": {"document_id": 2, "chunk_id": 22, "chunk_index": 0, "page_number": 3},
+            "distance": 0.1,
+        }
+        captured = {}
+
+        def fake_render(template_name, **kwargs):
+            captured["context"] = kwargs["context"]
+            return "PROMPT"
+
+        with patch.object(rag_service, "search_async", new=AsyncMock(return_value=[chunk])), patch.object(
+            rag_service, "_expand_context_chunks", new=AsyncMock(return_value=[chunk]),
+        ), patch(
+            "app.services.rag_service.prompt_service.render_by_name", side_effect=fake_render,
+        ), patch(
+            "app.services.rag_service.llm_client.generate",
+            new=AsyncMock(return_value="经济补偿按工作年限计算。"),
+        ):
+            asyncio.run(rag_service.answer_async(
+                "那经济补偿怎么算？", document_id=2, user_id=1,
+                conversation_history=[
+                    {"role": "user", "content": "合同解除后"},
+                    {"role": "assistant", "content": "可以解除。"},
+                ],
+            ))
+        self.assertIn("[对话上下文]", captured["context"])
+        self.assertIn("合同解除后", captured["context"])
 
     def test_build_prompt_context_includes_path_and_segment_type(self):
         context = rag_service._build_prompt_context(

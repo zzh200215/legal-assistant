@@ -103,11 +103,22 @@ async def ws_chat(
                 if not doc:
                     await websocket.send_json({"type": "error", "content": "文档不存在或无权访问"})
                     continue
+                # 会话记忆：取本消息之前的消息作为追问上文
+                history_msgs = (
+                    db.query(ChatMessage)
+                    .filter(ChatMessage.session_id == session.id, ChatMessage.id < user_msg.id)
+                    .order_by(ChatMessage.id.asc())
+                    .all()
+                )
+                conversation_history = (
+                    [{"role": m.role, "content": m.content} for m in history_msgs] or None
+                )
                 result = await agentic_rag_service.answer_async(
                     content,
                     document_id=document_id,
                     user_id=user.id,
                     knowledge_base_id=doc.knowledge_base_id,
+                    conversation_history=conversation_history,
                 )
                 chunks = result["hit_chunks"]
                 citations = result["citations"]

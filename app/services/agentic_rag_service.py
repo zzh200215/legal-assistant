@@ -80,8 +80,16 @@ class AgenticRAGService:
 
     async def _workflow_retrieve(self, state: dict[str, Any]) -> dict[str, Any]:
         started = time.time()
+        search_query = state["active_query"]
+        # 会话记忆：追问消歧——用上一轮用户问题补全当前检索表达式
+        history = state.get("conversation_history") or []
+        last_user_question = next(
+            (m.get("content") for m in reversed(history) if m.get("role") == "user"), None,
+        )
+        if last_user_question and last_user_question != state["question"]:
+            search_query = f"{last_user_question} {search_query}"
         chunks = await rag_service.search_async(
-            state["active_query"],
+            search_query,
             document_id=state.get("document_id"),
             top_k=state["runtime_config"]["top_k"],
             user_id=state.get("user_id"),
@@ -155,6 +163,7 @@ class AgenticRAGService:
             log_query=state["question"],
             knowledge_base_id=state.get("knowledge_base_id"),
             document_status=state.get("document_status"),
+            conversation_history=state.get("conversation_history"),
         )
         trace = {
             "enabled": True,
@@ -186,6 +195,7 @@ class AgenticRAGService:
         user_id: int | None = None,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        conversation_history: list[dict] | None = None,
         **runtime_overrides: Any,
     ) -> dict[str, Any]:
         runtime_config = rag_service.get_runtime_config(**runtime_overrides)
@@ -196,6 +206,7 @@ class AgenticRAGService:
                 user_id=user_id,
                 knowledge_base_id=knowledge_base_id,
                 document_status=document_status,
+                conversation_history=conversation_history,
                 **runtime_overrides,
             )
             result["agentic_rag"] = {"enabled": False, "reason": "feature_disabled"}
@@ -206,6 +217,7 @@ class AgenticRAGService:
             "user_id": user_id,
             "knowledge_base_id": knowledge_base_id,
             "document_status": document_status,
+            "conversation_history": conversation_history,
             "runtime_config": runtime_config,
             "max_rounds": self.settings.AGENTIC_RAG_MAX_RETRIEVAL_ROUNDS,
             "round": 0,

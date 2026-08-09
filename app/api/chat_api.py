@@ -45,11 +45,15 @@ async def chat(
             if not doc:
                 raise api_error(404, "文档不存在", code="DOCUMENT_NOT_FOUND")
             last_message = req.messages[-1].content if req.messages else ""
+            conversation_history = (
+                [{"role": m.role, "content": m.content} for m in req.messages[:-1]] or None
+            )
             result = await agentic_rag_service.answer_async(
                 last_message,
                 document_id=req.document_id,
                 user_id=current_user.id,
                 knowledge_base_id=doc.knowledge_base_id,
+                conversation_history=conversation_history,
             )
             qa_record = document_qa_service.record(
                 document_id=req.document_id,

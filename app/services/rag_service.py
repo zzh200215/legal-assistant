@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 import time
@@ -86,36 +87,49 @@ class RAGService:
         ]
         contents = [chunk.get("index_content") or chunk["content"] for chunk in chunks]
 
-        # 旧 chunk 内容 hash 收集（供缓存清除），随后按 document_id 全删
-        old_hashes: list[str] = []
+        # 索引增量：只 upsert 内容变化的 chunk，删除已移除的 chunk（未变 chunk 向量原样保留）
+        old_by_id: dict[str, str] = {}
         try:
             old_rows = self.collection.get(where={"document_id": document_id}, include=["documents"])
-            old_hashes = [doc for doc in (old_rows.get("documents") or [])]
-        except Exception:
-            pass
-        try:
-            self.collection.delete(where={"document_id": document_id})
+            old_ids = old_rows.get("ids") or []
+            old_docs = old_rows.get("documents") or []
+            old_by_id = dict(zip(old_ids, old_docs))
         except Exception:
             pass
 
+        to_add_idx = [i for i, cid in enumerate(ids) if old_by_id.get(cid) != contents[i]]
+        new_id_set = set(ids)
+        to_delete_ids = [cid for cid in old_by_id if cid not in new_id_set]
+        if to_delete_ids:
+            try:
+                self.collection.delete(ids=to_delete_ids)
+            except Exception:
+                pass
+
+        if not to_add_idx:
+            if to_delete_ids:
+                self._invalidate_bm25()
+            return
+
+        add_ids = [ids[i] for i in to_add_idx]
+        add_contents = [contents[i] for i in to_add_idx]
+        add_metadatas = [metadatas[i] for i in to_add_idx]
         if settings.RAG_EMBED_CACHE_ENABLED:
             # 内容寻址：未变 chunk 命中缓存不再重算嵌入
             embeddings = asyncio.run(
                 rag_embedding_cache.get_or_compute_batch(
-                    contents,
+                    add_contents,
                     lambda ms: llm_client.embed(ms, user_id=user_id, action="embedding"),
                 )
             )
-            for old in old_hashes:
-                rag_embedding_cache.remove(old)
         else:
-            embeddings = asyncio.run(llm_client.embed(contents, user_id=user_id, action="embedding"))
+            embeddings = asyncio.run(llm_client.embed(add_contents, user_id=user_id, action="embedding"))
 
         self.collection.add(
-            ids=ids,
+            ids=add_ids,
             embeddings=embeddings,
-            documents=contents,
-            metadatas=metadatas,
+            documents=add_contents,
+            metadatas=add_metadatas,
         )
         self._invalidate_bm25()
 
@@ -166,6 +180,10 @@ class RAGService:
             document_status=document_status,
         )
         query_variants = self._rewrite_queries(query, limit=runtime_config["query_variant_limit"])
+        if settings.RAG_QUERY_REWRITE_LLM_ENABLED:
+            for llm_variant in await self._rewrite_query_llm(query, user_id):
+                if llm_variant not in query_variants:
+                    query_variants.append(llm_variant)
         candidate_limit = max(
             runtime_config["top_k"] * runtime_config["recall_multiplier"],
             runtime_config["min_recall_candidates"],
@@ -228,6 +246,7 @@ class RAGService:
         *,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        conversation_history: list[dict] | None = None,
     ) -> dict:
         runtime_config = self.get_runtime_config(
             top_k=top_k,
@@ -262,6 +281,7 @@ class RAGService:
             retrieval_duration_ms=retrieval_duration_ms,
             knowledge_base_id=knowledge_base_id,
             document_status=document_status,
+            conversation_history=conversation_history,
         )
 
     async def answer_from_chunks_async(
@@ -277,6 +297,7 @@ class RAGService:
         log_query: str | None = None,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        conversation_history: list[dict] | None = None,
     ) -> dict:
         """Generate a grounded answer from already retrieved chunks.
 
@@ -312,6 +333,12 @@ class RAGService:
             document_status=document_status,
         )
         context = self._build_prompt_context(context_chunks)
+        if conversation_history:
+            # 会话记忆：注入最近对话作为上文，帮助理解追问
+            recent = [m for m in conversation_history[-4:] if m.get("content")]
+            conv_text = "\n".join(f"{m.get('role')}: {m.get('content')}" for m in recent)
+            if conv_text:
+                context = f"[对话上下文]\n{conv_text}\n\n{context}"
         prompt = prompt_service.render_by_name(
             "rag_answer",
             user_id=user_id,
@@ -392,6 +419,7 @@ class RAGService:
         *,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        conversation_history: list[dict] | None = None,
     ) -> dict:
         return asyncio.run(
             self.answer_async(
@@ -407,6 +435,7 @@ class RAGService:
                 context_max_chunks=context_max_chunks,
                 knowledge_base_id=knowledge_base_id,
                 document_status=document_status,
+                conversation_history=conversation_history,
             )
         )
 
@@ -789,6 +818,49 @@ class RAGService:
                 unique_variants.append(cleaned)
         final_limit = max(1, int(limit if limit is not None else settings.RAG_QUERY_VARIANT_LIMIT))
         return unique_variants[:final_limit]
+
+    @staticmethod
+    def _should_use_llm_rewrite(query: str) -> bool:
+        """长/歧义查询（多意图、含并列/标点）才触发 LLM 改写，控制成本。"""
+        compact = re.sub(r"\s+", "", query or "")
+        if len(compact) >= settings.RAG_QUERY_REWRITE_LLM_MIN_CHARS:
+            return True
+        return bool(re.search(r"[。；;，,]|和|与|并且|或者|或者|还是", compact))
+
+    async def _rewrite_query_llm(self, query: str, user_id: int | None = None) -> list[str]:
+        """LLM 查询改写：产出检索表达式 + 扩展词；失败/关闭时返回空（保持规则改写）。"""
+        if not settings.RAG_QUERY_REWRITE_LLM_ENABLED or not self._should_use_llm_rewrite(query):
+            return []
+        prompt = (
+            "你是法律文档检索优化器。把问题改写为更利于检索的表达式，并补充同义/相关检索词，"
+            "不回答问题、不添加事实。\n"
+            "只输出 JSON：{\"search_query\": \"不超过300字的检索表达式\", \"expand\": [\"词1\", \"词2\"]}\n"
+            f"原始问题：{query}"
+        )
+        try:
+            raw = await llm_client.generate(prompt, temperature=0.0, action="rag_query_rewrite", user_id=user_id)
+            payload = self._parse_llm_json(raw)
+            variants: list[str] = []
+            search_query = str(payload.get("search_query") or "").strip()
+            if search_query and len(search_query) <= 300:
+                variants.append(search_query)
+            expand = payload.get("expand") or []
+            for term in expand[: settings.RAG_QUERY_EXPANSION_MAX]:
+                term = str(term).strip()
+                if term and term not in query:
+                    variants.append(query + " " + term)
+            return [v for v in variants if v]
+        except Exception as exc:  # noqa: BLE001 - 改写失败回退规则
+            logger.warning("LLM query rewrite failed; keeping rule variants (%s)", type(exc).__name__)
+            return []
+
+    @staticmethod
+    def _parse_llm_json(raw: str) -> dict:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end < start:
+            return {}
+        return json.loads(raw[start:end + 1])
 
     async def _dense_multi_recall(
         self,

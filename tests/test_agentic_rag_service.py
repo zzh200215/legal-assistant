@@ -80,6 +80,38 @@ class AgenticRAGServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer.await_args.kwargs.get("knowledge_base_id"), 3)
         self.assertEqual(answer.await_args.kwargs.get("document_status"), "indexed")
 
+    async def test_conversation_history_disambiguates_search_and_threads_to_generate(self):
+        """会话记忆：追问用上一轮用户问题消歧检索，并把历史透传给生成。"""
+        previous = self.service.settings.AGENTIC_RAG_PLANNER_ENABLED
+        self.service.settings.AGENTIC_RAG_PLANNER_ENABLED = False
+        try:
+            with patch(
+                "app.services.agentic_rag_service.rag_service.search_async",
+                new=AsyncMock(return_value=[self.chunk]),
+            ) as search, patch(
+                "app.services.agentic_rag_service.rag_service._estimate_confidence",
+                return_value=0.8,
+            ), patch(
+                "app.services.agentic_rag_service.rag_service.answer_from_chunks_async",
+                new=AsyncMock(return_value=dict(self.answer)),
+            ) as answer, patch(
+                "app.services.agentic_rag_service.llm_observability_service.log_event",
+            ):
+                await self.service.answer_async(
+                    "那经济补偿怎么算？", document_id=1, user_id=7,
+                    conversation_history=[
+                        {"role": "user", "content": "合同解除后有什么后果"},
+                        {"role": "assistant", "content": "可以主张经济补偿。"},
+                    ],
+                )
+        finally:
+            self.service.settings.AGENTIC_RAG_PLANNER_ENABLED = previous
+
+        search_query = search.await_args.args[0]
+        self.assertIn("合同解除后有什么后果", search_query)  # 消歧
+        self.assertIn("那经济补偿怎么算", search_query)
+        self.assertEqual(answer.await_args.kwargs.get("conversation_history")[-1]["role"], "assistant")
+
     async def test_refines_once_when_first_retrieval_is_insufficient(self):
         weak_chunk = {**self.chunk, "content": "这是其他制度说明。"}
         previous = self.service.settings.AGENTIC_RAG_PLANNER_ENABLED
