@@ -99,7 +99,14 @@ async def ws_chat(
 
             # 流式响应
             if document_id:
-                doc = document_service.get(document_id, db, user_id=user.id)
+                doc = document_service.get(
+                    document_id,
+                    db,
+                    user_id=user.id,
+                    role=user.role,
+                    organization_id=user.organization_id,
+                    department_id=user.department_id,
+                )
                 if not doc:
                     await websocket.send_json({"type": "error", "content": "文档不存在或无权访问"})
                     continue
@@ -118,6 +125,7 @@ async def ws_chat(
                     document_id=document_id,
                     user_id=user.id,
                     knowledge_base_id=doc.knowledge_base_id,
+                    authorized_document_ids=[document_id],
                     conversation_history=conversation_history,
                 )
                 chunks = result["hit_chunks"]

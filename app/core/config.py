@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     RAG_EMBED_CACHE_REDIS_PREFIX: str = "aibg:rag:embed"
     RAG_BM25_ENABLED: bool = True
     RAG_BM25_TOP_N: int = 100
+    RAG_BM25_TTL_SECONDS: int = 300
     RAG_LLM_RERANK_ENABLED: bool = False
     RAG_LLM_RERANK_TOP_N: int = 5
     RAG_LLM_RERANK_MAX_CHARS: int = 400

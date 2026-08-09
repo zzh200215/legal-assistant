@@ -114,6 +114,7 @@ class DocumentGovernanceService:
             document.permission_roles = json.dumps(permission_roles, ensure_ascii=False)
         if knowledge_base_id is not None:
             document.knowledge_base_id = knowledge_base_id
+            self._refresh_rag_metadata(document.id, knowledge_base_id=knowledge_base_id)
         if metadata is not None:
             document.metadata_json = json.dumps(metadata, ensure_ascii=False)
         db.add(document)
@@ -189,6 +190,39 @@ class DocumentGovernanceService:
                 department_id=user.department_id,
             )
         ]
+
+    def list_accessible_document_ids(
+        self,
+        *,
+        db: Session,
+        user_id: int,
+        role: str | None = None,
+        organization_id: int | None = None,
+        department_id: int | None = None,
+    ) -> list[int]:
+        """返回当前用户在访问层可见的全部文档 ID（含共享文档），供 RAG 检索作授权上下文。"""
+        return [
+            doc.id
+            for doc in db.query(Document).order_by(Document.id.asc()).all()
+            if self.can_access_document(
+                document=doc,
+                user_id=user_id,
+                role=role,
+                organization_id=organization_id,
+                department_id=department_id,
+            )
+        ]
+
+    @staticmethod
+    def _refresh_rag_metadata(document_id: int, *, knowledge_base_id: int) -> None:
+        """知识库归属变化时同步 RAG chunk 元数据，避免 knowledge_base_id 过滤失配。"""
+        try:
+            from app.services.rag_service import rag_service
+
+            rag_service.refresh_document_metadata(document_id, knowledge_base_id=knowledge_base_id)
+        except Exception:
+            # 向量库不可用不阻断治理更新；下次重解析会重写元数据
+            pass
 
     @staticmethod
     def _json_list(raw: str | None) -> list[str]:

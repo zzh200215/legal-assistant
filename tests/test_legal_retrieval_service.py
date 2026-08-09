@@ -14,7 +14,12 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401 — registers all ORM metadata
 from app.core.database import Base
 from app.models.legal import LegalArticle, LegalSource
-from app.services.legal_retrieval_service import LegalRetrievalService, _article_vector_id, _graph_support_boost
+from app.services.legal_retrieval_service import (
+    LegalRetrievalService,
+    _article_vector_id,
+    _graph_support_boost,
+    _like_escape,
+)
 from app.services.vector_store import ChromaVectorStoreCollection
 
 USER_ID = 1
@@ -310,6 +315,43 @@ class LegalRetrievalServiceTests(unittest.IsolatedAsyncioTestCase):
 
         results = await self.service.search(self.db, "合同义务", user_id=USER_ID, limit=3)
         self.assertLessEqual(len(results), 3)
+
+    async def test_search_does_not_rollback_caller_transaction(self):
+        """检索使用独立会话：不得 rollback 调用方未提交事务。"""
+        src = _fake_source(self.db, title="劳动合同法", citation="劳动合同法")
+        _fake_article(self.db, src.id, article_number="第47条", content="经济补偿按工作年限计算")
+        self.db.commit()
+
+        # 调用方未提交的独立变更（不 flush 也不 commit）
+        pending = LegalSource(
+            user_id=USER_ID, title="待提交法源", source_type="statute",
+            jurisdiction="中国大陆", version="v1", status="active", content="待提交",
+        )
+        self.db.add(pending)
+
+        results = await self.service.search(self.db, "经济补偿", user_id=USER_ID)
+        self.assertGreater(len(results), 0)
+        # 关键：search 不能把 pending 对象从调用方会话中清掉
+        self.assertIn(pending, self.db)
+
+    async def test_sql_prefilter_surfaces_matching_amid_many_unrelated(self):
+        """SQL 侧词级预过滤：大量无关法条不进入 Python 候选，命中文章仍被召回。"""
+        src = _fake_source(self.db, title="民法典", citation="民法典")
+        matching = _fake_article(self.db, src.id, article_number="第47条",
+                                 content="经济补偿按劳动者在本单位工作年限计算")
+        for i in range(20):
+            _fake_article(self.db, src.id, article_number=f"第{500 + i}条",
+                          content=f"完全无关的条款内容第{i}项", sequence=i)
+        self.db.commit()
+
+        results = await self.service.search(self.db, "经济补偿工作年限", user_id=USER_ID)
+        self.assertGreater(len(results), 0)
+        self.assertIn(matching.id, [r["id"] for r in results])
+
+    def test_like_escape_escapes_wildcards(self):
+        self.assertEqual(_like_escape("50%_a"), "50\\%\\_a")
+        self.assertEqual(_like_escape("正常词"), "正常词")
+        self.assertEqual(_like_escape(None), "")
 
 
 if __name__ == "__main__":

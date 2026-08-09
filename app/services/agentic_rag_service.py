@@ -98,6 +98,7 @@ class AgenticRAGService:
             query_variant_limit=state["runtime_config"]["query_variant_limit"],
             knowledge_base_id=state.get("knowledge_base_id"),
             document_status=state.get("document_status"),
+            authorized_document_ids=state.get("authorized_document_ids"),
         )
         duration_ms = int((time.time() - started) * 1000)
         confidence = rag_service._estimate_confidence(state["question"], chunks) if chunks else 0.0
@@ -163,6 +164,7 @@ class AgenticRAGService:
             log_query=state["question"],
             knowledge_base_id=state.get("knowledge_base_id"),
             document_status=state.get("document_status"),
+            authorized_document_ids=state.get("authorized_document_ids"),
             conversation_history=state.get("conversation_history"),
         )
         trace = {
@@ -195,6 +197,7 @@ class AgenticRAGService:
         user_id: int | None = None,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        authorized_document_ids: list[int] | None = None,
         conversation_history: list[dict] | None = None,
         **runtime_overrides: Any,
     ) -> dict[str, Any]:
@@ -206,6 +209,7 @@ class AgenticRAGService:
                 user_id=user_id,
                 knowledge_base_id=knowledge_base_id,
                 document_status=document_status,
+                authorized_document_ids=authorized_document_ids,
                 conversation_history=conversation_history,
                 **runtime_overrides,
             )
@@ -217,6 +221,7 @@ class AgenticRAGService:
             "user_id": user_id,
             "knowledge_base_id": knowledge_base_id,
             "document_status": document_status,
+            "authorized_document_ids": authorized_document_ids,
             "conversation_history": conversation_history,
             "runtime_config": runtime_config,
             "max_rounds": self.settings.AGENTIC_RAG_MAX_RETRIEVAL_ROUNDS,

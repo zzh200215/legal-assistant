@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -60,6 +61,49 @@ def hit_at_k(ranked_chunks: list[dict], document_id: int, match: str) -> int | N
     return None
 
 
+def relevant_ranks(ranked_chunks: list[dict], document_id: int, match: str | list[str]) -> list[int]:
+    """返回全部相关片段排名；match 可为字符串或列表（支持多相关项，供 nDCG 用）。"""
+    matches = [match] if isinstance(match, str) else list(match)
+    ranks = []
+    for index, chunk in enumerate(ranked_chunks, start=1):
+        metadata = chunk.get("metadata") or {}
+        if metadata.get("document_id") == document_id and any(m in chunk.get("content", "") for m in matches):
+            ranks.append(index)
+    return ranks
+
+
+def ndcg_at_k(ranked_chunks: list[dict], document_id: int, match: str | list[str], k: int) -> float:
+    """nDCG@K：单个相关片段时退化为 1/log2(rank+1)；多相关项时按理想增益归一化。"""
+    ranks = [r for r in relevant_ranks(ranked_chunks, document_id, match) if r <= k]
+    if not ranks:
+        return 0.0
+    dcg = sum(1.0 / math.log2(rank + 1) for rank in ranks)
+    ideal = sum(1.0 / math.log2(index + 2) for index in range(len(ranks)))
+    return dcg / ideal if ideal > 0 else 0.0
+
+
+def calibrate_threshold(pairs: list[tuple[float, bool]]) -> float | None:
+    """在离线命中/未命中标注上扫描置信度阈值，返回最大化 F1 的建议阈值。
+
+    全命中或全未命中（无区分度）时返回 None，提示需要更多样例。
+    """
+    if not pairs or all(hit for _, hit in pairs) or not any(hit for _, hit in pairs):
+        return None
+    best_threshold = None
+    best_f1 = -1.0
+    for threshold in sorted({confidence for confidence, _ in pairs}):
+        tp = sum(1 for c, hit in pairs if c >= threshold and hit)
+        fp = sum(1 for c, hit in pairs if c >= threshold and not hit)
+        fn = sum(1 for c, hit in pairs if c < threshold and hit)
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = threshold
+    return round(best_threshold, 4) if best_threshold is not None else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Document RAG retrieval eval (offline, deterministic)")
     parser.add_argument("--top-k", type=int, default=3)
@@ -91,16 +135,36 @@ def main() -> int:
 
     # 检索评测
     hits = []
+    ranked_results: list[list[dict]] = []
+    margins: list[float | None] = []
+    route_consistent: list[bool] = []
+    confidences: list[float] = []
     for item in qa:
         ranked = service.search(item["question"], user_id=1, top_k=args.top_k)
         rank = hit_at_k(ranked, item["document_id"], item["match"])
         hits.append(rank)
+        ranked_results.append(ranked)
+        top_score = ranked[0].get("retrieval_score") if ranked else None
+        second_score = ranked[1].get("retrieval_score") if len(ranked) >= 2 else None
+        margin = None
+        if top_score is not None and second_score is not None and top_score > 0:
+            margin = max(0.0, min(1.0, (top_score - second_score) / top_score))
+        margins.append(margin)
+        routes = (ranked[0].get("retrieval_routes") or []) if ranked else []
+        route_consistent.append(len(routes) >= 2)
+        confidences.append(service._estimate_confidence(item["question"], ranked))
         status = f"Hit@{rank}" if rank is not None else "MISS"
         print(f"  [{status}] {item['question']}")
 
     hit1 = sum(1 for r in hits if r is not None and r <= 1) / len(qa)
     hitk = sum(1 for r in hits if r is not None and r <= args.top_k) / len(qa)
     mrr = sum(1.0 / r for r in hits if r is not None) / len(qa)
+    ndcg = sum(
+        ndcg_at_k(ranked, item["document_id"], item["match"], args.top_k)
+        for ranked, item in zip(ranked_results, qa)
+    ) / len(qa)
+    scored_margins = [m for m in margins if m is not None]
+    calibration_hint = calibrate_threshold(list(zip(confidences, [r is not None for r in hits])))
 
     report = {
         "eval": "document_rag_retrieval",
@@ -109,6 +173,10 @@ def main() -> int:
         "hit_at_1": round(hit1, 4),
         f"hit_at_{args.top_k}": round(hitk, 4),
         "mrr": round(mrr, 4),
+        f"ndcg_at_{args.top_k}": round(ndcg, 4),
+        "top_score_margin_avg": round(sum(scored_margins) / len(scored_margins), 4) if scored_margins else None,
+        "route_consistency_rate": round(sum(route_consistent) / len(route_consistent), 4),
+        "confidence_calibration_hint": calibration_hint,
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0

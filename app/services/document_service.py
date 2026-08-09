@@ -494,7 +494,12 @@ class DocumentService:
         if visual_analysis and visual_analysis.get("analysis"):
             final_question = f"{question}\n\n补充视觉分析线索：{visual_analysis['analysis']}"
 
-        result = agentic_rag_service.answer(final_question, document_id=document_id, user_id=doc.user_id)
+        result = agentic_rag_service.answer(
+            final_question,
+            document_id=document_id,
+            user_id=doc.user_id,
+            authorized_document_ids=[document_id],
+        )
         qa_record = document_qa_service.record(
             document_id=document_id,
             user_id=doc.user_id,

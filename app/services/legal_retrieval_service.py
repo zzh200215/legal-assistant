@@ -12,8 +12,10 @@ import logging
 import re
 import uuid
 from collections import defaultdict
+from typing import Any
 
 import jieba
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -36,6 +38,22 @@ def _tokens(text: str) -> set[str]:
         for word in jieba.cut(text or "")
         if len(word.strip()) >= 2 and re.search(r"[一-鿿A-Za-z]", word)
     }
+
+
+def _like_escape(text: str) -> str:
+    return (text or "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _token_like_clause(token: str) -> Any:
+    """将单个检索词转为多列 LIKE 匹配子句，下沉到 SQL 做候选预过滤。"""
+    pattern = f"%{_like_escape(token)}%"
+    return or_(
+        LegalArticle.content.like(pattern, escape="\\"),
+        LegalArticle.title.like(pattern, escape="\\"),
+        LegalArticle.article_number.like(pattern, escape="\\"),
+        LegalSource.title.like(pattern, escape="\\"),
+        LegalSource.citation.like(pattern, escape="\\"),
+    )
 
 
 def _article_vector_id(article_id: int) -> str:
@@ -96,7 +114,7 @@ class LegalRetrievalService:
             embeddings = await self.client.embed(documents, user_id=user_id, action="embedding")
         if len(embeddings) != len(rows):
             raise RuntimeError("embedding result count does not match legal articles")
-        collection.add(
+        collection.upsert(
             ids=[_article_vector_id(article.id) for article, _ in rows],
             embeddings=embeddings,
             documents=documents,
@@ -120,47 +138,57 @@ class LegalRetrievalService:
             logger.warning("Unable to remove legal vectors for source %s: %s", source_id, type(exc).__name__)
 
     async def search(self, db: Session, query: str, user_id: int, limit: int = 20) -> list[dict]:
-        """Fuse lexical and dense article recalls with reciprocal-rank fusion."""
-        rows = (
-            db.query(LegalArticle, LegalSource)
-            .join(LegalSource, LegalArticle.source_id == LegalSource.id)
-            .filter(LegalSource.user_id == user_id)
-            .filter(LegalSource.status != "inactive")
-            .all()
-        )
-        if not rows:
-            return []
+        """Fuse lexical and dense article recalls with reciprocal-rank fusion.
 
-        # E-7：先把检索数据物化为纯 dict——LLM 调用前结束事务归还 DB 连接，
-        # 避免连接在等待期间被占用，也避免依赖 ORM 对象的 session 生命周期。
-        article_data = [
-            {
-                "article_id": article.id,
-                "source_id": source.id,
-                "source_title": source.title,
-                "citation": source.citation or "",
-                "article_number": article.article_number,
-                "title": article.title,
-                "content": article.content,
-                "chapter": article.chapter,
-                "sequence": article.sequence,
-            }
-            for article, source in rows
-        ]
-        db.rollback()
+        db 参数仅为兼容调用方：检索使用与调用方同 bind 的独立只读会话，读后即归还连接，
+        既不占住调用方连接等待 LLM 调用，也不会 rollback 误伤调用方未提交事务。
+        """
+        from sqlalchemy.orm import sessionmaker
 
         query_tokens = _tokens(query)
         citations = set(ARTICLE_CITATION_PATTERN.findall(query))
-        lexical = []
-        for item in article_data:
-            haystack = (
-                f"{item['source_title']} {item['citation']} {item['article_number']} "
-                f"{item['title'] or ''} {item['content']}"
-            ).lower()
-            keyword_hits = sum(1 for token in query_tokens if token in haystack)
-            citation_hit = item["article_number"] in citations
-            if keyword_hits or citation_hit:
-                lexical.append((item["article_id"], citation_hit * 10 + keyword_hits, keyword_hits, citation_hit))
+
+        # 词级预过滤下沉 SQL：只把命中任一 token / 法条号的候选行载入 Python，
+        # 避免全量法条内容进内存；排序评分仍在 Python 对候选行执行，结果与全量扫描一致。
+        lexical_filters = [_token_like_clause(token) for token in query_tokens]
+        if citations:
+            lexical_filters.append(LegalArticle.article_number.in_(list(citations)))
+
+        article_data: list[dict] = []
+        lexical: list[tuple] = []
+        query_session = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)()
+        try:
+            base = (
+                query_session.query(LegalArticle, LegalSource)
+                .join(LegalSource, LegalArticle.source_id == LegalSource.id)
+                .filter(LegalSource.user_id == user_id)
+                .filter(LegalSource.status != "inactive")
+            )
+            candidate_rows = base.filter(or_(*lexical_filters)).all() if lexical_filters else []
+            for article, source in candidate_rows:
+                item = {
+                    "article_id": article.id,
+                    "source_id": source.id,
+                    "source_title": source.title,
+                    "citation": source.citation or "",
+                    "article_number": article.article_number,
+                    "title": article.title,
+                    "content": article.content,
+                    "chapter": article.chapter,
+                    "sequence": article.sequence,
+                }
+                article_data.append(item)
+                haystack = (
+                    f"{item['source_title']} {item['citation']} {item['article_number']} "
+                    f"{item['title'] or ''} {item['content']}"
+                ).lower()
+                keyword_hits = sum(1 for token in query_tokens if token in haystack)
+                citation_hit = item["article_number"] in citations
+                if keyword_hits or citation_hit:
+                    lexical.append((item["article_id"], citation_hit * 10 + keyword_hits, keyword_hits, citation_hit))
+        finally:
+            query_session.close()
+
         lexical.sort(key=lambda item: item[1], reverse=True)
 
         dense_ids: list[int] = []
@@ -214,6 +242,33 @@ class LegalRetrievalService:
             details[article_id]["graph_support"] = {**evidence, "boost": round(boost, 6)}
 
         by_id = {item["article_id"]: item for item in article_data}
+        # 稠密召回可能命中无词级匹配的文章（不在词级候选内）：定向补取，避免缺失 by_id
+        missing_ids = [article_id for article_id in fused if article_id not in by_id]
+        if missing_ids:
+            from sqlalchemy.orm import sessionmaker
+
+            dense_session = sessionmaker(bind=db.get_bind(), autoflush=False, autocommit=False)()
+            try:
+                extra_rows = (
+                    dense_session.query(LegalArticle, LegalSource)
+                    .join(LegalSource, LegalArticle.source_id == LegalSource.id)
+                    .filter(LegalArticle.id.in_(missing_ids))
+                    .all()
+                )
+                for article, source in extra_rows:
+                    by_id[article.id] = {
+                        "article_id": article.id,
+                        "source_id": source.id,
+                        "source_title": source.title,
+                        "citation": source.citation or "",
+                        "article_number": article.article_number,
+                        "title": article.title,
+                        "content": article.content,
+                        "chapter": article.chapter,
+                        "sequence": article.sequence,
+                    }
+            finally:
+                dense_session.close()
         ranked_ids = sorted(fused, key=lambda article_id: fused[article_id], reverse=True)[:limit]
         results = [
             {

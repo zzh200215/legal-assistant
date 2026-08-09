@@ -22,10 +22,17 @@ except Exception:
 
 
 class VectorStoreCollection:
-    def add(self, *, ids: list[str], embeddings: list[list[float]], documents: list[str], metadatas: list[dict]) -> None:
+    """统一向量库适配器契约。
+
+    - upsert：按 ID 覆盖写入（同 ID 已存在则替换旧向量/内容/元数据）。
+    - delete：按 ids 和/或 where 删除；两者皆空时由实现决定（Chroma 报错，Qdrant 清空集合）。
+    - where 支持 {$and, $or, $in, $ne} 等值子句，跨适配器语义一致。
+    """
+
+    def upsert(self, *, ids: list[str], embeddings: list[list[float]], documents: list[str], metadatas: list[dict]) -> None:
         raise NotImplementedError
 
-    def delete(self, *, where: dict | None = None) -> None:
+    def delete(self, *, ids: list[str] | None = None, where: dict | None = None) -> None:
         raise NotImplementedError
 
     def get(self, *, where: dict | None = None, include: list[str] | None = None) -> dict[str, Any]:
@@ -39,11 +46,11 @@ class VectorStoreCollection:
 class ChromaVectorStoreCollection(VectorStoreCollection):
     collection: Any
 
-    def add(self, *, ids: list[str], embeddings: list[list[float]], documents: list[str], metadatas: list[dict]) -> None:
-        self.collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
+    def upsert(self, *, ids: list[str], embeddings: list[list[float]], documents: list[str], metadatas: list[dict]) -> None:
+        self.collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
-    def delete(self, *, where: dict | None = None) -> None:
-        self.collection.delete(where=where)
+    def delete(self, *, ids: list[str] | None = None, where: dict | None = None) -> None:
+        self.collection.delete(ids=ids, where=where)
 
     def get(self, *, where: dict | None = None, include: list[str] | None = None) -> dict[str, Any]:
         return self.collection.get(where=where, include=include)
@@ -58,7 +65,7 @@ class QdrantVectorStoreCollection(VectorStoreCollection):
         self.collection_name = collection_name
         self._vector_size: int | None = None
 
-    def add(self, *, ids: list[str], embeddings: list[list[float]], documents: list[str], metadatas: list[dict]) -> None:
+    def upsert(self, *, ids: list[str], embeddings: list[list[float]], documents: list[str], metadatas: list[dict]) -> None:
         if not embeddings:
             return
         self._ensure_collection(len(embeddings[0]))
@@ -75,23 +82,30 @@ class QdrantVectorStoreCollection(VectorStoreCollection):
             )
         self.client.upsert(collection_name=self.collection_name, points=points, wait=True)
 
-    def delete(self, *, where: dict | None = None) -> None:
+    def delete(self, *, ids: list[str] | None = None, where: dict | None = None) -> None:
         self._ensure_existing_collection()
-        if not where:
-            self.client.delete_collection(self.collection_name)
-            self._vector_size = None
+        if ids is not None:
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=qdrant_models.PointIdsList(points=list(ids)),
+                wait=True,
+            )
             return
-        q_filter = self._build_filter(where)
-        self.client.delete(
-            collection_name=self.collection_name,
-            points_selector=qdrant_models.FilterSelector(filter=q_filter),
-            wait=True,
-        )
+        if where:
+            q_filter = self._build_filter(where)
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=qdrant_models.FilterSelector(filter=q_filter),
+                wait=True,
+            )
+            return
+        self.client.delete_collection(self.collection_name)
+        self._vector_size = None
 
     def get(self, *, where: dict | None = None, include: list[str] | None = None) -> dict[str, Any]:
         if not self._collection_exists():
             return {"ids": [], "documents": [], "metadatas": []}
-        _ = include
+        with_vectors = bool(include and "embeddings" in include)
         q_filter = self._build_filter(where) if where else None
         all_points = []
         next_offset = None
@@ -102,7 +116,7 @@ class QdrantVectorStoreCollection(VectorStoreCollection):
                 limit=256,
                 offset=next_offset,
                 with_payload=True,
-                with_vectors=False,
+                with_vectors=with_vectors,
             )
             all_points.extend(points)
             if next_offset is None:
@@ -110,12 +124,17 @@ class QdrantVectorStoreCollection(VectorStoreCollection):
         ids = []
         documents = []
         metadatas = []
+        embeddings = []
         for point in all_points:
             payload = dict(point.payload or {})
             ids.append(str(point.id))
             documents.append(str(payload.pop("content", "")))
             metadatas.append(payload)
-        return {"ids": ids, "documents": documents, "metadatas": metadatas}
+            embeddings.append(point.vector if with_vectors else None)
+        result = {"ids": ids, "documents": documents, "metadatas": metadatas}
+        if with_vectors:
+            result["embeddings"] = embeddings
+        return result
 
     def query(self, *, query_embeddings: list[list[float]], n_results: int, where: dict | None = None) -> dict[str, Any]:
         if not self._collection_exists():
@@ -202,6 +221,14 @@ class QdrantVectorStoreCollection(VectorStoreCollection):
                         qdrant_models.FieldCondition(
                             key=key,
                             match=qdrant_models.MatchValue(value=operand),
+                        )
+                    )
+                    continue
+                if op == "$in":
+                    must.append(
+                        qdrant_models.FieldCondition(
+                            key=key,
+                            match=qdrant_models.MatchAny(any=list(operand)),
                         )
                     )
                     continue

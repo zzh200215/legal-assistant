@@ -298,7 +298,7 @@ class RagServiceTests(unittest.TestCase):
             return_value=None,
         ), patch.object(
             rag_service.collection,
-            "add",
+            "upsert",
             return_value=None,
         ):
             rag_service.index_document(
@@ -348,10 +348,19 @@ class RagServiceTests(unittest.TestCase):
 
         chunks = [{"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "不变的内容", "section_path": []}]
 
+        # 模拟真实向量库状态：首次 upsert 后 get 能读到已写入的 chunk
+        state = {"ids": [], "documents": [], "metadatas": []}
+
+        def fake_get(**kwargs):
+            return state
+
+        def fake_upsert(**kwargs):
+            state.update({"ids": kwargs["ids"], "documents": kwargs["documents"], "metadatas": kwargs["metadatas"]})
+
         with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
-            rag_service.collection, "get", return_value={"ids": [], "documents": []},
+            rag_service.collection, "get", side_effect=fake_get,
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
-            rag_service.collection, "add", return_value=None,
+            rag_service.collection, "upsert", side_effect=fake_upsert,
         ):
             rag_service.index_document(5, chunks, user_id=7)
             rag_service.index_document(5, chunks, user_id=7)
@@ -368,7 +377,7 @@ class RagServiceTests(unittest.TestCase):
         with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service.collection, "get", return_value=existing,
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
-            rag_service.collection, "add", side_effect=lambda **kw: added.append(kw),
+            rag_service.collection, "upsert", side_effect=lambda **kw: added.append(kw),
         ):
             rag_service.index_document(5, chunks, user_id=7)
         self.assertEqual(mock_embed.call_count, 0)
@@ -385,7 +394,7 @@ class RagServiceTests(unittest.TestCase):
         with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service.collection, "get", return_value=existing,
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
-            rag_service.collection, "add", side_effect=lambda **kw: added.append(kw),
+            rag_service.collection, "upsert", side_effect=lambda **kw: added.append(kw),
         ):
             rag_service.index_document(5, [new_chunk], user_id=7)
         self.assertEqual(mock_embed.call_count, 1)
@@ -407,7 +416,7 @@ class RagServiceTests(unittest.TestCase):
         with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
             rag_service.collection, "get", return_value=existing,
         ), patch.object(rag_service.collection, "delete", side_effect=lambda **kw: deleted.append(kw)), patch.object(
-            rag_service.collection, "add", return_value=None,
+            rag_service.collection, "upsert", return_value=None,
         ):
             rag_service.index_document(5, chunks, user_id=7)
         self.assertEqual(deleted, [{"ids": ["doc5_chunk1"]}])
@@ -435,12 +444,213 @@ class RagServiceTests(unittest.TestCase):
         with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
             rag_service.collection, "get", return_value={"ids": [], "documents": []},
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
-            rag_service.collection, "add", new=FakeAdd(),
+            rag_service.collection, "upsert", new=FakeAdd(),
         ):
             rag_service.index_document(6, chunks, user_id=7, knowledge_base_id=3, document_status="indexed")
         meta = added["metadatas"][0]
         self.assertEqual(meta["knowledge_base_id"], 3)
         self.assertEqual(meta["document_status"], "indexed")
+
+    def test_index_document_writes_hash_and_model_metadata(self):
+        """索引元数据记录 embedding_model / content_hash / metadata_hash，供重建判定。"""
+        from app.core.config import get_settings
+        s = get_settings()
+
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1] for _ in texts]
+
+        added = {}
+        class FakeUpsert:
+            def __call__(self, **kwargs):
+                added.update(kwargs)
+
+        chunks = [{"embedding_id": "doc6_chunk0", "chunk_index": 0, "content": "内容", "section_path": []}]
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
+            rag_service.collection, "get", return_value={"ids": [], "documents": []},
+        ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
+            rag_service.collection, "upsert", new=FakeUpsert(),
+        ):
+            rag_service.index_document(6, chunks, user_id=7, knowledge_base_id=3, document_status="indexed")
+        meta = added["metadatas"][0]
+        self.assertEqual(meta["embedding_model"], s.EMBEDDING_MODEL)
+        self.assertEqual(meta["content_hash"], rag_service._content_hash("内容"))
+        # metadata_hash 只对签名字段求值，加入 hash/model 字段后保持不变
+        self.assertEqual(meta["metadata_hash"], rag_service._metadata_hash(meta))
+
+    def test_index_document_model_change_forces_rebuild(self):
+        """切换 EMBEDDING_MODEL 后，同内容 chunk 也必须重算向量（旧向量失效）。"""
+        from app.core.config import get_settings
+        s = get_settings()
+
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1, 0.2] for _ in texts]
+
+        chunks = [{"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "不变的内容", "section_path": []}]
+        existing = {
+            "ids": ["doc5_chunk0"],
+            "documents": ["不变的内容"],
+            "metadatas": [{"document_id": 5, "embedding_model": "text-embedding-v2-legacy"}],
+        }
+        added = []
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+            rag_service.collection, "get", return_value=existing,
+        ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
+            rag_service.collection, "upsert", side_effect=lambda **kw: added.append(kw),
+        ):
+            rag_service.index_document(5, chunks, user_id=7)
+        self.assertEqual(mock_embed.call_count, 1)
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0]["metadatas"][0]["embedding_model"], s.EMBEDDING_MODEL)
+
+    def test_index_document_metadata_change_triggers_upsert(self):
+        """knowledge_base_id 变化时，即使内容未变也要 upsert 更新元数据。"""
+        from app.core.config import get_settings
+        s = get_settings()
+
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1, 0.2] for _ in texts]
+
+        chunks = [{"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "不变的内容", "section_path": []}]
+        old_meta = {
+            "document_id": 5,
+            "user_id": 7,
+            "knowledge_base_id": 99,
+            "chunk_index": 0,
+            "section_path": "",
+            "embedding_model": s.EMBEDDING_MODEL,
+            "metadata_hash": rag_service._metadata_hash(
+                {"user_id": 7, "knowledge_base_id": 99, "chunk_index": 0, "section_path": ""}
+            ),
+        }
+        existing = {"ids": ["doc5_chunk0"], "documents": ["不变的内容"], "metadatas": [old_meta]}
+        added = []
+        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+            rag_service.collection, "get", return_value=existing,
+        ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
+            rag_service.collection, "upsert", side_effect=lambda **kw: added.append(kw),
+        ):
+            rag_service.index_document(5, chunks, user_id=7, knowledge_base_id=3)
+        self.assertEqual(mock_embed.call_count, 1)
+        self.assertEqual(added[0]["metadatas"][0]["knowledge_base_id"], 3)
+
+    def test_index_document_empty_chunks_deletes_document_vectors(self):
+        """文档内容变空时删除该文档全部旧向量，避免旧内容继续参与检索。"""
+        deleted = []
+        with patch.object(rag_service.collection, "delete", side_effect=lambda **kw: deleted.append(kw)):
+            rag_service.index_document(5, [], user_id=7)
+        self.assertEqual(deleted, [{"where": {"document_id": 5}}])
+
+    def test_build_where_uses_authorized_document_ids(self):
+        """授权文档 ID 取代 user_id 权限过滤；空授权集返回恒假子句。"""
+        w = rag_service._build_where(document_id=1, user_id=7, authorized_document_ids=[2, 3])
+        self.assertIn({"document_id": {"$in": [2, 3]}}, w["$and"])
+        self.assertNotIn({"user_id": 7}, w["$and"])  # 授权集接管权限
+        self.assertIn({"document_id": 1}, w["$and"])  # 显式 document_id 仍保留
+        w2 = rag_service._build_where(authorized_document_ids=[])
+        self.assertEqual(w2, {"document_id": -1})
+
+    def test_metadata_matches_where_supports_in_clause(self):
+        self.assertTrue(rag_service._metadata_matches_where({"document_id": 2}, {"document_id": {"$in": [1, 2]}}))
+        self.assertFalse(rag_service._metadata_matches_where({"document_id": 3}, {"document_id": {"$in": [1, 2]}}))
+        self.assertTrue(
+            rag_service._metadata_matches_where({"document_id": 5, "user_id": 1}, {"document_id": 5, "user_id": {"$ne": 2}})
+        )
+
+    def test_search_async_forwards_authorized_document_ids(self):
+        async def fake_embed(texts, user_id=None, action="embedding"):
+            return [[0.1] for _ in texts]
+
+        captured = {}
+        def spy(**kwargs):
+            captured.update(kwargs)
+            return None
+
+        with patch.object(rag_service, "_build_where", side_effect=spy), patch(
+            "app.services.rag_service.llm_client.embed", side_effect=fake_embed,
+        ), patch.object(rag_service.collection, "query", return_value={
+            "ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]],
+        }), patch.object(rag_service.collection, "get", return_value={
+            "ids": [], "documents": [], "metadatas": [],
+        }):
+            asyncio.run(rag_service.search_async("测试", user_id=7, authorized_document_ids=[1, 2]))
+        self.assertEqual(captured.get("authorized_document_ids"), [1, 2])
+
+    def test_refresh_document_metadata_preserves_embeddings(self):
+        """元数据刷新复用已有向量，不重算嵌入。"""
+        rows = {
+            "ids": ["doc6_chunk0"],
+            "documents": ["内容"],
+            "metadatas": [{"document_id": 6, "user_id": 7, "knowledge_base_id": 1}],
+            "embeddings": [[0.1, 0.2]],
+        }
+        upserted = {}
+        def fake_upsert(**kwargs):
+            upserted.update(kwargs)
+
+        with patch.object(rag_service.collection, "get", return_value=rows), patch.object(
+            rag_service.collection, "upsert", side_effect=fake_upsert,
+        ):
+            rag_service.refresh_document_metadata(6, knowledge_base_id=5)
+        self.assertEqual(upserted["embeddings"], [[0.1, 0.2]])
+        self.assertEqual(upserted["metadatas"][0]["knowledge_base_id"], 5)
+
+    def test_build_citations_covers_all_context_chunks(self):
+        """引用覆盖全部 context chunk（不再截断为前 3），保证 片段 N ↔ 引用 N。"""
+        chunks = [
+            {
+                "id": f"doc1_chunk{i}",
+                "content": f"第{i}段内容",
+                "metadata": {"document_id": 1, "chunk_index": i, "page_number": i},
+            }
+            for i in range(6)
+        ]
+        citations = rag_service._build_citations(chunks)
+        self.assertEqual(len(citations), 6)
+        self.assertEqual(citations[5]["chunk_index"], 5)
+
+    def test_is_answer_grounded_checks_all_context_chunks(self):
+        """答案由第 4 个（含之后的）片段支持时也应判定为可引用，而非误判不可靠。"""
+        chunks = [
+            {"content": "与问题完全无关的背景说明内容" * 10, "metadata": {}}
+            for _ in range(3)
+        ] + [{"content": "经济补偿按劳动者在本单位工作年限计算", "metadata": {"document_id": 1, "chunk_index": 3}}]
+        grounded = rag_service._is_answer_grounded("经济补偿按工作年限计算", chunks, can_answer=True)
+        self.assertTrue(grounded)
+
+    def test_top_score_margin_normalized(self):
+        self.assertAlmostEqual(
+            rag_service._top_score_margin([{"retrieval_score": 0.9}, {"retrieval_score": 0.3}]),
+            (0.9 - 0.3) / 0.9,
+        )
+        self.assertEqual(rag_service._top_score_margin([{"retrieval_score": 0.9}]), 0.5)  # 无竞争候选，中性
+        self.assertEqual(rag_service._top_score_margin([{"distance": 0.1}]), 0.5)  # 无分数，中性
+
+    def test_route_consistency_scores(self):
+        self.assertEqual(rag_service._route_consistency([{"retrieval_routes": ["dense", "keyword"]}]), 1.0)
+        self.assertEqual(rag_service._route_consistency([{"retrieval_routes": ["dense"]}]), 0.3)
+        self.assertEqual(rag_service._route_consistency([{}]), 0.5)
+        self.assertEqual(rag_service._route_consistency([]), 0.0)
+
+    def test_estimate_confidence_uses_margin_and_route(self):
+        """高 top-score margin + 双路一致 → 置信度更高。"""
+        chunks = [
+            {
+                "content": "付款条款：甲方应支付首付款金额100万元。",
+                "metadata": {"document_id": 1, "chunk_index": 0},
+                "distance": 0.1,
+                "retrieval_score": 0.9,
+                "retrieval_routes": ["dense", "keyword"],
+            },
+            {
+                "content": "与付款无关的验收标准说明",
+                "metadata": {"document_id": 1, "chunk_index": 1},
+                "distance": 0.9,
+                "retrieval_score": 0.2,
+                "retrieval_routes": ["dense"],
+            },
+        ]
+        confident = rag_service._estimate_confidence("首付款金额是多少", chunks)
+        self.assertGreaterEqual(confident, 0.5)
 
     def test_search_async_threads_scope_filters(self):
         """RAG②：search_async 把 knowledge_base_id / document_status 传给 _build_where。"""
@@ -2043,6 +2253,141 @@ class EmbeddingObservabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["model"], "qwen-vl-plus")
         self.assertEqual(captured["action"], "generate_with_images")
         self.assertEqual(captured["status"], "success")
+
+
+class GovernanceAccessListTests(unittest.TestCase):
+    def setUp(self):
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        self.SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        Base.metadata.create_all(bind=engine)
+        self.db = self.SessionLocal()
+
+    def tearDown(self):
+        self.db.close()
+
+    def _make_user(self, username, organization_id, department_id):
+        from app.models.user import User
+
+        return User(
+            username=username,
+            email=f"{username}@example.com",
+            role="lawyer",
+            status="active",
+            login_fail_count=0,
+            force_password_change=False,
+            organization_id=organization_id,
+            department_id=department_id,
+        )
+
+    def _make_doc(self, user_id, title, scope, organization_id=None, department_id=None):
+        from app.models.document import Document
+
+        return Document(
+            user_id=user_id,
+            version_number=1,
+            title=title,
+            file_path=f"/tmp/{title}.pdf",
+            file_type="pdf",
+            permission_scope=scope,
+            sensitivity_level="internal",
+            organization_id=organization_id,
+            department_id=department_id,
+            download_enabled=True,
+            watermark_required=False,
+            status="parsed",
+        )
+
+    def test_list_accessible_document_ids_includes_shared_docs(self):
+        from app.services.document_governance_service import document_governance_service
+
+        owner = self._make_user("owner", 10, 20)
+        sharer = self._make_user("sharer", 10, 20)
+        stranger = self._make_user("stranger", 99, 99)
+        self.db.add_all([owner, sharer, stranger])
+        self.db.commit()
+
+        own = self._make_doc(sharer.id, "own", "private")
+        shared_org = self._make_doc(owner.id, "shared_org", "org", organization_id=10, department_id=20)
+        self.db.add_all([own, shared_org])
+        self.db.commit()
+
+        ids = document_governance_service.list_accessible_document_ids(
+            db=self.db,
+            user_id=sharer.id,
+            role="lawyer",
+            organization_id=10,
+            department_id=20,
+        )
+        self.assertIn(own.id, ids)
+        self.assertIn(shared_org.id, ids)  # 同组织共享文档对授权用户可见
+
+        stranger_ids = document_governance_service.list_accessible_document_ids(
+            db=self.db,
+            user_id=stranger.id,
+            role="lawyer",
+            organization_id=99,
+            department_id=99,
+        )
+        self.assertEqual(stranger_ids, [])
+
+
+class BM25IndexTests(unittest.TestCase):
+    def setUp(self):
+        # 快照单例 BM25 状态，测试后恢复，避免污染其它用例
+        self._saved = {
+            name: getattr(rag_service, name)
+            for name in ("_bm25_index", "_bm25_items", "_bm25_stale", "_bm25_epoch", "_bm25_built_at")
+        }
+
+    def tearDown(self):
+        for name, value in self._saved.items():
+            setattr(rag_service, name, value)
+
+    def test_invalidate_bumps_epoch(self):
+        rag_service._bm25_epoch = 0
+        rag_service._invalidate_bm25()
+        self.assertEqual(rag_service._bm25_epoch, 1)
+        self.assertTrue(rag_service._bm25_stale)
+
+    def test_stale_build_discarded_when_invalidated_during_build(self):
+        """构建期间被并发失效（epoch 前进）的陈旧索引不得覆盖新数据。"""
+
+        def fake_get(**kwargs):
+            rag_service._invalidate_bm25()
+            return {"ids": ["a"], "documents": ["x"], "metadatas": [{"document_id": 1}]}
+
+        with patch.object(rag_service.collection, "get", side_effect=fake_get):
+            rag_service._bm25_stale = True
+            rag_service._build_bm25_index()
+        self.assertTrue(rag_service._bm25_stale)  # 陈旧索引未应用，保持待重建
+
+    def test_ttl_triggers_rebuild(self):
+        """索引超龄（漏了失效信号）时强制重建。"""
+        rag_service._bm25_stale = False
+        rag_service._bm25_built_at = 0.0
+        rag_service._bm25_index = object()  # 非 None 但已超龄
+        with patch("app.services.rag_service.settings.RAG_BM25_TTL_SECONDS", 10), patch.object(
+            rag_service.collection, "get",
+            return_value={"ids": [], "documents": [], "metadatas": []},
+        ) as mock_get:
+            rag_service._bm25_keyword_recall(["词"], where=None, candidate_limit=5)
+        mock_get.assert_called()
+        self.assertGreater(rag_service._bm25_built_at, 0)
+
+    def test_build_locked_and_sets_built_at(self):
+        with patch.object(
+            rag_service.collection, "get",
+            return_value={"ids": ["a"], "documents": ["内容"], "metadatas": [{"document_id": 1}]},
+        ):
+            rag_service._bm25_stale = True
+            rag_service._build_bm25_index()
+        self.assertFalse(rag_service._bm25_stale)
+        self.assertGreater(rag_service._bm25_built_at, 0)
 
 
 if __name__ == "__main__":

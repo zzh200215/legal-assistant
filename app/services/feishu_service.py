@@ -236,7 +236,20 @@ async def build_consultation_card(question: str, user_id: int, db) -> dict:
 
     rag_refs: list[dict] = []
     try:
-        chunks = await rag_service.search_async(question, top_k=3, user_id=user_id)
+        from app.models.user import User
+        from app.services.document_governance_service import document_governance_service
+
+        user = db.query(User).filter(User.id == user_id).first()
+        authorized_ids = document_governance_service.list_accessible_document_ids(
+            db=db,
+            user_id=user_id,
+            role=user.role if user else None,
+            organization_id=user.organization_id if user else None,
+            department_id=user.department_id if user else None,
+        )
+        chunks = await rag_service.search_async(
+            question, top_k=3, user_id=user_id, authorized_document_ids=authorized_ids
+        )
         rag_refs = [
             {
                 "source_id": c.get("document_id"),

@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import json
 import logging
 import re
+import threading
 import time
 
 from app.core.config import get_settings
@@ -27,6 +29,10 @@ class RAGService:
         self._bm25_index = None
         self._bm25_items: list[tuple] = []
         self._bm25_stale = True
+        # 并发构建锁 + 版本号（epoch）+ TTL：避免并发重复构建、陈旧构建覆盖新索引、长时间不失效导致数据过期
+        self._bm25_lock = threading.Lock()
+        self._bm25_epoch = 0
+        self._bm25_built_at = 0.0
         # RAG④：可插拔重排（懒构建——按当前 RAG_RERANK_ENGINE 选 bge/llm/heuristic）
         self._reranker = None
 
@@ -59,91 +65,196 @@ class RAGService:
 
     def index_document(self, document_id: int, chunks: list[dict], user_id: int | None = None,
                        *, knowledge_base_id: int | None = None, document_status: str | None = None):
+        # 文档内容清空（删除/重解析为空）：移除该文档全部旧向量，避免旧内容继续参与检索
         if not chunks:
+            self.collection.delete(where={"document_id": document_id})
+            self._invalidate_bm25()
             return
         ids = [chunk["embedding_id"] for chunk in chunks]
         metadatas = [
-            self._compact_metadata(
-                {
-                    "document_id": document_id,
-                    "chunk_id": chunk.get("id"),
-                    "chunk_index": chunk["chunk_index"],
-                    "page_number": chunk.get("page_number"),
-                    "section_title": chunk.get("section_title"),
-                    "embedding_id": chunk["embedding_id"],
-                    "section_path": " > ".join(chunk.get("section_path") or []),
-                    "segment_type": chunk.get("segment_type"),
-                    "table_like": bool(chunk.get("table_like")),
-                    "visual_tags": " ".join(chunk.get("visual_tags") or []),
-                    "ocr_quality": chunk.get("ocr_quality"),
-                    "visual_evidence": chunk.get("visual_evidence"),
-                    "visual_region": chunk.get("visual_region"),
-                    "user_id": user_id,
-                    "knowledge_base_id": knowledge_base_id,
-                    "document_status": document_status,
-                }
+            self._build_index_metadata(
+                document_id,
+                chunk,
+                user_id=user_id,
+                knowledge_base_id=knowledge_base_id,
+                document_status=document_status,
             )
             for chunk in chunks
         ]
         contents = [chunk.get("index_content") or chunk["content"] for chunk in chunks]
 
-        # 索引增量：只 upsert 内容变化的 chunk，删除已移除的 chunk（未变 chunk 向量原样保留）
+        # 索引增量：内容 / 嵌入模型 / 元数据（含 knowledge_base_id、document_status）任一变化则
+        # upsert（同 ID 覆盖旧向量），已移除 chunk 删除；未变 chunk 向量原样保留。
         old_by_id: dict[str, str] = {}
+        old_meta_by_id: dict[str, dict] = {}
         try:
-            old_rows = self.collection.get(where={"document_id": document_id}, include=["documents"])
+            old_rows = self.collection.get(
+                where={"document_id": document_id}, include=["documents", "metadatas"]
+            )
             old_ids = old_rows.get("ids") or []
             old_docs = old_rows.get("documents") or []
+            old_metas = old_rows.get("metadatas") or []
             old_by_id = dict(zip(old_ids, old_docs))
+            old_meta_by_id = dict(zip(old_ids, old_metas))
         except Exception:
             pass
 
-        to_add_idx = [i for i, cid in enumerate(ids) if old_by_id.get(cid) != contents[i]]
+        def needs_rebuild(index: int, chunk_id: str) -> bool:
+            if old_by_id.get(chunk_id) != contents[index]:
+                return True
+            old_meta = old_meta_by_id.get(chunk_id) or {}
+            # 老数据无 embedding_model 视为沿用当前模型（保持增量跳过）；一旦记录了旧模型则必须比对
+            old_model = str(old_meta.get("embedding_model") or "")
+            if old_model and old_model != settings.EMBEDDING_MODEL:
+                return True
+            old_hash = old_meta.get("metadata_hash")
+            if old_hash is not None and old_hash != metadatas[index].get("metadata_hash"):
+                return True
+            return False
+
+        to_update_idx = [i for i, cid in enumerate(ids) if needs_rebuild(i, cid)]
         new_id_set = set(ids)
         to_delete_ids = [cid for cid in old_by_id if cid not in new_id_set]
         if to_delete_ids:
             try:
                 self.collection.delete(ids=to_delete_ids)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to delete removed chunks %s (%s)", to_delete_ids, type(exc).__name__)
 
-        if not to_add_idx:
+        if not to_update_idx:
             if to_delete_ids:
                 self._invalidate_bm25()
             return
 
-        add_ids = [ids[i] for i in to_add_idx]
-        add_contents = [contents[i] for i in to_add_idx]
-        add_metadatas = [metadatas[i] for i in to_add_idx]
+        update_ids = [ids[i] for i in to_update_idx]
+        update_contents = [contents[i] for i in to_update_idx]
+        update_metadatas = [metadatas[i] for i in to_update_idx]
         if settings.RAG_EMBED_CACHE_ENABLED:
             # 内容寻址：未变 chunk 命中缓存不再重算嵌入
             embeddings = asyncio.run(
                 rag_embedding_cache.get_or_compute_batch(
-                    add_contents,
+                    update_contents,
                     lambda ms: llm_client.embed(ms, user_id=user_id, action="embedding"),
                 )
             )
         else:
-            embeddings = asyncio.run(llm_client.embed(add_contents, user_id=user_id, action="embedding"))
+            embeddings = asyncio.run(llm_client.embed(update_contents, user_id=user_id, action="embedding"))
 
-        self.collection.add(
-            ids=add_ids,
+        self.collection.upsert(
+            ids=update_ids,
             embeddings=embeddings,
-            documents=add_contents,
-            metadatas=add_metadatas,
+            documents=update_contents,
+            metadatas=update_metadatas,
         )
         self._invalidate_bm25()
+
+    def _build_index_metadata(self, document_id: int, chunk: dict, *, user_id: int | None,
+                              knowledge_base_id: int | None, document_status: str | None) -> dict:
+        metadata = self._compact_metadata(
+            {
+                "document_id": document_id,
+                "chunk_id": chunk.get("id"),
+                "chunk_index": chunk["chunk_index"],
+                "page_number": chunk.get("page_number"),
+                "section_title": chunk.get("section_title"),
+                "embedding_id": chunk["embedding_id"],
+                "section_path": " > ".join(chunk.get("section_path") or []),
+                "segment_type": chunk.get("segment_type"),
+                "table_like": bool(chunk.get("table_like")),
+                "visual_tags": " ".join(chunk.get("visual_tags") or []),
+                "ocr_quality": chunk.get("ocr_quality"),
+                "visual_evidence": chunk.get("visual_evidence"),
+                "visual_region": chunk.get("visual_region"),
+                "user_id": user_id,
+                "knowledge_base_id": knowledge_base_id,
+                "document_status": document_status,
+            }
+        )
+        metadata["content_hash"] = self._content_hash(chunk.get("index_content") or chunk["content"])
+        metadata["metadata_hash"] = self._metadata_hash(metadata)
+        metadata["embedding_model"] = settings.EMBEDDING_MODEL
+        return metadata
+
+    def refresh_document_metadata(self, document_id: int, *, user_id: int | None = None,
+                                  knowledge_base_id: int | None = None,
+                                  document_status: str | None = None) -> None:
+        """权限/范围元数据变化时刷新 chunk 元数据，不重算嵌入（复用已有向量）。"""
+        rows = self.collection.get(
+            where={"document_id": document_id},
+            include=["documents", "metadatas", "embeddings"],
+        )
+        ids = rows.get("ids") or []
+        if not ids:
+            return
+        documents = rows.get("documents") or []
+        embeddings = rows.get("embeddings") or []
+        metadatas = rows.get("metadatas") or []
+        new_metadatas = []
+        for index, chunk_id in enumerate(ids):
+            metadata = dict(metadatas[index] or {})
+            if user_id is not None:
+                metadata["user_id"] = user_id
+            if knowledge_base_id is not None:
+                metadata["knowledge_base_id"] = knowledge_base_id
+            if document_status is not None:
+                metadata["document_status"] = document_status
+            metadata["metadata_hash"] = self._metadata_hash(metadata)
+            new_metadatas.append(metadata)
+        self.collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=new_metadatas)
+        self._invalidate_bm25()
+
+    # 参与“是否需重建”判定的元数据签名字段：content_hash 覆盖内容，embedding_model 单独比对
+    _SIGNATURE_FIELDS = (
+        "user_id",
+        "knowledge_base_id",
+        "document_status",
+        "chunk_index",
+        "page_number",
+        "section_title",
+        "section_path",
+        "segment_type",
+        "table_like",
+        "visual_tags",
+        "ocr_quality",
+        "visual_evidence",
+        "visual_region",
+    )
+
+    @classmethod
+    def _metadata_hash(cls, metadata: dict) -> str:
+        signature = {key: metadata.get(key) for key in cls._SIGNATURE_FIELDS}
+        serialized = json.dumps(
+            signature, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _content_hash(text: str) -> str:
+        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
     @staticmethod
     def _compact_metadata(metadata: dict) -> dict:
         return {key: value for key, value in metadata.items() if value is not None}
 
     def _build_where(self, document_id: int | None = None, user_id: int | None = None,
-                     knowledge_base_id: int | None = None, document_status: str | None = None) -> dict | None:
+                     knowledge_base_id: int | None = None, document_status: str | None = None,
+                     authorized_document_ids: list[int] | None = None) -> dict | None:
+        """构造检索过滤子句。
+
+        传入 authorized_document_ids 时，用“document_id IN 授权集”作为权限过滤，
+        取代 user_id == 当前用户（后者会漏掉共享文档）。空授权集返回恒假子句。
+        """
         clauses = []
-        if document_id is not None:
-            clauses.append({"document_id": document_id})
-        if user_id is not None:
-            clauses.append({"user_id": user_id})
+        if authorized_document_ids is not None:
+            ids = [int(item) for item in authorized_document_ids]
+            clauses.append({"document_id": {"$in": ids}} if ids else {"document_id": -1})
+            if document_id is not None:
+                clauses.append({"document_id": document_id})
+        else:
+            if document_id is not None:
+                clauses.append({"document_id": document_id})
+            if user_id is not None:
+                clauses.append({"user_id": user_id})
         if knowledge_base_id is not None:
             clauses.append({"knowledge_base_id": knowledge_base_id})
         if document_status is not None:
@@ -166,6 +277,7 @@ class RAGService:
         *,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        authorized_document_ids: list[int] | None = None,
     ) -> list[dict]:
         runtime_config = self.get_runtime_config(
             top_k=top_k,
@@ -178,6 +290,7 @@ class RAGService:
             user_id=user_id,
             knowledge_base_id=knowledge_base_id,
             document_status=document_status,
+            authorized_document_ids=authorized_document_ids,
         )
         query_variants = self._rewrite_queries(query, limit=runtime_config["query_variant_limit"])
         if settings.RAG_QUERY_REWRITE_LLM_ENABLED:
@@ -216,6 +329,7 @@ class RAGService:
         *,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        authorized_document_ids: list[int] | None = None,
     ) -> list[dict]:
         return asyncio.run(
             self.search_async(
@@ -228,6 +342,7 @@ class RAGService:
                 query_variant_limit=query_variant_limit,
                 knowledge_base_id=knowledge_base_id,
                 document_status=document_status,
+                authorized_document_ids=authorized_document_ids,
             )
         )
 
@@ -246,6 +361,7 @@ class RAGService:
         *,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        authorized_document_ids: list[int] | None = None,
         conversation_history: list[dict] | None = None,
     ) -> dict:
         runtime_config = self.get_runtime_config(
@@ -269,6 +385,7 @@ class RAGService:
             query_variant_limit=runtime_config["query_variant_limit"],
             knowledge_base_id=knowledge_base_id,
             document_status=document_status,
+            authorized_document_ids=authorized_document_ids,
         )
         retrieval_duration_ms = int((time.time() - retrieval_started) * 1000)
         return await self.answer_from_chunks_async(
@@ -281,6 +398,7 @@ class RAGService:
             retrieval_duration_ms=retrieval_duration_ms,
             knowledge_base_id=knowledge_base_id,
             document_status=document_status,
+            authorized_document_ids=authorized_document_ids,
             conversation_history=conversation_history,
         )
 
@@ -297,6 +415,7 @@ class RAGService:
         log_query: str | None = None,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        authorized_document_ids: list[int] | None = None,
         conversation_history: list[dict] | None = None,
     ) -> dict:
         """Generate a grounded answer from already retrieved chunks.
@@ -331,6 +450,7 @@ class RAGService:
             max_chunks=runtime_config["context_max_chunks"],
             knowledge_base_id=knowledge_base_id,
             document_status=document_status,
+            authorized_document_ids=authorized_document_ids,
         )
         context = self._build_prompt_context(context_chunks)
         if conversation_history:
@@ -345,7 +465,7 @@ class RAGService:
             question=query,
             context=context,
         )
-        citations = self._build_citations(chunks)
+        citations = self._build_citations(context_chunks)
         confidence = self._estimate_confidence(query, chunks)
         if confidence < runtime_config["confidence_threshold"]:
             result = self._build_response(
@@ -419,6 +539,7 @@ class RAGService:
         *,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        authorized_document_ids: list[int] | None = None,
         conversation_history: list[dict] | None = None,
     ) -> dict:
         return asyncio.run(
@@ -435,6 +556,7 @@ class RAGService:
                 context_max_chunks=context_max_chunks,
                 knowledge_base_id=knowledge_base_id,
                 document_status=document_status,
+                authorized_document_ids=authorized_document_ids,
                 conversation_history=conversation_history,
             )
         )
@@ -444,8 +566,9 @@ class RAGService:
         return text[:limit] + "..." if len(text) > limit else text
 
     def _build_citations(self, chunks: list[dict]) -> list[dict]:
+        """引用覆盖全部喂给模型的 context chunk（片段 N ↔ 引用 N），避免模型引用无对应引用。"""
         citations = []
-        for chunk in chunks[:3]:
+        for chunk in chunks:
             metadata = chunk.get("metadata") or {}
             citations.append(
                 {
@@ -651,6 +774,7 @@ class RAGService:
         max_chunks: int,
         knowledge_base_id: int | None = None,
         document_status: str | None = None,
+        authorized_document_ids: list[int] | None = None,
     ) -> list[dict]:
         if not chunks:
             return []
@@ -662,6 +786,7 @@ class RAGService:
             user_id=user_id,
             knowledge_base_id=knowledge_base_id,
             document_status=document_status,
+            authorized_document_ids=authorized_document_ids,
         )
         try:
             rows = await asyncio.to_thread(
@@ -722,7 +847,8 @@ class RAGService:
         if not answer_terms:
             return True
         corpus_parts = []
-        for chunk in chunks[:3]:
+        # grounding 覆盖全部喂给模型的 context chunk，避免答案仅由后半段片段支持却被误判为不可靠
+        for chunk in chunks:
             metadata = chunk.get("metadata") or {}
             corpus_parts.append(chunk.get("content") or "")
             corpus_parts.append(self._build_keyword_corpus(chunk.get("content") or "", metadata))
@@ -935,41 +1061,66 @@ class RAGService:
             return all(RAGService._metadata_matches_where(metadata, clause) for clause in where["$and"])
         if "$or" in where:
             return any(RAGService._metadata_matches_where(metadata, clause) for clause in where["$or"])
-        return all(metadata.get(field) == value for field, value in where.items())
+        for field, value in where.items():
+            if isinstance(value, dict):
+                op, operand = next(iter(value.items()))
+                if op == "$in":
+                    if metadata.get(field) not in list(operand):
+                        return False
+                    continue
+                if op == "$ne":
+                    if metadata.get(field) == operand:
+                        return False
+                    continue
+            if metadata.get(field) != value:
+                return False
+        return True
 
     def _bm25_tokenize(self, text: str) -> list[str]:
         return sorted(self._extract_query_units(text))
 
     def _invalidate_bm25(self) -> None:
+        self._bm25_epoch += 1
         self._bm25_stale = True
 
     def _build_bm25_index(self) -> None:
-        """懒构建内存 BM25 索引（一次全量取回，后续查询命中不再全表扫描）。"""
-        self._bm25_items = []
-        self._bm25_index = None
-        try:
-            rows = self.collection.get(include=["documents", "metadatas"])
-        except Exception as exc:
-            logger.warning("BM25 index build unavailable; falling back (%s)", type(exc).__name__)
-            self._bm25_stale = True
-            return
-        ids = rows.get("ids") or []
-        docs = rows.get("documents") or []
-        metas = rows.get("metadatas") or []
-        corpus_tokens = []
-        for i, chunk_id in enumerate(ids):
-            content = docs[i] if i < len(docs) else ""
-            metadata = metas[i] if i < len(metas) else {}
-            self._bm25_items.append((chunk_id, content, metadata))
-            corpus_text = self._build_keyword_corpus(content, metadata)
-            corpus_tokens.append(self._bm25_tokenize(corpus_text))
-        if corpus_tokens:
+        """懒构建内存 BM25 索引（一次全量取回，后续查询命中不再全表扫描）。
+
+        并发锁 + epoch：同一进程内并发查询不会重复构建；构建期间失效的陈旧索引不会覆盖新数据。
+        构建成功时间用于 TTL 兜底过期重建。
+        """
+        with self._bm25_lock:
+            epoch = self._bm25_epoch
+            self._bm25_items = []
+            self._bm25_index = None
             try:
-                from rank_bm25 import BM25Okapi
-                self._bm25_index = BM25Okapi(corpus_tokens)
-            except Exception:
-                self._bm25_index = None
-        self._bm25_stale = False
+                rows = self.collection.get(include=["documents", "metadatas"])
+            except Exception as exc:
+                logger.warning("BM25 index build unavailable; falling back (%s)", type(exc).__name__)
+                self._bm25_stale = True
+                return
+            ids = rows.get("ids") or []
+            docs = rows.get("documents") or []
+            metas = rows.get("metadatas") or []
+            corpus_tokens = []
+            for i, chunk_id in enumerate(ids):
+                content = docs[i] if i < len(docs) else ""
+                metadata = metas[i] if i < len(metas) else {}
+                self._bm25_items.append((chunk_id, content, metadata))
+                corpus_text = self._build_keyword_corpus(content, metadata)
+                corpus_tokens.append(self._bm25_tokenize(corpus_text))
+            if corpus_tokens:
+                try:
+                    from rank_bm25 import BM25Okapi
+                    self._bm25_index = BM25Okapi(corpus_tokens)
+                except Exception:
+                    self._bm25_index = None
+            # 构建期间被并发失效（epoch 已前进）：不应用陈旧索引，标记待重建
+            if self._bm25_epoch != epoch:
+                self._bm25_stale = True
+                return
+            self._bm25_stale = False
+            self._bm25_built_at = time.time()
 
     def _bm25_keyword_recall(self, query_variants: list[str], *, where: dict | None,
                              candidate_limit: int) -> list[dict] | None:
@@ -978,7 +1129,11 @@ class RAGService:
             from rank_bm25 import BM25Okapi  # noqa: F401
         except ImportError:
             return None
-        if self._bm25_stale or self._bm25_index is None:
+        if self._bm25_index is None or self._bm25_stale:
+            self._build_bm25_index()
+        elif settings.RAG_BM25_TTL_SECONDS > 0 and time.time() - self._bm25_built_at > settings.RAG_BM25_TTL_SECONDS:
+            # TTL 兜底：索引超龄（可能漏了失效信号）强制重建，避免旧数据长期参与检索
+            self._bm25_stale = True
             self._build_bm25_index()
         if self._bm25_index is None:
             return None
@@ -1388,7 +1543,34 @@ class RAGService:
         keyword_score = self._keyword_overlap_score(query, chunks)
         distance_scores = [self._distance_score(chunk.get("distance")) for chunk in chunks[:3]]
         distance_score = sum(distance_scores) / len(distance_scores) if distance_scores else 0.0
-        return (keyword_score * 0.55) + (distance_score * 0.45)
+        margin = self._top_score_margin(chunks)
+        route = self._route_consistency(chunks)
+        return (keyword_score * 0.45) + (distance_score * 0.30) + (margin * 0.15) + (route * 0.10)
+
+    @staticmethod
+    def _top_score_margin(chunks: list[dict]) -> float:
+        """top 与次优候选 retrieval_score 的归一化差距；唯一/无分数候选给中性 0.5。"""
+        scores = sorted(
+            (float(chunk["retrieval_score"]) for chunk in chunks
+             if chunk.get("retrieval_score") is not None),
+            reverse=True,
+        )
+        if len(scores) < 2:
+            return 0.5
+        top, second = scores[0], scores[1]
+        if top <= 0:
+            return 0.0
+        return max(0.0, min(1.0, (top - second) / top))
+
+    @staticmethod
+    def _route_consistency(chunks: list[dict]) -> float:
+        """top hit 是否多路召回一致：dense + keyword 双路命中视为强一致。"""
+        if not chunks:
+            return 0.0
+        routes = chunks[0].get("retrieval_routes") or []
+        if not routes:
+            return 0.5
+        return 1.0 if len(routes) >= 2 else 0.3
 
 
 rag_service = RAGService()

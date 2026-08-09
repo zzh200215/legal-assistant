@@ -38,10 +38,26 @@ class LegalConsultationTool(BaseAgentTool):
             LegalSource.user_id == user_id, LegalSource.status == "active"
         ).all()
 
-        # RAG 法规检索：从知识库中找到与问题相关的法规片段
+        # RAG 法规检索：从知识库中找到与问题相关的法规片段（仅检索当前用户已授权文档）
         rag_chunks = []
         try:
-            rag_chunks = await rag_service.search_async(question, top_k=3, user_id=user_id)
+            from app.models.user import User
+            from app.services.document_governance_service import document_governance_service
+
+            user = db.query(User).filter(User.id == user_id).first()
+            authorized_ids = document_governance_service.list_accessible_document_ids(
+                db=db,
+                user_id=user_id,
+                role=user.role if user else None,
+                organization_id=user.organization_id if user else None,
+                department_id=user.department_id if user else None,
+            )
+            rag_chunks = await rag_service.search_async(
+                question,
+                top_k=3,
+                user_id=user_id,
+                authorized_document_ids=authorized_ids,
+            )
         except Exception:
             pass
 

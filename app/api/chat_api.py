@@ -41,7 +41,14 @@ async def chat(
     """通用聊天，如果传了 document_id 则基于文档 RAG 问答"""
     try:
         if req.document_id is not None:
-            doc = document_service.get(req.document_id, db, user_id=current_user.id)
+            doc = document_service.get(
+                req.document_id,
+                db,
+                user_id=current_user.id,
+                role=current_user.role,
+                organization_id=current_user.organization_id,
+                department_id=current_user.department_id,
+            )
             if not doc:
                 raise api_error(404, "文档不存在", code="DOCUMENT_NOT_FOUND")
             last_message = req.messages[-1].content if req.messages else ""
@@ -53,6 +60,7 @@ async def chat(
                 document_id=req.document_id,
                 user_id=current_user.id,
                 knowledge_base_id=doc.knowledge_base_id,
+                authorized_document_ids=[req.document_id],
                 conversation_history=conversation_history,
             )
             qa_record = document_qa_service.record(

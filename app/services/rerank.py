@@ -135,7 +135,10 @@ class BGEReranker(Reranker):
             try:
                 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
                 from sentence_transformers import CrossEncoder
-                cls._model = CrossEncoder(settings.RAG_RERANK_MODEL)
+                cls._model = CrossEncoder(
+                    settings.RAG_RERANK_MODEL,
+                    device=settings.RAG_RERANK_DEVICE,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("BGE reranker model unavailable; falling back (%s)", type(exc).__name__)
                 cls._model = None
