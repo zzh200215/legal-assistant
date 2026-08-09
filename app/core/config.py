@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     RAG_LLM_RERANK_ENABLED: bool = False
     RAG_LLM_RERANK_TOP_N: int = 5
     RAG_LLM_RERANK_MAX_CHARS: int = 400
-    RAG_RERANK_ENGINE: str = "bge"  # bge（BGE-Reranker 交叉编码器）| llm | heuristic
+    RAG_RERANK_ENGINE: str = "heuristic"  # heuristic（默认，零依赖）| bge（BGE-Reranker 交叉编码器，需 torch+模型）| llm（qwen-plus）
     RAG_RERANK_MODEL: str = "BAAI/bge-reranker-v2-m3"
     RAG_RERANK_TOP_N: int = 5
     RAG_RERANK_MAX_CHARS: int = 400

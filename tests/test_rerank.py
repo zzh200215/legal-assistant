@@ -16,7 +16,16 @@ class RerankerTests(unittest.IsolatedAsyncioTestCase):
              "routes": {"dense"}, "matched_variants": {"合同"}},
         ]
 
-    def test_build_selects_bge_by_default(self):
+    def test_build_heuristic_by_default(self):
+        """默认引擎 heuristic：重排默认关闭、零依赖（BGE 需显式开启）。"""
+        from app.services.rerank import HeuristicReranker, build_reranker
+        with patch("app.services.rerank.settings.RAG_RERANK_ENGINE", "heuristic"), patch(
+            "app.services.rerank.settings.RAG_LLM_RERANK_ENABLED", False,
+        ):
+            reranker = build_reranker(rag_service)
+        self.assertIsInstance(reranker, HeuristicReranker)
+
+    def test_build_bge_when_engine_bge(self):
         from app.services.rerank import BGEReranker, build_reranker
         with patch("app.services.rerank.settings.RAG_RERANK_ENGINE", "bge"), patch(
             "app.services.rerank.settings.RAG_LLM_RERANK_ENABLED", False,

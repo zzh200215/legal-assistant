@@ -1,0 +1,4 @@
+# BGE-Reranker-v2-M3 交叉编码器重排（可选模块，默认不安装）
+# 启用：pip install -r requirements-rerank.txt，并将 RAG_RERANK_ENGINE=bge
+FlagEmbedding>=1.4.0
+sentence-transformers>=5.0.0
