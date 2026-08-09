@@ -9,6 +9,7 @@ from app.services.llm_observability_service import llm_observability_service
 from app.services.prompt_service import prompt_service
 from app.services.rag_cache import rag_embedding_cache
 from app.services.rag_runtime import resolve_runtime_config
+from app.services.query_expansion import expand_terms
 from app.services.rerank import build_reranker
 from app.services.vector_store import build_vector_store
 
@@ -25,8 +26,13 @@ class RAGService:
         self._bm25_index = None
         self._bm25_items: list[tuple] = []
         self._bm25_stale = True
-        # RAG④：可插拔重排（默认启发式，RAG_LLM_RERANK_ENABLED 时用 LLM 重排）
-        self._reranker = build_reranker(self)
+        # RAG④：可插拔重排（懒构建——按当前 RAG_RERANK_ENGINE 选 bge/llm/heuristic）
+        self._reranker = None
+
+    def _get_reranker(self):
+        if self._reranker is None:
+            self._reranker = build_reranker(self)
+        return self._reranker
 
     def get_runtime_config(
         self,
@@ -172,7 +178,7 @@ class RAGService:
             dense_candidates=dense_candidates,
             keyword_candidates=keyword_candidates,
         )
-        return await self._reranker.rerank(
+        return await self._get_reranker().rerank(
             query=query,
             query_variants=query_variants,
             candidates=fused_candidates,
@@ -556,8 +562,20 @@ class RAGService:
             parts.append(f"chunk:{metadata['chunk_index']}")
         return " | ".join(parts)
 
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """粗略 token 估算：中文约 1.5 字符/token，ASCII 约 3.5 字符/token。"""
+        if not text:
+            return 0
+        ascii_chars = sum(1 for ch in text if ord(ch) < 128)
+        other_chars = len(text) - ascii_chars
+        return max(1, int(ascii_chars / 3.5 + other_chars / 1.5))
+
     def _build_prompt_context(self, chunks: list[dict]) -> str:
+        # 上下文处理：token 预算裁剪，避免拼接超限导致生成退化
+        max_tokens = settings.RAG_CONTEXT_MAX_TOKENS
         blocks = []
+        used_tokens = 0
         for index, chunk in enumerate(chunks, start=1):
             metadata = chunk.get("metadata") or {}
             parts = [f"片段 {index}"]
@@ -581,7 +599,17 @@ class RAGService:
                 block_content = f"{summary}\n{block_content}".strip()
             if metadata.get("visual_evidence"):
                 block_content = f"{block_content}\n[视觉证据]\n{metadata['visual_evidence']}".strip()
-            blocks.append(f"[{' | '.join(parts)}]\n{block_content}")
+            header = f"[{' | '.join(parts)}]"
+            block = f"{header}\n{block_content}"
+            est_tokens = self._estimate_tokens(block)
+            if max_tokens and used_tokens + est_tokens > max_tokens:
+                remaining = max_tokens - used_tokens
+                if remaining >= 40:
+                    keep_chars = max(int(remaining * 1.5), 0)
+                    blocks.append(f"{header}\n{block_content[:keep_chars]}")
+                break
+            blocks.append(block)
+            used_tokens += est_tokens
         return "\n\n".join(blocks)
 
     async def _expand_context_chunks(
@@ -745,6 +773,14 @@ class RAGService:
             focused = " ".join(key_terms[:4])
             if focused and focused not in variants:
                 variants.append(focused)
+
+        # Query Expansion：法律术语同义扩展，扩大混合召回覆盖面
+        if settings.RAG_QUERY_EXPANSION_ENABLED:
+            expanded = expand_terms(normalized)
+            if expanded:
+                expanded_query = normalized + " " + " ".join(expanded[: settings.RAG_QUERY_EXPANSION_MAX])
+                if expanded_query not in variants:
+                    variants.append(expanded_query)
 
         unique_variants: list[str] = []
         for variant in variants:

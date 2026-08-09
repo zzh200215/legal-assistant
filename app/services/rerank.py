@@ -4,8 +4,11 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
+import threading
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
@@ -109,7 +112,80 @@ class LLMReranker(Reranker):
                 for _, candidate, score in scored]
 
 
+class BGEReranker(Reranker):
+    """BGE 交叉编码器重排（BAAI/bge-reranker-v2-m3）。
+
+    模型懒加载（FlagEmbedding.FlagReranker），未安装依赖/模型加载失败时回退启发式。
+    模型权重经 HF 镜像下载（HF_ENDPOINT 缺省指向 hf-mirror.com）。
+    """
+    _model = None
+    _model_lock = threading.Lock()
+
+    def __init__(self, service: Any):
+        self._service = service
+        self._heuristic = HeuristicReranker(service)
+
+    @classmethod
+    def _load_model(cls):
+        if cls._model is not None:
+            return cls._model
+        with cls._model_lock:
+            if cls._model is not None:
+                return cls._model
+            try:
+                os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+                from FlagEmbedding import FlagReranker
+                cls._model = FlagReranker(settings.RAG_RERANK_MODEL, use_fp16=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("BGE reranker model unavailable; falling back (%s)", type(exc).__name__)
+                cls._model = None
+        return cls._model
+
+    async def rerank(self, *, query, query_variants, candidates, top_k, user_id=None) -> list[dict]:
+        if not candidates:
+            return []
+        if self._load_model() is None:
+            return await self._heuristic.rerank(
+                query=query, query_variants=query_variants, candidates=candidates,
+                top_k=top_k, user_id=user_id,
+            )
+        ordered = await self._heuristic.rerank(
+            query=query, query_variants=query_variants, candidates=candidates,
+            top_k=len(candidates), user_id=user_id,
+        )
+        top_n = ordered[: settings.RAG_RERANK_TOP_N]
+        if len(top_n) < 2:
+            return ordered[:top_k]
+        try:
+            pairs = [(query, (candidate.get("content") or "")[: settings.RAG_RERANK_MAX_CHARS])
+                     for candidate in top_n]
+            scores = await asyncio.to_thread(self._score, pairs)
+            ranked = sorted(zip(top_n, scores), key=lambda item: item[1], reverse=True)
+            result = []
+            for candidate, score in ranked:
+                item = dict(candidate)
+                item["bge_rerank_score"] = round(float(score), 6)
+                result.append(item)
+            return (result + ordered[len(top_n):])[:top_k]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("BGE rerank failed; falling back to heuristic (%s)", type(exc).__name__)
+            return ordered[:top_k]
+
+    @staticmethod
+    def _score(pairs: list[tuple[str, str]]) -> list[float]:
+        model = BGEReranker._model
+        scores = model.compute_score(pairs, normalize=True)
+        if isinstance(scores, list):
+            return [float(s) for s in scores]
+        return [float(scores)]
+
+
 def build_reranker(service: Any) -> Reranker:
+    engine = settings.RAG_RERANK_ENGINE
     if settings.RAG_LLM_RERANK_ENABLED:
+        engine = "llm"  # 兼容旧开关：显式开启 LLM 重排
+    if engine == "bge":
+        return BGEReranker(service)
+    if engine == "llm":
         return LLMReranker(service)
     return HeuristicReranker(service)

@@ -16,11 +16,27 @@ class RerankerTests(unittest.IsolatedAsyncioTestCase):
              "routes": {"dense"}, "matched_variants": {"合同"}},
         ]
 
-    def test_build_returns_heuristic_by_default(self):
+    def test_build_selects_bge_by_default(self):
+        from app.services.rerank import BGEReranker, build_reranker
+        with patch("app.services.rerank.settings.RAG_RERANK_ENGINE", "bge"), patch(
+            "app.services.rerank.settings.RAG_LLM_RERANK_ENABLED", False,
+        ):
+            reranker = build_reranker(rag_service)
+        self.assertIsInstance(reranker, BGEReranker)
+
+    def test_build_heuristic_when_engine_heuristic(self):
         from app.services.rerank import HeuristicReranker, build_reranker
-        with patch("app.services.rerank.settings.RAG_LLM_RERANK_ENABLED", False):
+        with patch("app.services.rerank.settings.RAG_RERANK_ENGINE", "heuristic"), patch(
+            "app.services.rerank.settings.RAG_LLM_RERANK_ENABLED", False,
+        ):
             reranker = build_reranker(rag_service)
         self.assertIsInstance(reranker, HeuristicReranker)
+
+    def test_build_llm_when_legacy_flag_enabled(self):
+        from app.services.rerank import LLMReranker, build_reranker
+        with patch("app.services.rerank.settings.RAG_LLM_RERANK_ENABLED", True):
+            reranker = build_reranker(rag_service)
+        self.assertIsInstance(reranker, LLMReranker)
 
     async def test_heuristic_delegates_to_rerank_candidates(self):
         from app.services.rerank import HeuristicReranker
@@ -65,6 +81,29 @@ class RerankerTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertTrue(result)
         self.assertNotIn("llm_rerank_score", result[0])
+
+    async def test_bge_rerank_reorders_with_scores(self):
+        from unittest.mock import MagicMock
+        from app.services.rerank import BGEReranker
+        reranker = BGEReranker(rag_service)
+        fake_model = MagicMock()
+        fake_model.compute_score.return_value = [0.3, 0.9]
+        with patch.object(BGEReranker, "_model", fake_model):
+            result = await reranker.rerank(
+                query="货款", query_variants=["货款"], candidates=self.candidates, top_k=2, user_id=7,
+            )
+        self.assertEqual(result[0]["id"], "c2")            # 0.9 更高 → 排最前
+        self.assertEqual(result[0]["bge_rerank_score"], 0.9)
+
+    async def test_bge_rerank_falls_back_when_model_unavailable(self):
+        from app.services.rerank import BGEReranker
+        reranker = BGEReranker(rag_service)
+        with patch.object(BGEReranker, "_load_model", return_value=None):
+            result = await reranker.rerank(
+                query="q", query_variants=["q"], candidates=self.candidates, top_k=2, user_id=7,
+            )
+        self.assertTrue(result)
+        self.assertNotIn("bge_rerank_score", result[0])
 
 
 if __name__ == "__main__":

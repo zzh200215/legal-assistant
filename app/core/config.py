@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     RAG_LLM_RERANK_ENABLED: bool = False
     RAG_LLM_RERANK_TOP_N: int = 5
     RAG_LLM_RERANK_MAX_CHARS: int = 400
+    RAG_RERANK_ENGINE: str = "bge"  # bge（BGE-Reranker 交叉编码器）| llm | heuristic
+    RAG_RERANK_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    RAG_RERANK_TOP_N: int = 5
+    RAG_RERANK_MAX_CHARS: int = 400
+    RAG_RERANK_DEVICE: str = "cpu"
+    RAG_QUERY_EXPANSION_ENABLED: bool = True
+    RAG_QUERY_EXPANSION_MAX: int = 4
+    RAG_CONTEXT_MAX_TOKENS: int = 6000
     LEGAL_DENSE_RECALL_MULTIPLIER: int = 3
     LEGAL_DENSE_MIN_CANDIDATES: int = 30
     AGENTIC_RAG_ENABLED: bool = True

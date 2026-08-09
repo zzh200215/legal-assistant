@@ -42,3 +42,7 @@ opentelemetry-exporter-otlp-proto-grpc==1.42.1
 opentelemetry-instrumentation-fastapi==0.63b1
 opentelemetry-instrumentation-sqlalchemy==0.63b1
 rank_bm25>=0.2.2
+
+# BGE-Reranker 交叉编码器重排（RAG；torch 为其传递依赖，环境无模型时 BGEReranker 自动回退启发式）
+FlagEmbedding>=1.4.0
+sentence-transformers>=5.0.0

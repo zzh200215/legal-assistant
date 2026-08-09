@@ -76,3 +76,18 @@ def _clear_rag_embedding_cache():
     rag_embedding_cache.clear()
     yield
     rag_embedding_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _force_heuristic_rerank_in_tests():
+    """BGE/LLM 重排依赖外部模型/网络，单元测试统一走启发式（快速、确定性）。"""
+    from unittest.mock import patch
+    from app.core.config import get_settings
+    from app.services.rag_service import rag_service
+    rag_service._reranker = None  # 懒重建，按当前（被 patch 的）引擎选择
+    settings = get_settings()
+    with patch.object(settings, "RAG_RERANK_ENGINE", "heuristic"), patch.object(
+        settings, "RAG_LLM_RERANK_ENABLED", False,
+    ):
+        yield
+    rag_service._reranker = None

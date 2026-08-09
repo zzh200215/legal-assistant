@@ -408,6 +408,20 @@ class RagServiceTests(unittest.TestCase):
         self.assertEqual(captured.get("knowledge_base_id"), 3)
         self.assertEqual(captured.get("document_status"), "indexed")
 
+    def test_build_prompt_context_respects_token_budget(self):
+        """上下文处理：token 预算裁剪，超限片段被截断。"""
+        from app.core.config import get_settings
+        s = get_settings()
+        chunks = [
+            {"content": "合同条款内容与付款安排说明" * 200, "metadata": {"document_id": 1, "chunk_index": i}}
+            for i in range(6)
+        ]
+        with patch.object(s, "RAG_CONTEXT_MAX_TOKENS", 400):
+            context = rag_service._build_prompt_context(chunks)
+        est = rag_service._estimate_tokens(context)
+        self.assertLessEqual(est, 600)  # 预算 400 + 截断余量
+        self.assertIn("片段 1", context)
+
     def test_keyword_multi_recall_boosts_section_path_match(self):
         fake_rows = {
             "ids": ["doc1_chunk0", "doc1_chunk1"],
