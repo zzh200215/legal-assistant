@@ -724,7 +724,7 @@ def retry_document_parse(
     snapshot_id = authorization_service.capture_snapshot(
         db, current_user, ctx, document_ids=[document_id],
     )
-    task = parse_document_task.delay(doc.id, doc.file_path, doc.file_type, snapshot_id)
+    task = parse_document_task.delay(doc.id, doc.version_number, doc.file_type, snapshot_id)
     document_job_service.attach_task_id(job.id, task.id, db)
     return {
         "document_id": document_id,

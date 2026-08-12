@@ -14,7 +14,9 @@ class DocumentCreate(DocumentBase):
 class DocumentOut(DocumentBase):
     id: int
     user_id: int
-    file_path: str
+    # 新文档只存 object_key（file_path 为存量本地路径，可为空）
+    file_path: str | None = None
+    object_key: str | None = None
     organization_id: int | None = None
     department_id: int | None = None
     knowledge_base_id: int | None = None

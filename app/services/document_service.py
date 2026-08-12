@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import io
 import json
 import re
 import uuid
@@ -19,11 +20,6 @@ from app.services.analysis_service import analysis_service
 from app.services.document_governance_service import document_governance_service
 from app.services.document_job_service import document_job_service
 from app.services.document_indexing import build_embedding_id as _build_embedding_id
-from app.services.document_qa_service import document_qa_service
-from app.services.llm_service import llm_service
-from app.services.rag_service import rag_service
-from app.services.agentic_rag_service import agentic_rag_service
-from app.services.storage_service import storage_service
 from app.services.document_parsing import (
     DocumentParsePermanentError,
     _extract_segments,
@@ -40,6 +36,26 @@ from app.services.document_parsing import (
     _supports_visual_analysis,
     extract_file_text,
 )
+from app.services.document_pipeline import (
+    resolve_local_path,
+    run_chunk,
+    run_index,
+    run_parse,
+)
+from app.services.document_security import (
+    DocumentSecurityError,
+    _ZIP_BASED_EXTS,
+    build_virus_scanner,
+    detect_mime,
+    inspect_zip_safety,
+    inspect_zip_safety_bytes,
+    spool_upload_to_temp,
+)
+from app.services.document_qa_service import document_qa_service
+from app.services.llm_service import llm_service
+from app.services.rag_service import rag_service
+from app.services.agentic_rag_service import agentic_rag_service
+from app.services.storage_service import storage_service
 
 UPLOAD_DIR = storage_service.ensure_dir(storage_service.base_dir())
 settings = get_settings()
@@ -97,9 +113,13 @@ class DocumentService:
         metadata: dict | None = None,
     ) -> tuple[Document, bool]:
         file_ext = file_type.lstrip(".") if file_type else "txt"
-        unique_name = f"{uuid.uuid4().hex}.{file_ext}"
-        file_path = storage_service.save_bytes(base_dir=UPLOAD_DIR, filename=unique_name, content=file_bytes)
         content_hash = _sha256_bytes(file_bytes)
+        size = len(file_bytes)
+        # 真实 MIME 校验（文本导入同样校验，避免伪造扩展名）+ zip-bomb 防护
+        head = file_bytes[:512]
+        ext, mime_type = detect_mime(head, f"document.{file_ext}")
+        if ext in _ZIP_BASED_EXTS:
+            inspect_zip_safety_bytes(file_bytes)
         current_user = db.query(User).filter(User.id == user_id).first()
         knowledge_base = self._resolve_knowledge_base(
             db=db,
@@ -114,8 +134,7 @@ class DocumentService:
             user_id=user_id,
             current_user=current_user,
             title=title,
-            file_path=str(file_path),
-            file_type=file_ext,
+            file_type=ext,
             content_hash=content_hash,
             knowledge_base=knowledge_base,
             classification=classification,
@@ -125,44 +144,55 @@ class DocumentService:
             permission_users=permission_users,
             permission_roles=permission_roles,
             metadata=metadata,
-            status=DOCUMENT_STATUS_PARSED,
+            mime_type=mime_type,
+            size=size,
+            status="uploaded",
         )
         if not created:
             return doc, False
 
+        # 存储抽象：只写 object_key，不存本地路径/二进制。
+        doc.object_key = storage_service.build_object_key(
+            user_id=user_id, document_id=doc.id, version_number=doc.version_number, file_ext=ext
+        )
+        with io.BytesIO(file_bytes) as stream:
+            storage_service.put_stream(doc.object_key, stream, content_type=mime_type)
+        db.add(doc)
+        db.commit()
+
         try:
-            segments = _extract_segments(str(file_path), file_ext)
-            chunks = _split_text(segments)
+            self._run_sync_pipeline(db, doc, user_id=user_id, knowledge_base_id=doc.knowledge_base_id)
         except Exception:
             # 解析失败：删除已落库的孤儿行，避免内容哈希去重导致重试永远“已存在”
             db.query(DocumentChunk).filter(DocumentChunk.document_id == doc.id).delete()
             db.delete(doc)
             db.commit()
             raise
-        db.add_all(
-            [
-                DocumentChunk(
-                    document_id=doc.id,
-                    chunk_index=chunk["chunk_index"],
-                    content=chunk["content"],
-                    page_number=chunk.get("page_number"),
-                    section_title=chunk.get("section_title"),
-                    section_path=" > ".join(chunk.get("section_path") or []),
-                    segment_type=chunk.get("segment_type"),
-                    table_like=bool(chunk.get("table_like")),
-                    visual_tags=" ".join(chunk.get("visual_tags") or []),
-                    ocr_quality=chunk.get("ocr_quality"),
-                    embedding_id=_build_embedding_id(doc.id, chunk["chunk_index"]),
-                )
-                for chunk in chunks
-            ]
-        )
-        db.commit()
-        index_error = _try_index_document(doc.id, chunks, user_id=user_id, knowledge_base_id=doc.knowledge_base_id)
-        if index_error is None:
-            doc.status = DOCUMENT_STATUS_INDEXED
-            db.commit()
         return doc, True
+
+    def _run_sync_pipeline(
+        self, db: Session, doc: Document, *, user_id: int | None = None, knowledge_base_id: int | None = None
+    ) -> dict:
+        """同步快路径：复用与异步一致的幂等阶段函数。
+
+        引用 document_service 模块级名称（_extract_segments/_split_text/_try_index_document），
+        保持既有测试 patch(document_service._extract_segments / rag_service.index_document) 兼容。
+        """
+        parse_result = run_parse(db, doc.id, extract_segments=_extract_segments, return_segments=True)
+        if parse_result["status"] == "skipped":
+            return parse_result
+        segments = parse_result.get("segments_payload")
+        chunk_result = run_chunk(db, doc.id, segments=segments, split_text=_split_text)
+        if chunk_result["status"] == "skipped":
+            return chunk_result
+        return run_index(
+            db,
+            doc.id,
+            segments=segments,
+            index_chunks=_try_index_document,
+            user_id=user_id,
+            knowledge_base_id=knowledge_base_id,
+        )
 
     def _resolve_knowledge_base(
         self,
@@ -193,7 +223,6 @@ class DocumentService:
         user_id: int,
         current_user: User | None,
         title: str,
-        file_path: str,
         file_type: str,
         content_hash: str,
         knowledge_base,
@@ -205,6 +234,10 @@ class DocumentService:
         permission_roles: list[str] | None,
         metadata: dict | None,
         status: str,
+        file_path: str | None = None,
+        object_key: str | None = None,
+        mime_type: str | None = None,
+        size: int | None = None,
     ) -> tuple[Document, bool]:
         latest_version = document_governance_service.find_latest_version(
             db=db,
@@ -235,7 +268,10 @@ class DocumentService:
             parent_document_id=parent_document_id,
             version_number=(latest_by_title.version_number + 1) if latest_by_title else 1,
             title=title,
-            file_path=str(file_path),
+            file_path=file_path,
+            object_key=object_key,
+            mime_type=mime_type,
+            size=size,
             file_type=file_type,
             content_hash=content_hash,
             classification=classification,
@@ -312,31 +348,52 @@ class DocumentService:
         permission_roles: list[str] | None = None,
         metadata: dict | None = None,
     ) -> Document:
-        ext = Path(file.filename).suffix
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        file_bytes = file.file.read()
-        file_path = storage_service.save_bytes(base_dir=UPLOAD_DIR, filename=unique_name, content=file_bytes)
+        from app.core.config import get_settings
 
-        file_type = ext.lstrip(".") if ext else "txt"
-        content_hash = _sha256_bytes(file_bytes)
-        current_user = db.query(User).filter(User.id == user_id).first()
-        knowledge_base = self._resolve_knowledge_base(
-            db=db,
-            user_id=user_id,
-            current_user=current_user,
-            knowledge_base_name=knowledge_base_name,
-            knowledge_base_category=knowledge_base_category,
-            permission_scope=permission_scope,
+        settings = get_settings()
+        filename = getattr(file, "filename", None) or "document"
+
+        # 1) 真实 MIME：只读文件头 512B 嗅探，与扩展名/Content-Type 交叉校验。
+        head = file.file.read(512)
+        file.file.seek(0)
+        ext, mime_type = detect_mime(head, filename)
+
+        # 2) 流式落盘临时文件：分块读取、边算 SHA-256、强制大小上限（禁止整体 read()）。
+        temp_path, size, content_hash = spool_upload_to_temp(
+            file.file, max_bytes=settings.DOCUMENT_MAX_UPLOAD_MB * 1024 * 1024
         )
+        try:
+            # 3) zip-bomb（docx/xlsx）：只读中央目录，不实际解压。
+            if ext in _ZIP_BASED_EXTS:
+                inspect_zip_safety(temp_path)
+            # 4) 病毒扫描：默认“未配置扫描器”策略，不伪造结果。
+            scan_result = build_virus_scanner().scan(temp_path)
+            if not scan_result.clean:
+                raise DocumentSecurityError("DOCUMENT_VIRUS_FOUND", scan_result.note)
 
-        if async_mode:
+            current_user = db.query(User).filter(User.id == user_id).first()
+            knowledge_base = self._resolve_knowledge_base(
+                db=db,
+                user_id=user_id,
+                current_user=current_user,
+                knowledge_base_name=knowledge_base_name,
+                knowledge_base_category=knowledge_base_category,
+                permission_scope=permission_scope,
+            )
+
+            # 5) 内容去重：同 title + content_hash 直接复用，避免重复创建等价对象/切片/索引。
+            existing = document_governance_service.find_latest_version(
+                db=db, user_id=user_id, title=filename, content_hash=content_hash
+            )
+            if existing:
+                return existing
+
             doc, created = self._persist_document_record(
                 db=db,
                 user_id=user_id,
                 current_user=current_user,
-                title=file.filename,
-                file_path=str(file_path),
-                file_type=file_type,
+                title=filename,
+                file_type=ext,
                 content_hash=content_hash,
                 knowledge_base=knowledge_base,
                 classification=classification,
@@ -346,89 +403,59 @@ class DocumentService:
                 permission_users=permission_users,
                 permission_roles=permission_roles,
                 metadata=metadata,
-                status="pending",
+                mime_type=mime_type,
+                size=size,
+                status="uploaded",
             )
             if not created:
                 return doc
 
-            from app.tasks import parse_document_task
-
-            job = document_job_service.create_job(
-                document_id=doc.id,
-                user_id=user_id,
-                job_type="document_parse",
-                db=db,
-                current_step="submitted",
-                message="文档解析任务已提交",
+            # 6) 写入对象存储：流式、只存 object_key（可预测/租户隔离命名）。
+            doc.object_key = storage_service.build_object_key(
+                user_id=user_id, document_id=doc.id, version_number=doc.version_number, file_ext=ext
             )
-            task = parse_document_task.delay(doc.id, str(file_path), file_type)
-            # 长流程权限快照：保证后台解析期间权限范围稳定。
-            snapshot_id = None
-            try:
-                from app.services.authorization_service import authorization_service
-
-                user_row = db.query(User).filter(User.id == user_id).first()
-                if user_row:
-                    ctx = authorization_service.build_context(db, user_row)
-                    snapshot_id = authorization_service.capture_snapshot(
-                        db, user_row, ctx, document_ids=[doc.id],
-                    )
-            except Exception:
-                # 快照失败不阻断上传；文档为创建者所有，访问路径由任务内校验兜底。
-                pass
-            if snapshot_id:
-                task = parse_document_task.delay(doc.id, str(file_path), file_type, snapshot_id)
-            document_job_service.attach_task_id(job.id, task.id, db)
-            return doc
-
-        segments = _extract_segments(str(file_path), file_type)
-
-        doc, created = self._persist_document_record(
-            db=db,
-            user_id=user_id,
-            current_user=current_user,
-            title=file.filename,
-            file_path=str(file_path),
-            file_type=file_type,
-            content_hash=content_hash,
-            knowledge_base=knowledge_base,
-            classification=classification,
-            tags=tags,
-            permission_scope=permission_scope,
-            sensitivity_level=sensitivity_level,
-            permission_users=permission_users,
-            permission_roles=permission_roles,
-            metadata=metadata,
-            status=DOCUMENT_STATUS_PARSED,
-        )
-        if not created:
-            return doc
-
-        chunks = _split_text(segments)
-        db_chunks = [
-            DocumentChunk(
-                document_id=doc.id,
-                chunk_index=chunk["chunk_index"],
-                content=chunk["content"],
-                page_number=chunk.get("page_number"),
-                section_title=chunk.get("section_title"),
-                section_path=" > ".join(chunk.get("section_path") or []),
-                segment_type=chunk.get("segment_type"),
-                table_like=bool(chunk.get("table_like")),
-                visual_tags=" ".join(chunk.get("visual_tags") or []),
-                ocr_quality=chunk.get("ocr_quality"),
-                embedding_id=_build_embedding_id(doc.id, chunk["chunk_index"]),
-            )
-            for chunk in chunks
-        ]
-        db.add_all(db_chunks)
-        db.commit()
-
-        index_error = _try_index_document(doc.id, chunks, user_id=user_id, knowledge_base_id=doc.knowledge_base_id)
-        if index_error is None:
-            doc.status = DOCUMENT_STATUS_INDEXED
+            with open(temp_path, "rb") as src:
+                storage_service.put_stream(doc.object_key, src, content_type=mime_type)
+            doc.content_hash = content_hash
+            doc.size = size
+            doc.mime_type = mime_type
+            db.add(doc)
             db.commit()
-        return doc
+
+            if async_mode:
+                # 长流程权限快照：保证后台解析期间权限范围稳定。
+                snapshot_id = None
+                try:
+                    from app.services.authorization_service import authorization_service
+
+                    user_row = db.query(User).filter(User.id == user_id).first()
+                    if user_row:
+                        ctx = authorization_service.build_context(db, user_row)
+                        snapshot_id = authorization_service.capture_snapshot(
+                            db, user_row, ctx, document_ids=[doc.id],
+                        )
+                except Exception:
+                    # 快照失败不阻断上传；文档为创建者所有，访问路径由任务内校验兜底。
+                    pass
+                from app.tasks import parse_document_task
+
+                job = document_job_service.create_job(
+                    document_id=doc.id,
+                    user_id=user_id,
+                    job_type="document_parse",
+                    db=db,
+                    current_step="submitted",
+                    message="文档解析任务已提交",
+                )
+                task = parse_document_task.delay(doc.id, doc.version_number, doc.file_type, snapshot_id)
+                document_job_service.attach_task_id(job.id, task.id, db)
+                return doc
+
+            # 同步快路径：走与异步一致的幂等阶段函数（兼容既有测试）。
+            self._run_sync_pipeline(db, doc, user_id=user_id, knowledge_base_id=doc.knowledge_base_id)
+            return doc
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     def get(
         self,
@@ -472,7 +499,7 @@ class DocumentService:
         )
         if not doc:
             raise ValueError("Document not found")
-        return _extract_text(doc.file_path, doc.file_type)
+        return _extract_text(str(resolve_local_path(doc)), doc.file_type)
 
     def ask(
         self,
@@ -562,7 +589,7 @@ class DocumentService:
         if doc.file_type.lower() not in VISION_SUPPORTED_FILE_TYPES:
             raise ValueError("Document visual analysis only supports image and PDF files")
 
-        image_url = _file_to_data_url(doc.file_path, doc.file_type)
+        image_url = _file_to_data_url(str(resolve_local_path(doc)), doc.file_type)
         analysis = await llm_service.generate_with_images(
             prompt,
             image_urls=[image_url],
@@ -973,7 +1000,7 @@ class DocumentService:
         )
         if not doc:
             raise ValueError("Document not found")
-        return _extract_text(doc.file_path, doc.file_type)
+        return _extract_text(str(resolve_local_path(doc)), doc.file_type)
 
     def get_chunks(
         self,

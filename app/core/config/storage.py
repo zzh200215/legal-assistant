@@ -9,8 +9,32 @@ from app.core.config.base import ENV_FILE_CONFIG
 class StorageSettings(BaseSettings):
     model_config = ENV_FILE_CONFIG
 
-    STORAGE_PROVIDER: str = "local"
+    STORAGE_PROVIDER: str = "local"  # local | minio | s3 | oss（本地默认可用，云后端需安装对应可选 SDK）
     STORAGE_LOCAL_DIR: str = "./data/uploads"
+    # 可选云存储：minio / aws s3 / aliyun oss 适配器配置（SDK 未安装时启用会抛 StorageBackendUnavailable）
+    STORAGE_MINIO_ENDPOINT: str = ""
+    STORAGE_MINIO_ACCESS_KEY: str = ""
+    STORAGE_MINIO_SECRET_KEY: str = ""
+    STORAGE_MINIO_BUCKET: str = "documents"
+    STORAGE_MINIO_SECURE: bool = True
+    STORAGE_S3_ENDPOINT_URL: str = ""
+    STORAGE_S3_REGION: str = ""
+    STORAGE_S3_ACCESS_KEY: str = ""
+    STORAGE_S3_SECRET_KEY: str = ""
+    STORAGE_S3_BUCKET: str = "documents"
+    STORAGE_OSS_ENDPOINT: str = ""
+    STORAGE_OSS_ACCESS_KEY: str = ""
+    STORAGE_OSS_SECRET_KEY: str = ""
+    STORAGE_OSS_BUCKET: str = "documents"
+    # 文档上传安全（流式读取、大小/MIME/zip-bomb 防护）
+    DOCUMENT_MAX_UPLOAD_MB: int = Field(default=50, ge=1, le=1024)
+    DOCUMENT_ALLOWED_EXTENSIONS: str = "pdf,docx,xlsx,md,txt,png,jpg,jpeg,bmp,webp"
+    DOCUMENT_VIRUS_SCAN_ENABLED: bool = False
+    DOCUMENT_CLAMAV_SOCKET: str = "/var/run/clamav/clamd.ctl"
+    DOCUMENT_ZIP_MAX_ENTRIES: int = Field(default=500, ge=1, le=10000)
+    DOCUMENT_ZIP_MAX_TOTAL_UNCOMPRESSED_MB: int = Field(default=200, ge=1, le=4096)
+    DOCUMENT_ZIP_MAX_COMPRESSION_RATIO: float = Field(default=1000.0, ge=1.0)
+    DOCUMENT_ZIP_MAX_NESTING: int = Field(default=2, ge=1, le=8)
     # 备份（等保自评差距 #1 整改：每日全量定时备份，见 app/tasks.create_pilot_backup_task）
     BACKUP_OUTPUT_DIR: str = "data/backups"
     BACKUP_DATA_DIRS: list[str] = ["data/uploads", "data/chroma_db"]

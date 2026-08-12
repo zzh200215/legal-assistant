@@ -1529,7 +1529,7 @@ class AnalyticsService:
             doc = db.query(Document).filter(Document.id == int(target_id), Document.user_id == user_id).first()
             if not doc:
                 raise ValueError("Document not found")
-            task = parse_document_task.delay(doc.id, doc.file_path, doc.file_type)
+            task = parse_document_task.delay(doc.id, doc.version_number, doc.file_type)
         else:
             raise ValueError("Task type is not retryable")
 

@@ -2,7 +2,7 @@ from app.models.org import Department, Organization
 from app.models.connector import ExternalConnector
 from app.models.user import User, UserRole, UserStatus
 from app.models.auth_log import LoginLog, AdminAuditLog
-from app.models.document import Document, DocumentAccessRule, DocumentAssistantArtifact, DocumentAssistantRevision, DocumentChunk, DocumentConflictCase, DocumentParseJob, DocumentQARecord, KnowledgeBase
+from app.models.document import Document, DocumentAccessRule, DocumentAssistantArtifact, DocumentAssistantRevision, DocumentChunk, DocumentConflictCase, DocumentParseArtifact, DocumentParseJob, DocumentQARecord, KnowledgeBase
 from app.models.task import Task, TaskComment, TaskLog
 from app.models.email import EmailDraft, EmailSendRequest, OutboundEmailPolicy
 from app.models.chat import ChatSession, ChatMessage, ChatSessionMemory, UserPreferenceMemory
@@ -63,6 +63,7 @@ __all__ = [
     "DocumentChunk",
     "DocumentConflictCase",
     "DocumentParseJob",
+    "DocumentParseArtifact",
     "DocumentQARecord",
     "KnowledgeBase",
     "Task",

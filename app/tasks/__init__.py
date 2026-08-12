@@ -14,19 +14,21 @@ from app.models.document import Document, DocumentChunk
 from app.models.user import User
 from app.services.analysis_service import analysis_service
 from app.services.document_job_service import document_job_service
-from app.services.document_service import (
-    DOCUMENT_STATUS_INDEXED,
-    DOCUMENT_STATUS_PARSED,
-    DocumentParsePermanentError,
-    _build_embedding_id,
-    _extract_segments,
-    _split_text,
-    _try_index_document,
-    UPLOAD_DIR,
+from app.services.document_parsing import DocumentParsePermanentError
+from app.services.document_pipeline import run_chunk, run_index, run_parse
+from app.services.document_security import DocumentSecurityError
+from app.services.document_state import (
+    DOCUMENT_STATUS_RETRYING,
+    DocumentStateTransitionError,
+    transition_document,
 )
 from app.services.storage_service import storage_service
-from app.tasks.runtime import background_error_detail as _background_error_detail
-from app.tasks.runtime import record_beat_heartbeat as _record_beat_heartbeat
+from app.tasks.runtime import (
+    acquire_document_lock as _acquire_document_lock,
+    background_error_detail as _background_error_detail,
+    record_beat_heartbeat as _record_beat_heartbeat,
+    release_document_lock as _release_document_lock,
+)
 from app.tasks.task_retry import retry_task as _retry_task_impl
 
 
@@ -41,10 +43,41 @@ def _retry_task(self, exc: Exception, **kwargs):
     )
 
 
+def _lease_refresher(job_id: int, owner: str):
+    """心跳：用独立短会话续约，避免把主事务的未提交变更一起 flush。"""
+    settings = get_settings()
+
+    def refresh() -> None:
+        try:
+            db = SessionLocal()
+            try:
+                document_job_service.renew_lease(job_id, owner, settings.DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
+            finally:
+                db.close()
+        except Exception:  # noqa: BLE001 - 续约失败不阻断处理（TTL 内由回收兜底）
+            pass
+
+    return refresh
+
+
+def _job_summary_chunks(result: dict) -> int | None:
+    for key in ("chunks", "segments", "indexed"):
+        value = result.get(key)
+        if value is not None:
+            return int(value)
+    return None
+
+
 @celery_app.task(bind=True, name="parse_document")
-def parse_document_task(self, document_id: int, file_path: str, file_type: str, snapshot_id: str | None = None):
-    """异步解析文档：提取文本 → 切分 → 向量化入库"""
+def parse_document_task(self, document_id: int, version_number: int, file_type: str, snapshot_id: str | None = None):
+    """异步文档流水线编排器：parse → chunk → index（各阶段幂等、版本守卫、租约刷新）。
+
+    任一阶段抛出可重试异常时，文档置 retrying 并按配置重试；永久错误（不可解析/
+    安全校验失败）记录失败不重试。
+    """
     db = SessionLocal()
+    owner = self.request.id
+    job = None
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
@@ -53,150 +86,107 @@ def parse_document_task(self, document_id: int, file_path: str, file_type: str, 
         # 长流程权限快照：硬撤销（禁用/强制退出/授权撤销）立即终止。
         if snapshot_id:
             from app.services.authorization_service import authorization_service
+
             authorization_service.assert_snapshot(db, snapshot_id, user_id=doc.user_id)
 
+        if not _acquire_document_lock(document_id, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS):
+            return {"status": "skipped", "reason": "document_locked"}
+
+        job = document_job_service.find_or_create_job(
+            document_id=document_id,
+            user_id=doc.user_id,
+            job_type="document_parse",
+            db=db,
+            task_id=owner,
+        )
+        document_job_service.claim_job(job.id, owner, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
         log_async_task_event(
             user_id=doc.user_id,
             module="async_task",
             action="document_parse_started",
             target_type="document",
             target_id=document_id,
-            detail=f"task_id={self.request.id}",
+            detail=f"task_id={owner}; version={version_number}",
         )
-        document_job_service.mark_started(
-            self.request.id,
+        refresh = _lease_refresher(job.id, owner)
+
+        # 阶段 1：parse（文本提取 → 产物存档）
+        parse_result = run_parse(db, document_id, expected_version=version_number, user_id=doc.user_id, lease_refresh=refresh)
+        if parse_result["status"] == "skipped":
+            return {"status": "skipped", "reason": parse_result.get("reason"), "document_id": document_id}
+        refresh()
+
+        # 阶段 2：chunk（产物 → 切分 → 写 DocumentChunk）
+        chunk_result = run_chunk(db, document_id, expected_version=version_number, lease_refresh=refresh)
+        if chunk_result["status"] == "skipped":
+            return {"status": "skipped", "reason": chunk_result.get("reason"), "document_id": document_id}
+        refresh()
+
+        # 阶段 3：index（切分结果 → 向量索引；失败降级为 parsed）
+        index_result = run_index(
             db,
-            current_step="extracting",
-            message="正在提取文档文本",
-            progress=10,
+            document_id,
+            expected_version=version_number,
+            user_id=doc.user_id,
+            knowledge_base_id=doc.knowledge_base_id,
+            lease_refresh=refresh,
         )
+        final = index_result["status"]
 
-        # 更新状态为解析中
-        doc.status = "processing"
-        db.commit()
-        self.update_state(state="PROCESSING", meta={"step": "extracting"})
-
-        # 提取文本
-        segments = _extract_segments(file_path, file_type)
-
-        self.update_state(state="PROCESSING", meta={"step": "splitting"})
-        document_job_service.update_progress(
-            self.request.id,
+        chunk_count = _job_summary_chunks(chunk_result) or _job_summary_chunks(parse_result)
+        degraded = final == "degraded"
+        document_job_service.mark_succeeded(
+            owner,
             db,
-            current_step="splitting",
-            message="正在切分文档内容",
-            progress=45,
+            message="文档解析完成，索引已降级" if degraded else "文档解析完成",
+            result_summary=(
+                f"共切分 {chunk_count or 0} 个文档片段，但索引失败：任务执行失败，请查看系统日志"
+                if degraded
+                else f"共切分 {chunk_count or 0} 个文档片段并完成索引"
+            ),
         )
-
-        # 切分
-        chunks = _split_text(segments)
-
-        # 写入 chunks 表
-        db_chunks = []
-        for chunk in chunks:
-            db_chunks.append(
-                DocumentChunk(
-                    document_id=document_id,
-                    chunk_index=chunk["chunk_index"],
-                    content=chunk["content"],
-                    page_number=chunk.get("page_number"),
-                    section_title=chunk.get("section_title"),
-                    section_path=" > ".join(chunk.get("section_path") or []),
-                    segment_type=chunk.get("segment_type"),
-                    table_like=bool(chunk.get("table_like")),
-                    visual_tags=" ".join(chunk.get("visual_tags") or []),
-                    ocr_quality=chunk.get("ocr_quality"),
-                    embedding_id=_build_embedding_id(document_id, chunk["chunk_index"]),
-                )
-            )
-        db.add_all(db_chunks)
-        db.commit()
-
-        self.update_state(state="PROCESSING", meta={"step": "indexing", "total_chunks": len(chunks)})
-        document_job_service.update_progress(
-            self.request.id,
-            db,
-            current_step="indexing",
-            message=f"正在建立索引，共 {len(chunks)} 个分片",
-            progress=75,
-        )
-
-        # 向量化入库
-        index_error = _try_index_document(
-            document_id, chunks, user_id=doc.user_id,
-            knowledge_base_id=getattr(doc, "knowledge_base_id", None),
-        )
-
-        # 更新状态为已完成
-        doc.status = DOCUMENT_STATUS_INDEXED if index_error is None else DOCUMENT_STATUS_PARSED
-        db.commit()
-
         log_async_task_event(
             user_id=doc.user_id,
             module="async_task",
             action="document_parse_succeeded",
             target_type="document",
             target_id=document_id,
-            detail=f"task_id={self.request.id}; chunks={len(chunks)}; indexed={index_error is None}",
+            detail=f"task_id={owner}; chunks={chunk_count or 0}; indexed={not degraded}",
         )
-        if index_error is not None:
-            log_async_task_event(
-                user_id=doc.user_id,
-                module="async_task",
-                action="document_index_degraded",
-                target_type="document",
-                target_id=document_id,
-                detail=_background_error_detail(self.request.id),
-            )
-        document_job_service.mark_succeeded(
-            self.request.id,
-            db,
-            message="文档解析完成，索引已降级" if index_error is not None else "文档解析完成",
-            result_summary=(
-                f"共切分 {len(chunks)} 个文档片段，但索引失败：任务执行失败，请查看系统日志"
-                if index_error is not None
-                else f"共切分 {len(chunks)} 个文档片段并完成索引"
-            ),
-        )
-
         return {
             "status": "success",
             "document_id": document_id,
-            "chunks": len(chunks),
-            "indexed": index_error is None,
-            "index_error": sanitize_background_error_message(str(index_error)) if index_error is not None else None,
+            "chunks": chunk_count or 0,
+            "indexed": not degraded,
         }
-
-    except DocumentParsePermanentError as e:
+    except (DocumentParsePermanentError, DocumentSecurityError) as e:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if doc:
-            doc.status = "failed"
-            db.commit()
             log_async_task_event(
                 user_id=doc.user_id,
                 module="async_task",
                 action="document_parse_failed",
                 target_type="document",
                 target_id=document_id,
-                detail=_background_error_detail(self.request.id),
+                detail=_background_error_detail(owner),
             )
             document_job_service.mark_failed(
-                self.request.id,
+                owner,
                 db,
                 error_message=sanitize_background_error_message(str(e)),
                 message="文档解析失败",
                 retry_count=int(getattr(self.request, "retries", 0) or 0),
             )
-        return {
-            "status": "error",
-            "document_id": document_id,
-            "message": sanitize_background_error_message(str(e)),
-        }
+        return {"status": "error", "document_id": document_id, "message": sanitize_background_error_message(str(e))}
     except Exception as e:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if doc:
-            doc.status = "failed"
-            db.commit()
+            # 置 retrying：重跑时从对应失败阶段恢复（阶段函数幂等）。
+            try:
+                transition_document(doc, DOCUMENT_STATUS_RETRYING, stage="retrying")
+                db.commit()
+            except DocumentStateTransitionError:
+                db.rollback()
             _retry_task(
                 self,
                 e,
@@ -206,6 +196,153 @@ def parse_document_task(self, document_id: int, file_path: str, file_type: str, 
                 action_prefix="document_parse",
             )
         raise
+    finally:
+        if job:
+            document_job_service.release_lease(job.id, owner, db)
+        _release_document_lock(document_id)
+        db.close()
+
+
+@celery_app.task(bind=True, name="document_chunk")
+def document_chunk_task(self, document_id: int, version_number: int, snapshot_id: str | None = None):
+    """独立切分任务：可单独重试；成功后链式推进 index。"""
+    db = SessionLocal()
+    owner = self.request.id
+    job = None
+    try:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc:
+            return {"status": "error", "message": "Document not found"}
+        if snapshot_id:
+            from app.services.authorization_service import authorization_service
+
+            authorization_service.assert_snapshot(db, snapshot_id, user_id=doc.user_id)
+        if not _acquire_document_lock(document_id, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS):
+            return {"status": "skipped", "reason": "document_locked"}
+        job = document_job_service.find_or_create_job(
+            document_id=document_id, user_id=doc.user_id, job_type="document_chunk", db=db, task_id=owner
+        )
+        document_job_service.claim_job(job.id, owner, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
+        refresh = _lease_refresher(job.id, owner)
+        result = run_chunk(db, document_id, expected_version=version_number, lease_refresh=refresh)
+        if result["status"] in ("success", "replayed"):
+            document_index_task.delay(document_id, version_number)
+            document_job_service.mark_succeeded(owner, db, message="文档切分完成", result_summary=f"共切分 {result.get('chunks', 0)} 个片段")
+            result["status"] = "success"
+        return result
+    except Exception as e:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if doc:
+            try:
+                transition_document(doc, DOCUMENT_STATUS_RETRYING, stage="retrying")
+                db.commit()
+            except DocumentStateTransitionError:
+                db.rollback()
+            _retry_task(
+                self, e, user_id=doc.user_id, target_type="document", target_id=document_id, action_prefix="document_chunk"
+            )
+        raise
+    finally:
+        if job:
+            document_job_service.release_lease(job.id, owner, db)
+        _release_document_lock(document_id)
+        db.close()
+
+
+@celery_app.task(bind=True, name="document_index")
+def document_index_task(self, document_id: int, version_number: int):
+    """独立索引任务：可单独重试；索引失败降级为 parsed（不抛异常）。"""
+    db = SessionLocal()
+    owner = self.request.id
+    job = None
+    try:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if not doc:
+            return {"status": "error", "message": "Document not found"}
+        if not _acquire_document_lock(document_id, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS):
+            return {"status": "skipped", "reason": "document_locked"}
+        job = document_job_service.find_or_create_job(
+            document_id=document_id, user_id=doc.user_id, job_type="document_index", db=db, task_id=owner
+        )
+        document_job_service.claim_job(job.id, owner, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
+        refresh = _lease_refresher(job.id, owner)
+        result = run_index(
+            db,
+            document_id,
+            expected_version=version_number,
+            user_id=doc.user_id,
+            knowledge_base_id=doc.knowledge_base_id,
+            lease_refresh=refresh,
+        )
+        if result["status"] == "success":
+            document_job_service.mark_succeeded(owner, db, message="文档索引完成", result_summary=f"已索引 {result.get('indexed', 0)} 个片段")
+        elif result["status"] == "degraded":
+            document_job_service.mark_succeeded(owner, db, message="文档索引已降级", result_summary="索引失败，文档保持已解析状态")
+        return result
+    except Exception as e:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if doc:
+            try:
+                transition_document(doc, DOCUMENT_STATUS_RETRYING, stage="retrying")
+                db.commit()
+            except DocumentStateTransitionError:
+                db.rollback()
+            _retry_task(
+                self, e, user_id=doc.user_id, target_type="document", target_id=document_id, action_prefix="document_index"
+            )
+        raise
+    finally:
+        if job:
+            document_job_service.release_lease(job.id, owner, db)
+        _release_document_lock(document_id)
+        db.close()
+
+
+@celery_app.task(name="document_export")
+def document_export_task(document_id: int, export_type: str = "archive", user_id: int | None = None):
+    """导出任务契约：当前项目未实现导出能力，仅记录调用参数并返回 not_implemented。"""
+    log_async_task_event(
+        user_id=user_id,
+        module="async_task",
+        action="document_export_submitted",
+        target_type="document",
+        target_id=document_id,
+        detail=f"export_type={export_type}",
+    )
+    return {"status": "not_implemented", "document_id": document_id, "export_type": export_type}
+
+
+@celery_app.task(name="recover_stale_document_jobs")
+def recover_stale_document_jobs_task():
+    """Beat 任务：回收租约过期/worker 崩溃残留的文档处理任务并重新入队。
+
+    按 job_type 重新投递对应阶段任务（parse/chunk/index 均幂等、版本守卫），
+    进程崩溃、租约过期、网络异常后的任务可安全恢复。决策逻辑见
+    document_job_service.plan_recovery（独立可测）。
+    """
+    _record_beat_heartbeat()
+    from datetime import timedelta
+
+    db = SessionLocal()
+    try:
+        settings = get_settings()
+        stale_before = utc_now() - timedelta(seconds=settings.DOCUMENT_JOB_LEASE_TTL_SECONDS)
+        plans = document_job_service.plan_recovery(db, stale_before=stale_before, limit=50)
+        recovered = 0
+        for job, task_name in plans:
+            doc = db.query(Document).filter(Document.id == job.document_id).first()
+            if task_name == "chunk":
+                new_task = document_chunk_task.delay(doc.id, doc.version_number)
+            elif task_name == "index":
+                new_task = document_index_task.delay(doc.id, doc.version_number)
+            else:
+                new_task = parse_document_task.delay(doc.id, doc.version_number, doc.file_type)
+            # 复用同一 job 记录：绑定新 task_id，下次领取即新租约。
+            job.task_id = new_task.id
+            db.add(job)
+            db.commit()
+            recovered += 1
+        return {"recovered": recovered}
     finally:
         db.close()
 

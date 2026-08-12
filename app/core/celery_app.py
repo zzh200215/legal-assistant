@@ -79,6 +79,10 @@ celery_app.conf.update(
             "task": "run_database_archive",
             "schedule": 86400.0,  # 每天：按保留策略清理过期日志/用量记录（默认 dry-run）
         },
+        "recover-stale-document-jobs": {
+            "task": "recover_stale_document_jobs",
+            "schedule": 300.0,  # 每5分钟：回收租约过期的文档处理任务并重新入队
+        },
     },
 )
 

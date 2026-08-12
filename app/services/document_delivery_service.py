@@ -24,6 +24,9 @@ class DocumentDeliveryService:
     WATERMARKABLE_FORMATS = TEXT_FORMATS | {"docx", "xlsx"}
 
     def _source_path(self, document: Document) -> Path:
+        # 新文档走 object_key（经存储抽象落到本地临时/受控路径）；存量文档沿用 file_path。
+        if document.object_key:
+            return storage_service.materialize_to_local(document.object_key)
         root = storage_service.base_dir().resolve()
         source = Path(document.file_path).resolve()
         try:

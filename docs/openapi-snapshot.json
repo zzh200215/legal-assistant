@@ -19237,8 +19237,26 @@
             "title": "User Id"
           },
           "file_path": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "File Path"
+          },
+          "object_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Key"
           },
           "organization_id": {
             "anyOf": [
@@ -19407,7 +19425,6 @@
           "file_type",
           "id",
           "user_id",
-          "file_path",
           "status",
           "created_at",
           "updated_at"

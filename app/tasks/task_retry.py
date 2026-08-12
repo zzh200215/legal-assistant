@@ -1,3 +1,4 @@
+from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.observability import log_async_task_event
 from app.core.observability_sanitizer import sanitize_background_error_message
@@ -11,12 +12,18 @@ def retry_task(
     target_type: str,
     target_id: int | None,
     action_prefix: str,
+    max_retries: int | None = None,
+    backoff_base: int | None = None,
     log_event=log_async_task_event,
     session_factory=SessionLocal,
     document_jobs=document_job_service,
 ):
+    settings = get_settings()
+    if max_retries is None:
+        max_retries = settings.DOCUMENT_TASK_MAX_RETRIES
+    if backoff_base is None:
+        backoff_base = settings.DOCUMENT_TASK_BACKOFF_BASE_SECONDS
     retries = int(getattr(self.request, "retries", 0) or 0)
-    max_retries = 2
     if target_type == "document":
         db = session_factory()
         try:
@@ -30,7 +37,7 @@ def retry_task(
         finally:
             db.close()
     if retries < max_retries:
-        countdown = 5 * (retries + 1)
+        countdown = backoff_base * (retries + 1)
         log_event(
             user_id=user_id,
             module="async_task",

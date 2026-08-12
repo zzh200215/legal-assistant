@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -37,6 +37,29 @@ class DocumentJobService:
         db.refresh(job)
         return job
 
+    def find_or_create_job(
+        self,
+        *,
+        document_id: int,
+        user_id: int,
+        job_type: str,
+        db: Session,
+        task_id: str | None = None,
+    ) -> DocumentParseJob:
+        if task_id:
+            existing = self.get_job_by_task_id(task_id, db)
+            if existing:
+                return existing
+        return self.create_job(
+            document_id=document_id,
+            user_id=user_id,
+            job_type=job_type,
+            db=db,
+            task_id=task_id,
+            current_step="submitted",
+            message="文档处理任务已提交",
+        )
+
     def get_job_by_task_id(self, task_id: str, db: Session) -> DocumentParseJob | None:
         return db.query(DocumentParseJob).filter(DocumentParseJob.task_id == task_id).first()
 
@@ -48,6 +71,103 @@ class DocumentJobService:
             .limit(limit)
             .all()
         )
+
+    def list_stale_jobs(
+        self,
+        db: Session,
+        *,
+        stale_before: datetime,
+        statuses: tuple[str, ...] = ("running", "pending"),
+        limit: int = 50,
+    ) -> list[DocumentParseJob]:
+        """返回租约过期（或从未领取）的进行中任务，供回收调度。"""
+        return (
+            db.query(DocumentParseJob)
+            .filter(
+                DocumentParseJob.status.in_(statuses),
+                (
+                    (DocumentParseJob.lease_expires_at.is_(None))
+                    | (DocumentParseJob.lease_expires_at < stale_before)
+                ),
+            )
+            .order_by(DocumentParseJob.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+
+    # ── 租约（lease）：worker 领取 / 心跳续约 / 释放 / 回收 ─────────────────────
+    def claim_job(self, job_id: int, owner: str, ttl_seconds: int, db: Session) -> bool:
+        """条件领取：仅当 lease 未被其他 worker 持有（过期或空）时成功。"""
+        job = db.query(DocumentParseJob).filter(DocumentParseJob.id == job_id).first()
+        if not job:
+            return False
+        now = utc_now()
+        if job.lease_owner and job.lease_owner != owner and job.lease_expires_at and job.lease_expires_at >= now:
+            return False
+        job.lease_owner = owner
+        job.lease_expires_at = now + timedelta(seconds=ttl_seconds)
+        if not job.started_at:
+            job.started_at = now
+        if job.status in ("pending",):
+            job.status = "running"
+        db.commit()
+        return True
+
+    def renew_lease(self, job_id: int, owner: str, ttl_seconds: int, db: Session) -> bool:
+        """心跳：仅 owner 可续约，防止其他 worker 误刷新。"""
+        job = db.query(DocumentParseJob).filter(DocumentParseJob.id == job_id).first()
+        if not job or job.lease_owner != owner:
+            return False
+        job.lease_expires_at = utc_now() + timedelta(seconds=ttl_seconds)
+        db.commit()
+        return True
+
+    def release_lease(self, job_id: int, owner: str, db: Session) -> None:
+        job = db.query(DocumentParseJob).filter(DocumentParseJob.id == job_id).first()
+        if job and job.lease_owner == owner:
+            job.lease_owner = None
+            job.lease_expires_at = None
+            db.commit()
+
+    def reset_expired_lease(self, job: DocumentParseJob, db: Session) -> None:
+        """回收：清空租约并复位状态，供重新领取。"""
+        job.lease_owner = None
+        job.lease_expires_at = None
+        job.status = "pending"
+        db.commit()
+
+    def plan_recovery(
+        self,
+        db: Session,
+        *,
+        stale_before: datetime,
+        limit: int = 50,
+    ) -> list[tuple[DocumentParseJob, str]]:
+        """租约过期任务回收规划：返回 [(job, next_task_name)]。
+
+        next_task_name ∈ {"parse", "chunk", "index"}，按 job_type 决定重投哪个阶段任务。
+        文档已删除的任务仅复位不重投。供 beat 回收任务使用，独立可测。
+        """
+        from app.models.document import Document
+
+        stale = self.list_stale_jobs(db, stale_before=stale_before, limit=limit)
+        plans: list[tuple[DocumentParseJob, str]] = []
+        for job in stale:
+            doc = db.query(Document).filter(Document.id == job.document_id).first()
+            if not doc:
+                self.reset_expired_lease(job, db)
+                continue
+            self.reset_expired_lease(job, db)
+            plans.append((job, self._recovery_task_for_job_type(job.job_type)))
+        return plans
+
+    @staticmethod
+    def _recovery_task_for_job_type(job_type: str | None) -> str:
+        if job_type == "document_chunk":
+            return "chunk"
+        if job_type == "document_index":
+            return "index"
+        return "parse"
 
     def mark_started(
         self,
