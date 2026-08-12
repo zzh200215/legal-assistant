@@ -124,3 +124,55 @@ def enrich_references(db: Session | None, refs: list[dict]) -> list[dict]:
             out["verification"] = verify_source(source, db=db)
         enriched.append(out)
     return enriched
+
+
+def _as_date(value) -> "object":
+    """把 date/datetime 统一为 date 用于范围比较；None 原样返回。"""
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        return value.date()
+    return value
+
+
+def check_applicability(
+    source: LegalSource,
+    analysis_date=None,
+    jurisdiction: str | None = None,
+) -> dict:
+    """法源适用性判定：状态 + 生效/失效日期 + 地域。
+
+    规则（P1）：
+      1. status=inactive → 不适用；status=pending_update → 待核验（applicable=None）。
+      2. analysis_date < effective_date → 尚未生效，不适用。
+      3. analysis_date > expiration_date → 已失效/废止，不适用。
+      4. 目标地域与法源 jurisdiction 不一致 → 地域不匹配（applicable=None + 限制说明）。
+      5. 以上均不命中且 status=active → 适用。
+
+    返回 {"applicable": True|False|None, "reason": str}。
+    applicable=None 表示适用性未知或待核验，不得据此发布确定法律结论。
+    """
+    effective_date = _as_date(source.effective_date)
+    expiration_date = _as_date(source.expiration_date)
+    analysis_date = _as_date(analysis_date) if analysis_date is not None else None
+
+    if source.status == "inactive":
+        return {"applicable": False, "reason": "已废止，不得作为法律依据"}
+    if source.status == "pending_update":
+        return {"applicable": None, "reason": "法源待更新，适用性需人工复核"}
+
+    if analysis_date is not None:
+        if effective_date is not None and analysis_date < effective_date:
+            return {"applicable": False, "reason": f"分析时点早于生效日期（{effective_date.isoformat()}）"}
+        if expiration_date is not None and analysis_date > expiration_date:
+            return {"applicable": False, "reason": f"分析时点晚于失效日期（{expiration_date.isoformat()}）"}
+
+    if jurisdiction and source.jurisdiction and source.jurisdiction != jurisdiction:
+        return {
+            "applicable": None,
+            "reason": f"地域不匹配：目标{jurisdiction}，法源为{source.jurisdiction}",
+        }
+
+    if source.status == "active":
+        return {"applicable": True, "reason": "现行有效且适用"}
+    return {"applicable": None, "reason": "法源状态未知，适用性待核验"}

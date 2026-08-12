@@ -39,6 +39,7 @@ from app.services.legal_service import (
     target_query,
 )
 from app.services.legal_reference_service import enrich_references
+from app.services.legal_domain_service import legal_domain_service
 from app.services.subscription_service import subscription_service
 
 
@@ -63,6 +64,16 @@ REVIEWER_ACTIONS = {
     "close": "archived",
 }
 OWNER_ACTIONS = {"submit_review": "needs_lawyer_review"}
+
+# P1 状态机：每个审核动作的合法来源状态，非法转换由服务端拒绝。
+# return 允许从 lawyer_approved 触发：已审内容可被退回修订，使 approved -> superseded（重新进入新版本审核闭环）。
+REVIEW_ACTION_FROM = {
+    "approve": {"pending_review", "needs_lawyer_review", "needs_facts"},
+    "return": {"pending_review", "needs_lawyer_review", "needs_facts", "lawyer_approved"},
+    "offline": {"pending_review", "needs_lawyer_review", "needs_facts", "returned_for_facts"},
+    "close": {"pending_review", "needs_lawyer_review", "needs_facts", "returned_for_facts", "offline_consultation"},
+    "submit_review": {"draft", "pending_review", "needs_lawyer_review", "returned_for_facts", "needs_facts"},
+}
 
 
 def _json_or(value: str | None, fallback: str) -> object:
@@ -116,6 +127,8 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "reviewed_at": row.reviewed_at,
             "confidence": compute_confidence(row),
             "feedback_score": row.feedback_score,
+            "reviewed_version": getattr(row, "reviewed_version", None),
+            "model_snapshot": _json_or(getattr(row, "model_snapshot_json", None), "{}"),
         }
     if isinstance(row, ContractReview):
         return {
@@ -130,6 +143,9 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "reviewed_at": row.reviewed_at,
             "confidence": compute_confidence(row),
             "feedback_score": row.feedback_score,
+            "reviewed_version": getattr(row, "reviewed_version", None),
+            "is_final": bool(getattr(row, "is_final", 0)),
+            "model_snapshot": _json_or(getattr(row, "model_snapshot_json", None), "{}"),
         }
     return {
         "id": row.id, "case_id": row.case_id, "document_type": row.document_type, "title": row.title,
@@ -140,6 +156,9 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
         "review_note": row.review_note, "reviewed_at": row.reviewed_at,
         "confidence": compute_confidence(row),
         "feedback_score": row.feedback_score,
+        "reviewed_version": getattr(row, "reviewed_version", None),
+        "is_final": bool(getattr(row, "is_final", 0)),
+        "model_snapshot": _json_or(getattr(row, "model_snapshot_json", None), "{}"),
     }
 
 
@@ -261,6 +280,9 @@ class LegalWorkspaceModule:
         db.add(row)
         db.commit()
         db.refresh(row)
+        legal_domain_service.persist_consultation_artifacts(
+            db, row, known=known, missing=missing, refs=refs, risk_level=risk,
+        )
         subscription_service.record_usage(db, user.id, "consultation")
         self.audit.log(
             db, user, "legal_consultation_create", target_type="consultation",
@@ -330,6 +352,7 @@ class LegalWorkspaceModule:
         db.add(row)
         db.commit()
         db.refresh(row)
+        legal_domain_service.persist_review_artifacts(db, row, risks=risks, refs=refs)
         subscription_service.record_usage(db, user.id, "review")
         self.audit.log(
             db, user, "legal_contract_review_create", target_type="contract_review",
@@ -368,6 +391,9 @@ class LegalWorkspaceModule:
         db.add(row)
         db.commit()
         db.refresh(row)
+        legal_domain_service.persist_consultation_artifacts(
+            db, row, known=known, missing=missing, refs=refs, risk_level=risk,
+        )
         subscription_service.record_usage(db, user.id, "consultation")
         self.audit.log(
             db, user, "legal_followup_create", target_type="consultation",
@@ -407,8 +433,13 @@ class LegalWorkspaceModule:
         row.reviewer_id = None
         row.review_note = None
         row.reviewed_at = None
+        row.reviewed_version = None
+        row.is_final = 0
         db.commit()
         db.refresh(row)
+        # P1：进入新版本后旧版本未决风险项/主张标记为被取代，再持久化新版本结构化工件。
+        legal_domain_service.supersede_artifacts(db, user, "contract_review", row.id)
+        legal_domain_service.persist_review_artifacts(db, row, risks=risks, refs=refs)
         self.audit.log(
             db, user, "legal_contract_review_resubmit", target_type="contract_review",
             target_id=row.id, detail=f"version={row.version}",
@@ -447,6 +478,7 @@ class LegalWorkspaceModule:
         db.add(row)
         db.commit()
         db.refresh(row)
+        legal_domain_service.persist_draft_artifacts(db, row, missing_fields=missing, refs=refs)
         subscription_service.record_usage(db, user.id, "draft")
         self.audit.log(
             db, user, "legal_draft_create", target_type="draft", target_id=row.id,
@@ -487,8 +519,12 @@ class LegalWorkspaceModule:
         row.reviewer_id = None
         row.review_note = None
         row.reviewed_at = None
+        row.reviewed_version = None
+        row.is_final = 0
         db.commit()
         db.refresh(row)
+        legal_domain_service.supersede_artifacts(db, user, "draft", row.id)
+        legal_domain_service.persist_draft_artifacts(db, row, missing_fields=missing, refs=refs)
         self.audit.log(
             db, user, "legal_draft_resubmit", target_type="draft", target_id=row.id,
             detail=f"version={row.version}",
@@ -601,10 +637,31 @@ class LegalWorkspaceReadModule:
         else:
             raise ValueError("LEGAL_REVIEW_ACTION_INVALID")
         previous = row.status
+        # P1 状态机守卫：非法来源状态转换由服务端拒绝。
+        valid_from = REVIEW_ACTION_FROM.get(action)
+        if valid_from and previous not in valid_from:
+            raise ValueError(f"LEGAL_REVIEW_ILLEGAL_TRANSITION:{previous}->{status}")
         row.status = status
         if action in REVIEWER_ACTIONS:
             row.reviewer_id, row.review_note, row.reviewed_at = user.id, note, utc_now()
-        db.add(LegalReviewAction(reviewer_id=user.id, target_type=target_type, target_id=target_id, action=action, note=note, from_status=previous, to_status=status))
+        if action == "approve" and hasattr(row, "version"):
+            # P1 审核绑定版本：通过时冻结已审内容到版本快照，供"修改需重审"校验。
+            row.reviewed_version = row.version
+            db.add(LegalDocumentVersion(
+                target_type=target_type, target_id=target_id, version=row.version,
+                title=getattr(row, "title", None), content=getattr(row, "content", "") or "",
+                status_at_snapshot="lawyer_approved", snapshot_reason="manual", created_by=user.id,
+            ))
+        if action == "return" and previous == "lawyer_approved":
+            # P1 approved -> superseded：已审内容被退回修订，旧审批失效，须重审后才能再发布。
+            row.reviewed_version = None
+            if hasattr(row, "is_final"):
+                row.is_final = 0
+        db.add(LegalReviewAction(
+            reviewer_id=user.id, target_type=target_type, target_id=target_id, action=action,
+            note=note, from_status=previous, to_status=status,
+            target_version=getattr(row, "version", None),
+        ))
         db.commit()
         db.refresh(row)
         self.audit.log(db, user, f"legal_review_{action}", target_type=target_type, target_id=target_id, detail=f"{previous}->{status}")
@@ -616,7 +673,7 @@ class LegalWorkspaceReadModule:
             raise LookupError("LEGAL_REVIEW_TARGET_NOT_FOUND")
         if not (row.user_id == user.id or user.role in {"admin", "dept_admin"}):
             raise PermissionError("LEGAL_REVIEW_COMMENT_FORBIDDEN")
-        comment = LegalReviewAction(reviewer_id=user.id, target_type=target_type, target_id=target_id, action="comment", note=note, from_status=row.status, to_status=row.status)
+        comment = LegalReviewAction(reviewer_id=user.id, target_type=target_type, target_id=target_id, action="comment", note=note, from_status=row.status, to_status=row.status, target_version=getattr(row, "version", None))
         db.add(comment)
         db.commit()
         db.refresh(comment)

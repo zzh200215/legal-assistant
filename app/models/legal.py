@@ -60,6 +60,10 @@ class LegalSource(Base):
     promulgation_date = Column(Date, nullable=True, comment="发布日期")
 
     effective_date = Column(Date, nullable=True)
+    # P1：法源适用性扩展——失效/废止日期、适用范围、官方唯一标识。
+    expiration_date = Column(Date, nullable=True, comment="失效/废止日期")
+    applicability_scope = Column(Text, nullable=True, comment="适用范围：主体/业务领域/事项类型，JSON或文本")
+    canonical_identifier = Column(String(128), nullable=True, comment="官方标识/唯一来源标识")
     version = Column(String(64), nullable=True)
     status = Column(String(32), nullable=False, default="active", index=True)
 
@@ -121,6 +125,9 @@ class LegalConsultation(Base):
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     review_note = Column(Text, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    # P1：模型结果快照（模型/提示词版本、输入 hash、生成时间）与审核绑定的业务版本号。
+    model_snapshot_json = Column(Text, nullable=True, comment="原始模型结果快照，JSON")
+    reviewed_version = Column(Integer, nullable=True, comment="审核动作所绑定的业务版本号")
     feedback_score = Column(Integer, nullable=True, comment="用户评分：1=满意 -1=不满意")
     feedback_note = Column(Text, nullable=True, comment="用户反馈备注")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -148,6 +155,10 @@ class ContractReview(Base):
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     review_note = Column(Text, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    # P1：模型结果快照与审核绑定的业务版本号。
+    model_snapshot_json = Column(Text, nullable=True, comment="原始模型结果快照，JSON")
+    reviewed_version = Column(Integer, nullable=True, comment="审核动作所绑定的业务版本号")
+    is_final = Column(Integer, nullable=False, default=0, comment="1=已发布/最终版（须先审核通过）")
     feedback_score = Column(Integer, nullable=True, comment="用户评分：1=满意 -1=不满意")
     feedback_note = Column(Text, nullable=True, comment="用户反馈备注")
     # 乐观锁版本号（version_id_col）：审查结论可能被审查人与提交人并发修改。
@@ -176,6 +187,10 @@ class LegalDraft(Base):
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     review_note = Column(Text, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    # P1：模型结果快照与审核绑定的业务版本号。
+    model_snapshot_json = Column(Text, nullable=True, comment="原始模型结果快照，JSON")
+    reviewed_version = Column(Integer, nullable=True, comment="审核动作所绑定的业务版本号")
+    is_final = Column(Integer, nullable=False, default=0, comment="1=已发布/最终版（须先审核通过）")
     feedback_score = Column(Integer, nullable=True, comment="用户评分：1=满意 -1=不满意")
     feedback_note = Column(Text, nullable=True, comment="用户反馈备注")
     # 乐观锁版本号（version_id_col）：文书草稿可能被起草人与审查人并发修改。
@@ -265,4 +280,6 @@ class LegalReviewAction(Base):
     note = Column(Text, nullable=True)
     from_status = Column(String(32), nullable=True)
     to_status = Column(String(32), nullable=False)
+    # P1：审核动作绑定的业务版本号，使"审核通过后修改需重新审核"可被校验与追溯。
+    target_version = Column(Integer, nullable=True, comment="审核对象业务版本号")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -17,6 +17,7 @@ from app.models.feishu_binding import FeishuBinding
 from app.models.llm_call_log import LLMCallLog
 from app.models.legal import ContractReview, LegalArticle, LegalConsultation, LegalDraft, LegalReviewAction, LegalSource
 from app.models.legal import LegalCase, LegalApprovalChain, LegalApprovalStep, LegalDocumentVersion
+from app.models.legal_domain import ContractRiskItem, LegalClaim, LegalEvidence, LegalFact, LegalReference
 from app.models.legal_billing import (
     LegalTimeEntry, LegalBillingRule, LegalInvoice, LegalInvoiceItem,
     LegalPaymentRecord, LegalRefundRecord, LegalCollectionReminder,
@@ -96,6 +97,11 @@ __all__ = [
     "LegalApprovalChain",
     "LegalApprovalStep",
     "LegalDocumentVersion",
+    "LegalFact",
+    "LegalEvidence",
+    "LegalClaim",
+    "LegalReference",
+    "ContractRiskItem",
     "LegalTimeEntry",
     "LegalBillingRule",
     "LegalInvoice",

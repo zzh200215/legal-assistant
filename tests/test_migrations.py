@@ -1,4 +1,4 @@
-"""迁移与脏数据处理测试：单一 head、迁移内容、重复数据去重。"""
+"""迁移与脏数据处理测试：单一 head、迁移内容、重复数据去重、0074 回填逻辑。"""
 import unittest
 
 from sqlalchemy import create_engine, text
@@ -45,6 +45,97 @@ class MigrationChainTests(unittest.TestCase):
             self.assertIn(f'"{table}"', src, f"0068 缺少 {table} row_version 列")
         self.assertIn("idempotency_keys", src)
         self.assertIn("uq_idempotency_keys_scope_key", src)
+
+    def test_0074_creates_legal_domain_tables_and_columns(self):
+        """0074 必须建 5 张领域表、扩展现有列，并实现 downgrade。"""
+        path = "alembic/versions/20260812_0074_legal_domain_models.py"
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        for table in ("legal_facts", "legal_evidences", "legal_claims",
+                      "legal_references", "contract_risk_items"):
+            self.assertIn(f'"{table}"', src, f"0074 缺少建表 {table}")
+        for col in ("expiration_date", "applicability_scope", "canonical_identifier"):
+            self.assertIn(f'"{col}"', src, f"0074 缺少 legal_sources.{col}")
+        self.assertIn('"target_version"', src)
+        self.assertIn('"is_final"', src)
+        self.assertIn("_backfill", src, "0074 应包含旧数据回填")
+        self.assertIn("def downgrade", src)
+
+    def test_0074_backfill_maps_old_json_into_structured_tables(self):
+        """0074 回填：旧 risks_json/references_json/facts JSON 幂等映射到结构化新表。"""
+        import importlib.util
+
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+
+        import app.models  # noqa: F401
+        from app.core.auth import hash_password
+        from app.core.database import Base
+        from app.models.legal import LegalCase, LegalConsultation, ContractReview
+        from app.models.legal_domain import ContractRiskItem, LegalFact
+        from app.models.org import Organization
+        from app.models.user import User
+
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=engine)
+        Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        db = Session()
+        user = User(username="u", email="u@x.com", hashed_password=hash_password("pw"), role="user")
+        org = Organization(name="O", code="o")
+        db.add_all([user, org])
+        db.commit()
+        db.refresh(user)
+        db.refresh(org)
+        case = LegalCase(organization_id=org.id, user_id=user.id, title="c", case_type="other")
+        db.add(case)
+        db.commit()
+        db.refresh(case)
+        # 旧数据：只有 JSON 列，无结构化表
+        review = ContractReview(
+            user_id=user.id, case_id=case.id, title="r", content="content", summary="s",
+            risks_json=(
+                '[{"clause_type":"breach","risk_level":"high",'
+                '"source_location":{"paragraph":1,"snippet":"违约条款"},"suggestion":"y"}]'
+            ),
+            references_json='[{"source_id":null}]', status="pending_review",
+        )
+        consult = LegalConsultation(
+            user_id=user.id, case_id=case.id, question="q", category="other",
+            known_facts_json='["已知事实"]', missing_facts_json='["缺失事实"]',
+            references_json="[]", advice="a", risk_level="low", status="pending_review",
+        )
+        db.add_all([review, consult])
+        db.commit()
+        db.refresh(review)
+        db.refresh(consult)
+
+        mig_path = "alembic/versions/20260812_0074_legal_domain_models.py"
+        spec = importlib.util.spec_from_file_location("mig_0074", mig_path)
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+
+        mig._backfill(engine)
+
+        items = db.query(ContractRiskItem).filter(ContractRiskItem.review_id == review.id).all()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].severity, "high")
+        self.assertEqual(items[0].status, "needs_review")
+        self.assertEqual(items[0].category, "breach")
+        self.assertEqual(items[0].recommendation, "y")
+        self.assertIn("违约条款", items[0].original_text_excerpt)
+        # 幂等：重复回填不重复插入
+        mig._backfill(engine)
+        self.assertEqual(
+            db.query(ContractRiskItem).filter(ContractRiskItem.review_id == review.id).count(), 1,
+        )
+        facts = db.query(LegalFact).filter(LegalFact.consultation_id == consult.id).all()
+        self.assertEqual(len(facts), 2)
+        self.assertEqual({f.fact_type for f in facts}, {"known", "missing"})
 
 
 class DirtyDataDedupeTests(unittest.TestCase):

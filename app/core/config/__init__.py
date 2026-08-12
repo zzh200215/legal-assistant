@@ -16,6 +16,7 @@ from typing import Optional
 
 from app.core.config.base import CoreSettings
 from app.core.config.database import DatabaseSettings
+from app.core.config.legal import LegalSettings
 from app.core.config.llm import LLMSettings
 from app.core.config.messaging import MessagingSettings
 from app.core.config.observability import ObservabilitySettings
@@ -60,6 +61,7 @@ SENSITIVE_FIELDS = frozenset(
 class Settings(
     CoreSettings,
     DatabaseSettings,
+    LegalSettings,
     LLMSettings,
     RAGSettings,
     StorageSettings,

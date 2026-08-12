@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm.exc import StaleDataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import account_deletion_api, agent_api, analytics_api, api_key_api, auth_api, chat_api, dashboard_api, document_api, document_conflict_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mcp_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, subscription_api, task_api, ws_api
+from app.api import account_deletion_api, agent_api, analytics_api, api_key_api, auth_api, chat_api, dashboard_api, document_api, document_conflict_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_domain_api, legal_platform_api, legal_portal_api, mcp_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, subscription_api, task_api, ws_api
 from app.core.config import get_settings
 from app.core.api_response import (
     ApiResponseMiddleware,
@@ -65,6 +65,7 @@ app.include_router(api_key_api.router, prefix="/api/developer", tags=["Open API 
 app.include_router(legal_billing_api.router, prefix="/api/legal", tags=["Legal Billing"])
 app.include_router(legal_portal_api.router, prefix="/api/legal", tags=["Legal Portal"])
 app.include_router(legal_contract_api.router, prefix="/api/legal", tags=["Legal Contracts"])
+app.include_router(legal_domain_api.router, prefix="/api/legal", tags=["Legal Domain Model"])
 app.include_router(legal_platform_api.router, prefix="/api/developer", tags=["Developer Platform"])
 app.include_router(legal_platform_api.open_router, prefix="/api/open", tags=["Open API"])
 app.include_router(ws_api.router, prefix="/api", tags=["WebSocket"])
