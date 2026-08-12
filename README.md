@@ -77,6 +77,22 @@
 - 对公转账支付流程 + 发票快照；Stripe webhook HMAC 验签（可选）
 - 过期自动流转、发票逾期扫描、订阅到期扫描（beat 任务）
 
+### 8. 文档处理与文件生命周期
+
+- **存储抽象**：统一 `object_key`，支持 Local / MinIO / S3 / OSS 适配器，按配置选择后端，不散落本地路径
+- **处理状态机**：`uploaded → parsing → parsed → indexing → indexed`，失败/重试/恢复全程可审计，并发 worker 不重复处理或回退
+- **流式安全上传**：分块读写限大小、真实 MIME 检测（扩展名×magic-byte 交叉校验）、MIME 白名单、zip-bomb 防护（只读中央目录）、病毒扫描抽象（未配置不伪造扫描结果）
+- **任务幂等与租约**：parse/chunk/index 分步幂等（版本+内容哈希指纹），DB 条件更新 + 租约（lease）回收，worker 崩溃/超时可安全接管
+- **内容去重与可重建性**：content_hash 去重；版本/解析器/分块器/索引器版本变化触发重建，旧产物自动失效
+
+### 9. Agent 统一执行与安全治理
+
+- **单一工具执行链**：Planner 只规划，PermissionGuard 校验权限，ToolExecutor 统一执行（超时/取消/重试/幂等/审计），LangGraph 与 fallback 引擎共用同一节点链路
+- **写工具审批**：审批绑定 run/step/参数摘要/操作者/过期时间，审批后改参必须重新审批；过期/撤销不可执行
+- **Agent Run 生命周期**：暂停/恢复/取消/超时/补偿，集中状态机校验合法转移
+- **结构化审计**：`agent_audit_events` 记录计划决策、权限决策、工具执行、审批、状态变更、重试/超时/取消/补偿与错误分类（脱敏摘要）
+- **SQLTool 只读加固**：sqlglot AST 级解析（仅单条 SELECT/WITH-SELECT），schema/表白名单、敏感列脱敏、行数/字节上限、独立只读账号校验
+
 ## 安全与合规（等保二级对标）
 
 平台按 GB/T 22239-2019 第二级要求实现并自评（见 docs/etc-protection-poc-self-assessment.md）：
@@ -105,6 +121,7 @@
 - **FastAPI**：异步 API 服务
 - **SQLAlchemy + MySQL / PostgreSQL / SQLite**：元数据与业务台账（生产建议 MySQL/PostgreSQL）
 - **Celery + Redis**：异步任务与计划任务（beat：每日备份、提醒、到期扫描、告警等 15+ 计划任务）
+- **sqlglot**：SQLTool 只读安全边界（AST 级解析与白名单）
 - **Chroma（默认）/ Qdrant**：向量检索
 - **千问 / Ollama**：LLM 推理与向量化（qwen-plus 主模型 + 简单请求路由小模型）
 - **OpenTelemetry + Sentry**：链路追踪与错误上报（可选开关）
@@ -121,6 +138,8 @@
 - **Agentic RAG**：问题分类 → 查询改写 → 混合检索 → 证据评估 → 有限轮次补检索 → 带引用回答或拒答
 - **Graph RAG（可选）**：Neo4j 基于法源修订关系、法律领域和条文关系为已召回候选提供可解释的排序证据；图谱不可用时自动降级至原检索链路
 - **多 Agent 协作**：按法律业务领域拆分 Agent（法律咨询、合同审查、法律文书、证据校验），而非技术步骤拆分
+- **统一工具执行链**：Planner → PermissionGuard → ToolExecutor（超时/取消/重试/幂等/审计），所有工具（含 MCP server）经单一执行器，写操作必须审批
+- **SQL 只读安全边界**：sqlglot AST 解析 + 白名单 + 脱敏 + 只读账号，拒绝非 SELECT/多语句/越权/危险函数
 - **结构化输出**：使用 JSON Schema 约束合同风险、咨询建议、文书字段和审核动作
 - **人机协同**：高风险结论、文书交付和对外动作均进入律师审核或用户确认
 - **PII 脱敏**：敏感信息（身份证、手机号、姓名）在送入 LLM 前自动脱敏
@@ -358,6 +377,7 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 | `export_review_feedback.py` / `export_exit_surveys.py` | 审核反馈 / 退出问卷导出 |
 | `loadtest_legal_paths.py` | 主路径压测 |
 | `check_pilot_readiness.py` | 试点环境门禁自检 |
+| `verify_agent_rollout_e2e.py` | Agent 落地端到端验证（临时库：schema + 应用启动 + 读/写/审批/审计链路） |
 
 ## 运营看板
 
@@ -381,7 +401,7 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 
 推荐在交付前至少做这几步：
 
-1. `python -m pytest -q`（全量测试，当前 742 项通过）
+1. `python -m pytest -q`（全量测试，当前 1186 项通过）
 2. `ruff check --select E9,F821,F823,F632,F706,F811 app scripts tests`（CI 静态门禁）
 3. `python scripts/check_openapi_contract.py`（OpenAPI 契约快照一致性）
 4. `npm run build`（在 `frontend/` 下执行）
@@ -396,6 +416,7 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 │   ├── services/           # 业务逻辑（legal_service / feishu_service / prompt_service…）
 │   ├── models/             # 数据模型（legal / legal_billing / subscription / feishu_binding…）
 │   ├── tools/              # Agent 工具
+│   ├── mcp/                # 工具注册表 / 权限守卫 / 统一执行器 / SQL 守卫
 │   ├── tasks/              # Celery 任务（beat 计划任务、备份、飞书提醒）
 │   └── core/               # 核心模块（config/auth/telemetry/observability/encryption…）
 ├── frontend/               # 前端代码（Vue 3 + Element Plus）
