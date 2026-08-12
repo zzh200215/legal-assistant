@@ -51,8 +51,6 @@ test('System 反馈处理 + 任务重试', async ({ page }) => {
     if (method === 'GET' && path === '/agent/approvals') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/documents/knowledge-bases') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/documents/') return route.fulfill({ json: success({ items: [], total: 0 }) })
-    if (method === 'GET' && path === '/connectors/') return route.fulfill({ json: success([]) })
-    if (method === 'GET' && path === '/connectors/sync-jobs') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/org/organizations') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/org/departments') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/auth/users') return route.fulfill({ json: success([]) })

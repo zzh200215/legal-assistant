@@ -109,119 +109,6 @@ DEFAULT_PROMPT_TEMPLATES = [
         "variables": "document_blocks",
     },
     {
-        "name": "meeting_summary",
-        "description": "会议纪要结构化模板",
-        "template": (
-            "你是专业的会议记录助手。请将以下会议转写整理为 JSON：\n"
-            "{\n"
-            '  "theme": "会议主题",\n'
-            '  "summary": "会议摘要",\n'
-            '  "topics": [{"topic": "议题", "description": "说明", "duration_hint": "位置", "key_points": ["观点1"]}],\n'
-            '  "decisions": [{"content": "决策内容", "status": "confirmed", "evidence": "原文依据"}],\n'
-            '  "action_items": [{"title": "任务标题", "description": "任务说明", "assignee": null, "due_date": null, "priority": "medium", "confidence": 0.8, "evidence": "原文依据"}],\n'
-            '  "risks": [{"title": "风险标题", "description": "风险说明", "evidence": "原文依据"}]\n'
-            "}\n\n"
-            "会议内容：\n{meeting_content}"
-        ),
-        "variables": "meeting_content",
-    },
-    {
-        "name": "meeting_decision_extract",
-        "description": "会议决策提取模板",
-        "template": (
-            "你是会议决策识别助手。\n"
-            "请从以下会议内容中提取决策事项，只输出 JSON 数组，每项包含 content、status、evidence。\n\n"
-            "会议内容：\n{meeting_content}"
-        ),
-        "variables": "meeting_content",
-    },
-    {
-        "name": "meeting_topic_extract",
-        "description": "会议议题提取模板",
-        "template": (
-            "你是会议议题识别助手。\n"
-            "请从以下会议内容中提取议题，只输出 JSON 数组，每项包含 topic、description、duration_hint、key_points。\n\n"
-            "会议内容：\n{meeting_content}"
-        ),
-        "variables": "meeting_content",
-    },
-    {
-        "name": "email_generate",
-        "description": "邮件草稿生成模板",
-        "template": (
-            "你是专业邮件写作助手。请根据以下信息生成一封中文商务邮件。\n\n"
-            "收件对象：{recipient}\n"
-            "邮件目的：{purpose}\n"
-            "核心信息：\n{key_points}\n"
-            "语气：{tone}\n"
-            "是否需要行动请求：{need_action}\n\n"
-            "要求：\n"
-            "1. 先输出 3 个候选标题，格式为“标题1: ...”。\n"
-            "2. 再输出邮件正文，格式为“正文: ...”。\n"
-            "3. 正文包含开头、主体、结尾，语言专业简洁。\n"
-            "4. 必须覆盖核心信息。\n"
-            "5. 如果需要行动请求，请在结尾明确提出。"
-        ),
-        "variables": "recipient,purpose,key_points,tone,need_action",
-    },
-    {
-        "name": "email_reply",
-        "description": "邮件回复模板",
-        "template": (
-            "你是商务邮件回复助手。请根据来信和回复目标生成一封中文回复邮件。\n\n"
-            "原始邮件：\n{original_email}\n\n"
-            "回复目标：{reply_goal}\n"
-            "语气：{tone}\n\n"
-            "要求：\n"
-            "1. 先输出 3 个候选标题。\n"
-            "2. 再输出回复正文。\n"
-            "3. 正文需要明确回应原邮件中的关键信息。\n"
-            "4. 信息不足时要礼貌指出待确认事项。"
-        ),
-        "variables": "original_email,reply_goal,tone",
-    },
-    {
-        "name": "email_tone_switch",
-        "description": "邮件语气改写模板",
-        "template": (
-            "请将以下邮件改写成指定语气，保持核心信息不变。\n\n"
-            "原标题：{subject}\n"
-            "原正文：\n{content}\n\n"
-            "目标语气：{target_tone}\n\n"
-            "要求先输出 3 个候选标题，再输出改写后的正文。"
-        ),
-        "variables": "subject,content,target_tone",
-    },
-    {
-        "name": "email_thread_summary",
-        "description": "邮件线程总结模板",
-        "template": (
-            "你是邮件线程分析助手。请对以下邮件线程进行总结。\n"
-            "输出 JSON：\n"
-            "{\n"
-            '  "summary": "线程摘要",\n'
-            '  "key_points": ["关键信息1"],\n'
-            '  "pending_items": ["待处理事项"],\n'
-            '  "participants": ["参与者"],\n'
-            '  "next_action": "建议的下一步动作"\n'
-            "}\n\n"
-            "邮件线程：\n{thread_content}"
-        ),
-        "variables": "thread_content",
-    },
-    {
-        "name": "email_polish",
-        "description": "邮件润色模板",
-        "template": (
-            "请根据以下要求优化这封邮件。\n\n"
-            "优化指令：{instruction}\n"
-            "原标题：{subject}\n"
-            "原正文：\n{content}\n\n"
-            "请输出完整优化结果，第一行格式为“标题: ...”。"
-        ),
-        "variables": "instruction,subject,content",
-    },
-    {
         "name": "task_extract_from_chat",
         "description": "聊天任务提取模板",
         "template": (
@@ -299,9 +186,9 @@ DEFAULT_PROMPT_TEMPLATES = [
             '  "steps": [\n'
             "    {{\n"
             '      "step": 1,\n'
-            '      "tool_name": "meeting_summary_tool",\n'
+            '      "tool_name": "legal_consultation_tool",\n'
             '      "purpose": "这一项为什么要做",\n'
-            '      "action_input_preview": {{"meeting_id": 1}}\n'
+            '      "action_input_preview": {{"question": "用户的法律问题"}}\n'
             "    }}\n"
             "  ],\n"
             '  "risks": ["可能的信息缺口或失败点"],\n'
@@ -331,14 +218,14 @@ DEFAULT_PROMPT_TEMPLATES = [
             '  "workers": ["knowledge_agent", "workflow_agent"],\n'
             '  "dependencies": [{{"from": "knowledge_agent", "to": "workflow_agent"}}],\n'
             '  "risk_level": "low | medium | high",\n'
-            '  "expected_artifacts": ["document", "email"],\n'
+            '  "expected_artifacts": ["document", "task"],\n'
             '  "rationale": "分派原因"\n'
             "}}\n\n"
             "约束：\n"
-            "1. workers 只能从 knowledge_agent、meeting_agent、data_agent、project_agent、legal_compliance_agent、communication_agent、workflow_agent 中选择，按执行顺序排列且不得重复。\n"
+            "1. workers 只能从 knowledge_agent、legal_compliance_agent、workflow_agent 中选择，按执行顺序排列且不得重复。\n"
             "2. dependencies 只能从前序 Worker 指向后序 Worker。\n"
-            "3. Knowledge、Meeting、Data、Project、Legal 负责各自领域结论；邮件草稿只能交给 Communication；任务创建等内部动作只能交给 Workflow。\n"
-            "4. expected_artifacts 只能使用 document、meeting、task、email。\n"
+            "3. Knowledge、Legal 负责各自领域结论；任务创建等内部动作只能交给 Workflow。\n"
+            "4. expected_artifacts 只能使用 document、task。\n"
             "5. 不得把证据核验、权限校验或审批节点当作 Agent。\n"
             "6. 目标不明确时输出最小只读计划，并将 risk_level 设为 medium 或 high，不得编造业务参数。"
         ),

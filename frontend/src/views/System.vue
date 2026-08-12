@@ -3,7 +3,7 @@
     <div class="page-heading">
       <div>
         <h3>系统中心</h3>
-        <p>统一查看平台健康、成本使用、连接器同步、反馈闭环和任务运行状态。</p>
+        <p>统一查看平台健康、成本使用、反馈闭环和任务运行状态。</p>
       </div>
     </div>
 
@@ -30,7 +30,7 @@
       <div class="command-copy">
         <div class="section-eyebrow">平台控制</div>
         <strong>运维与质量控制台</strong>
-        <span>集中处理健康检查、成本、反馈、审批、连接器和后台任务。</span>
+        <span>集中处理健康检查、成本、反馈、审批和后台任务。</span>
       </div>
       <div class="command-chips">
         <span class="command-chip">当前标签：{{ activeTab }}</span>
@@ -402,7 +402,6 @@
             <span style="margin-left: 12px">模块筛选：</span>
             <el-select v-model="logModule" clearable placeholder="全部" style="width: 140px" @change="resetLogPagination">
               <el-option label="文档" value="document" />
-              <el-option label="会议" value="meeting" />
               <el-option label="法律文书" value="legal" />
               <el-option label="任务" value="task" />
               <el-option label="Agent" value="agent" />
@@ -1136,189 +1135,7 @@
         </el-card>
       </el-tab-pane>
 
-      <el-tab-pane label="外部连接器" name="connectors">
-        <div class="app-section-intro tab-intro">
-          <strong>连接器与同步任务</strong>
-          <span>维护连接器配置、查看导入概览，并回看每次同步任务的扫描与入库结果。</span>
-        </div>
-
-        <el-row :gutter="16" class="system-block-row">
-          <el-col :span="10">
-            <el-card>
-              <template #header>新增连接器</template>
-              <div style="display: grid; gap: 12px">
-                <el-select v-model="newConnector.connector_type" placeholder="连接器类型">
-                  <el-option label="企业网盘" value="drive" />
-                  <el-option label="知识库" value="wiki" />
-                  <el-option label="法源" value="mailbox" />
-                  <el-option label="OA 审批" value="oa_approval" />
-                  <el-option label="OneDrive（Microsoft Graph）" value="ms_graph_onedrive" />
-                  <el-option label="SharePoint（Microsoft Graph）" value="ms_graph_sharepoint" />
-                  <el-option label="ERP（REST API）" value="erp_rest" />
-                  <el-option label="CRM（REST API）" value="crm_rest" />
-                </el-select>
-                <el-input v-model="newConnector.name" placeholder="连接器名称" />
-                <el-input v-model="newConnector.config_json" type="textarea" :rows="5" :placeholder="connectorConfigPlaceholder" />
-                <template v-if="isEnterpriseConnector(newConnector.connector_type)">
-                  <el-radio-group v-if="isMicrosoftConnector(newConnector.connector_type)" v-model="newConnector.graph_auth_mode">
-                    <el-radio-button value="access_token">手工访问令牌</el-radio-button>
-                    <el-radio-button value="oauth_client_secret">OAuth 应用密钥</el-radio-button>
-                  </el-radio-group>
-                  <el-input
-                    v-model="newConnector.secret"
-                    type="password"
-                    show-password
-                    :placeholder="enterpriseSecretPlaceholder(newConnector.connector_type, newConnector.graph_auth_mode)"
-                  />
-                  <el-alert
-                    type="info"
-                    :closable="false"
-                    :title="enterpriseConfigHint(newConnector.connector_type, newConnector.graph_auth_mode)"
-                  />
-                </template>
-                <el-button type="primary" :loading="connectorLoading" @click="createConnector">创建连接器</el-button>
-              </div>
-            </el-card>
-          </el-col>
-          <el-col :span="14">
-            <el-card>
-              <template #header>连接器列表</template>
-              <el-table :data="connectors" v-loading="connectorLoading" border size="small" max-height="360">
-                <el-table-column prop="name" label="名称" />
-                <el-table-column prop="connector_type" label="类型" width="120" />
-                <el-table-column prop="organization_id" label="组织 ID" width="90" />
-                <el-table-column prop="department_id" label="部门 ID" width="90" />
-                <el-table-column label="最近同步" width="180">
-                  <template #default="{ row }">
-                    {{ row.last_sync_at || '-' }}
-                  </template>
-                </el-table-column>
-                <el-table-column prop="status" label="状态" width="100">
-                  <template #default="{ row }">
-                    <el-tag size="small" :type="connectorStatusTagType(row.status)">
-                      {{ connectorStatusLabel(row.status) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="导入概览" min-width="220">
-                  <template #default="{ row }">
-                    <div style="display: grid; gap: 4px">
-                      <span>最近导入 {{ row.last_imported_count || 0 }} / 跳过 {{ row.last_skipped_count || 0 }}</span>
-                      <span style="color: var(--color-text-muted)">累计导入 {{ row.total_imported_count || 0 }} / 跳过 {{ row.total_skipped_count || 0 }}</span>
-                    </div>
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="180">
-                  <template #default="{ row }">
-                    <el-button text type="primary" :disabled="connectorLoading" @click="syncConnector(row)">同步</el-button>
-                    <el-button text type="info" @click="openConnectorDocuments(row)">文档</el-button>
-                    <el-button v-if="isEnterpriseConnector(row.connector_type)" text type="warning" @click="openEnterpriseCredentialDialog(row)">凭据</el-button>
-                    <el-button v-if="isMicrosoftConnector(row.connector_type)" text type="success" :disabled="connectorLoading" @click="startMicrosoftOAuth(row)">OAuth 授权</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </el-card>
-          </el-col>
-        </el-row>
-
-        <el-card class="system-panel-card">
-          <template #header>同步任务</template>
-          <div class="app-toolbar" style="margin-bottom: 12px">
-            <el-select v-model="connectorJobFilter.connector_id" clearable placeholder="按连接器筛选" style="width: 180px" @change="fetchConnectorData">
-              <el-option v-for="item in connectors" :key="item.id" :label="item.name" :value="item.id" />
-            </el-select>
-            <el-select v-model="connectorJobFilter.status" clearable placeholder="按状态筛选" style="width: 160px" @change="fetchConnectorData">
-              <el-option label="排队中" value="pending" />
-              <el-option label="执行中" value="running" />
-              <el-option label="已完成" value="succeeded" />
-              <el-option label="失败" value="failed" />
-            </el-select>
-          </div>
-          <el-table :data="connectorJobs" v-loading="connectorLoading" border size="small" max-height="420" :row-class-name="connectorJobRowClassName">
-            <el-table-column type="expand" width="60">
-              <template #default="{ row }">
-                <div style="display: grid; gap: 8px">
-                  <div><strong>来源：</strong> {{ connectorJobDetail(row).source || '-' }}</div>
-                  <div>
-                    <strong>导入：</strong> {{ connectorJobDetail(row).imported_count || 0 }}
-                    <span style="margin-left: 12px"><strong>跳过：</strong> {{ connectorJobDetail(row).skipped_count || 0 }}</span>
-                    <span style="margin-left: 12px"><strong>扫描：</strong> {{ connectorJobDetail(row).scanned_count || 0 }}</span>
-                  </div>
-                  <div v-if="connectorJobDetail(row).imported_items?.length || connectorJobDetail(row).imported_titles?.length">
-                    <strong>新增文件：</strong>
-                    <template v-if="connectorJobDetail(row).imported_items?.length">
-                      <el-button
-                        v-for="item in connectorJobDetail(row).imported_items"
-                        :key="`imported-${item.document_id || item.title}`"
-                        text
-                        type="primary"
-                        size="small"
-                        @click="openConnectorDocument(item)"
-                      >
-                        {{ item.title }}
-                      </el-button>
-                    </template>
-                    <template v-else>
-                      {{ connectorJobDetail(row).imported_titles.join('、') }}
-                    </template>
-                  </div>
-                  <div v-if="connectorJobDetail(row).skipped_items?.length || connectorJobDetail(row).skipped_titles?.length">
-                    <strong>跳过文件：</strong>
-                    <template v-if="connectorJobDetail(row).skipped_items?.length">
-                      <el-button
-                        v-for="item in connectorJobDetail(row).skipped_items"
-                        :key="`skipped-${item.document_id || item.title}`"
-                        text
-                        type="info"
-                        size="small"
-                        @click="openConnectorDocument(item)"
-                      >
-                        {{ item.title }}
-                      </el-button>
-                    </template>
-                    <template v-else>
-                      {{ connectorJobDetail(row).skipped_titles.join('、') }}
-                    </template>
-                  </div>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column prop="connector_id" label="连接器 ID" width="100" />
-            <el-table-column prop="sync_mode" label="模式" width="100" />
-            <el-table-column prop="status" label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag size="small" :type="connectorStatusTagType(row.status)">
-                  {{ connectorStatusLabel(row.status) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="result_summary" label="结果" show-overflow-tooltip />
-            <el-table-column prop="updated_at" label="更新时间" width="180" />
-          </el-table>
-        </el-card>
-
-        <el-dialog v-model="enterpriseCredentialDialog.visible" title="更新企业连接器凭据" width="440px">
-          <div style="display: grid; gap: 12px">
-            <span style="color: var(--color-text-secondary)">{{ enterpriseCredentialDialog.connector?.name }}</span>
-            <el-radio-group v-if="isMicrosoftConnector(enterpriseCredentialDialog.connector?.connector_type)" v-model="enterpriseCredentialDialog.graph_auth_mode">
-              <el-radio-button value="access_token">访问令牌</el-radio-button>
-              <el-radio-button value="oauth_client_secret">OAuth 密钥</el-radio-button>
-            </el-radio-group>
-            <el-input
-              v-model="enterpriseCredentialDialog.secret"
-              type="password"
-              show-password
-              :placeholder="enterpriseSecretPlaceholder(enterpriseCredentialDialog.connector?.connector_type, enterpriseCredentialDialog.graph_auth_mode)"
-            />
-          </div>
-          <template #footer>
-            <el-button @click="enterpriseCredentialDialog.visible = false">取消</el-button>
-            <el-button type="primary" :loading="connectorLoading" @click="saveEnterpriseCredentials">保存凭据</el-button>
-          </template>
-        </el-dialog>
-      </el-tab-pane>
-
-      <el-tab-pane label="任务中心" name="tasks">
+            <el-tab-pane label="任务中心" name="tasks">
         <div class="app-section-intro tab-intro">
           <strong>异步任务与 Agent 运行</strong>
           <span>按来源和状态查看后台任务，支持进入目标对象、查看详情和重试失败任务。</span>
@@ -1575,7 +1392,6 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 import StatusTag from '../components/StatusTag.vue'
 import { getStatusLabel } from '../utils/status'
 import { useSystemTaskMonitor } from '../composables/useSystemTaskMonitor'
-import { useSystemConnectors } from '../composables/useSystemConnectors'
 import { useSystemFeedback } from '../composables/useSystemFeedback'
 import { useSystemOrganization } from '../composables/useSystemOrganization'
 import { useSystemKnowledge } from '../composables/useSystemKnowledge'
@@ -1591,12 +1407,8 @@ const emptyGovernance = () => ({ today: {}, rate_limit: {}, policy: {} })
 const emptyTokenStats = () => ({ by_action: {}, by_date: {}, by_model: {}, governance: emptyGovernance() })
 const emptyGlobalStats = () => ({ by_model: {}, governance: { today: {}, policy: {} } })
 
-const activeTab = ref(['health', 'tokens', 'oplogs', 'alerts', 'experiments', 'feedback', 'funnel', 'retention', 'tool_health', 'approvals', 'knowledge', 'orgs', 'sensitivity', 'connectors', 'tasks'].includes(route.query.tab) ? route.query.tab : 'health')
+const activeTab = ref(['health', 'tokens', 'oplogs', 'alerts', 'experiments', 'feedback', 'funnel', 'retention', 'tool_health', 'approvals', 'knowledge', 'orgs', 'sensitivity', 'tasks'].includes(route.query.tab) ? route.query.tab : 'health')
 const currentUser = ref(null)
-const focusedConnectorJobId = computed(() => {
-  const parsed = Number(route.query.connectorSyncJobId)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
-})
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const {
   tokenDays, myStats, globalStats, llmPage, llmPageSize, llmTotal, llmStats, llmCalls,
@@ -1660,13 +1472,6 @@ const actionRows = computed(() => {
     document_clause_extract: '文档条款提取',
     document_compare: '文档对比',
     legal_consultation: '法律咨询',
-    meeting_decision_extract: '会议决策提取',
-    meeting_topic_extract: '会议议题提取',
-    email_generate: '审查生成',
-    email_reply: '审查回复',
-    email_tone_switch: '审查风格切换',
-    email_thread_summary: '审查线程总结',
-    email_polish: '审查润色',
     agent_plan: 'Agent 规划',
     task_extract_from_chat: '聊天待办提取',
     task_decompose: '任务拆解',
@@ -1799,7 +1604,6 @@ const feedbackDateRows = computed(() => {
 
 const moduleLabel = (mod) => ({
   document: '文档',
-  meeting: '会议',
   legal: '法律文书',
   task: '任务',
   agent: 'Agent',
@@ -1812,7 +1616,6 @@ const moduleLabel = (mod) => ({
 
 const moduleTagType = (mod) => ({
   document: '',
-  meeting: 'success',
   legal: 'warning',
   task: 'info',
   agent: 'danger',
@@ -1860,32 +1663,6 @@ const alertSourceTagType = (source) => ({
   outbound_email: 'warning',
 }[source] || 'info')
 
-const connectorStatusLabel = (status) => ({
-  pending: '排队中',
-  running: '执行中',
-  succeeded: '已完成',
-  failed: '失败',
-  active: '可用',
-}[status] || status || '未知')
-
-const connectorStatusTagType = (status) => ({
-  pending: 'info',
-  running: 'warning',
-  succeeded: 'success',
-  failed: 'danger',
-  active: 'success',
-}[status] || 'info')
-
-const connectorJobDetail = (row) => {
-  if (!row?.result_detail_json) return {}
-  try {
-    const payload = JSON.parse(row.result_detail_json)
-    return payload && typeof payload === 'object' ? payload : {}
-  } catch {
-    return {}
-  }
-}
-
 const feedbackReasonLabel = (reason) => ({
   incorrect_answer: '答案不准确',
   wrong_citation: '引用不准确',
@@ -1926,56 +1703,12 @@ const syncTabQuery = () => {
   router.replace({ query: { ...route.query, tab: activeTab.value } })
 }
 
-const normalizeConnectorFilterId = (value) => {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
-}
-
-const {
-  connectorLoading,
-  connectors,
-  connectorJobs,
-  newConnector,
-  enterpriseCredentialDialog,
-  connectorJobFilter,
-  isEnterpriseConnector,
-  isMicrosoftConnector,
-  enterpriseSecretPlaceholder,
-  enterpriseConfigHint,
-  connectorConfigPlaceholder,
-  fetchConnectorData,
-  connectorJobRowClassName,
-  createConnector,
-  openEnterpriseCredentialDialog,
-  saveEnterpriseCredentials,
-  startMicrosoftOAuth,
-  syncConnector,
-} = useSystemConnectors({
-  client: api,
-  message: ElMessage,
-  isAdmin,
-  focusedJobId: focusedConnectorJobId,
-  initialConnectorId: Number(route.query.connectorId) || null,
-  refreshTasks: fetchTaskRuns,
-  refreshAlerts: fetchAlerts,
-})
-
 const openApprovalInAgent = (row) => {
   router.push({ path: '/agent', query: { tab: 'approvals', approvalId: String(row.id) } })
 }
 
 const openKnowledgeDocument = (row) => {
   router.push({ path: '/documents', query: { documentId: String(row.id) } })
-}
-
-const openConnectorDocuments = (row) => {
-  if (!row?.id) return
-  router.push({ path: '/documents', query: { connectorId: String(row.id) } })
-}
-
-const openConnectorDocument = (item) => {
-  if (!item?.document_id) return
-  router.push({ path: '/documents', query: { documentId: String(item.document_id) } })
 }
 
 const {
@@ -2022,7 +1755,7 @@ onMounted(async () => {
   } catch {
     currentUser.value = null
   }
-  const jobs = [fetchHealthData(), fetchTokenData(), fetchLogData(), fetchAlerts(), fetchFeedbackData(), fetchToolHealth(), fetchApprovalData(), fetchKnowledgeData(), fetchSensitiveDocuments(), fetchConnectorData(), fetchTaskRuns()]
+  const jobs = [fetchHealthData(), fetchTokenData(), fetchLogData(), fetchAlerts(), fetchFeedbackData(), fetchToolHealth(), fetchApprovalData(), fetchKnowledgeData(), fetchSensitiveDocuments(), fetchTaskRuns()]
   if (currentUser.value?.role === 'admin') {
     jobs.push(fetchExperimentOverview(), fetchOrgData())
   }
@@ -2033,38 +1766,14 @@ watch(
   () => route.query.tab,
   async (value, oldValue) => {
     if (value === oldValue) return
-    const nextTab = typeof value === 'string' && ['health', 'tokens', 'oplogs', 'alerts', 'experiments', 'feedback', 'funnel', 'retention', 'tool_health', 'approvals', 'knowledge', 'orgs', 'sensitivity', 'connectors', 'tasks'].includes(value)
+    const nextTab = typeof value === 'string' && ['health', 'tokens', 'oplogs', 'alerts', 'experiments', 'feedback', 'funnel', 'retention', 'tool_health', 'approvals', 'knowledge', 'orgs', 'sensitivity', 'tasks'].includes(value)
       ? value
       : 'health'
     if (nextTab !== activeTab.value) {
       activeTab.value = nextTab
     }
-    if (nextTab === 'connectors') {
-      await fetchConnectorData()
-    }
     if (nextTab === 'tasks') {
       await fetchTaskRuns()
-    }
-  }
-)
-
-watch(
-  () => route.query.connectorId,
-  async (value, oldValue) => {
-    if (value === oldValue) return
-    connectorJobFilter.value.connector_id = normalizeConnectorFilterId(value)
-    if (activeTab.value === 'connectors') {
-      await fetchConnectorData()
-    }
-  }
-)
-
-watch(
-  () => route.query.connectorSyncJobId,
-  async (value, oldValue) => {
-    if (value === oldValue) return
-    if (activeTab.value === 'connectors') {
-      await fetchConnectorData()
     }
   }
 )
@@ -2253,9 +1962,7 @@ watch(
 :deep(.system-tabs .el-table th) {
   background: var(--color-bg-alt);
 }
-:deep(.focused-connector-job-row) {
-  --el-table-tr-bg-color: #F0F2FF;
-}
+
 
 /* ─── Dialogs ─── */
 .dialog-metrics {

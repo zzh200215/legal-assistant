@@ -20,6 +20,8 @@ class AgentRun(Base):
     failure_reason = Column(Text, nullable=True)
     total_steps = Column(Integer, nullable=True)
     error = Column(Text, nullable=True)
+    # 长流程权限快照：Agent 执行期间权限范围保持稳定，硬撤销立即终止。
+    authorization_snapshot_id = Column(String(64), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
 

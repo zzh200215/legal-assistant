@@ -7,8 +7,6 @@ from starlette.responses import Response
 # 需要记录日志的路径前缀和模块映射
 LOG_RULES = [
     ("/api/documents", "document"),
-    ("/api/meetings", "meeting"),
-    ("/api/emails", "email"),
     ("/api/tasks", "task"),
     ("/api/agent", "agent"),
     ("/api/chat", "chat"),

@@ -13,18 +13,13 @@ from typing import Sequence
 # so paused runs and stored approval requests can still resume safely.
 CANONICAL_AGENT_TYPES = (
     "knowledge_agent",
-    "meeting_agent",
-    "data_agent",
-    "project_agent",
     "legal_compliance_agent",
-    "communication_agent",
     "workflow_agent",
 )
 
 LEGACY_AGENT_ALIASES = {
     "document_agent": "knowledge_agent",
     "task_agent": "workflow_agent",
-    "task_email_agent": "workflow_agent",
 }
 
 
@@ -42,22 +37,6 @@ AGENT_TOOL_ALLOW: dict[str, set[str]] = {
         "document_risk_tool",
         "document_conflict_tool",
     },
-    "meeting_agent": {
-        "meeting_summary_tool",
-        "meeting_query_tool",
-    },
-    "data_agent": {
-        "sql_query_tool",
-    },
-    "project_agent": {
-        "document_search_tool",
-        "document_summary_tool",
-        "document_risk_tool",
-        "document_conflict_tool",
-        "meeting_summary_tool",
-        "meeting_query_tool",
-        "task_query_tool",
-    },
     "legal_compliance_agent": {
         "document_search_tool",
         "document_summary_tool",
@@ -67,11 +46,7 @@ AGENT_TOOL_ALLOW: dict[str, set[str]] = {
         "legal_contract_review_tool",
         "legal_draft_tool",
     },
-    "communication_agent": {
-        "email_writer_tool",
-    },
     "workflow_agent": {
-        "meeting_action_tool",
         "task_create_tool",
         "task_query_tool",
     },
@@ -81,10 +56,6 @@ AGENT_TOOL_ALLOW: dict[str, set[str]] = {
         "document_summary_tool",
         "document_risk_tool",
         "document_conflict_tool",
-        "meeting_summary_tool",
-        "meeting_query_tool",
-        "meeting_action_tool",
-        "email_writer_tool",
         "task_create_tool",
         "task_query_tool",
         "sql_query_tool",
@@ -100,7 +71,6 @@ AGENT_TOOL_ALLOW.update(
     {
         "document_agent": set(AGENT_TOOL_ALLOW["knowledge_agent"]),
         "task_agent": {"task_create_tool", "task_query_tool"},
-        "task_email_agent": {"task_query_tool", "email_writer_tool"},
     }
 )
 

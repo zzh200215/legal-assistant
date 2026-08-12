@@ -11,8 +11,6 @@ from app.core.observability import log_async_task_event
 from app.core.observability_sanitizer import sanitize_background_error_message
 from app.core.time import utc_now
 from app.models.document import Document, DocumentChunk
-from app.models.connector import ConnectorSyncJob, ExternalConnector
-from app.models.schedule import WorkflowExecution
 from app.models.user import User
 from app.services.analysis_service import analysis_service
 from app.services.document_job_service import document_job_service
@@ -26,11 +24,9 @@ from app.services.document_service import (
     _try_index_document,
     UPLOAD_DIR,
 )
-from app.services.meeting_service import meeting_service
 from app.services.storage_service import storage_service
 from app.tasks.runtime import background_error_detail as _background_error_detail
 from app.tasks.runtime import record_beat_heartbeat as _record_beat_heartbeat
-from app.tasks.task_retry import retry_connector_sync as _retry_connector_sync_impl
 from app.tasks.task_retry import retry_task as _retry_task_impl
 
 
@@ -45,35 +41,19 @@ def _retry_task(self, exc: Exception, **kwargs):
     )
 
 
-def _retry_connector_sync(self, exc: Exception, **kwargs):
-    return _retry_connector_sync_impl(
-        self,
-        exc,
-        log_event=log_async_task_event,
-        session_factory=SessionLocal,
-        **kwargs,
-    )
-
-
-def _simulate_connector_sync(connector: ExternalConnector) -> tuple[int, int, str]:
-    from app.services.connector_service import connector_service
-
-    config = connector_service.parse_config(connector.config_json)
-    path_hint = str(config.get("path") or config.get("space") or config.get("mailbox") or connector.name)
-    base = max(len(path_hint.strip()), 4)
-    scanned = min(base * 3, 120)
-    imported = max(scanned - min(base, 12), 1)
-    return scanned, imported, path_hint
-
-
 @celery_app.task(bind=True, name="parse_document")
-def parse_document_task(self, document_id: int, file_path: str, file_type: str):
+def parse_document_task(self, document_id: int, file_path: str, file_type: str, snapshot_id: str | None = None):
     """异步解析文档：提取文本 → 切分 → 向量化入库"""
     db = SessionLocal()
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
             return {"status": "error", "message": "Document not found"}
+
+        # 长流程权限快照：硬撤销（禁用/强制退出/授权撤销）立即终止。
+        if snapshot_id:
+            from app.services.authorization_service import authorization_service
+            authorization_service.assert_snapshot(db, snapshot_id, user_id=doc.user_id)
 
         log_async_task_event(
             user_id=doc.user_id,
@@ -231,9 +211,14 @@ def parse_document_task(self, document_id: int, file_path: str, file_type: str):
 
 
 @celery_app.task(bind=True, name="summarize_document")
-def summarize_document_task(self, document_id: int, user_id: int, max_length: int = 500):
+def summarize_document_task(self, document_id: int, user_id: int, max_length: int = 500, snapshot_id: str | None = None):
     db = SessionLocal()
     try:
+        # 长流程权限快照：硬撤销立即终止。
+        if snapshot_id:
+            from app.services.authorization_service import authorization_service
+            authorization_service.assert_snapshot(db, snapshot_id, user_id=user_id)
+
         log_async_task_event(
             user_id=user_id,
             module="async_task",
@@ -298,9 +283,14 @@ def summarize_document_task(self, document_id: int, user_id: int, max_length: in
 
 
 @celery_app.task(bind=True, name="analyze_document")
-def analyze_document_task(self, document_id: int, user_id: int, max_length: int = 500):
+def analyze_document_task(self, document_id: int, user_id: int, max_length: int = 500, snapshot_id: str | None = None):
     db = SessionLocal()
     try:
+        # 长流程权限快照：硬撤销立即终止。
+        if snapshot_id:
+            from app.services.authorization_service import authorization_service
+            authorization_service.assert_snapshot(db, snapshot_id, user_id=user_id)
+
         log_async_task_event(
             user_id=user_id,
             module="async_task",
@@ -363,244 +353,6 @@ def analyze_document_task(self, document_id: int, user_id: int, max_length: int 
         db.close()
 
 
-@celery_app.task(bind=True, name="summarize_meeting")
-def summarize_meeting_task(self, meeting_id: int, user_id: int):
-    db = SessionLocal()
-    try:
-        log_async_task_event(
-            user_id=user_id,
-            module="async_task",
-            action="meeting_summary_started",
-            target_type="meeting",
-            target_id=meeting_id,
-            detail=f"task_id={self.request.id}",
-        )
-        self.update_state(state="PROCESSING", meta={"step": "loading_meeting"})
-        summary = asyncio.run(meeting_service.summarize(meeting_id, db, user_id=user_id))
-        log_async_task_event(
-            user_id=user_id,
-            module="async_task",
-            action="meeting_summary_succeeded",
-            target_type="meeting",
-            target_id=meeting_id,
-            detail=f"task_id={self.request.id}",
-        )
-        return meeting_service.serialize_summary(summary)
-    except Exception as e:
-        _retry_task(
-            self,
-            e,
-            user_id=user_id,
-            target_type="meeting",
-            target_id=meeting_id,
-            action_prefix="meeting_summary",
-        )
-    finally:
-        db.close()
-
-
-@celery_app.task(bind=True, name="connector_sync")
-def connector_sync_task(self, sync_job_id: int):
-    db = SessionLocal()
-    try:
-        job = db.query(ConnectorSyncJob).filter(ConnectorSyncJob.id == sync_job_id).first()
-        if not job:
-            return {"status": "error", "message": "Sync job not found"}
-        connector = db.query(ExternalConnector).filter(ExternalConnector.id == job.connector_id).first()
-        if not connector:
-            job.status = "failed"
-            job.result_summary = "连接器不存在"
-            job.error_message = "Connector not found"
-            db.commit()
-            return {"status": "error", "message": "Connector not found"}
-
-        job.status = "running"
-        job.result_summary = "正在同步连接器数据"
-        job.error_message = None
-        db.commit()
-        self.update_state(state="PROCESSING", meta={"step": "syncing"})
-        log_async_task_event(
-            user_id=job.user_id,
-            module="async_task",
-            action="connector_sync_started",
-            target_type="connector_sync_job",
-            target_id=job.id,
-            detail=f"task_id={self.request.id}; connector_id={connector.id}; sync_mode={job.sync_mode}",
-        )
-
-        if connector.status != "active":
-            raise ValueError("Connector is inactive")
-
-        from app.services.connector_service import connector_service
-
-        if connector.connector_type == "imap_mailbox":
-            from app.services.mailbox_service import mailbox_service
-
-            result = mailbox_service.sync_imap_connector(connector, db=db)
-            connector.status = "active"
-            job.status = "succeeded"
-            job.result_summary = (
-                f"已扫描 {result['scanned_count']} 封，新同步 {result['imported_count']} 封，"
-                f"跳过 {result['skipped_count']} 封"
-            )
-            job.result_detail_json = json.dumps(
-                {
-                    "connector_id": connector.id,
-                    "connector_name": connector.name,
-                    **result,
-                },
-                ensure_ascii=False,
-            )
-            job.error_message = None
-            db.commit()
-            log_async_task_event(
-                user_id=job.user_id,
-                module="async_task",
-                action="connector_sync_succeeded",
-                target_type="connector_sync_job",
-                target_id=job.id,
-                detail=(
-                    f"task_id={self.request.id}; scanned={result['scanned_count']}; "
-                    f"imported={result['imported_count']}; skipped={result['skipped_count']}"
-                ),
-            )
-            return {"status": "success", "sync_job_id": job.id, "connector_id": connector.id, **result}
-
-        from app.services.document_service import document_service
-
-        sync_batch = connector_service.build_sync_batch(connector)
-        sync_documents = sync_batch["documents"]
-        imported_docs = 0
-        skipped_docs = 0
-        imported_items: list[dict] = []
-        skipped_items: list[dict] = []
-        imported_titles: list[str] = []
-        skipped_titles: list[str] = []
-        for payload in sync_documents:
-            title = str(payload.get("title") or f"{connector.name}-同步文档.md")
-            metadata = dict(payload.get("metadata") or {})
-            metadata.update(
-                {
-                    "connector_id": connector.id,
-                    "connector_name": connector.name,
-                    "connector_type": connector.connector_type,
-                    "connector_sync_job_id": job.id,
-                    "sync_mode": job.sync_mode,
-                }
-            )
-            source_file_path = payload.get("source_file_path")
-            file_bytes = payload.get("file_bytes")
-            if source_file_path or isinstance(file_bytes, bytes):
-                if source_file_path:
-                    file_bytes = storage_service.read_bytes(source_file_path)
-                document, created = document_service.import_file_document(
-                    db=db,
-                    user_id=job.user_id,
-                    title=title or Path(str(source_file_path) if source_file_path else connector.name).name,
-                    file_bytes=file_bytes,
-                    file_type=str(payload.get("file_type") or Path(str(source_file_path)).suffix.lstrip(".") or "txt"),
-                    knowledge_base_name=payload.get("knowledge_base_name"),
-                    knowledge_base_category=payload.get("knowledge_base_category"),
-                    classification=payload.get("classification"),
-                    tags=payload.get("tags") or [],
-                    permission_scope=str(payload.get("permission_scope") or connector_service._default_permission_scope(connector)),
-                    sensitivity_level=str(payload.get("sensitivity_level") or "internal"),
-                    metadata=metadata,
-                )
-            else:
-                document, created = document_service.import_text_document(
-                    db=db,
-                    user_id=job.user_id,
-                    title=title,
-                    content=str(payload.get("content") or ""),
-                    file_type=str(payload.get("file_type") or "md"),
-                    knowledge_base_name=payload.get("knowledge_base_name"),
-                    knowledge_base_category=payload.get("knowledge_base_category"),
-                    classification=payload.get("classification"),
-                    tags=payload.get("tags") or [],
-                    permission_scope=str(payload.get("permission_scope") or connector_service._default_permission_scope(connector)),
-                    sensitivity_level=str(payload.get("sensitivity_level") or "internal"),
-                    metadata=metadata,
-                )
-            if created:
-                imported_docs += 1
-                imported_titles.append(title)
-                imported_items.append({"title": title, "document_id": document.id if document else None})
-            else:
-                skipped_docs += 1
-                skipped_titles.append(title)
-                skipped_items.append({"title": title, "document_id": document.id if document else None})
-
-        scanned = int(sync_batch.get("scanned_count") or len(sync_documents))
-        path_hint = str(sync_batch.get("source") or connector.name)
-        next_cursor = sync_batch.get("sync_cursor")
-        if isinstance(next_cursor, dict):
-            connector.sync_cursor_json = json.dumps(next_cursor, ensure_ascii=False)
-        connector.status = "active"
-        job.status = "succeeded"
-        job.result_summary = f"已扫描 {scanned} 项，新导入 {imported_docs} 项，跳过 {skipped_docs} 项，来源 {path_hint}"
-        job.result_detail_json = json.dumps(
-            {
-                "connector_id": connector.id,
-                "connector_name": connector.name,
-                "source": path_hint,
-                "scanned_count": scanned,
-                "imported_count": imported_docs,
-                "skipped_count": skipped_docs,
-                "imported_items": imported_items[:20],
-                "skipped_items": skipped_items[:20],
-                "imported_titles": imported_titles[:20],
-                "skipped_titles": skipped_titles[:20],
-            },
-            ensure_ascii=False,
-        )
-        job.error_message = None
-        db.commit()
-        log_async_task_event(
-            user_id=job.user_id,
-            module="async_task",
-            action="connector_sync_succeeded",
-            target_type="connector_sync_job",
-            target_id=job.id,
-            detail=f"task_id={self.request.id}; scanned={scanned}; imported={imported_docs}; skipped={skipped_docs}",
-        )
-        return {
-            "status": "success",
-            "sync_job_id": job.id,
-            "connector_id": connector.id,
-            "scanned_count": scanned,
-            "imported_count": imported_docs,
-            "skipped_count": skipped_docs,
-            "source": path_hint,
-        }
-    except Exception as exc:
-        if "job" in locals() and "connector" in locals() and job and connector:
-            _retry_connector_sync(self, exc, job=job, connector=connector)
-        raise
-    finally:
-        db.close()
-
-
-@celery_app.task(name="dispatch_scheduled_workflows")
-def dispatch_scheduled_workflows_task():
-    """Beat entry point: claim due schedules, then enqueue their isolated executions."""
-    _record_beat_heartbeat()
-    db = SessionLocal()
-    try:
-        from app.services.scheduler_service import scheduler_service
-
-        execution_ids = scheduler_service.dispatch_due(db=db)
-        for execution_id in execution_ids:
-            task = scheduled_workflow_run_task.delay(execution_id)
-            execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
-            if execution:
-                execution.celery_task_id = task.id
-        db.commit()
-        return {"dispatched": len(execution_ids), "execution_ids": execution_ids}
-    finally:
-        db.close()
-
-
 @celery_app.task(name="dispatch_operational_alerts")
 def dispatch_operational_alerts_task():
     _record_beat_heartbeat()
@@ -609,34 +361,6 @@ def dispatch_operational_alerts_task():
         from app.services.operational_alert_service import operational_alert_service
 
         return operational_alert_service.dispatch(db=db)
-    finally:
-        db.close()
-
-
-@celery_app.task(name="purge_mailbox_retention")
-def purge_mailbox_retention_task():
-    _record_beat_heartbeat()
-    db = SessionLocal()
-    try:
-        from app.services.mailbox_service import mailbox_service
-
-        retention_days = get_settings().MAILBOX_RETENTION_DAYS
-        connectors = db.query(ExternalConnector).filter(
-            ExternalConnector.connector_type == "imap_mailbox",
-            ExternalConnector.status == "active",
-        ).all()
-        deleted_count = 0
-        processed_count = 0
-        for connector in connectors:
-            user = db.query(User).filter(User.id == connector.user_id).first()
-            if not user:
-                continue
-            result = mailbox_service.purge_retained_messages(
-                db=db, user=user, retention_days=retention_days, connector_id=connector.id,
-            )
-            deleted_count += result["deleted_count"]
-            processed_count += 1
-        return {"processed_connectors": processed_count, "deleted_count": deleted_count, "retention_days": retention_days}
     finally:
         db.close()
 
@@ -665,28 +389,6 @@ def run_database_archive_task():
             return result
     finally:
         set_db_correlation_id(None)
-
-
-@celery_app.task(bind=True, name="scheduled_workflow_run", max_retries=2)
-def scheduled_workflow_run_task(self, execution_id: int):
-    db = SessionLocal()
-    try:
-        from app.services.scheduler_service import scheduler_service
-
-        return scheduler_service.serialize_execution(scheduler_service.execute(execution_id, db=db))
-    except Exception as exc:
-        execution = None
-        try:
-            execution = db.query(WorkflowExecution).filter(WorkflowExecution.id == execution_id).first()
-            retries = int(getattr(self.request, "retries", 0) or 0)
-            if execution and retries < 2:
-                execution.status = "pending"
-                execution.retry_count = retries + 1
-                db.commit()
-                raise self.retry(exc=exc, countdown=30 * (retries + 1), max_retries=2)
-        finally:
-            db.close()
-        raise exc
 
 
 @celery_app.task(name="check_legal_deadline_reminders")

@@ -8,11 +8,12 @@ class LLMService:
         self,
         messages: list,
         stream: bool = False,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         action: str = "chat",
         user_id: int | None = None,
         prompt_template: str | None = None,
         prompt_version: int | None = None,
+        trace_id: str | None = None,
     ):
         return await llm_client.chat(
             messages,
@@ -22,16 +23,18 @@ class LLMService:
             user_id=user_id,
             prompt_template=prompt_template,
             prompt_version=prompt_version,
+            trace_id=trace_id,
         )
 
     async def generate(
         self,
         prompt: str,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         action: str = "generate",
         user_id: int | None = None,
         prompt_template: str | None = None,
         prompt_version: int | None = None,
+        trace_id: str | None = None,
     ) -> str:
         return await llm_client.generate(
             prompt,
@@ -40,17 +43,42 @@ class LLMService:
             user_id=user_id,
             prompt_template=prompt_template,
             prompt_version=prompt_version,
+            trace_id=trace_id,
+        )
+
+    async def structured_generate(
+        self,
+        prompt: str,
+        *,
+        schema,
+        temperature: float | None = None,
+        action: str = "generate",
+        user_id: int | None = None,
+        prompt_template: str | None = None,
+        prompt_version: int | None = None,
+        trace_id: str | None = None,
+    ):
+        return await llm_client.structured_generate(
+            prompt,
+            schema=schema,
+            temperature=temperature,
+            action=action,
+            user_id=user_id,
+            prompt_template=prompt_template,
+            prompt_version=prompt_version,
+            trace_id=trace_id,
         )
 
     async def generate_with_images(
         self,
         prompt: str,
         image_urls: list[str],
-        temperature: float = 0.7,
+        temperature: float | None = None,
         action: str = "generate_with_images",
         user_id: int | None = None,
         prompt_template: str | None = None,
         prompt_version: int | None = None,
+        trace_id: str | None = None,
     ) -> str:
         return await llm_client.generate_with_images(
             prompt,
@@ -60,6 +88,7 @@ class LLMService:
             user_id=user_id,
             prompt_template=prompt_template,
             prompt_version=prompt_version,
+            trace_id=trace_id,
         )
 
     def _strip_code_fence(self, text: str) -> str:

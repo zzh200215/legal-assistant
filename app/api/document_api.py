@@ -137,7 +137,12 @@ def list_knowledge_bases(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return document_governance_service.list_knowledge_bases(db=db, user_id=current_user.id)
+    return document_governance_service.list_knowledge_bases(
+        db=db,
+        user_id=current_user.id,
+        organization_id=current_user.organization_id,
+        department_id=current_user.department_id,
+    )
 
 
 @router.post("/knowledge-bases", response_model=KnowledgeBaseOut)
@@ -381,6 +386,7 @@ async def summarize_document(document_id: int, req: SummarizeRequest, db: Sessio
     try:
         if req.async_mode:
             from app.tasks import summarize_document_task
+            from app.services.authorization_service import authorization_service
 
             job = document_job_service.create_job(
                 document_id=document_id,
@@ -390,7 +396,14 @@ async def summarize_document(document_id: int, req: SummarizeRequest, db: Sessio
                 current_step="submitted",
                 message="文档摘要任务已提交",
             )
-            task = summarize_document_task.delay(document_id, current_user.id, req.max_length)
+            # 长流程权限快照：保证后台执行期间权限范围稳定。
+            ctx = authorization_service.build_context(db, current_user)
+            snapshot_id = authorization_service.capture_snapshot(
+                db, current_user, ctx, document_ids=[document_id],
+            )
+            task = summarize_document_task.delay(
+                document_id, current_user.id, req.max_length, snapshot_id,
+            )
             document_job_service.attach_task_id(job.id, task.id, db)
             oplog_service.log(
                 module="async_task",
@@ -442,6 +455,7 @@ async def analyze_document(document_id: int, req: AnalyzeRequest, db: Session = 
     try:
         if req.async_mode:
             from app.tasks import analyze_document_task
+            from app.services.authorization_service import authorization_service
 
             job = document_job_service.create_job(
                 document_id=document_id,
@@ -451,7 +465,13 @@ async def analyze_document(document_id: int, req: AnalyzeRequest, db: Session = 
                 current_step="submitted",
                 message="文档分析任务已提交",
             )
-            task = analyze_document_task.delay(document_id, current_user.id, req.max_length)
+            ctx = authorization_service.build_context(db, current_user)
+            snapshot_id = authorization_service.capture_snapshot(
+                db, current_user, ctx, document_ids=[document_id],
+            )
+            task = analyze_document_task.delay(
+                document_id, current_user.id, req.max_length, snapshot_id,
+            )
             document_job_service.attach_task_id(job.id, task.id, db)
             oplog_service.log(
                 module="async_task",
@@ -687,6 +707,7 @@ def retry_document_parse(
     current_user: User = Depends(get_current_user),
 ):
     from app.tasks import parse_document_task
+    from app.services.authorization_service import authorization_service
 
     doc = document_service.get(document_id, db, user_id=current_user.id, role=current_user.role, organization_id=current_user.organization_id, department_id=current_user.department_id)
     if not doc:
@@ -699,7 +720,11 @@ def retry_document_parse(
         current_step="submitted",
         message="文档重试解析任务已提交",
     )
-    task = parse_document_task.delay(doc.id, doc.file_path, doc.file_type)
+    ctx = authorization_service.build_context(db, current_user)
+    snapshot_id = authorization_service.capture_snapshot(
+        db, current_user, ctx, document_ids=[document_id],
+    )
+    task = parse_document_task.delay(doc.id, doc.file_path, doc.file_type, snapshot_id)
     document_job_service.attach_task_id(job.id, task.id, db)
     return {
         "document_id": document_id,

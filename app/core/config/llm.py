@@ -47,6 +47,15 @@ class LLMSettings(BaseSettings):
     LLM_ESTIMATED_COMPLETION_TOKENS: int = 1200
     LLM_LIMIT_REDIS_PREFIX: str = "aibg:llm-governance"
 
+    # 供应商熔断：仅超时/传输/5xx 计入；参数/鉴权/权限/内容拦截不计入。
+    CIRCUIT_BREAKER_ENABLED: bool = True
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = Field(default=5, ge=1, le=100)
+    CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = Field(default=30.0, ge=0.0, le=3600.0)
+    CIRCUIT_BREAKER_HALF_OPEN_MAX_CONCURRENCY: int = Field(default=1, ge=1, le=10)
+    # 可选 Redis 后端（默认关闭，进程内即可运行）；跨实例不承诺强一致。
+    CIRCUIT_BREAKER_REDIS_ENABLED: bool = False
+    CIRCUIT_BREAKER_REDIS_PREFIX: str = "aibg:circuit-breaker"
+
     # 对话记忆调优参数
     CONVERSATION_MEMORY_RECENT_MESSAGES: int = Field(default=12, ge=4, le=40)
     CONVERSATION_MEMORY_SUMMARY_TRIGGER: int = Field(default=18, ge=8, le=100)

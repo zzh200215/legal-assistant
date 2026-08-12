@@ -8,9 +8,9 @@
       </div>
       <div class="header-tips">
         <span>推荐示例：</span>
-        <el-button text @click="applyExample('总结会议 1，并把行动项创建成任务')">会议转任务</el-button>
-        <el-button text @click="applyExample('查询我未完成的任务，并生成一封催办汇总邮件')">任务转邮件</el-button>
         <el-button text @click="applyExample('总结文档 1，并提取其中的风险点')">文档风险</el-button>
+        <el-button text @click="applyExample('审查这份合同并提示风险条款')">合同审查</el-button>
+        <el-button text @click="applyExample('生成一份劳动争议仲裁申请书草稿')">文书草稿</el-button>
       </div>
     </div>
 
@@ -64,7 +64,7 @@
       <div class="command-copy">
         <div class="section-eyebrow">Execution Control</div>
         <strong>低风险步骤自动执行，敏感动作按需确认</strong>
-        <span>适合处理文档分析、会议转任务、任务同步邮件和跨模块串联动作。</span>
+        <span>适合处理文档风险、合同审查、法律咨询和跨模块串联动作。</span>
       </div>
       <div class="command-chips">
         <span class="command-chip">最大步数 {{ maxSteps }}</span>
@@ -84,7 +84,7 @@
         v-model="goal"
         type="textarea"
         :rows="4"
-        placeholder="例如：总结会议 1，并把行动项创建成任务；再给我一份结果摘要"
+        placeholder="例如：总结文档 1，并提取风险点；再生成一份审查意见"
       />
       <div class="input-actions">
         <div class="meta-text">文档分析、检索和草稿生成会直接继续；创建任务、批量落待办及敏感数据查询会在执行到该步骤时请求确认。</div>
@@ -335,7 +335,7 @@
           <li v-for="(item, index) in supervisorPlan.aggregation.findings" :key="`aggregation-${index}`">{{ item.title }}<span v-if="item.evidence">：{{ item.evidence }}</span></li>
         </ul>
       </div>
-      <div v-if="supervisorPlan.execution_mode === 'parallel_read_only'" class="stack-foot">仅文档、会议等白名单只读能力可并发执行；写入、草稿和敏感查询仍按审批串行执行。</div>
+      <div v-if="supervisorPlan.execution_mode === 'parallel_read_only'" class="stack-foot">仅文档等白名单只读能力可并发执行；写入、草稿和敏感查询仍按审批串行执行。</div>
       <div v-if="supervisorPlan.fallback_reason" class="stack-foot">回退原因：{{ supervisorPlan.fallback_reason }}</div>
     </el-card>
 
@@ -354,14 +354,6 @@
         <div class="artifact-summary-item">
           <span>任务</span>
           <strong>{{ artifactGroups.tasks.length }}</strong>
-        </div>
-        <div class="artifact-summary-item">
-          <span>邮件</span>
-          <strong>{{ artifactGroups.emails.length }}</strong>
-        </div>
-        <div class="artifact-summary-item">
-          <span>会议</span>
-          <strong>{{ artifactGroups.meetings.length }}</strong>
         </div>
       </div>
       <div class="artifact-grid">
@@ -393,36 +385,6 @@
               <span v-if="item.priority">优先级：{{ item.priority }}</span>
             </div>
             <el-button v-if="item.task_id" text type="primary" @click="openTask(item.task_id)">查看任务</el-button>
-          </div>
-        </div>
-
-        <div v-if="artifactGroups.emails.length" class="artifact-block">
-          <div class="panel-title">文书草稿</div>
-          <div v-for="item in artifactGroups.emails" :key="`email-${item.draft_id}`" class="stack-item">
-            <div class="stack-top">
-              <strong>{{ item.subject || `草稿 ${item.draft_id}` }}</strong>
-              <el-tag size="small" type="warning">draft</el-tag>
-            </div>
-            <div class="stack-foot">
-              <span v-if="item.recipient">收件人：{{ item.recipient }}</span>
-              <span v-if="item.purpose">目的：{{ item.purpose }}</span>
-            </div>
-            <el-button text type="primary" @click="openEmailDraft(item.draft_id)">查看草稿</el-button>
-          </div>
-        </div>
-
-        <div v-if="artifactGroups.meetings.length" class="artifact-block">
-          <div class="panel-title">会议结果</div>
-          <div v-for="item in artifactGroups.meetings" :key="`meeting-${item.meeting_id}`" class="stack-item">
-            <div class="stack-top">
-              <strong>{{ item.theme || `会议 ${item.meeting_id}` }}</strong>
-              <el-tag size="small">{{ toolLabel(item.tool_name) }}</el-tag>
-            </div>
-            <div class="stack-foot">
-              <span v-if="item.action_item_count">行动项：{{ item.action_item_count }}</span>
-              <span v-if="item.task_count">创建任务：{{ item.task_count }}</span>
-            </div>
-            <el-button v-if="item.meeting_id" text type="primary" @click="openMeeting(item.meeting_id)">查看会议</el-button>
           </div>
         </div>
       </div>
@@ -619,14 +581,12 @@ const artifactGroups = computed(() => {
   // 后端 artifacts 可能缺失部分 key（旧数据/异常结果），逐 key 兜底避免模板 .length 崩溃
   return {
     documents: Array.isArray(a.documents) ? a.documents : [],
-    meetings: Array.isArray(a.meetings) ? a.meetings : [],
     tasks: Array.isArray(a.tasks) ? a.tasks : [],
-    emails: Array.isArray(a.emails) ? a.emails : [],
   }
 })
 const supervisorPlan = computed(() => runResult.value?.supervisor_plan || {})
 const hasArtifacts = computed(() =>
-  ['documents', 'meetings', 'tasks', 'emails'].some((key) => (artifactGroups.value[key] || []).length)
+  ['documents', 'tasks'].some((key) => (artifactGroups.value[key] || []).length)
 )
 const expertRoles = computed(() => [
   ...(supervisorRole.value ? [supervisorRole.value] : []),
@@ -940,20 +900,12 @@ const decideApproval = async (item, approved) => {
   }
 }
 
-const openEmailDraft = () => {
-  ElMessage.info('邮件草稿查看页面已下线，产出仍记录在本条执行历史中')
-}
-
 const openDocument = (documentId) => {
   router.push({ path: '/documents', query: { documentId: String(documentId) } })
 }
 
 const openTask = (taskId) => {
   router.push({ path: '/tasks', query: { taskId: String(taskId), view: 'table' } })
-}
-
-const openMeeting = () => {
-  ElMessage.info('会议查看页面已下线，产出仍记录在本条执行历史中')
 }
 
 const fetchHistory = async () => {

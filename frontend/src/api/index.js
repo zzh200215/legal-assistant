@@ -1,7 +1,6 @@
 import agent from './agent'
 import analytics from './analytics'
 import auth from './auth'
-import connector from './connector'
 import document from './document'
 import legal from './legal'
 import legalWorkspace from './legalWorkspace'
@@ -15,7 +14,6 @@ const api = {
   ...agent,
   ...analytics,
   ...auth,
-  ...connector,
   ...document,
   ...legal,
   ...legalWorkspace,
@@ -26,5 +24,5 @@ const api = {
   ...task,
 }
 
-export { agent, analytics, auth, connector, document, legal, legalWorkspace, memory, notifications, org, subscription, task }
+export { agent, analytics, auth, document, legal, legalWorkspace, memory, notifications, org, subscription, task }
 export default api

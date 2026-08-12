@@ -13,7 +13,6 @@ if str(ROOT_DIR) not in sys.path:
 from app.core.auth import hash_password
 from app.core.database import SessionLocal
 from app.models.document import Document, DocumentChunk
-from app.models.meeting import Meeting, MeetingSummary
 from app.models.task import Task
 from app.models.user import User
 from app.models.legal import LegalConsultation, ContractReview, LegalDraft

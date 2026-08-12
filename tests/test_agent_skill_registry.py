@@ -14,7 +14,7 @@ class AgentSkillRegistryTests(unittest.TestCase):
 
     def test_registry_returns_copies_and_known_skill(self):
         skills = list_agent_skills()
-        self.assertGreaterEqual(len(skills), 8)
+        self.assertEqual(len(skills), 4)
         skills[0]["name"] = "changed"
         self.assertNotEqual(get_agent_skill("legal_consultation")["name"], "changed")
 

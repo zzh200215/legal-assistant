@@ -136,7 +136,7 @@ const navGroups = [
   {
     label: '平台管理',
     items: [
-      { path: '/system', label: '系统中心', caption: '观测、连接器与任务中心', icon: DataLine, adminOnly: true },
+      { path: '/system', label: '系统中心', caption: '观测与任务中心', icon: DataLine, adminOnly: true },
     ],
   },
 ]
@@ -149,7 +149,7 @@ const sectionMeta = {
   '/tasks': { label: '待办任务', description: '管理执行项、协作进度和任务来源' },
   '/agent': { label: 'Agent配置', description: '配置 Agent 目标、工具调用和执行追踪' },
   '/chat': { label: '对话记录', description: '查看流式对话、上下文消息和引用材料' },
-  '/system': { label: '系统中心', description: '查看平台健康、连接器和全链路观测' },
+  '/system': { label: '系统中心', description: '查看平台健康和全链路观测' },
 }
 
 const currentSection = computed(() => sectionMeta[route.path] || { label: '律智检', description: '法律文书与合同审查工作台' })

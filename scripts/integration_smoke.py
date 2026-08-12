@@ -67,8 +67,6 @@ def main():
         ("GET", "/api/documents/"),
         ("GET", "/api/documents/knowledge-bases"),
         ("GET", "/api/memory/preferences"),
-        ("GET", "/api/connectors/"),
-        ("GET", "/api/connectors/sync-jobs"),
         ("GET", "/api/developer/orgs/%d/apps" % org_id),
         ("GET", "/api/developer/orgs/%d/operations/summary" % org_id),
         ("GET", "/api/legal/contracts/expiry-alerts"),

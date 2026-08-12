@@ -128,6 +128,7 @@ class AuditLogOut(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: Optional[str] = None
     user: UserOut
 
 

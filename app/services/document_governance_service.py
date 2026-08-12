@@ -52,10 +52,24 @@ class DocumentGovernanceService:
         db.refresh(kb)
         return kb
 
-    def list_knowledge_bases(self, *, db: Session, user_id: int) -> list[KnowledgeBase]:
+    def list_knowledge_bases(
+        self,
+        *,
+        db: Session,
+        user_id: int,
+        organization_id: int | None = None,
+        department_id: int | None = None,
+    ) -> list[KnowledgeBase]:
+        from app.services.authorization_service import authorization_service
+
+        scope_filter = authorization_service.knowledge_base_scope_filter(
+            user_id=user_id,
+            organization_id=organization_id,
+            department_id=department_id,
+        )
         return (
             db.query(KnowledgeBase)
-            .filter(KnowledgeBase.user_id == user_id)
+            .filter(scope_filter)
             .order_by(KnowledgeBase.created_at.desc(), KnowledgeBase.id.desc())
             .all()
         )
@@ -131,29 +145,24 @@ class DocumentGovernanceService:
     def can_access_document(
         self,
         *,
+        db: Session,
         document: Document,
         user_id: int,
         role: str | None = None,
         organization_id: int | None = None,
         department_id: int | None = None,
     ) -> bool:
-        if document.user_id == user_id:
-            return True
-        scope = (document.permission_scope or "private").strip().lower()
-        if scope == "public":
-            return True
-        if scope == "org":
-            return bool(organization_id and document.organization_id and organization_id == document.organization_id)
-        if scope == "department":
-            return bool(department_id and document.department_id and department_id == document.department_id)
-        if scope == "role":
-            allowed_roles = self._json_list(document.permission_roles)
-            return bool(role and role in allowed_roles)
-        if scope == "restricted":
-            allowed_users = self._json_list(document.permission_users)
-            allowed_roles = self._json_list(document.permission_roles)
-            return str(user_id) in allowed_users or bool(role and role in allowed_roles)
-        return False
+        """文档访问判断（统一委托 AuthorizationService）。"""
+        from app.services.authorization_service import AuthorizationContext, authorization_service
+
+        ctx = AuthorizationContext(
+            user_id=user_id,
+            system_role=role,
+            organization_id=organization_id,
+            department_id=department_id,
+            legal_role=role,
+        )
+        return authorization_service.can_access_document(db=db, ctx=ctx, document=document)
 
     def find_latest_version(
         self,
@@ -175,21 +184,19 @@ class DocumentGovernanceService:
         user: User,
         sensitivity_level: str | None = None,
     ) -> list[Document]:
-        query = db.query(Document)
+        from app.services.authorization_service import authorization_service
+
+        scope_filter = authorization_service.document_scope_filter(
+            db,
+            user_id=user.id,
+            organization_id=user.organization_id,
+            department_id=user.department_id,
+            role=user.role,
+        )
+        query = db.query(Document).filter(scope_filter)
         if sensitivity_level:
             query = query.filter(Document.sensitivity_level == sensitivity_level)
-        rows = query.order_by(Document.created_at.desc(), Document.id.desc()).all()
-        return [
-            row
-            for row in rows
-            if self.can_access_document(
-                document=row,
-                user_id=user.id,
-                role=user.role,
-                organization_id=user.organization_id,
-                department_id=user.department_id,
-            )
-        ]
+        return query.order_by(Document.created_at.desc(), Document.id.desc()).all()
 
     def list_accessible_document_ids(
         self,
@@ -200,18 +207,26 @@ class DocumentGovernanceService:
         organization_id: int | None = None,
         department_id: int | None = None,
     ) -> list[int]:
-        """返回当前用户在访问层可见的全部文档 ID（含共享文档），供 RAG 检索作授权上下文。"""
-        return [
-            doc.id
-            for doc in db.query(Document).order_by(Document.id.asc()).all()
-            if self.can_access_document(
-                document=doc,
-                user_id=user_id,
-                role=role,
-                organization_id=organization_id,
-                department_id=department_id,
-            )
-        ]
+        """返回当前用户在访问层可见的全部文档 ID（含共享文档），供 RAG 检索作授权上下文。
+
+        使用 SQL 过滤，不读全表。
+        """
+        from app.services.authorization_service import authorization_service
+
+        scope_filter = authorization_service.document_scope_filter(
+            db,
+            user_id=user_id,
+            organization_id=organization_id,
+            department_id=department_id,
+            role=role,
+        )
+        rows = (
+            db.query(Document.id)
+            .filter(scope_filter)
+            .order_by(Document.id.asc())
+            .all()
+        )
+        return [row[0] for row in rows]
 
     @staticmethod
     def _refresh_rag_metadata(document_id: int, *, knowledge_base_id: int) -> None:

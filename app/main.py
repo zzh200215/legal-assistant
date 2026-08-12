@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import httpx
@@ -8,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm.exc import StaleDataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import account_deletion_api, agent_api, analytics_api, api_key_api, auth_api, chat_api, connector_api, dashboard_api, document_api, document_conflict_api, email_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mailbox_api, mcp_api, meeting_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, schedule_api, subscription_api, task_api, workflow_api, ws_api
+from app.api import account_deletion_api, agent_api, analytics_api, api_key_api, auth_api, chat_api, dashboard_api, document_api, document_conflict_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_platform_api, legal_portal_api, mcp_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, subscription_api, task_api, ws_api
 from app.core.config import get_settings
 from app.core.api_response import (
     ApiResponseMiddleware,
@@ -18,13 +19,23 @@ from app.core.api_response import (
     validation_exception_handler,
 )
 from app.core.database import SessionLocal
+from app.core.model_gateway import model_gateway
 from app.core.oplog_middleware import OperationLogMiddleware
 from app.core.telemetry import init_telemetry
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    model_gateway.start()
+    yield
+    await model_gateway.close()
+
 
 app = FastAPI(
     title="律智检｜法律文书与合同审查智能体平台",
     description="法律检索、合同审查、文书草稿与律师审核工作台",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.include_router(auth_api.router, prefix="/api/auth", tags=["Auth"])
@@ -33,16 +44,10 @@ app.include_router(chat_api.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(memory_api.router, prefix="/api/memory", tags=["Conversation Memory"])
 app.include_router(document_api.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(legal_api.router, prefix="/api/legal", tags=["Legal Workspace"])
-app.include_router(meeting_api.router, prefix="/api/meetings", tags=["Meetings"])
-app.include_router(email_api.router, prefix="/api/emails", tags=["Emails"])
-app.include_router(mailbox_api.router, prefix="/api/mailbox", tags=["Mailbox"])
 app.include_router(outbound_api.router, prefix="/api/outbound", tags=["Outbound Email"])
-app.include_router(connector_api.router, prefix="/api/connectors", tags=["Connectors"])
 app.include_router(task_api.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(pilot_feedback_api.router, prefix="/api/pilot", tags=["Pilot Feedback"])
 app.include_router(document_conflict_api.router, prefix="/api/document-conflicts", tags=["Document Conflicts"])
-app.include_router(workflow_api.router, prefix="/api/workflows", tags=["Workflows"])
-app.include_router(schedule_api.router, prefix="/api/schedules", tags=["Schedules"])
 app.include_router(agent_api.router, prefix="/api/agent", tags=["Agent"])
 app.include_router(mcp_api.router, prefix="/api/mcp", tags=["MCP"])
 app.include_router(org_api.router, prefix="/api/org", tags=["Org"])

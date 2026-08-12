@@ -1,14 +1,25 @@
 import asyncio
 import json
 import time
-import uuid
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
+from app.core.circuit_breaker import build_circuit_breaker, counts_toward_breaker
 from app.core.config import get_settings
 from app.core.llm_provider_adapter import provider_adapter
+from app.core.model_policy import (
+    ModelError,
+    ModelErrorKind,
+    ModelRequest,
+    TaskPolicy,
+    classify_error,
+    get_task_policy,
+    new_trace_id,
+)
 from app.core.observability_sanitizer import sanitize_observability_error_message, sanitize_observability_excerpt
+from app.core.structured_output import build_repair_prompt, normalize_schema, parse_structured_output
 from app.services.llm_governance_service import llm_governance_service
 
 settings = get_settings()
@@ -60,7 +71,13 @@ ACTION_PROMPT_TEMPLATE_MAP = {
 }
 
 
-class LLMClient:
+class ModelGateway:
+    """供应商无关的模型网关：chat/generate/vision/embedding 的唯一平台入口。
+
+    路由、重试、fallback、治理、观测均在此收敛。底层按供应商目标隔离复用
+    httpx.AsyncClient 连接池（_get_client/close）。LLMClient 为其兼容别名。
+    """
+
     def __init__(self):
         self.provider = settings.LLM_PROVIDER
         self.base_url = self._resolve_base_url(provider=self.provider).rstrip("/")
@@ -76,6 +93,42 @@ class LLMClient:
             api_key=self.api_key,
         )
         self.small_target = self._build_small_target()
+        # 连接池：key=(provider, base_url, api_key, timeout)，按供应商目标隔离复用。
+        self._clients: dict[tuple[str, str, str, float], httpx.AsyncClient] = {}
+        self._started = False
+        self.circuit_breaker = build_circuit_breaker()
+
+    def start(self) -> None:
+        """幂等启动：预建主/小模型连接池客户端；真实连接在首次请求时建立。"""
+        self._get_client(self.primary_target, timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS)
+        if self.small_target is not None:
+            self._get_client(self.small_target, timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS)
+        self._started = True
+
+    async def close(self) -> None:
+        """关闭全部供应商连接池客户端并清空（幂等；可安全重复调用/测试内调用）。"""
+        clients, self._clients = list(self._clients.values()), {}
+        self._started = False
+        for client in clients:
+            aclose = getattr(client, "aclose", None)
+            if aclose is None:
+                continue
+            try:
+                await aclose()
+            except Exception:
+                pass
+
+    async def shutdown(self) -> None:
+        """lifespan 关闭入口；等价于 close。"""
+        await self.close()
+
+    def _get_client(self, target: _ModelTarget, *, timeout: float) -> httpx.AsyncClient:
+        key = (target.provider, target.base_url, target.api_key, timeout)
+        client = self._clients.get(key)
+        if client is None:
+            client = httpx.AsyncClient(timeout=timeout)
+            self._clients[key] = client
+        return client
 
     def _resolve_base_url(self, *, provider: str, configured_url: str = "") -> str:
         if configured_url:
@@ -111,15 +164,15 @@ class LLMClient:
     def _embedding_url(self) -> str:
         return provider_adapter(self.provider).embedding_url(self.base_url)
 
-    def _build_chat_payload(self, messages: list[dict], stream: bool, temperature: float, target: _ModelTarget | None = None) -> dict:
+    def _build_chat_payload(self, messages: list[dict], stream: bool, temperature: float, target: _ModelTarget | None = None, max_tokens: int | None = None) -> dict:
         target = target or self.primary_target
         return provider_adapter(target.provider).chat_payload(
-            target.model, self._normalize_messages(messages), stream, temperature
+            target.model, self._normalize_messages(messages), stream, temperature, max_tokens=max_tokens
         )
 
-    def _build_generate_payload(self, prompt: str, temperature: float, target: _ModelTarget | None = None) -> dict:
+    def _build_generate_payload(self, prompt: str, temperature: float, target: _ModelTarget | None = None, max_tokens: int | None = None) -> dict:
         target = target or self.primary_target
-        return provider_adapter(target.provider).generate_payload(target.model, prompt, temperature)
+        return provider_adapter(target.provider).generate_payload(target.model, prompt, temperature, max_tokens=max_tokens)
 
     def _build_multimodal_generate_payload(
         self,
@@ -127,16 +180,20 @@ class LLMClient:
         prompt: str,
         image_urls: list[str],
         temperature: float,
+        max_tokens: int | None = None,
     ) -> dict:
         content = [{"type": "text", "text": prompt}]
         for image_url in image_urls:
             content.append({"type": "image_url", "image_url": {"url": image_url}})
-        return {
+        payload = {
             "model": self.vision_model,
             "messages": [{"role": "user", "content": content}],
             "stream": False,
             "temperature": temperature,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        return payload
 
     def _build_embed_payload(self, texts: list[str]) -> dict:
         return provider_adapter(self.provider).embedding_payload(self.embedding_model, texts)
@@ -170,6 +227,53 @@ class LLMClient:
                 normalized.append({"role": role, "content": str(content)})
         return normalized
 
+    @staticmethod
+    def _resolve_temperature(policy: TaskPolicy, requested: float | None) -> float:
+        if requested is not None:
+            return requested
+        if policy.temperature is not None:
+            return policy.temperature
+        return 0.7
+
+    def _policy_timeout(self, policy: TaskPolicy) -> float:
+        return policy.timeout_seconds if policy.timeout_seconds is not None else settings.LLM_REQUEST_TIMEOUT_SECONDS
+
+    def _policy_retries(self, policy: TaskPolicy, target: _ModelTarget) -> int:
+        if target.role == "primary":
+            return policy.max_retries if policy.max_retries is not None else settings.LLM_PRIMARY_REQUEST_RETRIES
+        return policy.fallback_max_retries if policy.fallback_max_retries is not None else settings.LLM_FALLBACK_REQUEST_RETRIES
+
+    def _build_request(
+        self,
+        *,
+        request_type: str,
+        action: str,
+        user_id: int | None,
+        prompt_template: str | None,
+        prompt_version: int | None,
+        trace_id: str | None,
+        temperature: float | None = None,
+        messages: list[dict] | None = None,
+        prompt: str | None = None,
+        image_urls: list[str] | None = None,
+        texts: list[str] | None = None,
+    ) -> ModelRequest:
+        request_id = trace_id or new_trace_id()
+        return ModelRequest(
+            request_type=request_type,
+            messages=messages,
+            prompt=prompt,
+            image_urls=image_urls,
+            texts=texts,
+            temperature=temperature,
+            action=action,
+            user_id=user_id,
+            prompt_template=prompt_template,
+            prompt_version=prompt_version,
+            trace_id=request_id,
+            request_id=request_id,
+        )
+
     async def _post_json_with_retry(
         self,
         client: httpx.AsyncClient,
@@ -185,14 +289,9 @@ class LLMClient:
                 resp = await client.post(url, json=payload, headers=headers)
                 resp.raise_for_status()
                 return resp.json()
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ProxyError) as exc:
-                last_error = exc
-                if attempt == retries:
-                    break
-                await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
-            except httpx.HTTPStatusError as exc:
-                # 参数、鉴权和内容审核等 4xx 不应换模型重试；5xx 视为服务端不可用。
-                if exc.response is None or exc.response.status_code < 500:
+            except Exception as exc:
+                # 只对明确瞬态错误（超时/传输/5xx/429）重试；参数/鉴权/权限/内容拦截等直接抛出。
+                if not classify_error(exc).retryable:
                     raise
                 last_error = exc
                 if attempt == retries:
@@ -314,14 +413,16 @@ class LLMClient:
     def _messages_to_text(messages: list[dict]) -> str:
         return "\n".join(str(item.get("content") or "") for item in messages if isinstance(item, dict))
 
-    def _select_text_target(self, text: str, action: str) -> _ModelTarget:
+    def _select_text_target(self, text: str, action: str, policy: TaskPolicy | None = None) -> _ModelTarget:
         """Route short, low-risk text requests to the configured small model."""
         if not self.small_target:
             return self.primary_target
+        policy = policy or get_task_policy(action)
         normalized_action = (action or "").lower()
         normalized_text = text or ""
         if (
-            normalized_action in _PRIMARY_ACTIONS
+            policy.model_tier == "primary"
+            or normalized_action in _PRIMARY_ACTIONS
             or normalized_action.startswith(_PRIMARY_ACTION_PREFIXES)
             or len(normalized_text) > settings.LLM_SIMPLE_REQUEST_MAX_CHARS
             or any(marker in normalized_text for marker in _COMPLEX_REQUEST_MARKERS)
@@ -333,25 +434,36 @@ class LLMClient:
     def _same_target(left: _ModelTarget, right: _ModelTarget) -> bool:
         return (left.model, left.provider, left.base_url, left.api_key) == (right.model, right.provider, right.base_url, right.api_key)
 
-    def _candidate_targets(self, text: str, action: str) -> list[_ModelTarget]:
-        primary_choice = self._select_text_target(text, action)
+    def _circuit_key(self, target: _ModelTarget, task: str) -> str:
+        return self.circuit_breaker.key(provider=target.provider, base_url=target.base_url, task=task)
+
+    def _circuit_open_error(self, *, task: str, request_id: str, trace_id: str) -> ModelError:
+        return ModelError(
+            kind=ModelErrorKind.CIRCUIT_OPEN,
+            message=f"没有可用的模型目标（{task} 能力已熔断）",
+            request_id=request_id,
+            trace_id=trace_id,
+        )
+
+    def _filter_available_targets(self, targets: list[_ModelTarget], task: str) -> list[_ModelTarget]:
+        return [target for target in targets if self.circuit_breaker.can_attempt(self._circuit_key(target, task))]
+
+    def _candidate_targets(self, text: str, action: str, policy: TaskPolicy | None = None) -> list[_ModelTarget]:
+        policy = policy or get_task_policy(action)
+        primary_choice = self._select_text_target(text, action, policy=policy)
         targets = [primary_choice]
-        if not settings.LLM_MODEL_FALLBACK_ENABLED or not self.small_target:
-            return targets
+        if not policy.fallback_enabled or not settings.LLM_MODEL_FALLBACK_ENABLED or not self.small_target:
+            return self._filter_available_targets(targets, policy.task)
         alternate = self.small_target if primary_choice.role == "primary" else self.primary_target
         if primary_choice.role == "small" and not settings.LLM_SMALL_MODEL_FALLBACK_TO_PRIMARY:
-            return targets
+            return self._filter_available_targets(targets, policy.task)
         if not self._same_target(primary_choice, alternate):
             targets.append(alternate)
-        return targets
+        return self._filter_available_targets(targets, policy.task)
 
     @staticmethod
     def _is_provider_failure(exc: Exception) -> bool:
-        if isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ProxyError)):
-            return True
-        if isinstance(exc, httpx.HTTPStatusError):
-            return bool(exc.response and exc.response.status_code >= 500)
-        return False
+        return classify_error(exc).retryable
 
     def _record_target_usage(
         self,
@@ -371,67 +483,71 @@ class LLMClient:
         self,
         *,
         target: _ModelTarget,
-        request_type: str,
-        messages: list[dict] | None = None,
-        prompt: str | None = None,
-        temperature: float,
-        action: str,
-        user_id: int | None,
-        prompt_template: str | None,
-        prompt_version: int | None,
-        request_id: str | None = None,
-        routing_stage: str | None = None,
+        request: ModelRequest,
+        policy: TaskPolicy,
+        routing_stage: str,
     ) -> str:
-        is_chat = request_type == "chat"
-        request_excerpt = json.dumps(messages, ensure_ascii=False) if is_chat else str(prompt or "")
+        is_chat = request.request_type == "chat"
+        temperature = self._resolve_temperature(policy, request.temperature)
+        max_tokens = policy.max_tokens
+        request_excerpt = json.dumps(request.messages, ensure_ascii=False) if is_chat else str(request.prompt or "")
         url = self._chat_url(target) if is_chat else self._generate_url(target)
         payload = (
-            self._build_chat_payload(messages or [], stream=False, temperature=temperature, target=target)
+            self._build_chat_payload(request.messages or [], stream=False, temperature=temperature, target=target, max_tokens=max_tokens)
             if is_chat
-            else self._build_generate_payload(prompt or "", temperature=temperature, target=target)
+            else self._build_generate_payload(request.prompt or "", temperature=temperature, target=target, max_tokens=max_tokens)
         )
         start = time.time()
-        retries = settings.LLM_PRIMARY_REQUEST_RETRIES if target.role == "primary" else settings.LLM_FALLBACK_REQUEST_RETRIES
+        retries = self._policy_retries(policy, target)
+        circuit_key = self._circuit_key(target, policy.task)
         try:
-            async with httpx.AsyncClient(timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS) as client:
-                data = await self._post_json_with_retry(
-                    client, url=url, payload=payload, headers=self._build_headers(target), retries=retries,
-                )
+            client = self._get_client(target, timeout=self._policy_timeout(policy))
+            data = await self._post_json_with_retry(
+                client, url=url, payload=payload, headers=self._build_headers(target), retries=retries,
+            )
         except Exception as exc:
+            self.circuit_breaker.record_failure(
+                circuit_key, counts=counts_toward_breaker(classify_error(exc).kind),
+            )
             self._record_target_usage(
-                {}, target, action, int((time.time() - start) * 1000), user_id,
+                {}, target, request.action, int((time.time() - start) * 1000), request.user_id,
                 request_excerpt=request_excerpt, error_message=str(exc), status="error",
-                prompt_template=prompt_template, prompt_version=prompt_version,
-                request_id=request_id, routing_role=target.role, routing_stage=routing_stage,
+                prompt_template=request.prompt_template, prompt_version=request.prompt_version,
+                request_id=request.request_id, routing_role=target.role, routing_stage=routing_stage,
             )
             raise
+        self.circuit_breaker.record_success(circuit_key)
         response_excerpt = (
             self._extract_chat_content(data, provider=target.provider)
             if is_chat else self._extract_generate_content(data, provider=target.provider)
         )
         self._record_target_usage(
-            data, target, action, int((time.time() - start) * 1000), user_id,
+            data, target, request.action, int((time.time() - start) * 1000), request.user_id,
             request_excerpt=request_excerpt, response_excerpt=response_excerpt,
-            prompt_template=prompt_template, prompt_version=prompt_version,
-            request_id=request_id, routing_role=target.role, routing_stage=routing_stage,
+            prompt_template=request.prompt_template, prompt_version=request.prompt_version,
+            request_id=request.request_id, routing_role=target.role, routing_stage=routing_stage,
         )
         return response_excerpt
 
-    async def _request_text_with_routing(self, *, source_text: str, **kwargs) -> str:
-        targets = self._candidate_targets(source_text, str(kwargs.get("action") or ""))
-        request_id = str(uuid.uuid4())
+    async def _request_text_with_routing(self, *, source_text: str, request: ModelRequest) -> str:
+        policy = get_task_policy(request.action)
+        targets = self._candidate_targets(source_text, request.action, policy=policy)
+        if not targets:
+            raise self._circuit_open_error(
+                task=policy.task, request_id=request.request_id, trace_id=request.trace_id,
+            )
         last_error: Exception | None = None
         for index, target in enumerate(targets):
             try:
                 return await self._request_text_once(
                     target=target,
-                    request_id=request_id,
+                    request=request,
+                    policy=policy,
                     routing_stage="initial" if index == 0 else "fallback",
-                    **kwargs,
                 )
             except Exception as exc:
                 last_error = exc
-                if index == len(targets) - 1 or not self._is_provider_failure(exc):
+                if index == len(targets) - 1 or not classify_error(exc).retryable:
                     raise
         raise last_error or RuntimeError("No LLM target is available")
 
@@ -439,61 +555,133 @@ class LLMClient:
         self,
         messages: list[dict],
         stream: bool = False,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         action: str = "chat",
         user_id: int | None = None,
         prompt_template: str | None = None,
         prompt_version: int | None = None,
+        trace_id: str | None = None,
     ) -> str:
         llm_governance_service.enforce_chat_request(messages=messages, user_id=user_id, action=action)
-        return await self._request_text_with_routing(
-            source_text=self._messages_to_text(messages),
-            request_type="chat",
-            messages=messages,
-            temperature=temperature,
-            action=action,
-            user_id=user_id,
-            prompt_template=prompt_template,
-            prompt_version=prompt_version,
+        request = self._build_request(
+            request_type="chat", messages=messages, temperature=temperature,
+            action=action, user_id=user_id, prompt_template=prompt_template,
+            prompt_version=prompt_version, trace_id=trace_id,
         )
+        return await self._request_text_with_routing(source_text=self._messages_to_text(messages), request=request)
 
     async def generate(
         self,
         prompt: str,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         action: str = "generate",
         user_id: int | None = None,
         prompt_template: str | None = None,
         prompt_version: int | None = None,
+        trace_id: str | None = None,
     ) -> str:
         llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
-        return await self._request_text_with_routing(
-            source_text=prompt,
-            request_type="generate",
-            prompt=prompt,
-            temperature=temperature,
-            action=action,
-            user_id=user_id,
-            prompt_template=prompt_template,
-            prompt_version=prompt_version,
+        request = self._build_request(
+            request_type="generate", prompt=prompt, temperature=temperature,
+            action=action, user_id=user_id, prompt_template=prompt_template,
+            prompt_version=prompt_version, trace_id=trace_id,
+        )
+        return await self._request_text_with_routing(source_text=prompt, request=request)
+
+    async def structured_generate(
+        self,
+        prompt: str,
+        *,
+        schema: dict | type,
+        temperature: float | None = None,
+        action: str = "generate",
+        user_id: int | None = None,
+        prompt_template: str | None = None,
+        prompt_version: int | None = None,
+        trace_id: str | None = None,
+    ) -> Any:
+        """供应商无关的结构化输出：按 JSON Schema/Pydantic 模型校验后返回 JSON 值。
+
+        流程：一次初始请求 → 无模型修复（去代码块/前后噪声）→ 至多
+        ``structured_repair_max_attempts`` 次受 TaskPolicy 控制的修复请求
+        （携带原始 schema，同样受权限/预算/限流约束）。最终仍失败时抛出
+        ``ModelError``，kind 为 invalid_response / schema_validation_failed /
+        repair_failed（均不可重试）。修复阶段的供应商/传输层错误原样向上抛，
+        与 ``generate`` 行为一致。
+        """
+        spec = normalize_schema(schema)
+        llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
+        policy = get_task_policy(action)
+        request = self._build_request(
+            request_type="generate", prompt=prompt, temperature=temperature,
+            action=action, user_id=user_id, prompt_template=prompt_template,
+            prompt_version=prompt_version, trace_id=trace_id,
+        )
+        raw = await self._request_text_with_routing(source_text=prompt, request=request)
+        data, failure_kind = parse_structured_output(raw, spec)
+        if data is not None:
+            return data
+
+        if policy.structured_repair_enabled:
+            candidate_raw = raw
+            for _ in range(max(1, policy.structured_repair_max_attempts)):
+                repair_prompt = build_repair_prompt(spec.json_schema, candidate_raw)
+                # 修复请求同样受权限/预算/限流约束（同一 action/user），不绕过治理。
+                llm_governance_service.enforce_generate_request(prompt=repair_prompt, user_id=user_id, action=action)
+                repair_request = self._build_request(
+                    request_type="generate", prompt=repair_prompt, temperature=0.0,
+                    action=action, user_id=user_id, prompt_template=None, prompt_version=None,
+                    trace_id=request.trace_id,
+                )
+                candidate_raw = await self._request_text_with_routing(source_text=repair_prompt, request=repair_request)
+                repaired_data, sub_kind = parse_structured_output(candidate_raw, spec)
+                if repaired_data is not None:
+                    return repaired_data
+            last_kind = sub_kind or failure_kind or ModelErrorKind.INVALID_RESPONSE
+            raise ModelError(
+                kind=ModelErrorKind.REPAIR_FAILED,
+                message=f"结构化修复后仍无法得到符合 Schema 的输出（{last_kind.value}）",
+                request_id=request.request_id,
+                trace_id=request.trace_id,
+            )
+
+        raise ModelError(
+            kind=failure_kind or ModelErrorKind.INVALID_RESPONSE,
+            message="模型输出不符合结构化要求且修复未启用",
+            request_id=request.request_id,
+            trace_id=request.trace_id,
         )
 
     async def generate_with_images(
         self,
         prompt: str,
         image_urls: list[str],
-        temperature: float = 0.7,
+        temperature: float | None = None,
         action: str = "generate_with_images",
         user_id: int | None = None,
         prompt_template: str | None = None,
         prompt_version: int | None = None,
+        trace_id: str | None = None,
     ) -> str:
         llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
+        policy = get_task_policy(action)
+        request = self._build_request(
+            request_type="vision", prompt=prompt, image_urls=image_urls, temperature=temperature,
+            action=action, user_id=user_id, prompt_template=prompt_template,
+            prompt_version=prompt_version, trace_id=trace_id,
+        )
+        resolved_temperature = self._resolve_temperature(policy, request.temperature)
+        circuit_key = self._circuit_key(self.primary_target, policy.task)
+        if not self.circuit_breaker.can_attempt(circuit_key):
+            raise self._circuit_open_error(
+                task=policy.task, request_id=request.request_id, trace_id=request.trace_id,
+            )
         url = self._generate_url()
         payload = self._build_multimodal_generate_payload(
             prompt=prompt,
             image_urls=image_urls,
-            temperature=temperature,
+            temperature=resolved_temperature,
+            max_tokens=policy.max_tokens,
         )
         headers = self._build_headers()
         start = time.time()
@@ -501,10 +689,14 @@ class LLMClient:
             {"prompt": prompt[:500], "image_count": len(image_urls)},
             ensure_ascii=False,
         )
+        retries = self._policy_retries(policy, self.primary_target)
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                data = await self._post_json_with_retry(client, url=url, payload=payload, headers=headers)
+            client = self._get_client(self.primary_target, timeout=self._policy_timeout(policy))
+            data = await self._post_json_with_retry(client, url=url, payload=payload, headers=headers, retries=retries)
         except Exception as exc:
+            self.circuit_breaker.record_failure(
+                circuit_key, counts=counts_toward_breaker(classify_error(exc).kind),
+            )
             duration_ms = int((time.time() - start) * 1000)
             self._record_usage(
                 {},
@@ -517,8 +709,10 @@ class LLMClient:
                 status="error",
                 prompt_template=prompt_template,
                 prompt_version=prompt_version,
+                request_id=request.request_id,
             )
             raise
+        self.circuit_breaker.record_success(circuit_key)
         duration_ms = int((time.time() - start) * 1000)
         response_excerpt = self._extract_generate_content(data)
         self._record_usage(
@@ -531,80 +725,94 @@ class LLMClient:
             response_excerpt=response_excerpt,
             prompt_template=prompt_template,
             prompt_version=prompt_version,
+            request_id=request.request_id,
         )
         return response_excerpt
 
     async def chat_stream(
         self,
         messages: list[dict],
-        temperature: float = 0.7,
+        temperature: float | None = None,
         action: str = "chat_stream",
         user_id: int | None = None,
         prompt_template: str | None = None,
         prompt_version: int | None = None,
+        trace_id: str | None = None,
     ):
         llm_governance_service.enforce_chat_request(messages=messages, user_id=user_id, action=action)
+        policy = get_task_policy(action)
+        request = self._build_request(
+            request_type="chat_stream", messages=messages, temperature=temperature,
+            action=action, user_id=user_id, prompt_template=prompt_template,
+            prompt_version=prompt_version, trace_id=trace_id,
+        )
+        resolved_temperature = self._resolve_temperature(policy, request.temperature)
+        max_tokens = policy.max_tokens
         request_excerpt = json.dumps(messages, ensure_ascii=False)
-        targets = self._candidate_targets(self._messages_to_text(messages), action)
-        request_id = str(uuid.uuid4())
+        targets = self._candidate_targets(self._messages_to_text(messages), action, policy=policy)
+        if not targets:
+            raise self._circuit_open_error(
+                task=policy.task, request_id=request.request_id, trace_id=request.trace_id,
+            )
 
         async def stream_from_target(target: _ModelTarget, routing_stage: str):
             start = time.time()
             full_response = ""
             last_data: dict = {}
-            retries = settings.LLM_PRIMARY_REQUEST_RETRIES if target.role == "primary" else settings.LLM_FALLBACK_REQUEST_RETRIES
+            retries = self._policy_retries(policy, target)
+            circuit_key = self._circuit_key(target, policy.task)
             try:
-                async with httpx.AsyncClient(timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS) as client:
-                    # Stream connection failures use the same bounded retry policy as normal requests.
-                    for attempt in range(1, retries + 1):
-                        try:
-                            async with client.stream(
-                                "POST",
-                                self._chat_url(target),
-                                json=self._build_chat_payload(messages, stream=True, temperature=temperature, target=target),
-                                headers=self._build_headers(target),
-                            ) as resp:
-                                resp.raise_for_status()
-                                async for line in resp.aiter_lines():
-                                    if not line.strip():
+                client = self._get_client(target, timeout=self._policy_timeout(policy))
+                # Stream connection failures use the same bounded retry policy as normal requests.
+                for attempt in range(1, retries + 1):
+                    try:
+                        async with client.stream(
+                            "POST",
+                            self._chat_url(target),
+                            json=self._build_chat_payload(messages, stream=True, temperature=resolved_temperature, target=target, max_tokens=max_tokens),
+                            headers=self._build_headers(target),
+                        ) as resp:
+                            resp.raise_for_status()
+                            async for line in resp.aiter_lines():
+                                if not line.strip():
+                                    continue
+                                adapter = provider_adapter(target.provider)
+                                if target.provider == "ollama":
+                                    payload_text = line
+                                else:
+                                    if not line.startswith("data:"):
                                         continue
-                                    adapter = provider_adapter(target.provider)
-                                    if target.provider == "ollama":
-                                        payload_text = line
-                                    else:
-                                        if not line.startswith("data:"):
-                                            continue
-                                        payload_text = line[5:].strip()
-                                        if payload_text == "[DONE]":
-                                            break
-                                    last_data = json.loads(payload_text)
-                                    content, done = adapter.extract_stream_chunk(last_data)
-                                    if content:
-                                        full_response += content
-                                        yield content
-                                    if done:
+                                    payload_text = line[5:].strip()
+                                    if payload_text == "[DONE]":
                                         break
-                                self._record_target_usage(
-                                    last_data, target, action, int((time.time() - start) * 1000), user_id,
-                                    request_excerpt=request_excerpt, response_excerpt=full_response,
-                                    prompt_template=prompt_template, prompt_version=prompt_version,
-                                    request_id=request_id, routing_role=target.role, routing_stage=routing_stage,
-                                )
-                                return
-                        except httpx.HTTPStatusError as exc:
-                            if exc.response is None or exc.response.status_code < 500 or attempt == retries:
-                                raise
-                            await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
-                        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError, httpx.ProxyError):
-                            if attempt == retries:
-                                raise
-                            await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+                                last_data = json.loads(payload_text)
+                                content, done = adapter.extract_stream_chunk(last_data)
+                                if content:
+                                    full_response += content
+                                    yield content
+                                if done:
+                                    break
+                            self.circuit_breaker.record_success(circuit_key)
+                            self._record_target_usage(
+                                last_data, target, action, int((time.time() - start) * 1000), user_id,
+                                request_excerpt=request_excerpt, response_excerpt=full_response,
+                                prompt_template=prompt_template, prompt_version=prompt_version,
+                                request_id=request.request_id, routing_role=target.role, routing_stage=routing_stage,
+                            )
+                            return
+                    except Exception as exc:
+                        if not classify_error(exc).retryable or attempt == retries:
+                            raise
+                        await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
             except Exception as exc:
+                self.circuit_breaker.record_failure(
+                    circuit_key, counts=counts_toward_breaker(classify_error(exc).kind),
+                )
                 self._record_target_usage(
                     {}, target, action, int((time.time() - start) * 1000), user_id,
                     request_excerpt=request_excerpt, response_excerpt=full_response, error_message=str(exc), status="error",
                     prompt_template=prompt_template, prompt_version=prompt_version,
-                    request_id=request_id, routing_role=target.role, routing_stage=routing_stage,
+                    request_id=request.request_id, routing_role=target.role, routing_stage=routing_stage,
                 )
                 raise
 
@@ -617,7 +825,7 @@ class LLMClient:
                 return
             except Exception as exc:
                 # 已输出内容后不能无缝切换模型，否则会造成重复或前后文不一致。
-                if emitted or index == len(targets) - 1 or not self._is_provider_failure(exc):
+                if emitted or index == len(targets) - 1 or not classify_error(exc).retryable:
                     raise
 
     async def embed(
@@ -626,10 +834,21 @@ class LLMClient:
         *,
         user_id: int | None = None,
         action: str = "embedding",
+        trace_id: str | None = None,
     ) -> list[list[float]]:
         if not texts:
             return []
         llm_governance_service.enforce_embedding_request(texts=texts, user_id=user_id, action=action)
+        policy = get_task_policy(action)
+        request = self._build_request(
+            request_type="embedding", texts=texts, action=action, user_id=user_id,
+            prompt_template=None, prompt_version=None, trace_id=trace_id,
+        )
+        circuit_key = self._circuit_key(self.primary_target, policy.task)
+        if not self.circuit_breaker.can_attempt(circuit_key):
+            raise self._circuit_open_error(
+                task=policy.task, request_id=request.request_id, trace_id=request.trace_id,
+            )
 
         url = self._embedding_url()
         headers = self._build_headers()
@@ -639,38 +858,48 @@ class LLMClient:
             batches = self._chunk_texts(texts, OPENAI_COMPATIBLE_EMBED_BATCH_SIZE)
 
         embeddings: list[list[float]] = []
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            for batch in batches:
-                payload = self._build_embed_payload(batch)
-                start = time.time()
-                request_excerpt = json.dumps({"input_count": len(batch), "sample": batch[:2]}, ensure_ascii=False)
-                try:
-                    data = await self._post_json_with_retry(client, url=url, payload=payload, headers=headers)
-                except Exception as exc:
-                    duration_ms = int((time.time() - start) * 1000)
-                    self._record_usage(
-                        {},
-                        self.embedding_model,
-                        "embedding",
-                        duration_ms,
-                        request_excerpt=request_excerpt,
-                        error_message=str(exc),
-                        status="error",
-                    )
-                    raise
-
+        client = self._get_client(self.primary_target, timeout=self._policy_timeout(policy))
+        retries = self._policy_retries(policy, self.primary_target)
+        for batch in batches:
+            payload = self._build_embed_payload(batch)
+            start = time.time()
+            request_excerpt = json.dumps({"input_count": len(batch), "sample": batch[:2]}, ensure_ascii=False)
+            try:
+                data = await self._post_json_with_retry(client, url=url, payload=payload, headers=headers, retries=retries)
+            except Exception as exc:
+                self.circuit_breaker.record_failure(
+                    circuit_key, counts=counts_toward_breaker(classify_error(exc).kind),
+                )
                 duration_ms = int((time.time() - start) * 1000)
-                response_excerpt = f"embedding_count={len(batch)}"
                 self._record_usage(
-                    data,
+                    {},
                     self.embedding_model,
                     "embedding",
                     duration_ms,
                     request_excerpt=request_excerpt,
-                    response_excerpt=response_excerpt,
+                    error_message=str(exc),
+                    status="error",
+                    request_id=request.request_id,
                 )
-                embeddings.extend(adapter.extract_embeddings(data))
+                raise
+            self.circuit_breaker.record_success(circuit_key)
+
+            duration_ms = int((time.time() - start) * 1000)
+            response_excerpt = f"embedding_count={len(batch)}"
+            self._record_usage(
+                data,
+                self.embedding_model,
+                "embedding",
+                duration_ms,
+                request_excerpt=request_excerpt,
+                response_excerpt=response_excerpt,
+                request_id=request.request_id,
+            )
+            embeddings.extend(adapter.extract_embeddings(data))
         return embeddings
 
 
-llm_client = LLMClient()
+model_gateway = ModelGateway()
+# 兼容别名：既有业务对 LLMClient / llm_client 的引用保持不变。
+LLMClient = ModelGateway
+llm_client = model_gateway

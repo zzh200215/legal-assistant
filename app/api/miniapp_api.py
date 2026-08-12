@@ -101,9 +101,11 @@ def miniapp_login(
         db.commit()
         db.refresh(user)
 
-    token = create_access_token({"sub": user.id, "role": user.role})
+    from app.services.auth_token_service import auth_token_service
+    session = auth_token_service.issue_session(db, user)
     return {
-        "access_token": token,
+        "access_token": session["access_token"],
+        "refresh_token": session["refresh_token"],
         "token_type": "bearer",
         "user_id": user.id,
         "nickname": wx_user.nickname,

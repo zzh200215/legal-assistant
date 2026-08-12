@@ -1,9 +1,8 @@
 from app.models.org import Department, Organization
-from app.models.connector import ConnectorOAuthState, ConnectorSyncJob, ExternalConnector, MailboxMessage
+from app.models.connector import ExternalConnector
 from app.models.user import User, UserRole, UserStatus
 from app.models.auth_log import LoginLog, AdminAuditLog
 from app.models.document import Document, DocumentAccessRule, DocumentAssistantArtifact, DocumentAssistantRevision, DocumentChunk, DocumentConflictCase, DocumentParseJob, DocumentQARecord, KnowledgeBase
-from app.models.meeting import Meeting, MeetingSummary
 from app.models.task import Task, TaskComment, TaskLog
 from app.models.email import EmailDraft, EmailSendRequest, OutboundEmailPolicy
 from app.models.chat import ChatSession, ChatMessage, ChatSessionMemory, UserPreferenceMemory
@@ -11,7 +10,6 @@ from app.models.calendar import CalendarSuggestion
 from app.models.agent import AgentApprovalRequest, AgentRun, ToolCallLog
 from app.models.prompt import PromptTemplate, PromptTemplateVersion
 from app.models.operation_log import OperationLog
-from app.models.schedule import ScheduledWorkflow, WorkflowExecution
 from app.models.token_usage import TokenUsage
 from app.models.feedback import ExitSurvey, NpsResponse
 from app.models.platform_payment import PlatformPayment
@@ -44,6 +42,10 @@ from app.models.api_key import APIKey
 from app.models.idempotency import IdempotencyKey
 from app.models.archive import DatabaseArchiveRun
 from app.models.subscription import SubscriptionPlan, UserSubscription, QuotaUsage
+from app.models.security_auth import (
+    AuthorizationSnapshot, AuthDevice, MFACredential, MFAChallenge, MFARecoveryCode,
+    RefreshToken, RevokedToken,
+)
 
 __all__ = [
     "User",
@@ -54,9 +56,6 @@ __all__ = [
     "Organization",
     "Department",
     "ExternalConnector",
-    "ConnectorOAuthState",
-    "ConnectorSyncJob",
-    "MailboxMessage",
     "Document",
     "DocumentAccessRule",
     "DocumentAssistantArtifact",
@@ -66,8 +65,6 @@ __all__ = [
     "DocumentParseJob",
     "DocumentQARecord",
     "KnowledgeBase",
-    "Meeting",
-    "MeetingSummary",
     "Task",
     "TaskComment",
     "TaskLog",
@@ -85,8 +82,6 @@ __all__ = [
     "PromptTemplate",
     "PromptTemplateVersion",
     "OperationLog",
-    "ScheduledWorkflow",
-    "WorkflowExecution",
     "TokenUsage",
     "LLMCallLog",
     "LegalSource",
@@ -136,4 +131,11 @@ __all__ = [
     "APIKey",
     "IdempotencyKey",
     "DatabaseArchiveRun",
+    "RevokedToken",
+    "RefreshToken",
+    "AuthDevice",
+    "MFACredential",
+    "MFAChallenge",
+    "MFARecoveryCode",
+    "AuthorizationSnapshot",
 ]

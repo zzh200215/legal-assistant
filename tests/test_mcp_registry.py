@@ -105,14 +105,14 @@ class MCPRegistryTests(unittest.IsolatedAsyncioTestCase):
     def test_list_tools_for_returns_stable_sorted_order(self):
         registry = MCPRegistry()
         fake_tools = {
+            "task_create_tool": FakeTool("task_create_tool", "创建任务"),
             "task_query_tool": FakeTool("task_query_tool", "查询任务"),
-            "email_writer_tool": FakeTool("email_writer_tool", "写邮件"),
         }
 
         with patch.dict("app.mcp.registry._TOOL_INSTANCES", fake_tools, clear=True):
-            tools = registry.list_tools_for("task_email_agent")
+            tools = registry.list_tools_for("workflow_agent")
 
-        self.assertEqual([item["name"] for item in tools], ["email_writer_tool", "task_query_tool"])
+        self.assertEqual([item["name"] for item in tools], ["task_create_tool", "task_query_tool"])
 
     def test_document_agent_can_discover_cross_document_conflict_tool(self):
         tool_names = [item["name"] for item in mcp_registry.list_tools_for("document_agent")]

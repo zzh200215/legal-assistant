@@ -69,9 +69,9 @@ TOOL_DESCRIPTIONS = build_tool_descriptions()
 SUB_AGENT_DESCRIPTIONS = _build_sub_agent_descriptions()
 
 PRIORITY_FLOWS = (
-    "- 总结会议并创建任务：meeting_summary_tool -> meeting_action_tool -> finish\n"
-    "- 查询未完成任务并生成邮件：task_query_tool(status=todo 或 in_progress) -> email_writer_tool -> finish\n"
-    "- 总结文档并提取风险：document_summary_tool -> document_risk_tool -> finish"
+    "- 总结文档并提取风险：document_summary_tool -> document_risk_tool -> finish\n"
+    "- 审查合同并生成文书草稿：legal_contract_review_tool -> legal_draft_tool -> finish\n"
+    "- 法律咨询并检索法源：legal_consultation_tool -> document_search_tool -> finish"
 )
 
 EVIDENCE_SOURCE_TOOLS = {
@@ -79,13 +79,10 @@ EVIDENCE_SOURCE_TOOLS = {
     "document_summary_tool",
     "document_risk_tool",
     "document_conflict_tool",
-    "meeting_summary_tool",
-    "meeting_query_tool",
 }
 
 EVIDENCE_GATED_WRITE_TOOLS = {
     "task_create_tool",
-    "meeting_action_tool",
 }
 
 # Only these tools may run in the concurrent fan-out. The list intentionally
@@ -95,15 +92,13 @@ PARALLEL_READ_ONLY_TOOLS = {
     "document_summary_tool",
     "document_risk_tool",
     "document_conflict_tool",
-    "meeting_query_tool",
 }
 PARALLEL_READ_ONLY_WORKER_PAIRS = {
-    frozenset({"knowledge_agent", "meeting_agent"}),
-    frozenset({"legal_compliance_agent", "meeting_agent"}),
+    frozenset({"knowledge_agent", "legal_compliance_agent"}),
 }
-PARALLEL_READ_ONLY_WORKERS = {"knowledge_agent", "meeting_agent", "legal_compliance_agent"}
+PARALLEL_READ_ONLY_WORKERS = {"knowledge_agent", "legal_compliance_agent"}
 
-SUPERVISOR_ARTIFACT_TYPES = {"document", "meeting", "task", "email"}
+SUPERVISOR_ARTIFACT_TYPES = {"document", "task"}
 SUPERVISOR_RISK_LEVELS = {"low", "medium", "high"}
 POLICY_GUARDRAIL_ROLE = "policy_guardrail"
 
@@ -169,14 +164,14 @@ def goal_execution_hints(goal: str) -> str:
     normalized = goal.lower()
     hints: list[str] = []
 
-    if ("会议" in goal or "meeting" in normalized) and ("任务" in goal or "待办" in goal or "action item" in normalized):
-        hints.append("建议优先使用 meeting_summary_tool，然后使用 meeting_action_tool，最后 finish。")
-
-    if ("任务" in goal or "task" in normalized) and ("邮件" in goal or "email" in normalized):
-        hints.append("建议先用 task_query_tool 查询 todo 或 in_progress 任务，再用 email_writer_tool 生成邮件。")
-
     if ("文档" in goal or "document" in normalized) and ("风险" in goal or "risk" in normalized):
         hints.append("建议先用 document_summary_tool，再用 document_risk_tool，最后 finish。")
+
+    if "合同" in goal or "contract" in normalized:
+        hints.append("合同类目标优先使用 legal_contract_review_tool，需要草稿时再用 legal_draft_tool。")
+
+    if "咨询" in goal or "法律" in goal or "legal" in normalized:
+        hints.append("法律咨询目标优先使用 legal_consultation_tool，并结合 document_search_tool 检索法源。")
 
     if ("冲突" in goal or "核对" in goal or "对比" in goal or "conflict" in normalized):
         hints.append("涉及多份文档的日期、金额或负责人冲突时，使用 document_conflict_tool，并依据返回的原文定位汇总结论。")

@@ -15,15 +15,16 @@ export const documentReferenceTagType = (value) => ({ risk: 'danger', todo: 'war
 
 const TOOL_LABELS = {
   finish: '完成', retry: '重试', document_search_tool: '文档检索', document_summary_tool: '文档总结',
-  document_risk_tool: '文档风险提取', meeting_summary_tool: '会议总结', meeting_query_tool: '会议查询',
-  meeting_action_tool: '会议行动项转任务', email_writer_tool: '文书生成', task_create_tool: '任务创建',
+  document_risk_tool: '文档风险提取', legal_consultation_tool: '法律咨询',
+  legal_contract_review_tool: '合同审查', legal_draft_tool: '文书草稿',
+  task_create_tool: '任务创建',
   task_query_tool: '任务查询', sql_query_tool: 'SQL 查询',
 }
 const WORKER_LABELS = {
-  knowledge_agent: '知识 Agent', meeting_agent: '会议 Agent', data_agent: '数据 Agent', project_agent: '项目管理专家',
-  legal_compliance_agent: '法务合规专家', communication_agent: '沟通写作专家', workflow_agent: '流程执行 Agent',
+  knowledge_agent: '知识 Agent',
+  legal_compliance_agent: '法务合规专家', workflow_agent: '流程执行 Agent',
   supervisor_agent: '法律总管 Agent', policy_guardrail: '策略校验节点', document_agent: '知识 Agent（历史名称）',
-  task_agent: '流程 Agent（历史名称）', task_email_agent: '流程 Agent（历史名称）', general_agent: '兼容 Agent',
+  task_agent: '流程 Agent（历史名称）',
   evidence_verifier_agent: '策略校验节点（历史名称）',
 }
 export const toolLabel = (name) => label(TOOL_LABELS, name)

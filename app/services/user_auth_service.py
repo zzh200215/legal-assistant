@@ -189,6 +189,10 @@ class UserAuthService:
         db.add(reset_token)
         db.commit()
         db.refresh(user)
+
+        # 密码重置后使该用户所有旧 token 失效。
+        from app.services.auth_token_service import auth_token_service
+        auth_token_service.increment_token_version(db, user)
         return user
 
     def get_wechat_login_url(self, state: str) -> str:

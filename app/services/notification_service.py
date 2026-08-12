@@ -338,7 +338,6 @@ class NotificationService:
         """微信通知：通过企业微信连接器发送。"""
         try:
             from app.models.connector import ExternalConnector
-            from app.services.connector_service import connector_service
 
             connector = db.query(ExternalConnector).filter(
                 ExternalConnector.connector_type == "wecom",

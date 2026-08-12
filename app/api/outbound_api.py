@@ -1,16 +1,48 @@
+import json
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.api_response import api_error, should_passthrough_exception
 from app.core.auth import get_current_user, require_admin_user
 from app.core.database import get_db
+from app.models.connector import ExternalConnector
 from app.models.user import User
 from app.schemas.connector import ConnectorOut
 from app.schemas.outbound import EmailSendRequestCreate, EmailSendRequestDecision, EmailSendRequestOut, OutboundEmailPolicyOut, OutboundEmailPolicyUpdate, SmtpConnectorCreateRequest
-from app.services.connector_service import connector_service
 from app.services.outbound_email_service import outbound_email_service
 
 router = APIRouter()
+
+
+def _serialize_smtp_connector(connector: ExternalConnector) -> dict:
+    config: dict = {}
+    try:
+        parsed = json.loads(connector.config_json or "{}")
+        if isinstance(parsed, dict):
+            config = parsed
+    except (TypeError, ValueError):
+        config = {}
+    for key in ("password", "authorization_code", "access_token", "refresh_token", "client_secret"):
+        config.pop(key, None)
+    return {
+        "id": connector.id,
+        "user_id": connector.user_id,
+        "organization_id": connector.organization_id,
+        "department_id": connector.department_id,
+        "connector_type": connector.connector_type,
+        "name": connector.name,
+        "status": connector.status,
+        "config_json": json.dumps(config, ensure_ascii=False) if config else None,
+        "last_sync_at": None,
+        "last_sync_status": None,
+        "last_imported_count": 0,
+        "last_skipped_count": 0,
+        "total_imported_count": 0,
+        "total_skipped_count": 0,
+        "created_at": connector.created_at,
+        "updated_at": connector.updated_at,
+    }
 
 
 @router.get("/policy", response_model=OutboundEmailPolicyOut)
@@ -29,7 +61,7 @@ def update_policy(req: OutboundEmailPolicyUpdate, db: Session = Depends(get_db),
 def create_smtp_connector(req: SmtpConnectorCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
         connector = outbound_email_service.create_smtp_connector(db=db, user=current_user, request=req)
-        return ConnectorOut(**connector_service.serialize_connector(connector))
+        return ConnectorOut(**{**_serialize_smtp_connector(connector), "last_sync_at": None})
     except Exception as exc:
         if should_passthrough_exception(exc):
             raise
@@ -38,7 +70,7 @@ def create_smtp_connector(req: SmtpConnectorCreateRequest, db: Session = Depends
 
 @router.get("/smtp-connectors", response_model=list[ConnectorOut])
 def list_smtp_connectors(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return [ConnectorOut(**connector_service.serialize_connector(item)) for item in outbound_email_service.list_smtp_connectors(db=db, user=current_user)]
+    return [ConnectorOut(**_serialize_smtp_connector(item)) for item in outbound_email_service.list_smtp_connectors(db=db, user=current_user)]
 
 
 @router.post("/drafts/{draft_id}/send-requests", response_model=EmailSendRequestOut)

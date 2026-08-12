@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import smtplib
@@ -8,15 +9,43 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import make_msgid
 
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
 from app.models.connector import ExternalConnector
 from app.models.email import EmailDraft, EmailSendRequest, OutboundEmailPolicy
 from app.models.user import User
-from app.services.connector_service import connector_service
 from app.services.data_protection_service import data_protection_service
-from app.services.mailbox_service import mailbox_service
 from app.services.oplog_service import oplog_service
+
+
+def _fernet() -> Fernet:
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    raw_key = settings.CONNECTOR_CREDENTIAL_ENCRYPTION_KEY.strip()
+    if raw_key:
+        try:
+            return Fernet(raw_key.encode("utf-8"))
+        except ValueError as exc:
+            raise ValueError("CONNECTOR_CREDENTIAL_ENCRYPTION_KEY 不是有效的 Fernet 密钥") from exc
+    derived = base64.urlsafe_b64encode(hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest())
+    return Fernet(derived)
+
+
+def _encrypt_credentials(payload: dict) -> str:
+    return _fernet().encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_credentials(ciphertext: str | None) -> dict:
+    if not ciphertext:
+        raise ValueError("连接器缺少凭据")
+    try:
+        payload = json.loads(_fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8"))
+    except (InvalidToken, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("连接器凭据不可用，请重新授权") from exc
+    return payload if isinstance(payload, dict) else {}
+
 
 
 class OutboundEmailService:
@@ -100,14 +129,22 @@ class OutboundEmailService:
         connector = ExternalConnector(
             user_id=user.id, organization_id=user.organization_id, department_id=user.department_id,
             connector_type=self.SMTP_CONNECTOR_TYPE, name=request.name.strip(), status="active",
-            config_json=json.dumps(config, ensure_ascii=False), credential_ciphertext=mailbox_service.encrypt_credentials(credentials),
+            config_json=json.dumps(config, ensure_ascii=False), credential_ciphertext=_encrypt_credentials(credentials),
         )
         db.add(connector); db.commit(); db.refresh(connector)
         oplog_service.log(module="outbound_email", action="smtp_connector_created", db=db, user_id=user.id, target_type="connector", target_id=connector.id, detail="connector_type=smtp_outbound")
         return connector
 
     def list_smtp_connectors(self, *, db: Session, user: User) -> list[ExternalConnector]:
-        return [item for item in connector_service.list_connectors(db=db, user=user) if item.connector_type == self.SMTP_CONNECTOR_TYPE]
+        return (
+            db.query(ExternalConnector)
+            .filter(
+                ExternalConnector.user_id == user.id,
+                ExternalConnector.connector_type == self.SMTP_CONNECTOR_TYPE,
+            )
+            .order_by(ExternalConnector.id.asc())
+            .all()
+        )
 
     def _validate_policy(self, *, db: Session, user: User, recipient: str, cc: str | None = None) -> OutboundEmailPolicy:
         policy = self._policy(db=db, organization_id=user.organization_id)
@@ -269,7 +306,7 @@ class OutboundEmailService:
         if sent_count >= policy.max_sends_per_hour:
             raise ValueError("已达到每小时发送上限")
         config = self._json(connector.config_json)
-        credentials = mailbox_service.decrypt_credentials(connector.credential_ciphertext)
+        credentials = _decrypt_credentials(connector.credential_ciphertext)
         message_id = make_msgid(domain=str(config.get("from_address") or "").split("@")[-1] or None)
         message = EmailMessage()
         message["From"] = str(config.get("from_address") or credentials.get("username"))
@@ -339,7 +376,7 @@ class OutboundEmailService:
             raise ValueError("验证码邮件命中外发 DLP 策略")
 
         config = self._json(connector.config_json)
-        credentials = mailbox_service.decrypt_credentials(connector.credential_ciphertext)
+        credentials = _decrypt_credentials(connector.credential_ciphertext)
         message = EmailMessage()
         message["From"] = str(config.get("from_address") or credentials.get("username"))
         message["To"] = recipient

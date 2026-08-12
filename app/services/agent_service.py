@@ -19,6 +19,7 @@ from app.mcp.permissions import (
 )
 from app.mcp.registry import mcp_registry
 from app.models.agent import AgentRun, ToolCallLog
+from app.models.user import User
 from app.services.llm_service import llm_service
 from app.services.llm_observability_service import llm_observability_service
 from app.services.prompt_service import prompt_service
@@ -71,25 +72,12 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         normalized = (goal or "").lower()
         has_document = "文档" in goal or "合同" in goal or "方案" in goal or "document" in normalized or "risk" in normalized or "冲突" in goal or "核对" in goal or "对比" in goal or "conflict" in normalized
         has_legal = "合同" in goal or "条款" in goal or "合规" in goal or "法务" in goal or "违约" in goal or "审查" in goal
-        has_project = "项目" in goal or "里程碑" in goal or "延期" in goal or "排期" in goal or "依赖" in goal
-        has_meeting = "会议" in goal or "纪要" in goal or "meeting" in normalized or "action item" in normalized
         has_task = "任务" in goal or "待办" in goal or "task" in normalized or "todo" in normalized
-        has_email = "邮件" in goal or "催办" in goal or "email" in normalized or "mail" in normalized
-        has_sql = "sql" in normalized or "数据库" in goal or "查询表" in goal
-        has_sales_report = "销售日报" in goal or "sales daily" in normalized
 
-        if has_sql or has_sales_report:
-            return "data_agent"
         if has_legal:
             return "legal_compliance_agent"
-        if has_project:
-            return "project_agent"
         if has_document:
             return "knowledge_agent"
-        if has_meeting:
-            return "meeting_agent"
-        if has_email:
-            return "communication_agent"
         if has_task:
             return "workflow_agent"
         # Ambiguous requests go to the read-only knowledge role, which must
@@ -101,29 +89,15 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         normalized = (goal or "").lower()
         has_document = "文档" in goal or "合同" in goal or "方案" in goal or "document" in normalized or "risk" in normalized or "冲突" in goal or "核对" in goal or "对比" in goal or "conflict" in normalized
         has_legal = "合同" in goal or "条款" in goal or "合规" in goal or "法务" in goal or "违约" in goal or "审查" in goal
-        has_project = "项目" in goal or "里程碑" in goal or "延期" in goal or "排期" in goal or "依赖" in goal
-        has_meeting = "会议" in goal or "纪要" in goal or "meeting" in normalized
         has_task = "任务" in goal or "待办" in goal or "task" in normalized or "todo" in normalized
-        has_email = "邮件" in goal or "催办" in goal or "email" in normalized or "mail" in normalized
-        has_sales_report = "销售日报" in goal or "sales daily" in normalized
 
         plan: list[str] = []
         if has_legal:
             plan.append("legal_compliance_agent")
-        if has_project:
-            plan.append("project_agent")
-        if has_document and not has_legal and not has_project:
+        if has_document and not has_legal:
             plan.append("knowledge_agent")
-        if has_meeting:
-            plan.append("meeting_agent")
-        if has_sales_report:
-            plan.append("data_agent")
-        elif "sql" in normalized or "数据库" in goal or "查询表" in goal:
-            plan.append("data_agent")
         if has_task:
             plan.append("workflow_agent")
-        if has_email:
-            plan.append("communication_agent")
         return plan or [self._select_worker_agent(goal)]
 
     @staticmethod
@@ -136,23 +110,21 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         if not self._can_parallelize_workers(workers):
             return None
         document_match = re.search(r"(?:文档|合同|方案|document)\s*(?:id)?\s*(\d+)", goal, flags=re.IGNORECASE)
-        meeting_match = re.search(r"(?:会议|纪要|meeting)\s*(?:id)?\s*(\d+)", goal, flags=re.IGNORECASE)
-        if not document_match or not meeting_match:
+        if not document_match:
             return None
         document_id = int(document_match.group(1))
-        meeting_id = int(meeting_match.group(1))
         document_tool = "document_risk_tool" if ("风险" in goal or "risk" in goal.lower()) else "document_summary_tool"
-        document_worker = next(
-            (worker for worker in workers if canonical_agent_type(worker) in {"knowledge_agent", "legal_compliance_agent"}),
+        knowledge_worker = next(
+            (worker for worker in workers if canonical_agent_type(worker) == "knowledge_agent"),
             "knowledge_agent",
         )
-        meeting_worker = next(
-            (worker for worker in workers if canonical_agent_type(worker) == "meeting_agent"),
-            "meeting_agent",
+        legal_worker = next(
+            (worker for worker in workers if canonical_agent_type(worker) == "legal_compliance_agent"),
+            "legal_compliance_agent",
         )
         return {
-            document_worker: {"tool_name": document_tool, "action_input": {"document_id": document_id}},
-            meeting_worker: {"tool_name": "meeting_query_tool", "action_input": {"meeting_id": meeting_id}},
+            knowledge_worker: {"tool_name": document_tool, "action_input": {"document_id": document_id}},
+            legal_worker: {"tool_name": "document_risk_tool", "action_input": {"document_id": document_id}},
         }
 
     def _fallback_supervisor_plan(self, goal: str, *, reason: str | None = None) -> dict[str, Any]:
@@ -161,14 +133,10 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         expected_artifacts: list[str] = []
         if "knowledge_agent" in workers:
             expected_artifacts.append("document")
-        if "meeting_agent" in workers:
-            expected_artifacts.append("meeting")
+        if "legal_compliance_agent" in workers:
+            expected_artifacts.append("document")
         if "任务" in goal or "待办" in goal or "task" in normalized or "todo" in normalized:
             expected_artifacts.append("task")
-        if "邮件" in goal or "催办" in goal or "email" in normalized or "mail" in normalized:
-            expected_artifacts.append("email")
-        if "data_agent" in workers and ("日报" in goal or "报告" in goal or "report" in normalized):
-            expected_artifacts.append("document")
         expected_artifacts = list(dict.fromkeys(expected_artifacts))
         parallel_plan = self._parallel_worker_plan(goal, workers)
         return {
@@ -178,7 +146,7 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
                 {"from": workers[index], "to": workers[index + 1]}
                 for index in range(len(workers) - 1)
             ],
-            "risk_level": "medium" if any(worker in {"workflow_agent", "data_agent", "communication_agent"} for worker in workers) else "low",
+            "risk_level": "medium" if "workflow_agent" in workers else "low",
             "expected_artifacts": expected_artifacts,
             "rationale": "使用规则路由生成稳定的最小 Worker 计划。",
             "plan_source": "rule_fallback",
@@ -190,7 +158,7 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         }
 
     def _validate_supervisor_plan(self, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-        allowed_workers = set(CANONICAL_AGENT_TYPES) | {"document_agent", "task_agent", "task_email_agent"}
+        allowed_workers = set(CANONICAL_AGENT_TYPES) | {"document_agent", "task_agent"}
         workers = payload.get("workers")
         if not isinstance(workers, list) or not workers or len(workers) > 4:
             return None, "workers 必须是 1 到 4 个 Worker 的列表"
@@ -388,9 +356,7 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
     def _collect_run_artifacts(self, logs: list[ToolCallLog]) -> dict[str, list[dict[str, Any]]]:
         artifacts = {
             "documents": [],
-            "meetings": [],
             "tasks": [],
-            "emails": [],
         }
         seen_keys: set[tuple[str, Any]] = set()
 
@@ -431,20 +397,6 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
                         },
                     )
 
-            meeting_id = data.get("meeting_id") or input_params.get("meeting_id")
-            if log.tool_name in {"meeting_summary_tool", "meeting_query_tool", "meeting_action_tool"} and meeting_id is not None:
-                add_artifact(
-                    "meetings",
-                    meeting_id,
-                    {
-                        "meeting_id": meeting_id,
-                        "tool_name": log.tool_name,
-                        "theme": data.get("theme"),
-                        "action_item_count": len(data.get("action_items") or []) if isinstance(data.get("action_items"), list) else 0,
-                        "task_count": len(data.get("tasks") or []) if isinstance(data.get("tasks"), list) else 0,
-                    },
-                )
-
             tasks = data.get("tasks") if isinstance(data.get("tasks"), list) else []
             task_payload = data.get("task") if isinstance(data.get("task"), dict) else None
             if task_payload:
@@ -462,20 +414,6 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
                         "status": task.get("status"),
                         "priority": task.get("priority"),
                         "assignee": task.get("assignee"),
-                        "tool_name": log.tool_name,
-                    },
-                )
-
-            draft_id = data.get("draft_id")
-            if log.tool_name == "email_writer_tool" and draft_id is not None:
-                add_artifact(
-                    "emails",
-                    draft_id,
-                    {
-                        "draft_id": draft_id,
-                        "subject": data.get("subject"),
-                        "recipient": data.get("recipient"),
-                        "purpose": data.get("purpose"),
                         "tool_name": log.tool_name,
                     },
                 )
@@ -777,6 +715,15 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
 
         Returns (result_dict, serialized_input_for_logging).
         """
+        # 长流程权限快照：硬撤销（禁用/强制退出/成员撤销/授权撤销）立即终止工具调用。
+        if agent_run_id:
+            snapshot_denied = self._assert_run_snapshot(
+                db, agent_run_id=agent_run_id, user_id=user_id
+            )
+            if snapshot_denied is not None:
+                return snapshot_denied, _json_dumps(
+                    {k: v for k, v in action_input.items() if k != "db"}
+                )
         try:
             result = await asyncio.wait_for(
                 mcp_registry.call_tool(
@@ -795,6 +742,27 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
             }
         serialized_input = _json_dumps({k: v for k, v in action_input.items() if k != "db"})
         return result, serialized_input
+
+    def _assert_run_snapshot(self, db: Session, *, agent_run_id: int, user_id: int) -> dict | None:
+        """校验该 Agent run 的权限快照；有效返回 None，失效返回拒绝结果。"""
+        from app.services.authorization_service import authorization_service
+
+        run = db.query(AgentRun).filter(AgentRun.id == agent_run_id).first()
+        snapshot_id = run.authorization_snapshot_id if run else None
+        if not snapshot_id:
+            return None
+        try:
+            authorization_service.assert_snapshot(db, snapshot_id, user_id=user_id)
+            return None
+        except Exception as exc:
+            code = getattr(getattr(exc, "detail", None), "get", lambda *_: "authz_changed")("code", "authz_changed")
+            return {
+                "success": False,
+                "message": "执行已终止：权限已变化，请重新发起。",
+                "data": {"error_code": code},
+                "error": code,
+                "mcp_error_code": "AUTHZ_CHANGED",
+            }
 
     @staticmethod
     def _parallel_session_factory(db: Session):
@@ -1035,6 +1003,19 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         event_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> AgentRun:
         agent_run = self._create_run(goal=goal, user_id=user_id, session_id=session_id, db=db)
+        # 长流程权限快照：Agent 执行期间权限范围保持稳定，硬撤销立即终止。
+        from app.services.authorization_service import authorization_service
+
+        user_row = db.query(User).filter(User.id == user_id).first()
+        if user_row:
+            try:
+                ctx = authorization_service.build_context(db, user_row)
+                snapshot_id = authorization_service.capture_snapshot(db, user_row, ctx)
+                agent_run.authorization_snapshot_id = snapshot_id
+                db.add(agent_run)
+                db.commit()
+            except Exception:
+                db.rollback()
         memory_context = conversation_memory_service.build_agent_context(db, user_id, session_id)
         run_started = time.time()
         master_agent = "supervisor_agent"
@@ -1527,9 +1508,7 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
     ) -> list[AgentRun]:
         type_mapping = {
             "document": ("documents", "document_id"),
-            "meeting": ("meetings", "meeting_id"),
             "task": ("tasks", "task_id"),
-            "email": ("emails", "draft_id"),
         }
         artifact_key = type_mapping.get((artifact_type or "").strip().lower())
         if not artifact_key:

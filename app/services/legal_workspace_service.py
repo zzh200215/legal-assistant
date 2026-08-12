@@ -194,6 +194,37 @@ class LegalWorkspaceModule:
             raise LookupError("LEGAL_CASE_NOT_FOUND")
         return case_id
 
+    def _capture_flow_snapshot(
+        self, db: Session, user: User, *, case_id: int | None = None, document_id: int | None = None,
+    ) -> str | None:
+        """长流程启动时创建权限快照（合同审查 / 文书生成）。"""
+        from app.services.authorization_service import authorization_service
+
+        try:
+            ctx = authorization_service.build_context(db, user, org_id=user.organization_id)
+            return authorization_service.capture_snapshot(
+                db, user, ctx,
+                case_ids=[case_id] if case_id else [],
+                document_ids=[document_id] if document_id else [],
+            )
+        except Exception:
+            return None
+
+    def _assert_flow_snapshot(
+        self, db: Session, user: User, snapshot_id: str | None, *, case_id: int | None = None,
+    ) -> None:
+        """LLM 生成后、落库前校验快照：硬撤销（禁用/退出/成员/授权/严格案件成员撤销）立即终止。"""
+        if not snapshot_id:
+            return
+        from app.services.authorization_service import authorization_service
+
+        authorization_service.assert_snapshot(db, snapshot_id, user_id=user.id)
+        if case_id is not None:
+            try:
+                verify_case_access(case_id, user.id, db)
+            except HTTPException:
+                raise LookupError("LEGAL_CASE_NOT_FOUND")
+
     async def create_consultation(
         self, db: Session, user: User, question: str, *, case_id: int | None = None,
     ) -> ConsultationResult:
@@ -247,6 +278,8 @@ class LegalWorkspaceModule:
             raise ValueError("QUOTA_EXCEEDED")
 
         case_id = self._resolve_case_id(db, user, case_id)
+        # 长流程权限快照：审查期间权限范围保持稳定，硬撤销立即终止落库。
+        flow_snapshot = self._capture_flow_snapshot(db, user, case_id=case_id, document_id=document_id)
         ensure_demo_sources(db, user.id)
         policy_snapshot = None
         policy_version = None
@@ -280,6 +313,8 @@ class LegalWorkspaceModule:
         # E-7：LLM 调用前归还 DB 连接，避免长等待期间占用连接池。
         db.commit()
         risks, summary = await review_contract(review_input, user_id=user.id)
+        # 硬撤销（禁用/强制退出/成员/授权/严格案件成员撤销）→ 立即终止，不落库。
+        self._assert_flow_snapshot(db, user, flow_snapshot, case_id=case_id)
         sources = db.query(LegalSource).filter(
             LegalSource.user_id == user.id, LegalSource.status == "active"
         ).all()
@@ -387,6 +422,8 @@ class LegalWorkspaceModule:
         if document_type not in DRAFT_FIELDS:
             raise KeyError("LEGAL_DRAFT_TYPE_INVALID")
         case_id = self._resolve_case_id(db, user, case_id)
+        # 长流程权限快照：文书生成期间权限范围保持稳定。
+        flow_snapshot = self._capture_flow_snapshot(db, user, case_id=case_id)
         required = DRAFT_REQUIRED_FIELDS.get(document_type, [])
         missing_required = [field for field in required if not fields.get(field)]
         missing = [field for field in DRAFT_FIELDS[document_type] if not fields.get(field)]
@@ -397,6 +434,8 @@ class LegalWorkspaceModule:
         # E-7：LLM 调用前归还 DB 连接。
         db.commit()
         content = await draft_content(document_type, fields, missing, user_id=user.id)
+        # 硬撤销（禁用/强制退出/成员/严格案件成员撤销）→ 立即终止，不落库。
+        self._assert_flow_snapshot(db, user, flow_snapshot, case_id=case_id)
         row = LegalDraft(
             user_id=user.id, document_type=document_type,
             case_id=case_id, title=DRAFT_TITLES[document_type],

@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.user import UserStatus, User
 from app.models.org import OrganizationMember, LegalMemberRole
+from app.services.auth_token_service import auth_token_service, new_jti
 from app.services.org_service import org_service
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -27,10 +28,23 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    """签发 access JWT（兼容旧签名）。
+
+    最终生成的 token 必然包含 jti 与 token_version，供撤销与版本校验使用。
+    """
     to_encode = data.copy()
     if "sub" in to_encode:
         to_encode["sub"] = str(to_encode["sub"])
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    now = datetime.now(timezone.utc)
+    expire = now + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    if "jti" not in to_encode:
+        to_encode["jti"] = new_jti()
+    if "token_version" not in to_encode:
+        to_encode["token_version"] = 0
+    if "typ" not in to_encode:
+        to_encode["typ"] = "access"
+    if "iat" not in to_encode:
+        to_encode["iat"] = int(now.timestamp())
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
@@ -64,7 +78,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         code="INVALID_CREDENTIALS",
     )
     credentials_exception.headers = {"WWW-Authenticate": "Bearer"}
-    user = get_user_from_token(token, db)
+    # 校验：签名、过期、jti 是否撤销、token_version 是否仍匹配用户。
+    user = auth_token_service.validate_access_token(token, db)
     if user is None:
         raise credentials_exception
     # #95：deletion_pending 视为可执行注销流程（撤销/确认），其余状态按禁用处理
@@ -77,6 +92,36 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             code="USER_DISABLED",
         )
     return user
+
+
+def get_token_jti(request: Request, token: str | None = None) -> str | None:
+    """从请求的 Bearer token 提取 jti（用于构建授权上下文）。"""
+    raw = token
+    if raw is None and request is not None:
+        auth_header = request.headers.get("Authorization") or ""
+        if auth_header.startswith("Bearer "):
+            raw = auth_header[7:]
+    if not raw:
+        return None
+    payload = auth_token_service.decode_access_token(raw)
+    return payload.get("jti") if payload else None
+
+
+def get_current_context(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    request: Request = None,
+) -> "AuthorizationContext":
+    """构建统一授权上下文（组织成员关系实时从数据库解析）。"""
+    from app.services.authorization_service import authorization_service
+
+    return authorization_service.build_context(
+        db,
+        current_user,
+        org_id=current_user.organization_id,
+        jti=get_token_jti(request),
+        token_version=current_user.token_version,
+    )
 
 
 def require_admin_user(current_user: User = Depends(get_current_user)) -> User:

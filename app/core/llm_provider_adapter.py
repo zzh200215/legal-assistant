@@ -17,8 +17,8 @@ class LLMProviderAdapter(Protocol):
     def chat_url(self, base_url: str) -> str: ...
     def generate_url(self, base_url: str) -> str: ...
     def embedding_url(self, base_url: str) -> str: ...
-    def chat_payload(self, model: str, messages: list[dict], stream: bool, temperature: float) -> dict: ...
-    def generate_payload(self, model: str, prompt: str, temperature: float) -> dict: ...
+    def chat_payload(self, model: str, messages: list[dict], stream: bool, temperature: float, max_tokens: int | None = None) -> dict: ...
+    def generate_payload(self, model: str, prompt: str, temperature: float, max_tokens: int | None = None) -> dict: ...
     def embedding_payload(self, model: str, texts: list[str]) -> dict: ...
     def extract_usage(self, data: dict) -> tuple[int, int]: ...
     def extract_chat_content(self, data: dict) -> str: ...
@@ -43,11 +43,14 @@ class OpenAICompatibleAdapter:
     def embedding_url(self, base_url: str) -> str:
         return f"{base_url}/embeddings"
 
-    def chat_payload(self, model: str, messages: list[dict], stream: bool, temperature: float) -> dict:
-        return {"model": model, "messages": messages, "stream": stream, "temperature": temperature}
+    def chat_payload(self, model: str, messages: list[dict], stream: bool, temperature: float, max_tokens: int | None = None) -> dict:
+        payload = {"model": model, "messages": messages, "stream": stream, "temperature": temperature}
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        return payload
 
-    def generate_payload(self, model: str, prompt: str, temperature: float) -> dict:
-        return self.chat_payload(model, [{"role": "user", "content": prompt}], False, temperature)
+    def generate_payload(self, model: str, prompt: str, temperature: float, max_tokens: int | None = None) -> dict:
+        return self.chat_payload(model, [{"role": "user", "content": prompt}], False, temperature, max_tokens=max_tokens)
 
     def embedding_payload(self, model: str, texts: list[str]) -> dict:
         return {"model": model, "input": texts}
@@ -87,11 +90,17 @@ class OllamaAdapter:
     def embedding_url(self, base_url: str) -> str:
         return f"{base_url}/api/embed"
 
-    def chat_payload(self, model: str, messages: list[dict], stream: bool, temperature: float) -> dict:
-        return {"model": model, "messages": messages, "stream": stream, "options": {"temperature": temperature}}
+    def chat_payload(self, model: str, messages: list[dict], stream: bool, temperature: float, max_tokens: int | None = None) -> dict:
+        options = {"temperature": temperature}
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
+        return {"model": model, "messages": messages, "stream": stream, "options": options}
 
-    def generate_payload(self, model: str, prompt: str, temperature: float) -> dict:
-        return {"model": model, "prompt": prompt, "stream": False, "options": {"temperature": temperature}}
+    def generate_payload(self, model: str, prompt: str, temperature: float, max_tokens: int | None = None) -> dict:
+        options = {"temperature": temperature}
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
+        return {"model": model, "prompt": prompt, "stream": False, "options": options}
 
     def embedding_payload(self, model: str, texts: list[str]) -> dict:
         return {"model": model, "input": texts}

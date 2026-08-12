@@ -95,26 +95,21 @@ def list_cases(
     current_user: User = Depends(get_current_user),
 ):
     _require_org_member(db, current_user.id, org_id)
-    from app.models.legal_portal import LegalCaseMember
-    q = db.query(LegalCase).filter(LegalCase.organization_id == org_id)
+    from app.services.authorization_service import (
+        PermissionAction,
+        authorization_service,
+    )
+
+    ctx = authorization_service.build_context(db, current_user, org_id=org_id)
+    q = authorization_service.scope_query(
+        db, LegalCase, ctx, PermissionAction.CASE_READ, org_id=org_id
+    )
     if status:
         q = q.filter(LegalCase.status == status)
     if case_type:
         q = q.filter(LegalCase.case_type == case_type)
     cases = q.order_by(LegalCase.updated_at.desc()).all()
-
-    # 严格模式：过滤非成员案件（返回 404，不泄露名称/客户信息）
-    def _accessible(c: LegalCase) -> bool:
-        if not getattr(c, "is_strict_mode", 0):
-            return True
-        member = db.query(LegalCaseMember).filter(
-            LegalCaseMember.case_id == c.id,
-            LegalCaseMember.user_id == current_user.id,
-            LegalCaseMember.revoked_at.is_(None),
-        ).first()
-        return member is not None
-
-    return [_serialize_case(c, db) for c in cases if _accessible(c)]
+    return [_serialize_case(c, db) for c in cases]
 
 
 @router.post("/orgs/{org_id}/cases", status_code=201)
@@ -168,16 +163,14 @@ def get_case(
     ).first()
     if not case:
         raise api_error(404, "案件不存在", code="CASE_NOT_FOUND")
-    # 严格模式访问控制
-    if getattr(case, "is_strict_mode", 0):
-        from app.models.legal_portal import LegalCaseMember
-        member = db.query(LegalCaseMember).filter(
-            LegalCaseMember.case_id == case_id,
-            LegalCaseMember.user_id == current_user.id,
-            LegalCaseMember.revoked_at.is_(None),
-        ).first()
-        if not member:
-            raise api_error(404, "案件不存在", code="CASE_NOT_FOUND")
+    # 统一授权：严格案件仅活跃成员（404）；client 仅自己/活跃成员案件（403）。
+    from app.services.authorization_service import (
+        PermissionAction,
+        authorization_service,
+    )
+
+    ctx = authorization_service.build_context(db, current_user, org_id=org_id)
+    authorization_service.require(db, ctx, PermissionAction.CASE_READ, case=case)
     return _serialize_case(case, db)
 
 

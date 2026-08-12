@@ -7,14 +7,11 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.time import utc_now
 from app.models.agent import AgentRun, ToolCallLog
-from app.models.connector import ConnectorSyncJob
 from app.models.document import Document, DocumentQARecord
 from app.models.email import EmailSendRequest
 from app.models.llm_call_log import LLMCallLog
-from app.models.meeting import Meeting
 from app.models.operation_log import OperationLog
 from app.models.prompt import PromptTemplate
-from app.models.schedule import ScheduledWorkflow, WorkflowExecution
 from app.models.token_usage import TokenUsage
 from app.services.document_qa_service import document_qa_service
 from app.services.llm_governance_service import llm_governance_service
@@ -26,10 +23,8 @@ from app.services.analytics_task_state import (
 from eval.bundle_utils import DEFAULT_BASELINE_SNAPSHOT_PATH, DEFAULT_OUTPUT_DIR
 from app.tasks import (
     analyze_document_task,
-    connector_sync_task,
     parse_document_task,
     summarize_document_task,
-    summarize_meeting_task,
 )
 from app.core.celery_app import celery_app
 
@@ -55,15 +50,7 @@ def _classify_alert(
     error_type = "unknown_error"
     severity = "medium"
 
-    if source == "scheduler":
-        category = "scheduler_error"
-        error_type = "scheduled_workflow_failed"
-        severity = "high"
-    elif source == "mailbox":
-        category = "mailbox_sync_error"
-        error_type = "mailbox_sync_failed"
-        severity = "high"
-    elif source == "outbound_email":
+    if source == "outbound_email":
         if "approval_pending" in text:
             category = "approval_pending"
             error_type = "outbound_approval_pending"
@@ -126,8 +113,6 @@ def _classify_alert(
         "source_label": {
             "agent": "Agent",
             "async_task": "异步任务",
-            "scheduler": "计划任务",
-            "mailbox": "邮箱同步",
             "outbound_email": "外发邮件",
         }.get(source, source),
     }
@@ -169,8 +154,6 @@ def _task_title_from_action(action: str | None, target_type: str | None) -> str:
         "document_parse": "文档解析",
         "document_summary": "文档摘要",
         "document_analysis": "文档分析",
-        "meeting_summary": "会议总结",
-        "connector_sync": "连接器同步",
     }
     action = action or ""
     for prefix, label in mapping.items():
@@ -829,19 +812,6 @@ class AnalyticsService:
             async_task_query = async_task_query.filter(OperationLog.user_id == user_id)
             agent_query = agent_query.filter(AgentRun.user_id == user_id)
 
-        workflow_query = db.query(WorkflowExecution).filter(
-            WorkflowExecution.created_at >= since,
-            WorkflowExecution.status == "failed",
-        )
-        overdue_schedule_query = db.query(ScheduledWorkflow).filter(
-            ScheduledWorkflow.enabled.is_(True),
-            ScheduledWorkflow.next_run_at.is_not(None),
-            ScheduledWorkflow.next_run_at < utc_now() - timedelta(minutes=15),
-        )
-        mailbox_query = db.query(ConnectorSyncJob).filter(
-            ConnectorSyncJob.created_at >= since,
-            ConnectorSyncJob.status == "failed",
-        )
         outbound_failure_query = db.query(EmailSendRequest).filter(
             EmailSendRequest.created_at >= since,
             EmailSendRequest.status == "failed",
@@ -852,18 +822,12 @@ class AnalyticsService:
             EmailSendRequest.status == "pending",
         )
         if user_id is not None and not include_all_users:
-            workflow_query = workflow_query.filter(WorkflowExecution.user_id == user_id)
-            overdue_schedule_query = overdue_schedule_query.filter(ScheduledWorkflow.user_id == user_id)
-            mailbox_query = mailbox_query.filter(ConnectorSyncJob.user_id == user_id)
             outbound_failure_query = outbound_failure_query.filter(EmailSendRequest.user_id == user_id)
             outbound_pending_query = outbound_pending_query.filter(EmailSendRequest.user_id == user_id)
 
         query_limit = max(limit * 5, 200)
         async_task_logs = async_task_query.order_by(OperationLog.created_at.desc()).limit(query_limit).all()
         agent_runs = agent_query.order_by(AgentRun.created_at.desc()).limit(query_limit).all()
-        workflow_executions = workflow_query.order_by(WorkflowExecution.created_at.desc()).limit(query_limit).all()
-        overdue_schedules = overdue_schedule_query.order_by(ScheduledWorkflow.next_run_at.asc()).limit(query_limit).all()
-        mailbox_jobs = mailbox_query.order_by(ConnectorSyncJob.created_at.desc()).limit(query_limit).all()
         outbound_failures = outbound_failure_query.order_by(EmailSendRequest.created_at.desc()).limit(query_limit).all()
         outbound_pending = outbound_pending_query.order_by(EmailSendRequest.created_at.asc()).limit(query_limit).all()
 
@@ -911,37 +875,6 @@ class AnalyticsService:
             alerts.append(
                 alert
             )
-
-        for execution in workflow_executions:
-            alert = {
-                "source": "scheduler", "title": "scheduled_workflow_failed",
-                "message": execution.error_message or "计划任务执行失败",
-                "user_id": execution.user_id, "target_type": "scheduled_workflow",
-                "target_id": execution.schedule_id, "created_at": execution.completed_at or execution.created_at,
-            }
-            alert.update(_classify_alert(source=alert["source"], title=alert["title"], message=alert["message"], target_type=alert["target_type"]))
-            alerts.append(alert)
-
-        for schedule in overdue_schedules:
-            alert = {
-                "source": "scheduler", "title": "scheduled_workflow_delayed",
-                "message": "计划任务超过 15 分钟未被调度，请检查 Celery Beat 与队列。",
-                "user_id": schedule.user_id, "target_type": "scheduled_workflow",
-                "target_id": schedule.id, "created_at": schedule.next_run_at,
-            }
-            alert.update(_classify_alert(source=alert["source"], title=alert["title"], message=alert["message"], target_type=alert["target_type"]))
-            alert["category"] = "scheduler_delay"; alert["error_type"] = "scheduled_workflow_delayed"; alert["severity"] = "high"
-            alerts.append(alert)
-
-        for job in mailbox_jobs:
-            alert = {
-                "source": "mailbox", "title": "mailbox_sync_failed",
-                "message": job.error_message or "邮箱同步失败，请检查 IMAP 连接与授权。",
-                "user_id": job.user_id, "target_type": "connector_sync_job",
-                "target_id": job.id, "created_at": job.updated_at or job.created_at,
-            }
-            alert.update(_classify_alert(source=alert["source"], title=alert["title"], message=alert["message"], target_type=alert["target_type"]))
-            alerts.append(alert)
 
         for request in outbound_failures:
             alert = {
@@ -1592,22 +1525,11 @@ class AnalyticsService:
             task = analyze_document_task.delay(int(target_id), user_id, max_length)
         elif action.startswith("document_summary"):
             task = summarize_document_task.delay(int(target_id), user_id, max_length)
-        elif action.startswith("meeting_summary"):
-            task = summarize_meeting_task.delay(int(target_id), user_id)
         elif action.startswith("document_parse"):
             doc = db.query(Document).filter(Document.id == int(target_id), Document.user_id == user_id).first()
             if not doc:
                 raise ValueError("Document not found")
             task = parse_document_task.delay(doc.id, doc.file_path, doc.file_type)
-        elif action.startswith("connector_sync"):
-            job = (
-                db.query(ConnectorSyncJob)
-                .filter(ConnectorSyncJob.id == int(target_id), ConnectorSyncJob.user_id == user_id)
-                .first()
-            )
-            if not job:
-                raise ValueError("Connector sync job not found")
-            task = connector_sync_task.delay(job.id)
         else:
             raise ValueError("Task type is not retryable")
 

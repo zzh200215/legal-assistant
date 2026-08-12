@@ -14,6 +14,9 @@ class SecuritySettings(BaseSettings):
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    # 逗号分隔的 IP 网段/地址列表；只有来自这些代理的请求才解析 X-Forwarded-For。
+    TRUSTED_PROXIES: str = ""
     CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: str = ""
 
     # 企业微信扫码登录

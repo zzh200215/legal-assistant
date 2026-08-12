@@ -3,7 +3,7 @@
     <div class="page-heading">
       <div>
         <h3>待办任务</h3>
-        <p>统一查看来源任务、协作进度、同步邮件和执行记录。</p>
+        <p>统一查看来源任务、协作进度和执行记录。</p>
       </div>
     </div>
 
@@ -21,7 +21,7 @@
       <div class="overview-tile">
         <span>已逾期</span>
         <strong>{{ overdueCount }}</strong>
-        <p>需要同步或催办的任务</p>
+        <p>已过截止日期的任务</p>
       </div>
       <div class="overview-tile">
         <span>共享任务</span>
@@ -41,13 +41,8 @@
       </template>
       <el-space wrap class="toolbar-actions">
         <el-button type="primary" @click="showCreateDialog = true">新建任务</el-button>
-        <el-button type="success" :loading="syncingEmail" @click="generateTaskSyncEmail(false)">生成同步邮件</el-button>
-        <el-button type="info" plain :loading="syncingEmail" @click="generateTaskSyncEmail(true)">仅逾期任务邮件</el-button>
         <el-button type="warning" @click="showExtractDialog = true">从文档提取</el-button>
         <el-button type="info" @click="showChatExtractDialog = true">从聊天提取</el-button>
-        <el-select v-model="syncEmailScope" style="width: 140px">
-          <el-option v-for="item in syncScopeOptions" :key="item.value" :label="item.label" :value="item.value" />
-        </el-select>
         <el-select v-model="scopeFilter" style="width: 140px" @change="handleScopeChange">
           <el-option v-for="item in scopeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -368,10 +363,8 @@ const taskPage = ref(1)
 const taskPageSize = ref(12)
 const taskTotal = ref(0)
 const loading = ref(false)
-const syncingEmail = ref(false)
 const viewMode = ref('kanban')
 const scopeFilter = ref('all')
-const syncEmailScope = ref('mine')
 const detailVisible = ref(false)
 const selectedTask = ref(null)
 const subTasks = ref([])
@@ -398,7 +391,6 @@ const priorityLabelMap = {
 }
 
 const sourceTypeLabelMap = {
-  meeting: '会议',
   document: '文档',
   chat: '聊天',
   decompose: '拆解',
@@ -416,13 +408,6 @@ const scopeOptions = [
   { label: '我的', value: 'mine' },
   { label: '部门共享', value: 'department' },
   { label: '组织共享', value: 'organization' },
-]
-
-const syncScopeOptions = [
-  { label: '我的任务邮件', value: 'mine' },
-  { label: '部门共享任务', value: 'department' },
-  { label: '组织共享任务', value: 'organization' },
-  { label: '全部可见任务', value: 'all' },
 ]
 
 const canEditSelectedTask = computed(() => {
@@ -557,23 +542,6 @@ const changeStatus = async (task, status) => {
     ElMessage.success('状态已更新')
     fetchTasks()
   } catch (e) { ElMessage.error(e.response?.data?.detail || '更新失败') }
-}
-
-const generateTaskSyncEmail = async (overdueOnly) => {
-  syncingEmail.value = true
-  try {
-    const { data } = await api.generateTaskSyncEmail({
-      include_overdue_only: overdueOnly,
-      purpose: overdueOnly ? '逾期任务催办' : '任务进度同步',
-      tone: 'professional',
-      need_action: true,
-      scope: syncEmailScope.value,
-    })
-    ElMessage.success(`已生成邮件草稿 #${data.draft.id}（邮件查看页面已下线，草稿保留在后台）`)
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '同步邮件生成失败')
-  }
-  syncingEmail.value = false
 }
 
 const decompose = async (task) => {

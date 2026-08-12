@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 // 任务中心（/tasks）联调回归：
 //   kanban 加载 + overview 计数 → 详情对话框 4 路并行（子任务/评论/日志/关联 Agent）
 //   → owner 可编辑（评论 POST、协作 PUT、状态 PUT）/ 共享只读
-//   → 新建任务 POST → scope 筛选 → 同步邮件 POST → 路由 taskId 深链。
+//   → 新建任务 POST → scope 筛选 → 路由 taskId 深链。
 // 全 mock，锁定 API 契约与 UI 接线。
 const success = (data) => ({ success: true, data })
 const ME = { id: 15, username: 'pilot01-lawyer', role: 'dept_admin', organization_id: 5, department_id: 51, status: 'active' }
@@ -110,7 +110,7 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
 
-test('共享任务只读 + 新建任务 + scope 筛选 + 同步邮件', async ({ page }) => {
+test('共享任务只读 + 新建任务 + scope 筛选', async ({ page }) => {
   const requests = []
   const failed = []
   page.on('response', (r) => {
@@ -136,10 +136,6 @@ test('共享任务只读 + 新建任务 + scope 筛选 + 同步邮件', async ({
     if (method === 'POST' && path === '/tasks/') {
       requests.taskCreate = route.request().postDataJSON()
       return route.fulfill({ json: success(ownerTask({ id: 304, title: requests.taskCreate.title, status: 'todo' })) })
-    }
-    if (method === 'POST' && path === '/emails/from-tasks') {
-      requests.syncEmail = route.request().postDataJSON()
-      return route.fulfill({ json: success({ draft: { id: 42 }, subject_candidates: [] }) })
     }
 
     await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
@@ -169,16 +165,6 @@ test('共享任务只读 + 新建任务 + scope 筛选 + 同步邮件', async ({
   await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("我的")').click()
   await page.waitForTimeout(400)
   expect(requests.some((r) => r.startsWith('GET /tasks/') && r.includes('scope=mine'))).toBe(true)
-
-  // 同步邮件（含仅逾期变体）
-  await page.getByRole('button', { name: '生成同步邮件' }).click()
-  await expect(page.getByText(/已生成邮件草稿 #42/)).toBeVisible()
-  expect(requests.syncEmail).toEqual({ include_overdue_only: false, purpose: '任务进度同步', tone: 'professional', need_action: true, scope: 'mine' })
-
-  requests.syncEmail = null
-  await page.getByRole('button', { name: '仅逾期任务邮件' }).click()
-  await expect(page.getByText(/已生成邮件草稿 #42/).last()).toBeVisible()
-  expect(requests.syncEmail).toEqual({ include_overdue_only: true, purpose: '逾期任务催办', tone: 'professional', need_action: true, scope: 'mine' })
 
   expect(failed).toEqual([])
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)

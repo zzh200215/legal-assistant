@@ -20,7 +20,4 @@ export default {
   extractTasksFromChat(message) {
     return http.post('/tasks/extract-from-chat', { message })
   },
-  generateTaskSyncEmail(data) {
-    return http.post('/emails/from-tasks', data)
-  },
 }

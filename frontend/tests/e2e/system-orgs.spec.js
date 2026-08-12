@@ -56,8 +56,6 @@ test('System 组织架构：admin 列表 + 创建组织/部门 + 归属分配', 
     if (method === 'GET' && path === '/agent/approvals') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/documents/knowledge-bases') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/documents/') return route.fulfill({ json: success({ items: [], total: 0 }) })
-    if (method === 'GET' && path === '/connectors/') return route.fulfill({ json: success([]) })
-    if (method === 'GET' && path === '/connectors/sync-jobs') return route.fulfill({ json: success([]) })
 
     if (method === 'GET' && path === '/admin/funnel') return route.fulfill({ json: success({ data: { funnel: [], cohort: { registered: 0 } } }) })
     if (method === 'GET' && path === '/admin/retention') return route.fulfill({ json: success({ data: {} }) })

@@ -50,42 +50,6 @@ AGENT_SKILLS: tuple[dict[str, Any], ...] = (
         "expected_artifacts": ("document", "evidence"),
         "evidence_required": True,
     },
-    {
-        "skill_id": "meeting_to_task",
-        "name": "会议纪要转行动项",
-        "description": "先提取会议纪要和行动项，再在人工审批后创建内部任务。",
-        "keywords": ("会议纪要", "会议行动项", "会议任务", "总结会议"),
-        "worker_plan": ("meeting_agent", "workflow_agent"),
-        "expected_artifacts": ("meeting", "task"),
-        "evidence_required": True,
-    },
-    {
-        "skill_id": "project_risk_assessment",
-        "name": "项目风险评估",
-        "description": "基于项目资料、会议和任务状态识别里程碑、依赖和交付风险。",
-        "keywords": ("项目风险", "里程碑", "项目延期", "项目依赖", "交付风险"),
-        "worker_plan": ("project_agent",),
-        "expected_artifacts": ("project_risk_register",),
-        "evidence_required": True,
-    },
-    {
-        "skill_id": "data_analysis_report",
-        "name": "受控数据分析报告",
-        "description": "基于白名单数据源执行只读查询并形成指标或分析报告。",
-        "keywords": ("数据分析", "销售日报", "查询数据库", "sql", "指标报告"),
-        "worker_plan": ("data_agent",),
-        "expected_artifacts": ("data_report",),
-        "evidence_required": True,
-    },
-    {
-        "skill_id": "communication_draft",
-        "name": "业务沟通草稿",
-        "description": "将已确认的上游结论转化为邮件或通知草稿，不直接外发。",
-        "keywords": ("邮件草稿", "写邮件", "通知草稿", "催办邮件"),
-        "worker_plan": ("communication_agent",),
-        "expected_artifacts": ("email_draft",),
-        "evidence_required": True,
-    },
 )
 
 

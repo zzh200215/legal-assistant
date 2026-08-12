@@ -23,17 +23,9 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     imports=("app.tasks",),
     beat_schedule={
-        "dispatch-scheduled-workflows": {
-            "task": "dispatch_scheduled_workflows",
-            "schedule": 60.0,
-        },
         "dispatch-operational-alerts": {
             "task": "dispatch_operational_alerts",
             "schedule": 300.0,
-        },
-        "purge-mailbox-retention": {
-            "task": "purge_mailbox_retention",
-            "schedule": 86400.0,
         },
         "check-legal-approval-timeouts": {
             "task": "check_legal_approval_timeouts",

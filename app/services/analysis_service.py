@@ -233,30 +233,6 @@ class AnalysisService:
         result = await self._extract_json_object(prompt, action="document_compare", user_id=user_id)
         return _normalize_doc_compare_result(result, documents)
 
-    async def summarize_meeting(self, transcript: str, user_id: int | None = None) -> dict:
-        prompt = prompt_service.render_by_name(
-            "meeting_summary",
-            user_id=user_id,
-            meeting_content=_trim_text(transcript, 12000),
-        )
-        return await self._extract_json_object(prompt, action="meeting_summary", user_id=user_id)
-
-    async def extract_meeting_decisions(self, transcript: str, user_id: int | None = None) -> list[dict]:
-        prompt = prompt_service.render_by_name(
-            "meeting_decision_extract",
-            user_id=user_id,
-            meeting_content=_trim_text(transcript, 12000),
-        )
-        return await self._extract_json_array(prompt, action="meeting_decision_extract", user_id=user_id)
-
-    async def extract_meeting_topics(self, transcript: str, user_id: int | None = None) -> list[dict]:
-        prompt = prompt_service.render_by_name(
-            "meeting_topic_extract",
-            user_id=user_id,
-            meeting_content=_trim_text(transcript, 12000),
-        )
-        return await self._extract_json_array(prompt, action="meeting_topic_extract", user_id=user_id)
-
     async def extract_tasks_from_chat(self, message: str, user_id: int | None = None) -> list[dict]:
         prompt = prompt_service.render_by_name(
             "task_extract_from_chat",

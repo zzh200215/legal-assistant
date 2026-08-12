@@ -93,9 +93,6 @@
           <el-select v-model="filters.classification" clearable placeholder="分类筛选" style="width: 100%" @change="handleFilterChange">
             <el-option v-for="item in classificationOptions" :key="item" :label="item" :value="item" />
           </el-select>
-          <el-select v-model="filters.connector_id" clearable placeholder="来源连接器" style="width: 100%" @change="handleFilterChange">
-            <el-option v-for="item in connectors" :key="item.id" :label="item.name" :value="item.id" />
-          </el-select>
           <el-select v-model="filters.sensitivity_level" clearable placeholder="敏感级别" style="width: 100%" @change="handleFilterChange">
             <el-option label="内部" value="internal" />
             <el-option label="受限" value="restricted" />
@@ -140,21 +137,9 @@
             <el-tag>{{ docMeta.status }}</el-tag>
             <el-tag v-if="docMeta.version_number">v{{ docMeta.version_number }}</el-tag>
             <el-tag v-if="docMeta.classification" type="success">{{ docMeta.classification }}</el-tag>
-            <el-tag v-if="docMeta.connector_name" type="warning">{{ docMeta.connector_name }}</el-tag>
             <el-tag v-if="docMeta.sensitivity_level" :type="docMeta.sensitivity_level === 'confidential' ? 'danger' : docMeta.sensitivity_level === 'restricted' ? 'warning' : 'info'">
               {{ docMeta.sensitivity_level }}
             </el-tag>
-          </div>
-          <div v-if="documentSourceMeta.hasSource" class="doc-source-meta">
-            <span v-if="documentSourceMeta.connectorName"><strong>来源连接器：</strong>{{ documentSourceMeta.connectorName }}</span>
-            <span v-if="documentSourceMeta.sourcePath"><strong>来源路径：</strong>{{ documentSourceMeta.sourcePath }}</span>
-            <span v-if="documentSourceMeta.originFile"><strong>原始文件：</strong>{{ documentSourceMeta.originFile }}</span>
-            <span v-if="documentSourceMeta.syncJobId">
-              <strong>同步任务：</strong>
-              <el-button text type="primary" size="small" @click="openDocumentSourceSyncJob">
-                #{{ documentSourceMeta.syncJobId }}
-              </el-button>
-            </span>
           </div>
           <div class="download-governance">
             <div class="download-governance-copy">
@@ -228,7 +213,6 @@
             <span>{{ item.file_type }} · {{ item.status }}<template v-if="item.version_number"> · v{{ item.version_number }}</template></span>
             <div class="doc-item-foot">
               <span>{{ item.classification || '未分类' }}</span>
-              <span>{{ item.connector_name || '手动上传' }}</span>
             </div>
           </button>
         </div>
@@ -670,7 +654,6 @@ const docId = ref(null)
 const docMeta = ref(null)
 const documents = ref([])
 const knowledgeBases = ref([])
-const connectors = ref([])
 const versions = ref([])
 const documentPage = ref(1)
 const documentPageSize = ref(10)
@@ -703,7 +686,6 @@ const uploadForm = ref({
 const filters = ref({
   knowledge_base_id: null,
   classification: '',
-  connector_id: route.query.connectorId ? Number(route.query.connectorId) : null,
   sensitivity_level: '',
   q: '',
 })
@@ -736,11 +718,6 @@ const {
   cancelNegativeFeedback,
   submitNegativeFeedback,
 } = useDocumentQaFeedback({ client: api, message: ElMessage, documentId: docId, refreshRecords: () => fetchQaRecords() })
-
-const normalizeConnectorId = (value) => {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
-}
 
 const emptyAnalysis = () => ({
   summary: '',
@@ -781,23 +758,6 @@ const parseDocumentMetadata = (value) => {
   }
 }
 
-const documentSourceMeta = computed(() => {
-  const metadata = parseDocumentMetadata(docMeta.value?.metadata_json)
-  return {
-    hasSource: Boolean(
-      docMeta.value?.connector_name ||
-      metadata.connector_name ||
-      metadata.connector_source_path ||
-      metadata.connector_origin_file ||
-      metadata.connector_sync_job_id
-    ),
-    connectorName: docMeta.value?.connector_name || metadata.connector_name || '',
-    sourcePath: metadata.connector_source_path || '',
-    originFile: metadata.connector_origin_file || '',
-    syncJobId: metadata.connector_sync_job_id || null,
-  }
-})
-
 const onFileChange = (_uploadFile, uploadFiles) => {
   selectedFiles.value = (uploadFiles || []).map((item) => item.raw).filter(Boolean)
   file.value = selectedFiles.value[0] || null
@@ -831,7 +791,6 @@ const fetchDocuments = async () => {
         page_size: documentPageSize.value,
         knowledge_base_id: filters.value.knowledge_base_id || undefined,
         classification: filters.value.classification || undefined,
-        connector_id: filters.value.connector_id || undefined,
         sensitivity_level: filters.value.sensitivity_level || undefined,
         q: filters.value.q || undefined,
       })
@@ -851,11 +810,6 @@ const handleDocumentPageChange = async (page) => {
 const handleFilterChange = async () => {
   documentPage.value = 1
   const nextQuery = { ...route.query }
-  if (filters.value.connector_id) {
-    nextQuery.connectorId = String(filters.value.connector_id)
-  } else {
-    delete nextQuery.connectorId
-  }
   router.replace({ query: nextQuery })
   await fetchDocuments()
 }
@@ -866,15 +820,6 @@ const fetchKnowledgeBases = async () => {
     knowledgeBases.value = data || []
   } catch {
     knowledgeBases.value = []
-  }
-}
-
-const fetchConnectors = async () => {
-  try {
-    const { data } = await api.listConnectors()
-    connectors.value = data || []
-  } catch {
-    connectors.value = []
   }
 }
 
@@ -980,18 +925,6 @@ const fetchRelatedAgentRuns = async (documentId) => {
   }
 }
 
-const openDocumentSourceSyncJob = () => {
-  if (!documentSourceMeta.value?.syncJobId) return
-  const query = {
-    tab: 'connectors',
-    connectorSyncJobId: String(documentSourceMeta.value.syncJobId),
-  }
-  if (docMeta.value?.connector_id) {
-    query.connectorId = String(docMeta.value.connector_id)
-  }
-  router.push({ path: '/system', query })
-}
-
 const hydrateDocumentMeta = async (documentId) => {
   if (!documentId) return
   try {
@@ -1002,8 +935,6 @@ const hydrateDocumentMeta = async (documentId) => {
       title: data.title,
       file_type: data.file_type,
       knowledge_base_id: data.knowledge_base_id,
-      connector_id: data.connector_id || docMeta.value?.connector_id || null,
-      connector_name: data.connector_name || docMeta.value?.connector_name || '',
       version_number: data.version_number,
       classification: data.classification,
       sensitivity_level: data.sensitivity_level,
@@ -1347,24 +1278,11 @@ const loadDocumentFromRoute = async (rawDocumentId) => {
 
   try {
     const { data } = await api.getDocument(nextId)
-    let connectorId = data.connector_id || null
-    let connectorName = data.connector_name || ''
-    if ((!connectorId || !connectorName) && data.metadata_json) {
-      try {
-        const parsed = JSON.parse(data.metadata_json)
-        connectorId = connectorId || parsed?.connector_id || null
-        connectorName = connectorName || parsed?.connector_name || ''
-      } catch {
-        // ignore invalid metadata
-      }
-    }
     const normalized = {
       id: data.id,
       title: data.title,
       file_type: data.file_type,
       knowledge_base_id: data.knowledge_base_id,
-      connector_id: connectorId,
-      connector_name: connectorName,
       version_number: data.version_number,
       classification: data.classification,
       sensitivity_level: data.sensitivity_level,
@@ -1384,7 +1302,6 @@ const loadDocumentFromRoute = async (rawDocumentId) => {
 onMounted(async () => {
   analysis.value = emptyAnalysis()
   await fetchKnowledgeBases()
-  await fetchConnectors()
   await fetchDocuments()
   await loadDocumentFromRoute(route.query.documentId)
 })
@@ -1394,16 +1311,6 @@ watch(
   async (value, oldValue) => {
     if (value === oldValue) return
     await loadDocumentFromRoute(value)
-  }
-)
-
-watch(
-  () => route.query.connectorId,
-  async (value, oldValue) => {
-    if (value === oldValue) return
-    filters.value.connector_id = normalizeConnectorId(value)
-    documentPage.value = 1
-    await fetchDocuments()
   }
 )
 

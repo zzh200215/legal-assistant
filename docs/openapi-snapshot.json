@@ -29,9 +29,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -125,9 +123,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -167,9 +163,47 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Refresh Token",
+        "description": "refresh token 单次轮换；同一 token 重复使用判定为重放并撤销整个 family。",
+        "operationId": "refresh_token_api_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -192,8 +226,60 @@
           "Auth"
         ],
         "summary": "Logout",
-        "description": "登出（客户端清除 Token 即可）",
+        "description": "登出：撤销当前 access token，可选撤销 refresh token。",
         "operationId": "logout_api_auth_logout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LogoutRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Req"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/logout-all": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout All",
+        "description": "全部设备退出：递增 token 版本使所有 access token 失效，并撤销全部 refresh token。",
+        "operationId": "logout_all_api_auth_logout_all_post",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -234,9 +320,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -278,6 +362,223 @@
             "OAuth2PasswordBearer": []
           }
         ]
+      }
+    },
+    "/api/auth/security-status": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get Security Status",
+        "description": "当前用户安全状态：MFA、设备、最近风险。",
+        "operationId": "get_security_status_api_auth_security_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/mfa/setup": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mfa Setup",
+        "description": "开始启用 MFA：生成 TOTP secret（confirm 前不生效）。",
+        "operationId": "mfa_setup_api_auth_mfa_setup_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/mfa/confirm": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mfa Confirm",
+        "description": "用一次性验证码确认启用 MFA，返回恢复码（仅展示一次）。",
+        "operationId": "mfa_confirm_api_auth_mfa_confirm_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/mfa/disable": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mfa Disable",
+        "description": "禁用 MFA（需通过一次验证码校验）。",
+        "operationId": "mfa_disable_api_auth_mfa_disable_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/mfa/recovery-codes": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mfa Regenerate Recovery Codes",
+        "description": "重新生成恢复码（旧恢复码全部作废）。",
+        "operationId": "mfa_regenerate_recovery_codes_api_auth_mfa_recovery_codes_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/mfa/verify": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Mfa Verify Login",
+        "description": "登录第二步：校验 challenge + MFA 验证码，成功后签发 token 会话。",
+        "operationId": "mfa_verify_login_api_auth_mfa_verify_post",
+        "parameters": [
+          {
+            "name": "challenge",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Challenge"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/auth/users": {
@@ -655,7 +956,7 @@
           "Auth"
         ],
         "summary": "Force Logout User",
-        "description": "强制用户下线",
+        "description": "强制用户下线：递增 token 版本，使该用户所有 token 立即失效。",
         "operationId": "force_logout_user_api_auth_users__user_id__force_logout_post",
         "security": [
           {
@@ -1004,9 +1305,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -1086,9 +1385,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -1160,9 +1457,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -5116,1528 +5411,6 @@
         }
       }
     },
-    "/api/meetings/": {
-      "get": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "List Meetings",
-        "description": "获取用户的会议列表。",
-        "operationId": "list_meetings_api_meetings__get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "scope",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "可见范围筛选：all/mine/department/organization/shared",
-              "default": "all",
-              "title": "Scope"
-            },
-            "description": "可见范围筛选：all/mine/department/organization/shared"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "页码",
-              "default": 1,
-              "title": "Page"
-            },
-            "description": "页码"
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "每页条数",
-              "default": 20,
-              "title": "Page Size"
-            },
-            "description": "每页条数"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Create Meeting",
-        "operationId": "create_meeting_api_meetings__post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MeetingCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeetingOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/meetings/upload-image": {
-      "post": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Upload Meeting Image",
-        "operationId": "upload_meeting_image_api_meetings_upload_image_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_meeting_image_api_meetings_upload_image_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeetingOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/meetings/upload-audio": {
-      "post": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Upload Meeting Audio",
-        "operationId": "upload_meeting_audio_api_meetings_upload_audio_post",
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_upload_meeting_audio_api_meetings_upload_audio_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeetingOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/meetings/{meeting_id}": {
-      "get": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Get Meeting",
-        "operationId": "get_meeting_api_meetings__meeting_id__get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeetingOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/meetings/{meeting_id}/summary": {
-      "get": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Get Meeting Summary",
-        "operationId": "get_meeting_summary_api_meetings__meeting_id__summary_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/meetings/{meeting_id}/transcript": {
-      "get": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Get Meeting Transcript",
-        "operationId": "get_meeting_transcript_api_meetings__meeting_id__transcript_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/meetings/{meeting_id}/summarize": {
-      "post": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Summarize Meeting",
-        "operationId": "summarize_meeting_api_meetings__meeting_id__summarize_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MeetingSummarizeRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/meetings/task/{task_id}/status": {
-      "get": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Get Meeting Task Status",
-        "operationId": "get_meeting_task_status_api_meetings_task__task_id__status_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "task_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Task Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/meetings/{meeting_id}/extract-decisions": {
-      "post": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Extract Decisions",
-        "description": "决策事项单独抽取：区分讨论中和已确认。",
-        "operationId": "extract_decisions_api_meetings__meeting_id__extract_decisions_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/meetings/{meeting_id}/extract-topics": {
-      "post": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Extract Topics",
-        "description": "议题抽取：识别会议讨论的主题及关键观点。",
-        "operationId": "extract_topics_api_meetings__meeting_id__extract_topics_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/meetings/{meeting_id}/extract-tasks": {
-      "post": {
-        "tags": [
-          "Meetings"
-        ],
-        "summary": "Extract Tasks From Meeting",
-        "operationId": "extract_tasks_from_meeting_api_meetings__meeting_id__extract_tasks_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/emails/generate": {
-      "post": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "Generate Email",
-        "operationId": "generate_email_api_emails_generate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EmailGenerateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/emails/reply": {
-      "post": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "Reply Email",
-        "operationId": "reply_email_api_emails_reply_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EmailReplyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/emails/from-tasks": {
-      "post": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "Generate Email From Tasks",
-        "operationId": "generate_email_from_tasks_api_emails_from_tasks_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TaskSyncEmailRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/emails/{draft_id}/switch-tone": {
-      "post": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "Switch Tone",
-        "operationId": "switch_tone_api_emails__draft_id__switch_tone_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "draft_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Draft Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EmailSwitchToneRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/emails/thread-summary": {
-      "post": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "Summarize Thread",
-        "operationId": "summarize_thread_api_emails_thread_summary_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EmailThreadSummaryRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/emails/thread-reply": {
-      "post": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "Reply From Thread",
-        "operationId": "reply_from_thread_api_emails_thread_reply_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EmailThreadReplyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftActionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/emails/{draft_id}": {
-      "get": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "Get Draft",
-        "operationId": "get_draft_api_emails__draft_id__get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "draft_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Draft Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/emails/{draft_id}/polish": {
-      "post": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "Polish Draft",
-        "operationId": "polish_draft_api_emails__draft_id__polish_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "draft_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Draft Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EmailPolishRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/emails/": {
-      "get": {
-        "tags": [
-          "Emails"
-        ],
-        "summary": "List Drafts",
-        "operationId": "list_drafts_api_emails__get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "scope",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "可见范围筛选：all/mine/department/organization/shared",
-              "default": "all",
-              "title": "Scope"
-            },
-            "description": "可见范围筛选：all/mine/department/organization/shared"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "页码",
-              "default": 1,
-              "title": "Page"
-            },
-            "description": "页码"
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "每页条数",
-              "default": 20,
-              "title": "Page Size"
-            },
-            "description": "每页条数"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/mailbox/retention/preview": {
-      "post": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "Preview Retention",
-        "operationId": "preview_retention_api_mailbox_retention_preview_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MailboxRetentionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/mailbox/retention/purge": {
-      "post": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "Purge Retention",
-        "operationId": "purge_retention_api_mailbox_retention_purge_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MailboxRetentionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/mailbox/connectors": {
-      "post": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "Create Imap Connector",
-        "operationId": "create_imap_connector_api_mailbox_connectors_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImapMailboxCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectorOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/mailbox/emails": {
-      "get": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "List Mailbox Messages",
-        "operationId": "list_mailbox_messages_api_mailbox_emails_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "connector_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Connector Id"
-            }
-          },
-          {
-            "name": "category",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Category"
-            }
-          },
-          {
-            "name": "importance",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Importance"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 20,
-              "title": "Page Size"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/mailbox/emails/top-important": {
-      "get": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "Top Important Emails",
-        "operationId": "top_important_emails_api_mailbox_emails_top_important_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 20,
-              "minimum": 1,
-              "default": 5,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/mailbox/reply-style-profile": {
-      "get": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "Reply Style Profile",
-        "operationId": "reply_style_profile_api_mailbox_reply_style_profile_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/mailbox/emails/{message_id}/auto-reply": {
-      "post": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "Auto Reply",
-        "operationId": "auto_reply_api_mailbox_emails__message_id__auto_reply_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Message Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MailboxAutoReplyRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/mailbox/emails/{message_id}/task-suggestion": {
-      "get": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "Get Task Suggestion",
-        "operationId": "get_task_suggestion_api_mailbox_emails__message_id__task_suggestion_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Message Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MailboxTaskSuggestionOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/mailbox/emails/{message_id}/confirm-task": {
-      "post": {
-        "tags": [
-          "Mailbox"
-        ],
-        "summary": "Confirm Mailbox Task",
-        "operationId": "confirm_mailbox_task_api_mailbox_emails__message_id__confirm_task_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Message Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MailboxTaskConfirmRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/outbound/policy": {
       "get": {
         "tags": [
@@ -6984,498 +5757,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EmailSendRequestOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/connectors/": {
-      "get": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "List Connectors",
-        "operationId": "list_connectors_api_connectors__get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "include_all",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Include All"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ConnectorOut"
-                  },
-                  "title": "Response List Connectors Api Connectors  Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "Create Connector",
-        "operationId": "create_connector_api_connectors__post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConnectorCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectorOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/connectors/enterprise": {
-      "post": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "Create Enterprise Connector",
-        "description": "创建 Microsoft Graph、ERP 或 CRM 的受控企业连接器。",
-        "operationId": "create_enterprise_connector_api_connectors_enterprise_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnterpriseConnectorCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectorOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/connectors/{connector_id}/microsoft-oauth/start": {
-      "post": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "Start Microsoft Oauth",
-        "operationId": "start_microsoft_oauth_api_connectors__connector_id__microsoft_oauth_start_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "connector_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Connector Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MicrosoftOAuthStartRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MicrosoftOAuthStartResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/connectors/{connector_id}/sync": {
-      "post": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "Sync Connector",
-        "operationId": "sync_connector_api_connectors__connector_id__sync_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "connector_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Connector Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConnectorSyncRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectorSyncJobOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/connectors/{connector_id}/credentials/rotate": {
-      "post": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "Rotate Connector Credentials",
-        "operationId": "rotate_connector_credentials_api_connectors__connector_id__credentials_rotate_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "connector_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Connector Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ConnectorCredentialRotateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectorOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/connectors/{connector_id}/enterprise-credentials": {
-      "put": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "Update Enterprise Connector Credentials",
-        "operationId": "update_enterprise_connector_credentials_api_connectors__connector_id__enterprise_credentials_put",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "connector_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Connector Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnterpriseConnectorCredentialRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectorOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/connectors/{connector_id}/disable": {
-      "post": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "Disable Connector",
-        "operationId": "disable_connector_api_connectors__connector_id__disable_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "connector_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Connector Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConnectorOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/connectors/sync-jobs": {
-      "get": {
-        "tags": [
-          "Connectors"
-        ],
-        "summary": "List Connector Sync Jobs",
-        "operationId": "list_connector_sync_jobs_api_connectors_sync_jobs_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "connector_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Connector Id"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ConnectorSyncJobOut"
-                  },
-                  "title": "Response List Connector Sync Jobs Api Connectors Sync Jobs Get"
                 }
               }
             }
@@ -8550,457 +6831,6 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workflows/meetings/{meeting_id}/task-preview": {
-      "get": {
-        "tags": [
-          "Workflows"
-        ],
-        "summary": "Preview Meeting Tasks",
-        "operationId": "preview_meeting_tasks_api_workflows_meetings__meeting_id__task_preview_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workflows/meetings/{meeting_id}/confirm-tasks": {
-      "post": {
-        "tags": [
-          "Workflows"
-        ],
-        "summary": "Confirm Meeting Tasks",
-        "operationId": "confirm_meeting_tasks_api_workflows_meetings__meeting_id__confirm_tasks_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MeetingTaskConfirmRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workflows/weekly-report": {
-      "post": {
-        "tags": [
-          "Workflows"
-        ],
-        "summary": "Create Weekly Report",
-        "operationId": "create_weekly_report_api_workflows_weekly_report_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WeeklyReportDraftRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/workflows/meetings/{meeting_id}/risk-followup": {
-      "post": {
-        "tags": [
-          "Workflows"
-        ],
-        "summary": "Create Risk Followup",
-        "operationId": "create_risk_followup_api_workflows_meetings__meeting_id__risk_followup_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "meeting_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Meeting Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RiskFollowupDraftRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailDraftOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/schedules/": {
-      "get": {
-        "tags": [
-          "Schedules"
-        ],
-        "summary": "List Schedules",
-        "operationId": "list_schedules_api_schedules__get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ScheduledWorkflowOut"
-                  },
-                  "type": "array",
-                  "title": "Response List Schedules Api Schedules  Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Schedules"
-        ],
-        "summary": "Create Schedule",
-        "operationId": "create_schedule_api_schedules__post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduledWorkflowCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduledWorkflowOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      }
-    },
-    "/api/schedules/{schedule_id}": {
-      "patch": {
-        "tags": [
-          "Schedules"
-        ],
-        "summary": "Update Schedule",
-        "operationId": "update_schedule_api_schedules__schedule_id__patch",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "schedule_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Schedule Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduledWorkflowUpdate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduledWorkflowOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/schedules/{schedule_id}/run": {
-      "post": {
-        "tags": [
-          "Schedules"
-        ],
-        "summary": "Run Schedule",
-        "operationId": "run_schedule_api_schedules__schedule_id__run_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "schedule_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Schedule Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowExecutionOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/schedules/executions/": {
-      "get": {
-        "tags": [
-          "Schedules"
-        ],
-        "summary": "List Executions",
-        "operationId": "list_executions_api_schedules_executions__get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "schedule_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Schedule Id"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/WorkflowExecutionOut"
-                  },
-                  "title": "Response List Executions Api Schedules Executions  Get"
-                }
               }
             }
           },
@@ -10427,53 +8257,6 @@
             }
           }
         }
-      }
-    },
-    "/api/org/sync": {
-      "post": {
-        "tags": [
-          "Org"
-        ],
-        "summary": "Sync From External",
-        "description": "从外部系统同步组织架构（系统管理员）",
-        "operationId": "sync_from_external_api_org_sync_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrgSyncRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrgSyncResultOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
       }
     },
     "/api/legal/orgs/{org_id}/members": {
@@ -15490,6 +13273,11 @@
         ],
         "summary": "Payment Webhook",
         "operationId": "payment_webhook_api_legal_invoices__invoice_id__payment_webhook_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "invoice_id",
@@ -17246,6 +15034,71 @@
         }
       }
     },
+    "/api/legal/contracts/expiry-alerts": {
+      "get": {
+        "tags": [
+          "Legal Contracts"
+        ],
+        "summary": "Expiry Alerts",
+        "operationId": "expiry_alerts_api_legal_contracts_expiry_alerts_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/contracts/{contract_id}": {
       "get": {
         "tags": [
@@ -17597,71 +15450,6 @@
             "schema": {
               "type": "integer",
               "title": "Milestone Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/legal/contracts/expiry-alerts": {
-      "get": {
-        "tags": [
-          "Legal Contracts"
-        ],
-        "summary": "Expiry Alerts",
-        "operationId": "expiry_alerts_api_legal_contracts_expiry_alerts_get",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "org_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Org Id"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 20,
-              "title": "Page Size"
             }
           }
         ],
@@ -19128,6 +16916,102 @@
         }
       }
     },
+    "/api/developer/notifications/me": {
+      "get": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Get My Notifications",
+        "description": "当前用户最近 50 条站内通知 + 未读数（delivered/sent 计为未读）。",
+        "operationId": "get_my_notifications_api_developer_notifications_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/api/developer/notifications/{notification_id}/read": {
+      "post": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Mark Notification Read",
+        "description": "标记单条站内通知为已读；非本人或不存在返回 404。",
+        "operationId": "mark_notification_read_api_developer_notifications__notification_id__read_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/developer/notifications/read-all": {
+      "post": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Mark All Notifications Read",
+        "description": "标记当前用户全部站内通知为已读。",
+        "operationId": "mark_all_notifications_read_api_developer_notifications_read_all_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
     "/api/developer/onboarding": {
       "get": {
         "tags": [
@@ -20484,67 +18368,6 @@
         ],
         "title": "Body_upload_document_api_documents_upload_post"
       },
-      "Body_upload_meeting_audio_api_meetings_upload_audio_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "transcript_text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Transcript Text"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_meeting_audio_api_meetings_upload_audio_post"
-      },
-      "Body_upload_meeting_image_api_meetings_upload_image_post": {
-        "properties": {
-          "file": {
-            "type": "string",
-            "contentMediaType": "application/octet-stream",
-            "title": "File"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          }
-        },
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "title": "Body_upload_meeting_image_api_meetings_upload_image_post"
-      },
       "CaseMemberCreate": {
         "properties": {
           "user_id": {
@@ -20797,57 +18620,6 @@
         "type": "object",
         "title": "ConflictTaskConfirmRequest"
       },
-      "ConnectorCreateRequest": {
-        "properties": {
-          "connector_type": {
-            "type": "string",
-            "title": "Connector Type"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "config_json": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config Json"
-          }
-        },
-        "type": "object",
-        "required": [
-          "connector_type",
-          "name"
-        ],
-        "title": "ConnectorCreateRequest"
-      },
-      "ConnectorCredentialRotateRequest": {
-        "properties": {
-          "username": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Username"
-          },
-          "password": {
-            "type": "string",
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Password"
-          }
-        },
-        "type": "object",
-        "required": [
-          "username",
-          "password"
-        ],
-        "title": "ConnectorCredentialRotateRequest"
-      },
       "ConnectorOut": {
         "properties": {
           "id": {
@@ -20968,95 +18740,6 @@
           "updated_at"
         ],
         "title": "ConnectorOut"
-      },
-      "ConnectorSyncJobOut": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "connector_id": {
-            "type": "integer",
-            "title": "Connector Id"
-          },
-          "user_id": {
-            "type": "integer",
-            "title": "User Id"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "sync_mode": {
-            "type": "string",
-            "title": "Sync Mode"
-          },
-          "result_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result Summary"
-          },
-          "result_detail_json": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result Detail Json"
-          },
-          "error_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Message"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "connector_id",
-          "user_id",
-          "status",
-          "sync_mode",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "ConnectorSyncJobOut"
-      },
-      "ConnectorSyncRequest": {
-        "properties": {
-          "sync_mode": {
-            "type": "string",
-            "title": "Sync Mode",
-            "default": "manual"
-          }
-        },
-        "type": "object",
-        "title": "ConnectorSyncRequest"
       },
       "ConsultationIn": {
         "properties": {
@@ -22031,272 +19714,6 @@
         ],
         "title": "DraftIn"
       },
-      "EmailDraftActionResponse": {
-        "properties": {
-          "draft": {
-            "$ref": "#/components/schemas/EmailDraftOut"
-          },
-          "subject_candidates": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Subject Candidates"
-          }
-        },
-        "type": "object",
-        "required": [
-          "draft"
-        ],
-        "title": "EmailDraftActionResponse"
-      },
-      "EmailDraftOut": {
-        "properties": {
-          "subject": {
-            "type": "string",
-            "title": "Subject"
-          },
-          "recipient": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipient"
-          },
-          "cc": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cc"
-          },
-          "content": {
-            "type": "string",
-            "title": "Content"
-          },
-          "purpose": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Purpose"
-          },
-          "key_points": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Key Points"
-          },
-          "need_action": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Need Action"
-          },
-          "generation_type": {
-            "type": "string",
-            "title": "Generation Type",
-            "default": "generate"
-          },
-          "original_email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Original Email"
-          },
-          "reply_goal": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reply Goal"
-          },
-          "tone": {
-            "type": "string",
-            "title": "Tone",
-            "default": "professional"
-          },
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "user_id": {
-            "type": "integer",
-            "title": "User Id"
-          },
-          "organization_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Organization Id"
-          },
-          "department_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department Id"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "metadata_json": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata Json"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "subject",
-          "content",
-          "id",
-          "user_id",
-          "status",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "EmailDraftOut"
-      },
-      "EmailGenerateRequest": {
-        "properties": {
-          "purpose": {
-            "type": "string",
-            "title": "Purpose"
-          },
-          "key_points": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Key Points"
-          },
-          "tone": {
-            "type": "string",
-            "title": "Tone",
-            "default": "professional"
-          },
-          "recipient": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipient"
-          },
-          "need_action": {
-            "type": "boolean",
-            "title": "Need Action",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "purpose"
-        ],
-        "title": "EmailGenerateRequest"
-      },
-      "EmailPolishRequest": {
-        "properties": {
-          "instruction": {
-            "type": "string",
-            "title": "Instruction",
-            "default": "优化措辞，使其更专业"
-          }
-        },
-        "type": "object",
-        "title": "EmailPolishRequest"
-      },
-      "EmailReplyRequest": {
-        "properties": {
-          "original_email": {
-            "type": "string",
-            "title": "Original Email"
-          },
-          "reply_goal": {
-            "type": "string",
-            "title": "Reply Goal"
-          },
-          "tone": {
-            "type": "string",
-            "title": "Tone",
-            "default": "professional"
-          },
-          "recipient": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipient"
-          }
-        },
-        "type": "object",
-        "required": [
-          "original_email",
-          "reply_goal"
-        ],
-        "title": "EmailReplyRequest"
-      },
       "EmailSendRequestCreate": {
         "properties": {
           "smtp_connector_id": {
@@ -22525,123 +19942,6 @@
         ],
         "title": "EmailSendRequestOut"
       },
-      "EmailSwitchToneRequest": {
-        "properties": {
-          "target_tone": {
-            "type": "string",
-            "title": "Target Tone"
-          }
-        },
-        "type": "object",
-        "required": [
-          "target_tone"
-        ],
-        "title": "EmailSwitchToneRequest"
-      },
-      "EmailThreadReplyRequest": {
-        "properties": {
-          "emails": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Emails"
-          },
-          "reply_goal": {
-            "type": "string",
-            "title": "Reply Goal"
-          },
-          "tone": {
-            "type": "string",
-            "title": "Tone",
-            "default": "professional"
-          },
-          "recipient": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipient"
-          }
-        },
-        "type": "object",
-        "required": [
-          "emails",
-          "reply_goal"
-        ],
-        "title": "EmailThreadReplyRequest"
-      },
-      "EmailThreadSummaryRequest": {
-        "properties": {
-          "emails": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Emails"
-          }
-        },
-        "type": "object",
-        "required": [
-          "emails"
-        ],
-        "title": "EmailThreadSummaryRequest"
-      },
-      "EnterpriseConnectorCreateRequest": {
-        "properties": {
-          "connector_type": {
-            "type": "string",
-            "enum": [
-              "ms_graph_onedrive",
-              "ms_graph_sharepoint",
-              "erp_rest",
-              "crm_rest"
-            ],
-            "title": "Connector Type"
-          },
-          "name": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Name"
-          },
-          "config": {
-            "type": "object",
-            "title": "Config"
-          },
-          "credentials": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Credentials"
-          }
-        },
-        "type": "object",
-        "required": [
-          "connector_type",
-          "name"
-        ],
-        "title": "EnterpriseConnectorCreateRequest",
-        "description": "管理员配置的企业数据源。凭据与可展示配置强制分开传递。"
-      },
-      "EnterpriseConnectorCredentialRequest": {
-        "properties": {
-          "credentials": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Credentials"
-          }
-        },
-        "type": "object",
-        "title": "EnterpriseConnectorCredentialRequest"
-      },
       "ExitSurveyRequest": {
         "properties": {
           "nps_score": {
@@ -22864,75 +20164,6 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
-      },
-      "ImapMailboxCreateRequest": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Name"
-          },
-          "host": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Host"
-          },
-          "port": {
-            "type": "integer",
-            "maximum": 65535.0,
-            "minimum": 1.0,
-            "title": "Port",
-            "default": 993
-          },
-          "username": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Username"
-          },
-          "password": {
-            "type": "string",
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Password"
-          },
-          "mailbox": {
-            "type": "string",
-            "maxLength": 128,
-            "title": "Mailbox",
-            "default": "INBOX"
-          },
-          "use_ssl": {
-            "type": "boolean",
-            "title": "Use Ssl",
-            "default": true
-          },
-          "max_messages": {
-            "type": "integer",
-            "maximum": 200.0,
-            "minimum": 1.0,
-            "title": "Max Messages",
-            "default": 50
-          },
-          "important_senders": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "title": "Important Senders"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "host",
-          "username",
-          "password"
-        ],
-        "title": "ImapMailboxCreateRequest"
       },
       "InvoiceCreate": {
         "properties": {
@@ -23396,6 +20627,23 @@
         ],
         "title": "LoginLogOut"
       },
+      "LogoutRequest": {
+        "properties": {
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "title": "LogoutRequest"
+      },
       "MCPToolCallRequest": {
         "properties": {
           "tool_name": {
@@ -23421,371 +20669,6 @@
           "tool_name"
         ],
         "title": "MCPToolCallRequest"
-      },
-      "MailboxAutoReplyRequest": {
-        "properties": {
-          "reply_goal": {
-            "type": "string",
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Reply Goal",
-            "default": "确认收到，并说明将尽快跟进。"
-          },
-          "recipient": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipient"
-          },
-          "smtp_connector_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Smtp Connector Id"
-          }
-        },
-        "type": "object",
-        "title": "MailboxAutoReplyRequest"
-      },
-      "MailboxRetentionRequest": {
-        "properties": {
-          "retention_days": {
-            "type": "integer",
-            "maximum": 3650.0,
-            "minimum": 7.0,
-            "title": "Retention Days",
-            "default": 90
-          },
-          "connector_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Connector Id"
-          }
-        },
-        "type": "object",
-        "title": "MailboxRetentionRequest"
-      },
-      "MailboxTaskConfirmRequest": {
-        "properties": {
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "assignee": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignee"
-          },
-          "priority": {
-            "type": "string",
-            "title": "Priority",
-            "default": "medium"
-          }
-        },
-        "type": "object",
-        "title": "MailboxTaskConfirmRequest"
-      },
-      "MailboxTaskSuggestionOut": {
-        "properties": {
-          "message_id": {
-            "type": "integer",
-            "title": "Message Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "priority": {
-            "type": "string",
-            "title": "Priority"
-          },
-          "already_created_task_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Already Created Task Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message_id",
-          "title",
-          "priority"
-        ],
-        "title": "MailboxTaskSuggestionOut"
-      },
-      "MeetingCreateRequest": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "transcript": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Transcript"
-          }
-        },
-        "type": "object",
-        "required": [
-          "title"
-        ],
-        "title": "MeetingCreateRequest"
-      },
-      "MeetingOut": {
-        "properties": {
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "user_id": {
-            "type": "integer",
-            "title": "User Id"
-          },
-          "organization_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Organization Id"
-          },
-          "department_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department Id"
-          },
-          "transcript": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Transcript"
-          },
-          "transcript_source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Transcript Source"
-          },
-          "audio_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Audio Path"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "title",
-          "id",
-          "user_id",
-          "status",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "MeetingOut"
-      },
-      "MeetingSummarizeRequest": {
-        "properties": {
-          "async_mode": {
-            "type": "boolean",
-            "title": "Async Mode",
-            "default": false
-          }
-        },
-        "type": "object",
-        "title": "MeetingSummarizeRequest"
-      },
-      "MeetingTaskConfirmRequest": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/MeetingTaskSelection"
-            },
-            "type": "array",
-            "title": "Items"
-          }
-        },
-        "type": "object",
-        "title": "MeetingTaskConfirmRequest"
-      },
-      "MeetingTaskSelection": {
-        "properties": {
-          "source_index": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Source Index"
-          },
-          "selected": {
-            "type": "boolean",
-            "title": "Selected",
-            "default": true
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "assignee": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignee"
-          },
-          "due_date": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Due Date"
-          },
-          "priority": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Priority"
-          }
-        },
-        "type": "object",
-        "required": [
-          "source_index"
-        ],
-        "title": "MeetingTaskSelection"
       },
       "MemberInviteIn": {
         "properties": {
@@ -23817,40 +20700,6 @@
           "legal_role"
         ],
         "title": "MemberRoleUpdate"
-      },
-      "MicrosoftOAuthStartRequest": {
-        "properties": {
-          "redirect_uri": {
-            "type": "string",
-            "maxLength": 1024,
-            "minLength": 10,
-            "title": "Redirect Uri"
-          }
-        },
-        "type": "object",
-        "required": [
-          "redirect_uri"
-        ],
-        "title": "MicrosoftOAuthStartRequest"
-      },
-      "MicrosoftOAuthStartResponse": {
-        "properties": {
-          "authorize_url": {
-            "type": "string",
-            "title": "Authorize Url"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Expires At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "authorize_url",
-          "expires_at"
-        ],
-        "title": "MicrosoftOAuthStartResponse"
       },
       "NotificationPrefUpdate": {
         "properties": {
@@ -24050,68 +20899,6 @@
           "content"
         ],
         "title": "OpenContractReviewRequest"
-      },
-      "OrgSyncRequest": {
-        "properties": {
-          "provider": {
-            "type": "string",
-            "title": "Provider"
-          }
-        },
-        "type": "object",
-        "required": [
-          "provider"
-        ],
-        "title": "OrgSyncRequest"
-      },
-      "OrgSyncResultOut": {
-        "properties": {
-          "organizations_created": {
-            "type": "integer",
-            "title": "Organizations Created",
-            "default": 0
-          },
-          "organizations_updated": {
-            "type": "integer",
-            "title": "Organizations Updated",
-            "default": 0
-          },
-          "departments_created": {
-            "type": "integer",
-            "title": "Departments Created",
-            "default": 0
-          },
-          "departments_updated": {
-            "type": "integer",
-            "title": "Departments Updated",
-            "default": 0
-          },
-          "users_created": {
-            "type": "integer",
-            "title": "Users Created",
-            "default": 0
-          },
-          "users_updated": {
-            "type": "integer",
-            "title": "Users Updated",
-            "default": 0
-          },
-          "users_disabled": {
-            "type": "integer",
-            "title": "Users Disabled",
-            "default": 0
-          },
-          "errors": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Errors",
-            "default": []
-          }
-        },
-        "type": "object",
-        "title": "OrgSyncResultOut"
       },
       "OrganizationCreate": {
         "properties": {
@@ -24472,6 +21259,14 @@
             "minimum": 0.0,
             "title": "Require Email Verification",
             "default": 1
+          },
+          "aggregate_case": {
+            "type": "integer",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Aggregate Case",
+            "description": "1=聚合该案件全部已发布客户可见内容（一个案件一个URL）",
+            "default": 0
           },
           "items": {
             "items": {
@@ -24876,6 +21671,19 @@
         ],
         "title": "PromptTemplateVersionOut"
       },
+      "RefreshTokenRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshTokenRequest"
+      },
       "RefundCreate": {
         "properties": {
           "amount": {
@@ -25150,23 +21958,6 @@
         ],
         "title": "ReviewPolicyCreate"
       },
-      "RiskFollowupDraftRequest": {
-        "properties": {
-          "recipient": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipient"
-          }
-        },
-        "type": "object",
-        "title": "RiskFollowupDraftRequest"
-      },
       "RollbackVersionRequest": {
         "properties": {
           "target_version_id": {
@@ -25201,260 +21992,6 @@
           "rollout_percentage"
         ],
         "title": "RolloutVersionRequest"
-      },
-      "ScheduledWorkflowCreate": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Name"
-          },
-          "workflow_type": {
-            "type": "string",
-            "title": "Workflow Type"
-          },
-          "frequency": {
-            "type": "string",
-            "title": "Frequency",
-            "default": "daily"
-          },
-          "run_time": {
-            "type": "string",
-            "title": "Run Time",
-            "default": "09:00"
-          },
-          "weekday": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 6.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Weekday"
-          },
-          "timezone": {
-            "type": "string",
-            "title": "Timezone",
-            "default": "Asia/Shanghai"
-          },
-          "config": {
-            "type": "object",
-            "title": "Config"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "workflow_type"
-        ],
-        "title": "ScheduledWorkflowCreate"
-      },
-      "ScheduledWorkflowOut": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "user_id": {
-            "type": "integer",
-            "title": "User Id"
-          },
-          "organization_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Organization Id"
-          },
-          "department_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "workflow_type": {
-            "type": "string",
-            "title": "Workflow Type"
-          },
-          "frequency": {
-            "type": "string",
-            "title": "Frequency"
-          },
-          "run_time": {
-            "type": "string",
-            "title": "Run Time"
-          },
-          "weekday": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Weekday"
-          },
-          "timezone": {
-            "type": "string",
-            "title": "Timezone"
-          },
-          "config": {
-            "type": "object",
-            "title": "Config"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          },
-          "next_run_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Run At"
-          },
-          "last_run_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Run At"
-          },
-          "last_status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Status"
-          },
-          "consecutive_failures": {
-            "type": "integer",
-            "title": "Consecutive Failures"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "user_id",
-          "name",
-          "workflow_type",
-          "frequency",
-          "run_time",
-          "timezone",
-          "enabled",
-          "consecutive_failures",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "ScheduledWorkflowOut"
-      },
-      "ScheduledWorkflowUpdate": {
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "run_time": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Time"
-          },
-          "weekday": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 6.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Weekday"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config"
-          }
-        },
-        "type": "object",
-        "title": "ScheduledWorkflowUpdate"
       },
       "SendVerifyCodeRequest": {
         "properties": {
@@ -26181,55 +22718,6 @@
         ],
         "title": "TaskOut"
       },
-      "TaskSyncEmailRequest": {
-        "properties": {
-          "task_ids": {
-            "items": {
-              "type": "integer"
-            },
-            "type": "array",
-            "title": "Task Ids"
-          },
-          "scope": {
-            "type": "string",
-            "title": "Scope",
-            "default": "mine"
-          },
-          "tone": {
-            "type": "string",
-            "title": "Tone",
-            "default": "professional"
-          },
-          "recipient": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipient"
-          },
-          "include_overdue_only": {
-            "type": "boolean",
-            "title": "Include Overdue Only",
-            "default": false
-          },
-          "need_action": {
-            "type": "boolean",
-            "title": "Need Action",
-            "default": true
-          },
-          "purpose": {
-            "type": "string",
-            "title": "Purpose",
-            "default": "任务进度同步"
-          }
-        },
-        "type": "object",
-        "title": "TaskSyncEmailRequest"
-      },
       "TaskUpdate": {
         "properties": {
           "title": {
@@ -26459,28 +22947,6 @@
         },
         "type": "object",
         "title": "TimeEntryPatch"
-      },
-      "TokenResponse": {
-        "properties": {
-          "access_token": {
-            "type": "string",
-            "title": "Access Token"
-          },
-          "token_type": {
-            "type": "string",
-            "title": "Token Type",
-            "default": "bearer"
-          },
-          "user": {
-            "$ref": "#/components/schemas/UserOut"
-          }
-        },
-        "type": "object",
-        "required": [
-          "access_token",
-          "user"
-        ],
-        "title": "TokenResponse"
       },
       "ToolCallLogOut": {
         "properties": {
@@ -27003,124 +23469,6 @@
         "type": "object",
         "title": "UserOrgAssignRequest"
       },
-      "UserOut": {
-        "properties": {
-          "username": {
-            "type": "string",
-            "title": "Username"
-          },
-          "email": {
-            "type": "string",
-            "format": "email",
-            "title": "Email"
-          },
-          "full_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Full Name"
-          },
-          "organization_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Organization Id"
-          },
-          "department_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Department Id"
-          },
-          "job_title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Job Title"
-          },
-          "employee_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Employee Id"
-          },
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "role": {
-            "type": "string",
-            "title": "Role"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "external_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "External Provider"
-          },
-          "last_login_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Login At"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "username",
-          "email",
-          "id",
-          "role",
-          "status",
-          "created_at"
-        ],
-        "title": "UserOut"
-      },
       "UserPasswordReset": {
         "properties": {
           "new_password": {
@@ -27315,175 +23663,6 @@
           "state"
         ],
         "title": "WechatLoginUrlResponse"
-      },
-      "WeeklyReportDraftRequest": {
-        "properties": {
-          "scope": {
-            "type": "string",
-            "title": "Scope",
-            "default": "mine"
-          },
-          "start_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start Date"
-          },
-          "end_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "End Date"
-          },
-          "recipient": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recipient"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          }
-        },
-        "type": "object",
-        "title": "WeeklyReportDraftRequest"
-      },
-      "WorkflowExecutionOut": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "schedule_id": {
-            "type": "integer",
-            "title": "Schedule Id"
-          },
-          "user_id": {
-            "type": "integer",
-            "title": "User Id"
-          },
-          "trigger_type": {
-            "type": "string",
-            "title": "Trigger Type"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "scheduled_for": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scheduled For"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "completed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "result_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result Summary"
-          },
-          "result_detail": {
-            "type": "object",
-            "title": "Result Detail"
-          },
-          "error_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Message"
-          },
-          "retry_count": {
-            "type": "integer",
-            "title": "Retry Count"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "schedule_id",
-          "user_id",
-          "trigger_type",
-          "status",
-          "retry_count",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "WorkflowExecutionOut"
       }
     },
     "securitySchemes": {

@@ -62,27 +62,27 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_supervisor_plan_validates_model_output_and_falls_back_safely(self):
         valid_plan = json.dumps(
             {
-                "intent": "分析文档后生成风险邮件",
-                "workers": ["document_agent", "communication_agent"],
-                "dependencies": [{"from": "document_agent", "to": "communication_agent"}],
+                "intent": "审查合同后生成跟进任务",
+                "workers": ["legal_compliance_agent", "workflow_agent"],
+                "dependencies": [{"from": "legal_compliance_agent", "to": "workflow_agent"}],
                 "risk_level": "medium",
-                "expected_artifacts": ["document", "email"],
-                "rationale": "先分析资料，再生成草稿。",
+                "expected_artifacts": ["document", "task"],
+                "rationale": "先审查合同，再创建跟进任务。",
             }
         )
         with patch(
             "app.services.agent_service.llm_service.generate",
             new=AsyncMock(return_value=valid_plan),
         ):
-            plan = await self.service._plan_with_supervisor("总结文档并生成邮件", self.user.id)
+            plan = await self.service._plan_with_supervisor("审查合同并生成跟进任务", self.user.id)
         self.assertEqual(plan["plan_source"], "llm")
-        self.assertEqual(plan["workers"], ["knowledge_agent", "communication_agent"])
-        self.assertEqual(plan["dependencies"][0]["to"], "communication_agent")
+        self.assertEqual(plan["workers"], ["legal_compliance_agent", "workflow_agent"])
+        self.assertEqual(plan["dependencies"][0]["to"], "workflow_agent")
 
         invalid_plan = json.dumps(
             {
-                "workers": ["communication_agent", "document_agent"],
-                "dependencies": [{"from": "document_agent", "to": "communication_agent"}],
+                "workers": ["workflow_agent", "legal_compliance_agent"],
+                "dependencies": [{"from": "legal_compliance_agent", "to": "workflow_agent"}],
                 "risk_level": "urgent",
                 "expected_artifacts": ["unknown"],
             }
@@ -91,128 +91,10 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
             "app.services.agent_service.llm_service.generate",
             new=AsyncMock(return_value=invalid_plan),
         ):
-            fallback = await self.service._plan_with_supervisor("总结文档并生成邮件", self.user.id)
+            fallback = await self.service._plan_with_supervisor("审查合同并生成跟进任务", self.user.id)
         self.assertEqual(fallback["plan_source"], "rule_fallback")
-        self.assertEqual(fallback["workers"], ["knowledge_agent", "communication_agent"])
+        self.assertEqual(fallback["workers"], ["legal_compliance_agent", "workflow_agent"])
         self.assertEqual(fallback["fallback_reason"], "dependency 必须从前序 Worker 指向后序 Worker")
-
-    async def test_meeting_to_task_flow(self):
-        calls = [
-            """
-            {
-              "thought": "先总结会议",
-              "action_type": "tool_call",
-              "tool_name": "meeting_summary_tool",
-              "action_input": {"meeting_id": 1}
-            }
-            """,
-            """
-            {
-              "thought": "会议理解已完成，交接结构化结果",
-              "action_type": "finish",
-              "answer": "会议纪要和行动项已提取。"
-            }
-            """,
-            """
-            {
-              "thought": "根据上游会议纪要创建任务",
-              "action_type": "tool_call",
-              "tool_name": "meeting_action_tool",
-              "action_input": {"meeting_id": 1}
-            }
-            """,
-            """
-            {
-              "thought": "任务已创建完成",
-              "action_type": "finish",
-              "answer": "会议已总结，并创建 2 条任务。"
-            }
-            """,
-        ]
-
-        async def fake_chat(messages, stream=False, temperature=0.7):
-            return calls.pop(0)
-
-        fake_tools = {
-            "meeting_summary_tool": FakeTool(
-                "meeting_summary_tool",
-                "总结会议",
-                auto_context_fields=("user_id", "db"),
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "meeting_id": {"type": "integer"},
-                        "user_id": {"type": "integer"},
-                    },
-                    "required": ["meeting_id", "user_id"],
-                },
-                handler=lambda **kwargs: tool_success(
-                    "会议总结完成",
-                    {
-                        "meeting_id": kwargs["meeting_id"],
-                        "summary": "预算延期风险需要跟进",
-                        "decisions": [{"content": "本周提交预算方案", "evidence": "会议决定本周提交预算方案"}],
-                    },
-                ),
-            ),
-            "meeting_action_tool": FakeTool(
-                "meeting_action_tool",
-                "创建任务",
-                auto_context_fields=("user_id", "db"),
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "meeting_id": {"type": "integer"},
-                        "user_id": {"type": "integer"},
-                    },
-                    "required": ["meeting_id", "user_id"],
-                },
-                handler=lambda **kwargs: tool_success(
-                    "任务创建完成",
-                    {
-                        "meeting_id": kwargs["meeting_id"],
-                        "tasks": [
-                            {"id": 11, "title": "跟进预算风险"},
-                            {"id": 12, "title": "同步采购时间表"},
-                        ],
-                    },
-                ),
-            ),
-        }
-
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
-            "app.mcp.registry._TOOL_INSTANCES",
-            fake_tools,
-            clear=True,
-        ):
-            run = await self.service.run("总结会议 1，并把行动项创建成任务", self.user.id, self.db, max_steps=5)
-            self.assertEqual(run.status, "awaiting_approval")
-            approval = agent_approval_service.list_requests(db=self.db, user_id=self.user.id, status="pending")[0]
-            self.assertEqual(approval.tool_name, "meeting_action_tool")
-            agent_approval_service.decide_request(
-                db=self.db,
-                approval_id=approval.id,
-                user_id=self.user.id,
-                approved=True,
-                decision_note="allow meeting tasks",
-            )
-            run = await self.service.resume_after_approval(approval.id, self.user.id, self.db)
-
-        self.assertEqual(run.status, "completed", run.error or run.failure_reason or run.result)
-        self.assertEqual(run.total_steps, 4)
-        self.assertIn("创建 2 条任务", run.final_answer)
-        logs = self.service.get_run_logs(run.id, self.db, user_id=self.user.id)
-        self.assertIn("supervisor_handoff", [log.tool_name for log in logs])
-        self.assertEqual(json.loads(run.result)["supervisor_plan"]["workers"], ["meeting_agent", "workflow_agent"])
-        self.assertEqual(logs[0].status, "success")
-        meeting_action_logs = [log for log in logs if log.tool_name == "meeting_action_tool"]
-        self.assertEqual([log.status for log in meeting_action_logs], ["approved", "success"])
-        parsed_result = json.loads(run.result)
-        self.assertEqual(parsed_result["agent_mode"], "langgraph_workflow")
-        self.assertIn(parsed_result["workflow_engine"], {"langgraph", "internal_state_graph"})
-        self.assertEqual(parsed_result["supervisor_plan"]["selected_skill"]["skill_id"], "meeting_to_task")
-        self.assertEqual(parsed_result["supervisor_plan"]["harness"]["harness_id"], "controlled_agent_harness")
-        self.assertTrue(parsed_result["evidence_verification"]["passed"])
 
     async def test_unsupported_document_claim_blocks_task_creation(self):
         calls = [
@@ -249,149 +131,6 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([log.tool_name for log in logs], ["document_risk_tool", "evidence_verifier"])
         self.assertEqual(logs[-1].status, "error")
         self.assertEqual(json.loads(run.result)["evidence_verification"]["failed_claims"], 1)
-
-    async def test_task_to_email_flow(self):
-        calls = [
-            """
-            {
-              "thought": "先查未完成任务",
-              "action_type": "tool_call",
-              "tool_name": "task_query_tool",
-              "action_input": {"status": "todo"}
-            }
-            """,
-            """
-            {
-              "thought": "根据任务生成催办邮件",
-              "action_type": "tool_call",
-              "tool_name": "email_writer_tool",
-              "action_input": {
-                "purpose": "催办未完成任务",
-                "key_points": ["任务 A 未完成", "任务 B 今天到期"],
-                "tone": "professional",
-                "need_action": true
-              }
-            }
-            """,
-            """
-            {
-              "thought": "当前角色的任务查询已完成",
-              "action_type": "tool_call",
-              "tool_name": "email_writer_tool",
-              "action_input": {
-                "purpose": "催办未完成任务"
-              }
-            }
-            """,
-            """
-            {
-              "thought": "邮件已生成",
-              "action_type": "finish",
-              "answer": "已查询未完成任务，并生成催办邮件草稿。"
-            }
-            """,
-        ]
-
-        async def fake_chat(messages, stream=False, temperature=0.7):
-            return calls.pop(0)
-
-        fake_tools = {
-            "task_query_tool": FakeTool(
-                "task_query_tool",
-                "查询任务",
-                auto_context_fields=("user_id", "db"),
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string"},
-                        "user_id": {"type": "integer"},
-                    },
-                    "required": ["user_id"],
-                },
-                handler=lambda **kwargs: tool_success(
-                    "查询成功",
-                    {
-                        "tasks": [
-                            {"id": 21, "title": "任务 A", "status": "todo"},
-                            {"id": 22, "title": "任务 B", "status": "todo"},
-                        ]
-                    },
-                ),
-            ),
-            "email_writer_tool": FakeTool(
-                "email_writer_tool",
-                "生成邮件",
-                handler=lambda **kwargs: tool_success(
-                    "邮件生成成功",
-                    {
-                        "draft_id": 301,
-                        "subject": "未完成任务催办",
-                        "content": "请尽快处理任务 A 和任务 B。",
-                    },
-                ),
-            ),
-        }
-
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
-            "app.mcp.registry._TOOL_INSTANCES",
-            fake_tools,
-            clear=True,
-        ):
-            run = await self.service.run("查询我未完成的任务，并生成一封催办汇总邮件", self.user.id, self.db, max_steps=5)
-
-        self.assertEqual(run.status, "completed")
-        self.assertIn("催办邮件草稿", run.final_answer)
-        logs = self.service.get_run_logs(run.id, self.db, user_id=self.user.id)
-        self.assertEqual([log.tool_name for log in logs], ["task_query_tool", "finish", "supervisor_handoff", "email_writer_tool", "finish"])
-        self.assertIn('"status": "todo"', logs[0].input_params)
-
-        serialized = self.service.serialize_run(run)
-        self.assertEqual(serialized["artifacts"]["tasks"][0]["task_id"], 21)
-        self.assertEqual(serialized["artifacts"]["emails"][0]["draft_id"], 301)
-
-    async def test_supervisor_handoffs_document_result_to_email_worker(self):
-        calls = [
-            '{"thought":"总结文档","action_type":"tool_call","tool_name":"document_summary_tool","action_input":{"document_id":9}}',
-            '{"thought":"文档分析完成","action_type":"finish","answer":"已提取文档核心风险。"}',
-            '{"thought":"生成风险同步邮件","action_type":"tool_call","tool_name":"email_writer_tool","action_input":{"purpose":"同步文档风险","key_points":["交付延期风险"]}}',
-            '{"thought":"邮件草稿完成","action_type":"finish","answer":"已生成风险同步邮件草稿。"}',
-        ]
-        worker_prompts = []
-
-        async def fake_chat(messages, stream=False, temperature=0.7):
-            worker_prompts.append("\n".join(message["content"] for message in messages[:2]))
-            return calls.pop(0)
-
-        fake_tools = {
-            "document_summary_tool": FakeTool(
-                "document_summary_tool", "文档总结", auto_context_fields=("user_id", "db"),
-                parameters={"type": "object", "properties": {"document_id": {"type": "integer"}, "user_id": {"type": "integer"}}, "required": ["document_id", "user_id"]},
-                handler=lambda **kwargs: tool_success("总结完成", {"document_id": 9, "summary": "交付计划存在延期风险"}),
-            ),
-            "email_writer_tool": FakeTool(
-                "email_writer_tool", "邮件草稿", auto_context_fields=("user_id", "db"),
-                parameters={"type": "object", "properties": {"purpose": {"type": "string"}, "user_id": {"type": "integer"}}, "required": ["purpose", "user_id"]},
-                handler=lambda **kwargs: tool_success("草稿生成完成", {"draft_id": 91, "subject": "文档风险同步", "purpose": kwargs["purpose"]}),
-            ),
-        }
-
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
-            "app.mcp.registry._TOOL_INSTANCES", fake_tools, clear=True,
-        ):
-            run = await self.service.run("总结文档 9，并生成一封风险同步邮件", self.user.id, self.db, max_steps=6)
-
-        self.assertEqual(run.status, "completed")
-        self.assertIn("风险同步邮件草稿", run.final_answer)
-        self.assertIn("knowledge_agent", worker_prompts[0])
-        self.assertIn("communication_agent", worker_prompts[2])
-        self.assertIn("上游 Worker 已完成", worker_prompts[2])
-        logs = self.service.get_run_logs(run.id, self.db, user_id=self.user.id)
-        self.assertIn("supervisor_handoff", [log.tool_name for log in logs])
-        payload = json.loads(run.result)
-        self.assertEqual(payload["supervisor_plan"]["workers"], ["knowledge_agent", "communication_agent"])
-        self.assertEqual(payload["supervisor_plan"]["handoffs"][0]["to_worker"], "communication_agent")
-        self.assertEqual(payload["supervisor_plan"]["task_contract"]["receiver"], "knowledge_agent")
-        self.assertEqual(payload["supervisor_plan"]["handoffs"][0]["task_contract"]["receiver"], "communication_agent")
 
     async def test_document_risk_flow_with_retry(self):
         calls = [
@@ -489,74 +228,6 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(logs[3].status, "success")
         serialized = self.service.serialize_run(run)
         self.assertEqual(serialized["artifacts"]["documents"][0]["document_id"], 5)
-
-    async def test_supervisor_runs_document_and_meeting_read_workers_in_parallel_then_aggregates(self):
-        plan = json.dumps(
-            {
-                "intent": "核对文档和会议纪要风险",
-                "workers": ["document_agent", "meeting_agent"],
-                "dependencies": [],
-                "risk_level": "low",
-                "expected_artifacts": ["document", "meeting"],
-                "rationale": "两个输入独立且只读，可并行获取。",
-            }
-        )
-        running = 0
-        peak_running = 0
-
-        async def document_handler(**kwargs):
-            nonlocal running, peak_running
-            running += 1
-            peak_running = max(peak_running, running)
-            await asyncio.sleep(0.03)
-            running -= 1
-            return tool_success(
-                "风险提取完成",
-                {"document_id": kwargs["document_id"], "risks": [{"title": "延期", "evidence": "交付日期为 8 月 1 日"}]},
-            )
-
-        async def meeting_handler(**kwargs):
-            nonlocal running, peak_running
-            running += 1
-            peak_running = max(peak_running, running)
-            await asyncio.sleep(0.03)
-            running -= 1
-            return tool_success(
-                "会议查询完成",
-                {"meeting_id": kwargs["meeting_id"], "decisions": [{"title": "调整排期", "evidence": "会议确认调整至 8 月 15 日"}]},
-            )
-
-        class AsyncFakeTool(FakeTool):
-            async def run(self, **kwargs):
-                return await self._handler(**kwargs)
-
-        fake_tools = {
-            "document_risk_tool": AsyncFakeTool(
-                "document_risk_tool", "风险提取", auto_context_fields=("user_id", "db"),
-                parameters={"type": "object", "properties": {"document_id": {"type": "integer"}, "user_id": {"type": "integer"}}, "required": ["document_id", "user_id"]},
-                handler=document_handler,
-            ),
-            "meeting_query_tool": AsyncFakeTool(
-                "meeting_query_tool", "会议查询", auto_context_fields=("user_id", "db"),
-                parameters={"type": "object", "properties": {"meeting_id": {"type": "integer"}, "user_id": {"type": "integer"}}, "required": ["meeting_id", "user_id"]},
-                handler=meeting_handler,
-            ),
-        }
-
-        with patch("app.services.agent_service.llm_service.generate", new=AsyncMock(return_value=plan)), patch.dict(
-            "app.mcp.registry._TOOL_INSTANCES", fake_tools, clear=True,
-        ):
-            run = await self.service.run("核对文档 9 与会议 4 的风险", self.user.id, self.db, max_steps=5)
-
-        self.assertEqual(run.status, "completed", run.error or run.failure_reason or run.result)
-        self.assertIn("并行完成 2 个只读 Worker", run.final_answer)
-        self.assertEqual(peak_running, 2)
-        logs = self.service.get_run_logs(run.id, self.db, user_id=self.user.id)
-        self.assertIn("supervisor_parallel_fanout", [log.tool_name for log in logs])
-        self.assertIn("supervisor_aggregate", [log.tool_name for log in logs])
-        self.assertIn("evidence_verifier", [log.tool_name for log in logs])
-        payload = json.loads(run.result)
-        self.assertEqual(payload["supervisor_plan"]["execution_mode"], "parallel_read_only")
 
     async def test_preview_plan_returns_structured_steps(self):
         raw_preview = """

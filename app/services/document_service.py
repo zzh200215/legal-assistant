@@ -362,6 +362,22 @@ class DocumentService:
                 message="文档解析任务已提交",
             )
             task = parse_document_task.delay(doc.id, str(file_path), file_type)
+            # 长流程权限快照：保证后台解析期间权限范围稳定。
+            snapshot_id = None
+            try:
+                from app.services.authorization_service import authorization_service
+
+                user_row = db.query(User).filter(User.id == user_id).first()
+                if user_row:
+                    ctx = authorization_service.build_context(db, user_row)
+                    snapshot_id = authorization_service.capture_snapshot(
+                        db, user_row, ctx, document_ids=[doc.id],
+                    )
+            except Exception:
+                # 快照失败不阻断上传；文档为创建者所有，访问路径由任务内校验兜底。
+                pass
+            if snapshot_id:
+                task = parse_document_task.delay(doc.id, str(file_path), file_type, snapshot_id)
             document_job_service.attach_task_id(job.id, task.id, db)
             return doc
 
@@ -429,6 +445,7 @@ class DocumentService:
         if user_id is None:
             return doc
         return doc if document_governance_service.can_access_document(
+            db=db,
             document=doc,
             user_id=user_id,
             role=role,
@@ -1000,23 +1017,26 @@ class DocumentService:
         connector_id: int | None = None,
         query: str | None = None,
     ) -> list[Document]:
-        rows = db.query(Document).order_by(Document.created_at.desc(), Document.id.desc()).all()
+        from app.services.authorization_service import authorization_service
+
+        scope_filter = authorization_service.document_scope_filter(
+            db,
+            user_id=user_id,
+            organization_id=organization_id,
+            department_id=department_id,
+            role=role,
+        )
+        q = db.query(Document).filter(scope_filter)
+        if knowledge_base_id is not None:
+            q = q.filter(Document.knowledge_base_id == knowledge_base_id)
+        if classification:
+            q = q.filter(Document.classification == classification)
+        if sensitivity_level:
+            q = q.filter(Document.sensitivity_level == sensitivity_level)
+        rows = q.order_by(Document.created_at.desc(), Document.id.desc()).all()
+
         filtered = []
         for doc in rows:
-            if not document_governance_service.can_access_document(
-                document=doc,
-                user_id=user_id,
-                role=role,
-                organization_id=organization_id,
-                department_id=department_id,
-            ):
-                continue
-            if knowledge_base_id is not None and doc.knowledge_base_id != knowledge_base_id:
-                continue
-            if classification and doc.classification != classification:
-                continue
-            if sensitivity_level and doc.sensitivity_level != sensitivity_level:
-                continue
             if connector_id is not None:
                 metadata = self._parse_metadata_json(doc.metadata_json)
                 if _safe_int(metadata.get("connector_id"), 0) != connector_id:

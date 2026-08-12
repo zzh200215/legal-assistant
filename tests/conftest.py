@@ -6,6 +6,7 @@ test module imports the app, and pydantic-settings gives os.environ precedence
 over the repo .env file.
 """
 
+import asyncio
 import base64
 import os
 
@@ -76,6 +77,18 @@ def _clear_rag_embedding_cache():
     rag_embedding_cache.clear()
     yield
     rag_embedding_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _close_model_gateway_clients():
+    """每个测试后关闭模型网关单例连接池并重置熔断状态，避免跨测试累积/污染。"""
+    yield
+    from app.core.model_gateway import model_gateway
+    model_gateway.circuit_breaker.reset()
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(model_gateway.close())
 
 
 @pytest.fixture(autouse=True)

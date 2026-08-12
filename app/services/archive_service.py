@@ -30,7 +30,6 @@ from app.models.legal_notifications import LegalNotificationEvent, SecurityAudit
 from app.models.legal_platform import WebhookDelivery
 from app.models.llm_call_log import LLMCallLog
 from app.models.operation_log import OperationLog
-from app.models.schedule import WorkflowExecution
 from app.models.token_usage import TokenUsage
 from app.services.oplog_service import oplog_service
 
@@ -51,7 +50,6 @@ ARCHIVE_TABLES: dict[str, tuple[Any, str]] = {
     "admin_audit_logs": (AdminAuditLog, "created_at"),
     "legal_notification_events": (LegalNotificationEvent, "created_at"),
     "webhook_deliveries": (WebhookDelivery, "created_at"),
-    "workflow_executions": (WorkflowExecution, "created_at"),
     "security_audit_events": (SecurityAuditEvent, "occurred_at"),
 }
 

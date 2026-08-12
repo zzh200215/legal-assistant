@@ -13,7 +13,6 @@ from app.core.time import utc_now
 class AgentApprovalService:
     HIGH_RISK_TOOLS = {
         "task_create_tool": "high",
-        "meeting_action_tool": "high",
         # Even read-only SQL can expose organization-wide sensitive data.
         "sql_query_tool": "high",
     }

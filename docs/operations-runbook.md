@@ -28,16 +28,6 @@ Leave `ALERT_WEBHOOK_URL` empty to keep alert delivery disabled. The worker chec
 
 The same task also checks model routing health. Once the configured minimum request sample is reached, excessive primary-model failures or failed fallback attempts create a `model_routing_degraded` alert. Check `GET /api/analytics/llm-routing/health` as an administrator before changing model credentials, routing rules, or retry thresholds.
 
-## Legal Document Data Governance
-
-`LEGALDOC_RETENTION_DAYS` defaults to `90`. Beat runs the retention task daily for active legal data connectors. It deletes only local legal document copies older than the threshold, retains documents linked to a review or audit record, and never changes the source legal database.
-
-Users can preview and manually run the same retention policy from the Legal Workbench. Each purge is written to the operation log.
-
-## Connector Revocation
-
-Owners can rotate credentials or disable a legal data connector from Legal Workbench or Review Control. Disabling immediately clears the encrypted credentials and sync cursor, changes the connector status to `disabled`, and prevents later data sync or external delivery through that connector. Reconnect with a new connector and fresh authorization to resume use.
-
 ## Error Reporting & Tracing (E-5)
 
 Sentry captures frontend and API errors; OpenTelemetry (OTel) exports request traces to a collector. Both are opt-in: they skip initialization when unconfigured, so local/dev runs carry no extra dependency or overhead. Backend wiring lives in `app/core/telemetry.py`, called from `app/main.py`.

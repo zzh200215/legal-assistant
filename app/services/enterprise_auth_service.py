@@ -551,6 +551,10 @@ class EnterpriseAuthService:
         db.add(user)
         db.commit()
 
+        # 禁用后立即递增 token 版本，使该用户已有 access token 全部失效。
+        from app.services.auth_token_service import auth_token_service
+        auth_token_service.increment_token_version(db, user)
+
         self._record_login_event(
             db, user.id, user.username, LoginEventType.account_disabled,
             None, None, f"Disabled by admin {operator_id}"
@@ -558,7 +562,14 @@ class EnterpriseAuthService:
         return True
 
     def force_logout(self, db: Session, user_id: int, operator_id: int) -> bool:
-        """强制用户退出（需要 Token 黑名单支持，这里仅记录）"""
+        """强制用户退出：递增 token 版本使旧 token 全部失效，并撤销 refresh token。"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return False
+
+        from app.services.auth_token_service import auth_token_service
+        auth_token_service.increment_token_version(db, user)
+
         self._record_login_event(
             db, user_id, None, LoginEventType.force_logout,
             None, None, f"Force logout by admin {operator_id}"

@@ -10,10 +10,9 @@ from app.models.user import User, UserRole
 from app.schemas.org import (
     DepartmentCreate, DepartmentOut, DepartmentUpdate,
     OrganizationCreate, OrganizationOut, OrganizationUpdate,
-    UserOrgAssignRequest, OrgSyncRequest, OrgSyncResultOut,
+    UserOrgAssignRequest,
 )
 from app.services.org_service import org_service
-from app.services.org_sync_service import org_sync_service
 from app.services.audit_log_service import audit_log_service, AuditAction
 
 router = APIRouter()
@@ -287,24 +286,3 @@ def assign_user_org(
         "department_id": user.department_id,
         "job_title": user.job_title,
     }
-
-
-# ================== 组织同步 ==================
-
-@router.post("/sync", response_model=OrgSyncResultOut)
-def sync_from_external(
-    req: OrgSyncRequest,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_system_admin),
-):
-    """从外部系统同步组织架构（系统管理员）"""
-    if req.provider == "wecom":
-        result = org_sync_service.sync_from_wecom(db)
-    elif req.provider == "dingtalk":
-        result = org_sync_service.sync_from_dingtalk(db)
-    elif req.provider == "ldap":
-        result = org_sync_service.sync_from_ldap(db)
-    else:
-        raise api_error(400, f"不支持的同步源: {req.provider}", code="UNSUPPORTED_PROVIDER")
-
-    return OrgSyncResultOut(**result.to_dict())

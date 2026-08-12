@@ -35,9 +35,7 @@ from app.mcp.schema import tool_to_mcp_spec, trim_sensitive_args, validate_tool_
 from app.services.agent_approval_service import agent_approval_service
 from app.tools.base import BaseAgentTool
 from app.tools.document_tool import DocumentConflictTool, DocumentRiskTool, DocumentSearchTool, DocumentSummaryTool
-from app.tools.email_tool import EmailTool
 from app.tools.legal_tool import LegalConsultationTool, LegalContractReviewTool, LegalDraftTool
-from app.tools.meeting_tool import MeetingActionTool, MeetingQueryTool, MeetingSummaryTool
 from app.tools.sql_tool import SQLTool
 from app.tools.task_tool import TaskCreateTool, TaskQueryTool
 
@@ -50,10 +48,6 @@ _TOOL_INSTANCES: dict[str, BaseAgentTool] = {
     "document_summary_tool": DocumentSummaryTool(),
     "document_risk_tool": DocumentRiskTool(),
     "document_conflict_tool": DocumentConflictTool(),
-    "meeting_summary_tool": MeetingSummaryTool(),
-    "meeting_query_tool": MeetingQueryTool(),
-    "meeting_action_tool": MeetingActionTool(),
-    "email_writer_tool": EmailTool(),
     "task_create_tool": TaskCreateTool(),
     "task_query_tool": TaskQueryTool(),
     "sql_query_tool": SQLTool(),
