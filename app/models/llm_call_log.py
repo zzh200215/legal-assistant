@@ -15,6 +15,11 @@ class LLMCallLog(Base):
     prompt_version = Column(Integer, nullable=True)
     input_tokens = Column(Integer, nullable=False, default=0)
     output_tokens = Column(Integer, nullable=False, default=0)
+    # 请求前统一 token 估算（治理层 enforce_* 计算），与实际 input/output 同记录以对比偏差。
+    estimated_input_tokens = Column(Integer, nullable=True)
+    estimated_output_tokens = Column(Integer, nullable=True)
+    # 逻辑请求内的第几次 attempt（1 起）；重试/fallback 行与最终成功行据此区分。
+    attempt_number = Column(Integer, nullable=True)
     duration_ms = Column(Integer, nullable=True)
     status = Column(String(32), nullable=False, default="success", index=True)
     request_id = Column(String(36), nullable=True, index=True)

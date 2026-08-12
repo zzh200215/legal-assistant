@@ -181,6 +181,7 @@ class ApiStabilityTests(unittest.TestCase):
                 user_id=self.user.id,
                 model="qwen-plus",
                 action="chat",
+                budget_category="text",
                 prompt_tokens=30,
                 completion_tokens=30,
                 total_tokens=60,

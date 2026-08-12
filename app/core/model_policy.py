@@ -109,6 +109,9 @@ class ModelRequest:
     user_id: int | None = None
     prompt_template: str | None = None
     prompt_version: int | None = None
+    # 请求前统一 token 估算（治理层 enforce_* 计算），随请求记录用于对比实际 usage。
+    estimated_input_tokens: int | None = None
+    estimated_output_tokens: int | None = None
     trace_id: str = ""
     request_id: str = ""
 
@@ -137,8 +140,8 @@ _TASK_POLICIES = {
     "rerank": TaskPolicy(
         task="rerank",
         temperature=0.0,
-        budget_category="text",
-        rate_limit_category="chat",
+        budget_category="rerank",
+        rate_limit_category="rerank",
     ),
 }
 

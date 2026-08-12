@@ -2071,6 +2071,7 @@ class EmbeddingObservabilityTests(unittest.IsolatedAsyncioTestCase):
                 prompt_template=None,
                 prompt_version=None,
                 request_id=None,
+                **kwargs,
             ):
                 captured.update(
                     {
@@ -2234,6 +2235,7 @@ class EmbeddingObservabilityTests(unittest.IsolatedAsyncioTestCase):
                 prompt_template=None,
                 prompt_version=None,
                 request_id=None,
+                **kwargs,
             ):
                 captured.update(
                     {

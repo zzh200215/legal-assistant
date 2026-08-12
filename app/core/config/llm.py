@@ -47,6 +47,20 @@ class LLMSettings(BaseSettings):
     LLM_ESTIMATED_COMPLETION_TOKENS: int = 1200
     LLM_LIMIT_REDIS_PREFIX: str = "aibg:llm-governance"
 
+    # 独立预算桶 / 限流桶：category → 限额（JSON dict）。未配置的 category 回退到下方全局默认值。
+    # budget category: text/embedding/vision/rerank；rate-limit category: chat/embedding/vision/rerank。
+    # 例：LLM_BUDGET_LIMITS_JSON={"text":{"daily_requests":200,"daily_tokens":300000}}
+    #     LLM_RATE_LIMIT_CONFIG_JSON={"chat":{"window_seconds":60,"max_requests":20}}
+    LLM_BUDGET_LIMITS_JSON: str = "{}"
+    LLM_RATE_LIMIT_CONFIG_JSON: str = "{}"
+    # LLM 响应缓存：仅显式标记 cacheable 的幂等请求默认走缓存；聊天/含敏感上下文默认不缓存。
+    # 默认进程内 LRU + TTL（多实例各持一份，无跨实例失效）；启用 Redis 后跨实例共享（非强一致）。
+    LLM_RESPONSE_CACHE_ENABLED: bool = True
+    LLM_RESPONSE_CACHE_TTL_SECONDS: int = Field(default=3600, ge=1, le=86400)
+    LLM_RESPONSE_CACHE_CAPACITY: int = Field(default=256, ge=1, le=10000)
+    LLM_RESPONSE_CACHE_REDIS_ENABLED: bool = False
+    LLM_RESPONSE_CACHE_REDIS_PREFIX: str = "aibg:llm-response-cache"
+
     # 供应商熔断：仅超时/传输/5xx 计入；参数/鉴权/权限/内容拦截不计入。
     CIRCUIT_BREAKER_ENABLED: bool = True
     CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = Field(default=5, ge=1, le=100)
@@ -90,3 +104,39 @@ class LLMSettings(BaseSettings):
         except json.JSONDecodeError as e:
             raise ValueError(f"LLM_MODEL_PRICING格式错误：{e}")
         return v
+
+    @field_validator("LLM_BUDGET_LIMITS_JSON")
+    @classmethod
+    def validate_budget_limits_json(cls, v: str) -> str:
+        cfg = cls._parse_category_json(v, "LLM_BUDGET_LIMITS_JSON")
+        allowed = {"daily_requests", "daily_tokens"}
+        for category, limits in cfg.items():
+            if not isinstance(limits, dict):
+                raise ValueError(f"预算桶 {category} 的限额必须是对象")
+            unknown = set(limits) - allowed
+            if unknown:
+                raise ValueError(f"预算桶 {category} 含未知限额键：{sorted(unknown)}")
+        return v
+
+    @field_validator("LLM_RATE_LIMIT_CONFIG_JSON")
+    @classmethod
+    def validate_rate_limit_config_json(cls, v: str) -> str:
+        cfg = cls._parse_category_json(v, "LLM_RATE_LIMIT_CONFIG_JSON")
+        allowed = {"window_seconds", "max_requests"}
+        for category, limits in cfg.items():
+            if not isinstance(limits, dict):
+                raise ValueError(f"限流桶 {category} 的配置必须是对象")
+            unknown = set(limits) - allowed
+            if unknown:
+                raise ValueError(f"限流桶 {category} 含未知配置键：{sorted(unknown)}")
+        return v
+
+    @staticmethod
+    def _parse_category_json(v: str, name: str) -> dict:
+        try:
+            cfg = json.loads(v)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{name}格式错误：{e}")
+        if not isinstance(cfg, dict):
+            raise ValueError(f"{name}必须是有效的JSON对象")
+        return cfg

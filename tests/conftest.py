@@ -81,10 +81,11 @@ def _clear_rag_embedding_cache():
 
 @pytest.fixture(autouse=True)
 def _close_model_gateway_clients():
-    """每个测试后关闭模型网关单例连接池并重置熔断状态，避免跨测试累积/污染。"""
+    """每个测试后关闭模型网关单例连接池并重置熔断/响应缓存，避免跨测试累积/污染。"""
     yield
     from app.core.model_gateway import model_gateway
     model_gateway.circuit_breaker.reset()
+    model_gateway.response_cache.clear()
     try:
         asyncio.get_running_loop()
     except RuntimeError:

@@ -101,7 +101,8 @@ class TaskPolicyTests(unittest.TestCase):
         self.assertEqual(vision.model_tier, "primary")
         self.assertEqual(embedding.budget_category, "embedding")
         self.assertEqual(vision.rate_limit_category, "vision")
-        self.assertEqual(rerank.budget_category, "text")
+        self.assertEqual(rerank.budget_category, "rerank")
+        self.assertEqual(rerank.rate_limit_category, "rerank")
 
     def test_policy_is_frozen(self):
         with self.assertRaises(FrozenInstanceError):

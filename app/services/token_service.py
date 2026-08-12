@@ -1,13 +1,29 @@
+import json
 import time
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.models.token_usage import TokenUsage
+from app.core.config import get_settings
 from app.core.time import utc_now
+
+settings = get_settings()
 
 
 class TokenService:
+    def compute_cost(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+        """按 LLM_MODEL_PRICING 计算本 attempt 成本；未配置定价的模型按 0 计。"""
+        try:
+            pricing = json.loads(settings.LLM_MODEL_PRICING)
+            model_pricing = pricing.get(model, {}) if isinstance(pricing, dict) else {}
+            input_per_1k = float(model_pricing.get("input_per_1k") or 0.0)
+            output_per_1k = float(model_pricing.get("output_per_1k") or 0.0)
+        except Exception:
+            return 0.0
+        cost = (prompt_tokens / 1000.0) * input_per_1k + (completion_tokens / 1000.0) * output_per_1k
+        return round(cost, 6)
+
     def record(
         self,
         model: str,
@@ -17,15 +33,23 @@ class TokenService:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         duration_ms: int | None = None,
+        budget_category: str | None = None,
+        attempt_number: int | None = 1,
+        cost: float | None = None,
     ) -> TokenUsage:
         total = prompt_tokens + completion_tokens
+        if cost is None:
+            cost = self.compute_cost(model, prompt_tokens, completion_tokens)
         usage = TokenUsage(
             user_id=user_id,
             model=model,
             action=action,
+            budget_category=budget_category,
+            attempt_number=attempt_number,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total,
+            cost=cost,
             duration_ms=duration_ms,
         )
         db.add(usage)
@@ -45,6 +69,7 @@ class TokenService:
         total_prompt = sum(r.prompt_tokens for r in rows)
         total_completion = sum(r.completion_tokens for r in rows)
         total_tokens = sum(r.total_tokens for r in rows)
+        total_cost = round(sum(r.cost or 0 for r in rows), 6)
         total_duration = sum(r.duration_ms or 0 for r in rows)
 
         # 按 action 分组
@@ -71,6 +96,7 @@ class TokenService:
             "total_prompt_tokens": total_prompt,
             "total_completion_tokens": total_completion,
             "total_tokens": total_tokens,
+            "total_cost": total_cost,
             "avg_duration_ms": round(total_duration / total_calls) if total_calls else 0,
             "by_action": by_action,
             "by_date": by_date,
@@ -85,6 +111,7 @@ class TokenService:
         total_tokens = sum(r.total_tokens for r in rows)
         total_prompt = sum(r.prompt_tokens for r in rows)
         total_completion = sum(r.completion_tokens for r in rows)
+        total_cost = round(sum(r.cost or 0 for r in rows), 6)
 
         # 按 model 分组
         by_model = {}
@@ -110,6 +137,7 @@ class TokenService:
             "total_prompt_tokens": total_prompt,
             "total_completion_tokens": total_completion,
             "total_tokens": total_tokens,
+            "total_cost": total_cost,
             "by_model": by_model,
             "by_date": by_date,
         }

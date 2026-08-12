@@ -14,6 +14,8 @@ class LLMService:
         prompt_template: str | None = None,
         prompt_version: int | None = None,
         trace_id: str | None = None,
+        cacheable: bool = False,
+        permission_fingerprint: str | None = None,
     ):
         return await llm_client.chat(
             messages,
@@ -24,6 +26,8 @@ class LLMService:
             prompt_template=prompt_template,
             prompt_version=prompt_version,
             trace_id=trace_id,
+            cacheable=cacheable,
+            permission_fingerprint=permission_fingerprint,
         )
 
     async def generate(
@@ -35,6 +39,8 @@ class LLMService:
         prompt_template: str | None = None,
         prompt_version: int | None = None,
         trace_id: str | None = None,
+        cacheable: bool = False,
+        permission_fingerprint: str | None = None,
     ) -> str:
         return await llm_client.generate(
             prompt,
@@ -44,6 +50,8 @@ class LLMService:
             prompt_template=prompt_template,
             prompt_version=prompt_version,
             trace_id=trace_id,
+            cacheable=cacheable,
+            permission_fingerprint=permission_fingerprint,
         )
 
     async def structured_generate(
@@ -57,6 +65,8 @@ class LLMService:
         prompt_template: str | None = None,
         prompt_version: int | None = None,
         trace_id: str | None = None,
+        cacheable: bool = False,
+        permission_fingerprint: str | None = None,
     ):
         return await llm_client.structured_generate(
             prompt,
@@ -67,6 +77,8 @@ class LLMService:
             prompt_template=prompt_template,
             prompt_version=prompt_version,
             trace_id=trace_id,
+            cacheable=cacheable,
+            permission_fingerprint=permission_fingerprint,
         )
 
     async def generate_with_images(

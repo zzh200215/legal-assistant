@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import time
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from app.core.model_policy import (
     new_trace_id,
 )
 from app.core.observability_sanitizer import sanitize_observability_error_message, sanitize_observability_excerpt
+from app.core.response_cache import build_response_cache
 from app.core.structured_output import build_repair_prompt, normalize_schema, parse_structured_output
 from app.services.llm_governance_service import llm_governance_service
 
@@ -97,6 +99,8 @@ class ModelGateway:
         self._clients: dict[tuple[str, str, str, float], httpx.AsyncClient] = {}
         self._started = False
         self.circuit_breaker = build_circuit_breaker()
+        # LLM 响应缓存：仅显式 cacheable 请求命中/写入（进程内 LRU + 可选 Redis）。
+        self.response_cache = build_response_cache()
 
     def start(self) -> None:
         """幂等启动：预建主/小模型连接池客户端；真实连接在首次请求时建立。"""
@@ -257,6 +261,8 @@ class ModelGateway:
         prompt: str | None = None,
         image_urls: list[str] | None = None,
         texts: list[str] | None = None,
+        estimated_input_tokens: int | None = None,
+        estimated_output_tokens: int | None = None,
     ) -> ModelRequest:
         request_id = trace_id or new_trace_id()
         return ModelRequest(
@@ -270,6 +276,8 @@ class ModelGateway:
             user_id=user_id,
             prompt_template=prompt_template,
             prompt_version=prompt_version,
+            estimated_input_tokens=estimated_input_tokens,
+            estimated_output_tokens=estimated_output_tokens,
             trace_id=request_id,
             request_id=request_id,
         )
@@ -333,6 +341,10 @@ class ModelGateway:
         request_id: str | None = None,
         routing_role: str | None = None,
         routing_stage: str | None = None,
+        attempt_number: int | None = 1,
+        budget_category: str | None = None,
+        estimated_input_tokens: int | None = None,
+        estimated_output_tokens: int | None = None,
     ):
         try:
             from app.core.database import SessionLocal
@@ -340,6 +352,7 @@ class ModelGateway:
             from app.services.prompt_service import prompt_service
             from app.services.token_service import token_service
 
+            budget_category = budget_category or get_task_policy(action).budget_category
             prompt_tokens, completion_tokens = self._extract_usage(data, provider=provider)
             if prompt_template is None:
                 mapped_template = ACTION_PROMPT_TEMPLATE_MAP.get(action)
@@ -359,6 +372,8 @@ class ModelGateway:
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     duration_ms=duration_ms,
+                    budget_category=budget_category,
+                    attempt_number=attempt_number,
                 )
                 db.add(
                     LLMCallLog(
@@ -370,6 +385,9 @@ class ModelGateway:
                         prompt_version=prompt_version,
                         input_tokens=prompt_tokens,
                         output_tokens=completion_tokens,
+                        estimated_input_tokens=estimated_input_tokens,
+                        estimated_output_tokens=estimated_output_tokens,
+                        attempt_number=attempt_number,
                         duration_ms=duration_ms,
                         status=status,
                         request_id=request_id,
@@ -461,6 +479,42 @@ class ModelGateway:
             targets.append(alternate)
         return self._filter_available_targets(targets, policy.task)
 
+    def _cache_model(self, source_text: str, action: str) -> str:
+        """按路由规则解析将使用的模型名，作为缓存键的"模型不可变版本"锚点。"""
+        return self._select_text_target(source_text, action).model
+
+    def _cache_key(
+        self,
+        *,
+        task: str,
+        request: ModelRequest,
+        model: str,
+        permission_fingerprint: str | None,
+        schema: dict | None = None,
+    ) -> str:
+        """构造响应缓存键：task + 规范化请求 + 模型 + prompt 版本 + 权限指纹 → sha256。
+
+        规范化请求与权限指纹只参与摘要计算；缓存键本身是不可逆 digest，
+        绝不写入 prompt 原文、角色、资源范围或用户隐私文本。
+        """
+        if request.request_type in ("chat", "chat_stream"):
+            normalized = json.dumps(request.messages or [], ensure_ascii=False, sort_keys=True)
+        else:
+            normalized = json.dumps({"prompt": request.prompt or "", "schema": schema}, ensure_ascii=False, sort_keys=True)
+        perm_digest = hashlib.sha256(str(permission_fingerprint or "public").encode("utf-8")).hexdigest()
+        payload = json.dumps(
+            {
+                "task": task,
+                "request": normalized,
+                "model": model,
+                "prompt_version": request.prompt_version or "",
+                "permission": perm_digest,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
     @staticmethod
     def _is_provider_failure(exc: Exception) -> bool:
         return classify_error(exc).retryable
@@ -486,6 +540,7 @@ class ModelGateway:
         request: ModelRequest,
         policy: TaskPolicy,
         routing_stage: str,
+        attempt_number: int = 1,
     ) -> str:
         is_chat = request.request_type == "chat"
         temperature = self._resolve_temperature(policy, request.temperature)
@@ -514,6 +569,9 @@ class ModelGateway:
                 request_excerpt=request_excerpt, error_message=str(exc), status="error",
                 prompt_template=request.prompt_template, prompt_version=request.prompt_version,
                 request_id=request.request_id, routing_role=target.role, routing_stage=routing_stage,
+                attempt_number=attempt_number,
+                estimated_input_tokens=request.estimated_input_tokens,
+                estimated_output_tokens=request.estimated_output_tokens,
             )
             raise
         self.circuit_breaker.record_success(circuit_key)
@@ -526,6 +584,9 @@ class ModelGateway:
             request_excerpt=request_excerpt, response_excerpt=response_excerpt,
             prompt_template=request.prompt_template, prompt_version=request.prompt_version,
             request_id=request.request_id, routing_role=target.role, routing_stage=routing_stage,
+            attempt_number=attempt_number,
+            estimated_input_tokens=request.estimated_input_tokens,
+            estimated_output_tokens=request.estimated_output_tokens,
         )
         return response_excerpt
 
@@ -544,6 +605,7 @@ class ModelGateway:
                     request=request,
                     policy=policy,
                     routing_stage="initial" if index == 0 else "fallback",
+                    attempt_number=index + 1,
                 )
             except Exception as exc:
                 last_error = exc
@@ -561,14 +623,32 @@ class ModelGateway:
         prompt_template: str | None = None,
         prompt_version: int | None = None,
         trace_id: str | None = None,
+        cacheable: bool = False,
+        permission_fingerprint: str | None = None,
     ) -> str:
-        llm_governance_service.enforce_chat_request(messages=messages, user_id=user_id, action=action)
+        enforcement = llm_governance_service.enforce_chat_request(messages=messages, user_id=user_id, action=action)
         request = self._build_request(
             request_type="chat", messages=messages, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
+            estimated_input_tokens=enforcement.get("estimated_input_tokens"),
+            estimated_output_tokens=enforcement.get("estimated_output_tokens"),
         )
-        return await self._request_text_with_routing(source_text=self._messages_to_text(messages), request=request)
+        cache_key = None
+        if cacheable and not stream and settings.LLM_RESPONSE_CACHE_ENABLED:
+            policy = get_task_policy(action)
+            cache_key = self._cache_key(
+                task=policy.task, request=request,
+                model=self._cache_model(self._messages_to_text(messages), action),
+                permission_fingerprint=permission_fingerprint,
+            )
+            cached = self.response_cache.get(cache_key)
+            if cached is not None:
+                return cached
+        raw = await self._request_text_with_routing(source_text=self._messages_to_text(messages), request=request)
+        if cache_key is not None:
+            self.response_cache.put(cache_key, raw)
+        return raw
 
     async def generate(
         self,
@@ -579,14 +659,32 @@ class ModelGateway:
         prompt_template: str | None = None,
         prompt_version: int | None = None,
         trace_id: str | None = None,
+        cacheable: bool = False,
+        permission_fingerprint: str | None = None,
     ) -> str:
-        llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
+        enforcement = llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
         request = self._build_request(
             request_type="generate", prompt=prompt, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
+            estimated_input_tokens=enforcement.get("estimated_input_tokens"),
+            estimated_output_tokens=enforcement.get("estimated_output_tokens"),
         )
-        return await self._request_text_with_routing(source_text=prompt, request=request)
+        cache_key = None
+        if cacheable and settings.LLM_RESPONSE_CACHE_ENABLED:
+            policy = get_task_policy(action)
+            cache_key = self._cache_key(
+                task=policy.task, request=request,
+                model=self._cache_model(prompt, action),
+                permission_fingerprint=permission_fingerprint,
+            )
+            cached = self.response_cache.get(cache_key)
+            if cached is not None:
+                return cached
+        raw = await self._request_text_with_routing(source_text=prompt, request=request)
+        if cache_key is not None:
+            self.response_cache.put(cache_key, raw)
+        return raw
 
     async def structured_generate(
         self,
@@ -599,6 +697,8 @@ class ModelGateway:
         prompt_template: str | None = None,
         prompt_version: int | None = None,
         trace_id: str | None = None,
+        cacheable: bool = False,
+        permission_fingerprint: str | None = None,
     ) -> Any:
         """供应商无关的结构化输出：按 JSON Schema/Pydantic 模型校验后返回 JSON 值。
 
@@ -608,18 +708,38 @@ class ModelGateway:
         ``ModelError``，kind 为 invalid_response / schema_validation_failed /
         repair_failed（均不可重试）。修复阶段的供应商/传输层错误原样向上抛，
         与 ``generate`` 行为一致。
+
+        ``cacheable=True`` 时按 task+规范化请求+schema+模型+prompt 版本+权限指纹
+        缓存通过校验的原始输出；命中时先过治理门禁再复用，不缓存权限校验结果。
         """
         spec = normalize_schema(schema)
-        llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
+        enforcement = llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
         policy = get_task_policy(action)
         request = self._build_request(
             request_type="generate", prompt=prompt, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
+            estimated_input_tokens=enforcement.get("estimated_input_tokens"),
+            estimated_output_tokens=enforcement.get("estimated_output_tokens"),
         )
+        cache_key = None
+        if cacheable and settings.LLM_RESPONSE_CACHE_ENABLED:
+            cache_key = self._cache_key(
+                task=policy.task, request=request,
+                model=self._cache_model(prompt, action),
+                permission_fingerprint=permission_fingerprint,
+                schema=spec.json_schema,
+            )
+            cached = self.response_cache.get(cache_key)
+            if cached is not None:
+                cached_data, _ = parse_structured_output(cached, spec)
+                if cached_data is not None:
+                    return cached_data
         raw = await self._request_text_with_routing(source_text=prompt, request=request)
         data, failure_kind = parse_structured_output(raw, spec)
         if data is not None:
+            if cache_key is not None:
+                self.response_cache.put(cache_key, raw)
             return data
 
         if policy.structured_repair_enabled:
@@ -627,15 +747,19 @@ class ModelGateway:
             for _ in range(max(1, policy.structured_repair_max_attempts)):
                 repair_prompt = build_repair_prompt(spec.json_schema, candidate_raw)
                 # 修复请求同样受权限/预算/限流约束（同一 action/user），不绕过治理。
-                llm_governance_service.enforce_generate_request(prompt=repair_prompt, user_id=user_id, action=action)
+                repair_enforcement = llm_governance_service.enforce_generate_request(prompt=repair_prompt, user_id=user_id, action=action)
                 repair_request = self._build_request(
                     request_type="generate", prompt=repair_prompt, temperature=0.0,
                     action=action, user_id=user_id, prompt_template=None, prompt_version=None,
                     trace_id=request.trace_id,
+                    estimated_input_tokens=repair_enforcement.get("estimated_input_tokens"),
+                    estimated_output_tokens=repair_enforcement.get("estimated_output_tokens"),
                 )
                 candidate_raw = await self._request_text_with_routing(source_text=repair_prompt, request=repair_request)
                 repaired_data, sub_kind = parse_structured_output(candidate_raw, spec)
                 if repaired_data is not None:
+                    if cache_key is not None:
+                        self.response_cache.put(cache_key, candidate_raw)
                     return repaired_data
             last_kind = sub_kind or failure_kind or ModelErrorKind.INVALID_RESPONSE
             raise ModelError(
@@ -663,12 +787,14 @@ class ModelGateway:
         prompt_version: int | None = None,
         trace_id: str | None = None,
     ) -> str:
-        llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
+        enforcement = llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
         policy = get_task_policy(action)
         request = self._build_request(
             request_type="vision", prompt=prompt, image_urls=image_urls, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
+            estimated_input_tokens=enforcement.get("estimated_input_tokens"),
+            estimated_output_tokens=enforcement.get("estimated_output_tokens"),
         )
         resolved_temperature = self._resolve_temperature(policy, request.temperature)
         circuit_key = self._circuit_key(self.primary_target, policy.task)
@@ -710,6 +836,9 @@ class ModelGateway:
                 prompt_template=prompt_template,
                 prompt_version=prompt_version,
                 request_id=request.request_id,
+                attempt_number=1,
+                estimated_input_tokens=request.estimated_input_tokens,
+                estimated_output_tokens=request.estimated_output_tokens,
             )
             raise
         self.circuit_breaker.record_success(circuit_key)
@@ -726,6 +855,9 @@ class ModelGateway:
             prompt_template=prompt_template,
             prompt_version=prompt_version,
             request_id=request.request_id,
+            attempt_number=1,
+            estimated_input_tokens=request.estimated_input_tokens,
+            estimated_output_tokens=request.estimated_output_tokens,
         )
         return response_excerpt
 
@@ -739,12 +871,14 @@ class ModelGateway:
         prompt_version: int | None = None,
         trace_id: str | None = None,
     ):
-        llm_governance_service.enforce_chat_request(messages=messages, user_id=user_id, action=action)
+        enforcement = llm_governance_service.enforce_chat_request(messages=messages, user_id=user_id, action=action)
         policy = get_task_policy(action)
         request = self._build_request(
             request_type="chat_stream", messages=messages, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
+            estimated_input_tokens=enforcement.get("estimated_input_tokens"),
+            estimated_output_tokens=enforcement.get("estimated_output_tokens"),
         )
         resolved_temperature = self._resolve_temperature(policy, request.temperature)
         max_tokens = policy.max_tokens
@@ -755,7 +889,7 @@ class ModelGateway:
                 task=policy.task, request_id=request.request_id, trace_id=request.trace_id,
             )
 
-        async def stream_from_target(target: _ModelTarget, routing_stage: str):
+        async def stream_from_target(target: _ModelTarget, routing_stage: str, attempt_number: int):
             start = time.time()
             full_response = ""
             last_data: dict = {}
@@ -798,6 +932,9 @@ class ModelGateway:
                                 request_excerpt=request_excerpt, response_excerpt=full_response,
                                 prompt_template=prompt_template, prompt_version=prompt_version,
                                 request_id=request.request_id, routing_role=target.role, routing_stage=routing_stage,
+                                attempt_number=attempt_number,
+                                estimated_input_tokens=request.estimated_input_tokens,
+                                estimated_output_tokens=request.estimated_output_tokens,
                             )
                             return
                     except Exception as exc:
@@ -813,13 +950,16 @@ class ModelGateway:
                     request_excerpt=request_excerpt, response_excerpt=full_response, error_message=str(exc), status="error",
                     prompt_template=prompt_template, prompt_version=prompt_version,
                     request_id=request.request_id, routing_role=target.role, routing_stage=routing_stage,
+                    attempt_number=attempt_number,
+                    estimated_input_tokens=request.estimated_input_tokens,
+                    estimated_output_tokens=request.estimated_output_tokens,
                 )
                 raise
 
         for index, target in enumerate(targets):
             emitted = False
             try:
-                async for chunk in stream_from_target(target, "initial" if index == 0 else "fallback"):
+                async for chunk in stream_from_target(target, "initial" if index == 0 else "fallback", attempt_number=index + 1):
                     emitted = True
                     yield chunk
                 return
@@ -838,11 +978,13 @@ class ModelGateway:
     ) -> list[list[float]]:
         if not texts:
             return []
-        llm_governance_service.enforce_embedding_request(texts=texts, user_id=user_id, action=action)
+        enforcement = llm_governance_service.enforce_embedding_request(texts=texts, user_id=user_id, action=action)
         policy = get_task_policy(action)
         request = self._build_request(
             request_type="embedding", texts=texts, action=action, user_id=user_id,
             prompt_template=None, prompt_version=None, trace_id=trace_id,
+            estimated_input_tokens=enforcement.get("estimated_input_tokens"),
+            estimated_output_tokens=enforcement.get("estimated_output_tokens"),
         )
         circuit_key = self._circuit_key(self.primary_target, policy.task)
         if not self.circuit_breaker.can_attempt(circuit_key):
@@ -880,6 +1022,9 @@ class ModelGateway:
                     error_message=str(exc),
                     status="error",
                     request_id=request.request_id,
+                    attempt_number=1,
+                    estimated_input_tokens=request.estimated_input_tokens,
+                    estimated_output_tokens=request.estimated_output_tokens,
                 )
                 raise
             self.circuit_breaker.record_success(circuit_key)
@@ -894,6 +1039,9 @@ class ModelGateway:
                 request_excerpt=request_excerpt,
                 response_excerpt=response_excerpt,
                 request_id=request.request_id,
+                attempt_number=1,
+                estimated_input_tokens=request.estimated_input_tokens,
+                estimated_output_tokens=request.estimated_output_tokens,
             )
             embeddings.extend(adapter.extract_embeddings(data))
         return embeddings
