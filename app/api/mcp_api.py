@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.api_response import api_error, should_passthrough_exception
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.mcp.executor import tool_executor
 from app.mcp.permissions import all_agent_types, allowed_tools_for
 from app.mcp.registry import mcp_registry
 from app.models.user import User
@@ -67,12 +68,14 @@ async def call_mcp_tool(
         if req.tool_name == "sql_query_tool" and current_user.role != "admin":
             raise api_error(403, "需要管理员权限", code="ADMIN_REQUIRED")
 
-        result = await mcp_registry.call_tool(
+        # 统一执行链路：权限 / 审批 / 超时 / 幂等 / 审计全在 ToolExecutor。
+        result, _ = await tool_executor.execute(
             req.tool_name,
             req.arguments or {},
             agent_type=req.agent_type,
             user_id=current_user.id,
             db=db,
+            organization_id=current_user.organization_id,
         )
         return {
             "tool_name": req.tool_name,

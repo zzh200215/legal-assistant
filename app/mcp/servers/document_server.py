@@ -4,18 +4,15 @@ Run standalone::
 
     python -m app.mcp.servers.document_server
 
-Or import and mount via the MCPRegistry in-process.
+安全说明：独立 MCP 进程无 HTTP 鉴权上下文。本 server 统一经 ``tool_executor`` 执行，
+缺少认证用户（user_id）时一律拒绝（fail-closed），杜绝绕过统一执行链路的调用。
 """
 
 from __future__ import annotations
 
-import asyncio
-
 from mcp.server.fastmcp import FastMCP
 
-from app.services.analysis_service import analysis_service
-from app.services.document_service import document_service
-from app.services.rag_service import rag_service
+from app.mcp.executor import tool_executor
 
 mcp = FastMCP(
     "document-server",
@@ -24,51 +21,38 @@ mcp = FastMCP(
 
 
 @mcp.tool(description="根据问题检索文档知识库，返回相关文档片段，可选限定 document_id。")
-async def document_search(
-    query: str,
-    document_id: int | None = None,
-    user_id: int | None = None,
-) -> str:
-    """Search the document knowledge base by query string."""
-    chunks = await asyncio.to_thread(rag_service.search, query, document_id, 5, user_id)
-    result = {
-        "success": True,
-        "message": f"检索到 {len(chunks)} 条相关片段",
-        "data": {"query": query, "document_id": document_id, "chunks": chunks},
-    }
-    return str(result)
+async def document_search(query: str, document_id: int | None = None, user_id: int | None = None):
+    if user_id is None:
+        return str({"success": False, "message": "缺少认证上下文，工具调用被拒绝", "error": "unauthorized"})
+    args = {"query": query}
+    if document_id is not None:
+        args["document_id"] = document_id
+    out, _ = await tool_executor.execute(
+        "document_search_tool", args, agent_type="knowledge_agent", user_id=user_id, db=None,
+    )
+    return str(out)
 
 
 @mcp.tool(description="根据文档 ID 生成摘要，提取核心信息。")
-async def document_summary(
-    document_id: int,
-    user_id: int | None = None,
-    max_length: int = 500,
-) -> str:
-    """Generate a summary for the given document."""
-    raw_text = await asyncio.to_thread(document_service.summarize, document_id, None, user_id)
-    summary = await analysis_service.summarize_document(raw_text, max_length=max_length)
-    result = {
-        "success": True,
-        "message": "文档摘要已生成",
-        "data": {"document_id": document_id, "summary": summary, "max_length": max_length},
-    }
-    return str(result)
+async def document_summary(document_id: int, user_id: int | None = None, max_length: int = 500):
+    if user_id is None:
+        return str({"success": False, "message": "缺少认证上下文，工具调用被拒绝", "error": "unauthorized"})
+    out, _ = await tool_executor.execute(
+        "document_summary_tool", {"document_id": document_id, "max_length": max_length},
+        agent_type="knowledge_agent", user_id=user_id, db=None,
+    )
+    return str(out)
 
 
 @mcp.tool(description="根据文档 ID 提取结构化风险点，返回标题、说明、严重程度和建议动作。")
-async def document_extract_risks(
-    document_id: int,
-    user_id: int | None = None,
-) -> str:
-    """Extract structured risk items from a document."""
-    risks = await document_service.extract_risks(document_id, db=None, user_id=user_id)
-    result = {
-        "success": True,
-        "message": f"提取到 {len(risks)} 条风险点",
-        "data": {"document_id": document_id, "risks": risks},
-    }
-    return str(result)
+async def document_extract_risks(document_id: int, user_id: int | None = None):
+    if user_id is None:
+        return str({"success": False, "message": "缺少认证上下文，工具调用被拒绝", "error": "unauthorized"})
+    out, _ = await tool_executor.execute(
+        "document_risk_tool", {"document_id": document_id},
+        agent_type="knowledge_agent", user_id=user_id, db=None,
+    )
+    return str(out)
 
 
 if __name__ == "__main__":

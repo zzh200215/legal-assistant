@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings
+from app.core.model_policy import new_trace_id
 from app.core.time import utc_now
 from app.services.agent_approval_service import agent_approval_service
+from app.mcp.executor import tool_executor
+from app.mcp.permission_guard import permission_guard
 from app.mcp.permissions import (
     CANONICAL_AGENT_TYPES,
     agent_allows_tool,
@@ -20,6 +23,14 @@ from app.mcp.permissions import (
 from app.mcp.registry import mcp_registry
 from app.models.agent import AgentRun, ToolCallLog
 from app.models.user import User
+from app.services.agent_planner import Planner, planner as _planner_default
+from app.services.agent_run_repository import RunStateRepository, run_state_repository
+from app.services.agent_run_state import (
+    AgentPlan,
+    AgentRunState,
+    STATUS_RUNNING,
+    RunStateMachine,
+)
 from app.services.llm_service import llm_service
 from app.services.llm_observability_service import llm_observability_service
 from app.services.prompt_service import prompt_service
@@ -30,6 +41,14 @@ from app.services.conversation_memory_service import conversation_memory_service
 from app.services.agent_harness_service import get_harness_profile
 from app.services.agent_registry import AGENT_REGISTRY, AGENT_REGISTRY_VERSION, TASK_PROTOCOL_VERSION
 from app.services.agent_skill_registry import resolve_agent_skill
+from app.services.agent_audit import (
+    EVENT_CANCEL,
+    EVENT_COMPENSATION,
+    EVENT_ERROR,
+    EVENT_PLAN_CREATED,
+    EVENT_RUN_STATE_CHANGED,
+    agent_audit_service,
+)
 from app.workflows.langgraph_compat import GRAPH_END, GRAPH_START, StateGraph, workflow_engine_name
 
 
@@ -60,6 +79,12 @@ from app.services.agent_workflow_nodes import AgentWorkflowNodesMixin
 class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
     def __init__(self) -> None:
         self.settings = get_settings()
+        # 职责拆分：Planner 只规划，PermissionGuard/ToolExecutor 管权限与执行，
+        # RunStateRepository 管持久化，EvidenceVerifier 管证据校验。
+        self._planner: Planner = _planner_default
+        self._executor = tool_executor
+        self._guard = permission_guard
+        self._repo: RunStateRepository = run_state_repository
         self._workflow = self._build_workflow()
 
     @staticmethod
@@ -69,193 +94,31 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         return status == "cancelling"
 
     def _select_worker_agent(self, goal: str) -> str:
-        normalized = (goal or "").lower()
-        has_document = "文档" in goal or "合同" in goal or "方案" in goal or "document" in normalized or "risk" in normalized or "冲突" in goal or "核对" in goal or "对比" in goal or "conflict" in normalized
-        has_legal = "合同" in goal or "条款" in goal or "合规" in goal or "法务" in goal or "违约" in goal or "审查" in goal
-        has_task = "任务" in goal or "待办" in goal or "task" in normalized or "todo" in normalized
-
-        if has_legal:
-            return "legal_compliance_agent"
-        if has_document:
-            return "knowledge_agent"
-        if has_task:
-            return "workflow_agent"
-        # Ambiguous requests go to the read-only knowledge role, which must
-        # clarify or refuse when it has no evidence instead of taking action.
-        return "knowledge_agent"
+        return self._planner.plan_worker(goal)
 
     def _build_supervisor_worker_plan(self, goal: str) -> list[str]:
         """Return the ordered Worker handoff plan for cross-domain goals."""
-        normalized = (goal or "").lower()
-        has_document = "文档" in goal or "合同" in goal or "方案" in goal or "document" in normalized or "risk" in normalized or "冲突" in goal or "核对" in goal or "对比" in goal or "conflict" in normalized
-        has_legal = "合同" in goal or "条款" in goal or "合规" in goal or "法务" in goal or "违约" in goal or "审查" in goal
-        has_task = "任务" in goal or "待办" in goal or "task" in normalized or "todo" in normalized
+        from app.services.agent_planner import build_worker_plan
 
-        plan: list[str] = []
-        if has_legal:
-            plan.append("legal_compliance_agent")
-        if has_document and not has_legal:
-            plan.append("knowledge_agent")
-        if has_task:
-            plan.append("workflow_agent")
-        return plan or [self._select_worker_agent(goal)]
+        return build_worker_plan(goal)
 
     @staticmethod
     def _can_parallelize_workers(workers: list[str]) -> bool:
-        canonical_workers = {canonical_agent_type(worker) for worker in workers}
-        return len(workers) == 2 and frozenset(canonical_workers) in PARALLEL_READ_ONLY_WORKER_PAIRS
+        return Planner._can_parallelize(workers)
 
     def _parallel_worker_plan(self, goal: str, workers: list[str]) -> dict[str, Any] | None:
         """Build bounded, explicit fan-out steps without asking the model to infer IDs."""
-        if not self._can_parallelize_workers(workers):
-            return None
-        document_match = re.search(r"(?:文档|合同|方案|document)\s*(?:id)?\s*(\d+)", goal, flags=re.IGNORECASE)
-        if not document_match:
-            return None
-        document_id = int(document_match.group(1))
-        document_tool = "document_risk_tool" if ("风险" in goal or "risk" in goal.lower()) else "document_summary_tool"
-        knowledge_worker = next(
-            (worker for worker in workers if canonical_agent_type(worker) == "knowledge_agent"),
-            "knowledge_agent",
-        )
-        legal_worker = next(
-            (worker for worker in workers if canonical_agent_type(worker) == "legal_compliance_agent"),
-            "legal_compliance_agent",
-        )
-        return {
-            knowledge_worker: {"tool_name": document_tool, "action_input": {"document_id": document_id}},
-            legal_worker: {"tool_name": "document_risk_tool", "action_input": {"document_id": document_id}},
-        }
+        return self._planner._parallel_plan(goal, workers)
 
     def _fallback_supervisor_plan(self, goal: str, *, reason: str | None = None) -> dict[str, Any]:
-        workers = self._build_supervisor_worker_plan(goal)
-        normalized = (goal or "").lower()
-        expected_artifacts: list[str] = []
-        if "knowledge_agent" in workers:
-            expected_artifacts.append("document")
-        if "legal_compliance_agent" in workers:
-            expected_artifacts.append("document")
-        if "任务" in goal or "待办" in goal or "task" in normalized or "todo" in normalized:
-            expected_artifacts.append("task")
-        expected_artifacts = list(dict.fromkeys(expected_artifacts))
-        parallel_plan = self._parallel_worker_plan(goal, workers)
-        return {
-            "intent": (goal or "").strip() or "general_legal_request",
-            "workers": workers,
-            "dependencies": [
-                {"from": workers[index], "to": workers[index + 1]}
-                for index in range(len(workers) - 1)
-            ],
-            "risk_level": "medium" if "workflow_agent" in workers else "low",
-            "expected_artifacts": expected_artifacts,
-            "rationale": "使用规则路由生成稳定的最小 Worker 计划。",
-            "plan_source": "rule_fallback",
-            "fallback_reason": reason,
-            "execution_mode": "parallel_read_only" if parallel_plan else "sequential",
-            "parallel_plan": parallel_plan,
-            "architecture_version": AGENT_REGISTRY_VERSION,
-            "guardrail_nodes": ["rbac", "tool_acl", "approval", "evidence_verification"],
-        }
+        return self._planner._fallback_dict(goal, reason=reason)
 
     def _validate_supervisor_plan(self, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-        allowed_workers = set(CANONICAL_AGENT_TYPES) | {"document_agent", "task_agent"}
-        workers = payload.get("workers")
-        if not isinstance(workers, list) or not workers or len(workers) > 4:
-            return None, "workers 必须是 1 到 4 个 Worker 的列表"
-        requested_workers = [str(item).strip() for item in workers]
-        if any(item not in allowed_workers for item in requested_workers):
-            return None, "计划包含未知或内部 Worker"
-        normalized_workers = [canonical_agent_type(item) for item in requested_workers]
-        if len(set(normalized_workers)) != len(normalized_workers):
-            return None, "Worker 不允许重复"
-
-        dependencies = payload.get("dependencies")
-        if dependencies is None:
-            dependencies = []
-        if not isinstance(dependencies, list):
-            return None, "dependencies 必须是列表"
-        normalized_dependencies = []
-        for dependency in dependencies:
-            if not isinstance(dependency, dict):
-                return None, "dependency 必须是对象"
-            source = canonical_agent_type(str(dependency.get("from") or "").strip())
-            target = canonical_agent_type(str(dependency.get("to") or "").strip())
-            if source not in normalized_workers or target not in normalized_workers:
-                return None, "dependency 指向计划外 Worker"
-            if normalized_workers.index(source) >= normalized_workers.index(target):
-                return None, "dependency 必须从前序 Worker 指向后序 Worker"
-            normalized_dependencies.append({"from": source, "to": target})
-
-        risk_level = str(payload.get("risk_level") or "medium").strip().lower()
-        if risk_level not in SUPERVISOR_RISK_LEVELS:
-            return None, "risk_level 非法"
-        artifacts = payload.get("expected_artifacts")
-        if artifacts is None:
-            artifacts = []
-        if not isinstance(artifacts, list):
-            return None, "expected_artifacts 必须是列表"
-        normalized_artifacts = [str(item).strip().lower() for item in artifacts if str(item).strip()]
-        if any(item not in SUPERVISOR_ARTIFACT_TYPES for item in normalized_artifacts):
-            return None, "expected_artifacts 包含非法类型"
-
-        return {
-            "intent": str(payload.get("intent") or "general_legal_request").strip() or "general_legal_request",
-            "workers": normalized_workers,
-            "dependencies": normalized_dependencies,
-            "risk_level": risk_level,
-            "expected_artifacts": list(dict.fromkeys(normalized_artifacts)),
-            "rationale": str(payload.get("rationale") or "Supervisor 已完成 Worker 分派。").strip(),
-            "plan_source": "llm",
-            "fallback_reason": None,
-            "execution_mode": "sequential",
-            "parallel_plan": None,
-            "architecture_version": AGENT_REGISTRY_VERSION,
-            "guardrail_nodes": ["rbac", "tool_acl", "approval", "evidence_verification"],
-        }, None
+        return self._planner._validate_dict(payload)
 
     async def _plan_with_supervisor(self, goal: str, user_id: int) -> dict[str, Any]:
-        required_workers = self._build_supervisor_worker_plan(goal)
-        if len(required_workers) == 1:
-            plan = self._fallback_supervisor_plan(goal)
-            plan.update(
-                {
-                    "plan_source": "deterministic_direct_route",
-                    "fallback_reason": None,
-                    "rationale": "单领域请求直接路由到唯一责任 Agent，不启动多 Agent 规划。",
-                }
-            )
-            return plan
-
-        metadata = prompt_service.get_template_metadata("agent_supervisor_plan", user_id=user_id)
-        prompt = prompt_service.render_by_name(
-            "agent_supervisor_plan",
-            user_id=user_id,
-            sub_agent_descriptions=SUB_AGENT_DESCRIPTIONS,
-            goal=goal,
-        )
-        try:
-            raw = await llm_service.generate(
-                prompt,
-                temperature=0.1,
-                action="agent_supervisor_plan",
-                user_id=user_id,
-                prompt_template=metadata.get("prompt_template"),
-                prompt_version=metadata.get("prompt_version"),
-            )
-        except Exception:
-            return self._fallback_supervisor_plan(goal, reason="supervisor_generation_failed")
-
-        payload = llm_service.parse_json_object(raw)
-        plan, error = self._validate_supervisor_plan(payload)
-        if plan:
-            if plan["workers"] != required_workers:
-                return self._fallback_supervisor_plan(goal, reason="supervisor_role_boundary_mismatch")
-            parallel_plan = self._parallel_worker_plan(goal, plan["workers"])
-            if parallel_plan:
-                plan["execution_mode"] = "parallel_read_only"
-                plan["parallel_plan"] = parallel_plan
-            return plan
-        return self._fallback_supervisor_plan(goal, reason=error or "supervisor_plan_invalid")
+        """兼容层：委托 Planner 生成 supervisor_plan dict（形状与历史一致）。"""
+        return await self._planner.plan_dict(goal, user_id)
 
     def _worker_allows_tool(self, worker_name: str, tool_name: str) -> bool:
         """Delegate to the MCP permissions module."""
@@ -540,14 +403,26 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
             return
         await event_callback(payload)
 
-    def _create_run(self, goal: str, user_id: int, session_id: int | None, db: Session) -> AgentRun:
-        agent_run = AgentRun(
+    def _create_run(
+        self,
+        goal: str,
+        user_id: int,
+        session_id: int | None,
+        db: Session,
+        *,
+        trace_id: str | None = None,
+        organization_id: int | None = None,
+    ) -> AgentRun:
+        agent_run = self._repo.create_run(
+            db,
+            goal=goal,
             user_id=user_id,
             session_id=session_id,
-            goal=goal,
-            status="running",
-            total_steps=0,
+            trace_id=trace_id,
+            organization_id=organization_id,
         )
+        run_deadline = utc_now() + timedelta(seconds=self.settings.AGENT_RUN_DEADLINE_SECONDS)
+        agent_run.run_deadline_at = run_deadline
         db.add(agent_run)
         db.commit()
         db.refresh(agent_run)
@@ -591,16 +466,11 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         }
 
     def _save_run(self, db: Session, agent_run: AgentRun, **fields) -> AgentRun:
-        for key, value in fields.items():
-            setattr(agent_run, key, value)
-        db.add(agent_run)
-        db.commit()
-        db.refresh(agent_run)
-        return agent_run
+        return self._repo.save_run(db, agent_run, **fields)
 
     @staticmethod
     def _load_workflow_snapshot(agent_run: AgentRun) -> dict[str, Any]:
-        return _json_loads_dict(agent_run.workflow_state)
+        return run_state_repository.load_workflow_snapshot(agent_run)
 
     def _build_workflow_snapshot(self, state: dict[str, Any], *, node: str) -> dict[str, Any]:
         supervisor_plan = dict(state.get("supervisor_plan") or {})
@@ -628,13 +498,20 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         }
 
     def _save_workflow_snapshot(self, state: dict[str, Any], *, node: str, **fields) -> AgentRun:
-        fields.update(
-            {
-                "workflow_state": _json_dumps(self._build_workflow_snapshot(state, node=node)),
-                "workflow_state_updated_at": utc_now(),
-            }
+        model = state.get("_model")
+        if not isinstance(model, AgentRunState):
+            model = AgentRunState(
+                run_id=state["agent_run"].id,
+                user_id=state["user_id"],
+                status=str(state["agent_run"].status or STATUS_RUNNING),
+                node=node,
+                step=int(state.get("step") or 0),
+                retry_count=int(state.get("retry_count") or 0),
+            )
+        snapshot = self._build_workflow_snapshot(state, node=node)
+        return self._repo.save_workflow_state(
+            state["db"], state["agent_run"], snapshot=snapshot, state=model, node=node, **fields
         )
-        return self._save_run(state["db"], state["agent_run"], **fields)
 
     def _append_observation(self, messages: list[dict[str, str]], raw: str, observation: str) -> None:
         messages.append({"role": "assistant", "content": raw})
@@ -664,33 +541,23 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         error: str | None,
         duration_ms: int,
     ) -> ToolCallLog:
-        safe_input = {key: value for key, value in input_params.items() if key != "db"}
-        log = ToolCallLog(
+        return self._repo.append_log(
+            db,
             agent_run_id=agent_run_id,
             step=step,
-            action_type=decision.get("action_type"),
-            thought=decision.get("thought"),
-            tool_name=tool_name,
-            input_params=_json_dumps(safe_input),
+            decision=decision,
             raw_decision=raw_decision,
+            tool_name=tool_name,
+            input_params=input_params,
             observation=observation,
             output_result=output_result,
             status=status,
             error=_sanitize_agent_error_message(error),
             duration_ms=duration_ms,
         )
-        db.add(log)
-        db.commit()
-        db.refresh(log)
-        return log
 
     def _update_log(self, db: Session, log: ToolCallLog, **fields) -> ToolCallLog:
-        for key, value in fields.items():
-            setattr(log, key, value)
-        db.add(log)
-        db.commit()
-        db.refresh(log)
-        return log
+        return self._repo.update_log(db, log, **fields)
 
     async def _execute_tool(
         self,
@@ -701,46 +568,29 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         agent_type: str = "general_agent",
         agent_run_id: int | None = None,
         skip_approval: bool = False,
+        *,
+        step_id: int | None = None,
+        trace_id: str | None = None,
+        organization_id: int | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> tuple[dict, str | None]:
-        """Execute a tool through the MCP registry.
-
-        The registry handles:
-          1. Tool lookup
-          2. Permission check (agent_type × tool_name)
-          3. JSON Schema argument validation
-          4. Auto-context injection (user_id, db)
-          5. Invocation
-          6. Result normalisation
-          7. Observability hooks
+        """统一执行入口：委托 ToolExecutor（权限/取消/审批/幂等/超时/重试/审计）。
 
         Returns (result_dict, serialized_input_for_logging).
         """
-        # 长流程权限快照：硬撤销（禁用/强制退出/成员撤销/授权撤销）立即终止工具调用。
-        if agent_run_id:
-            snapshot_denied = self._assert_run_snapshot(
-                db, agent_run_id=agent_run_id, user_id=user_id
-            )
-            if snapshot_denied is not None:
-                return snapshot_denied, _json_dumps(
-                    {k: v for k, v in action_input.items() if k != "db"}
-                )
-        try:
-            result = await asyncio.wait_for(
-                mcp_registry.call_tool(
-                    tool_name, action_input, agent_type=agent_type, user_id=user_id, db=db,
-                    agent_run_id=agent_run_id, skip_approval=skip_approval,
-                ),
-                timeout=self.settings.AGENT_TOOL_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            result = {
-                "success": False,
-                "message": "工具执行超时，已停止等待该步骤。",
-                "data": {"tool_name": tool_name, "timeout_seconds": self.settings.AGENT_TOOL_TIMEOUT_SECONDS},
-                "error": "agent_tool_timeout",
-                "mcp_error_code": "AGENT_TOOL_TIMEOUT",
-            }
-        serialized_input = _json_dumps({k: v for k, v in action_input.items() if k != "db"})
+        result, serialized_input = await self._executor.execute(
+            tool_name,
+            action_input,
+            agent_type=agent_type,
+            user_id=user_id,
+            db=db,
+            agent_run_id=agent_run_id,
+            skip_approval=skip_approval,
+            step_id=step_id,
+            trace_id=trace_id,
+            organization_id=organization_id,
+            cancel_check=cancel_check,
+        )
         return result, serialized_input
 
     def _assert_run_snapshot(self, db: Session, *, agent_run_id: int, user_id: int) -> dict | None:
@@ -778,6 +628,9 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         user_id: int,
         db: Session,
         agent_run_id: int,
+        step_id: int | None = None,
+        trace_id: str | None = None,
+        organization_id: int | None = None,
     ) -> dict[str, Any]:
         canonical_worker = canonical_agent_type(worker_name)
         if canonical_worker not in PARALLEL_READ_ONLY_WORKERS or tool_name not in PARALLEL_READ_ONLY_TOOLS:
@@ -799,6 +652,9 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
                 branch_db,
                 agent_type=canonical_worker,
                 agent_run_id=agent_run_id,
+                step_id=step_id,
+                trace_id=trace_id,
+                organization_id=organization_id,
             )
             return {
                 "worker_agent": worker_name,
@@ -821,7 +677,7 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
                 return await self._execute_parallel_read_only_worker(**kwargs)
 
         jobs = []
-        for worker_name, step in branch_plan.items():
+        for index, (worker_name, step) in enumerate(branch_plan.items()):
             if not isinstance(step, dict):
                 continue
             jobs.append(
@@ -832,6 +688,9 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
                     user_id=state["user_id"],
                     db=state["db"],
                     agent_run_id=state["agent_run"].id,
+                    step_id=int(state.get("step") or 0) + index + 1,
+                    trace_id=state["agent_run"].trace_id,
+                    organization_id=state["agent_run"].organization_id,
                 )
             )
         results = await asyncio.gather(*jobs) if jobs else []
@@ -1002,11 +861,20 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         max_steps: int = 5,
         event_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> AgentRun:
-        agent_run = self._create_run(goal=goal, user_id=user_id, session_id=session_id, db=db)
+        trace_id = new_trace_id()
         # 长流程权限快照：Agent 执行期间权限范围保持稳定，硬撤销立即终止。
         from app.services.authorization_service import authorization_service
 
         user_row = db.query(User).filter(User.id == user_id).first()
+        organization_id = user_row.organization_id if user_row else None
+        agent_run = self._create_run(
+            goal=goal,
+            user_id=user_id,
+            session_id=session_id,
+            db=db,
+            trace_id=trace_id,
+            organization_id=organization_id,
+        )
         if user_row:
             try:
                 ctx = authorization_service.build_context(db, user_row)
@@ -1089,6 +957,27 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
             "evidence_scope_seen": False,
             "retry_count": 0,
         }
+        # 具类型运行状态（取代无约束 dict 的持久化/恢复载体），并写计划审计。
+        state["_model"] = AgentRunState(
+            run_id=agent_run.id,
+            user_id=user_id,
+            status=STATUS_RUNNING,
+            node="decide",
+            step=0,
+            trace_id=trace_id,
+            organization_id=organization_id,
+            plan=AgentPlan.from_dict(supervisor_plan),
+            run_deadline_at=agent_run.run_deadline_at.isoformat() if agent_run.run_deadline_at else None,
+        )
+        try:
+            agent_audit_service.record(
+                db=db, event_type=EVENT_PLAN_CREATED, run_id=agent_run.id, trace_id=trace_id,
+                user_id=user_id, organization_id=organization_id,
+                decision={"plan_source": supervisor_plan.get("plan_source"), "workers": worker_plan},
+                status="created",
+            )
+        except Exception:  # noqa: BLE001 - 审计失败不阻断执行
+            db.rollback()
         self._save_workflow_snapshot(state, node="decide")
 
         try:
@@ -1105,6 +994,22 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
                 last_observation=state.get("last_observation") or "",
                 completed_at=utc_now(),
             )
+            # 失败后补偿：反向补偿已完成的可补偿写步骤（不可补偿步骤记录审计）。
+            try:
+                from app.services.agent_compensation import run_compensation
+
+                run_compensation(db, result_run)
+            except Exception:  # noqa: BLE001 - 补偿失败不阻断错误上报
+                db.rollback()
+            try:
+                agent_audit_service.record(
+                    db=db, event_type=EVENT_ERROR, run_id=result_run.id,
+                    trace_id=result_run.trace_id, user_id=result_run.user_id,
+                    organization_id=result_run.organization_id, status="error",
+                    summary={"error_category": "unhandled_exception"},
+                )
+            except Exception:  # noqa: BLE001
+                db.rollback()
             self._record_run_summary(
                 run=result_run,
                 status="error",
@@ -1239,6 +1144,26 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         action_input.pop("_worker_agent", None)
 
         execution_agent = canonical_agent_type(approval.agent_type or worker_agent)
+        # 审批参数守卫：审批后参数变化/审批过期 → 必须重新审批，不执行工具。
+        from app.services.agent_approval_service import ApprovalStateError
+
+        try:
+            agent_approval_service.require_executable(
+                db=db, approval_id=approval.id, user_id=user_id, current_params=action_input
+            )
+        except ApprovalStateError as exc:
+            agent_approval_service.create_request(
+                db=db,
+                user_id=user_id,
+                tool_name=pending_log.tool_name,
+                input_params=action_input,
+                agent_type=execution_agent,
+                agent_run_id=agent_run.id,
+                step_id=pending_log.step,
+            )
+            self._save_run(db, agent_run, status="awaiting_approval", final_answer="审批参数已变化，需重新审批。")
+            raise ValueError(f"Approval parameters changed; re-approval required: {exc}")
+
         result, serialized_input = await self._execute_tool(
             pending_log.tool_name,
             action_input,
@@ -1247,6 +1172,10 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
             agent_type=execution_agent,
             agent_run_id=agent_run.id,
             skip_approval=True,
+            step_id=pending_log.step,
+            trace_id=agent_run.trace_id,
+            organization_id=agent_run.organization_id,
+            cancel_check=lambda: self._is_cancel_requested({"db": db, "agent_run": agent_run}),
         )
         result.setdefault("data", {})
         if isinstance(result["data"], dict):
@@ -1335,6 +1264,18 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
             "parallel_results": snapshot.get("parallel_results") or {},
             "retry_count": int(snapshot.get("retry_count") or 0),
         }
+        state["_model"] = AgentRunState(
+            run_id=agent_run.id,
+            user_id=user_id,
+            status=STATUS_RUNNING,
+            node="decide",
+            step=state["step"],
+            trace_id=agent_run.trace_id,
+            organization_id=agent_run.organization_id,
+            plan=AgentPlan.from_dict(supervisor_plan),
+            run_deadline_at=agent_run.run_deadline_at.isoformat() if agent_run.run_deadline_at else None,
+            retry_count=state["retry_count"],
+        )
         self._save_workflow_snapshot(
             state,
             node="decide",
@@ -1350,27 +1291,32 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         return final_state.get("final_run") or agent_run
 
     def get_run(self, run_id: int, db: Session, user_id: int | None = None) -> AgentRun | None:
-        query = db.query(AgentRun).filter(AgentRun.id == run_id)
-        if user_id is not None:
-            query = query.filter(AgentRun.user_id == user_id)
-        return query.first()
+        return self._repo.get_run(db, run_id, user_id=user_id)
 
     def request_cancel(self, run_id: int, *, db: Session, user_id: int, reason: str | None = None) -> AgentRun:
         run = self.get_run(run_id, db, user_id=user_id)
         if not run:
             raise ValueError("Agent run not found")
-        if run.status not in {"running", "awaiting_approval", "cancelling"}:
+        if not RunStateMachine.can_cancel(run.status):
             raise ValueError("Agent run is not active")
         run.cancel_requested_at = utc_now()
         run.cancel_reason = (reason or "").strip() or None
         if run.status == "awaiting_approval":
-            run.status = "cancelled"
+            run.status = RunStateMachine.transition(run.status, "cancelled")
             run.final_answer = "执行已取消，未恢复待审批操作。"
             run.failure_reason = "cancelled_by_user"
             run.completed_at = utc_now()
         else:
-            run.status = "cancelling"
-        return self._save_run(db, run)
+            run.status = RunStateMachine.transition(run.status, "cancelling")
+        result = self._save_run(db, run)
+        try:
+            agent_audit_service.record(
+                db=db, event_type=EVENT_CANCEL, run_id=run.id, user_id=user_id,
+                summary={"reason": reason}, status="cancelled" if run.status == "cancelled" else "cancelling",
+            )
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        return result
 
     def get_run_metrics(self, *, db: Session, user_id: int, days: int = 30) -> dict[str, Any]:
         since = utc_now() - timedelta(days=max(1, min(days, 365)))
@@ -1493,10 +1439,7 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin):
         }
 
     def get_run_logs(self, run_id: int, db: Session, user_id: int | None = None) -> list[ToolCallLog]:
-        query = db.query(ToolCallLog).join(AgentRun).filter(ToolCallLog.agent_run_id == run_id)
-        if user_id is not None:
-            query = query.filter(AgentRun.user_id == user_id)
-        return query.order_by(ToolCallLog.step.asc(), ToolCallLog.created_at.asc()).all()
+        return self._repo.get_run_logs(db, run_id, user_id=user_id)
 
     def list_runs_by_artifact(
         self,

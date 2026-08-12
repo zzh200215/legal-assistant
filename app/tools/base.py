@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.mcp.tool_contract import ToolContract
 
 
 def _sanitize_tool_error(error: str | None, fallback_message: str) -> str:
@@ -32,6 +35,9 @@ class BaseAgentTool:
     description = ""
     parameters: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
     auto_context_fields: tuple[str, ...] = ()
+    # 统一工具契约（读/写、审批、超时、重试、幂等、成本、副作用、补偿、审计）。
+    # 未声明时按安全兜底处理（写操作、需审批、不可重试、不可补偿），见 app.mcp.tool_contract。
+    contract: "ToolContract | None" = None
 
     def spec(self) -> dict[str, Any]:
         return {

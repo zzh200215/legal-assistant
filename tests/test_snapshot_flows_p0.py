@@ -184,7 +184,7 @@ class HardRevokeSnapshotTests(SnapshotFlowBase):
 
 
 class AgentRunSnapshotTests(SnapshotFlowBase):
-    """Agent 工具调用受快照约束。"""
+    """Agent 工具调用受快照约束（统一经 ToolExecutor，工具名用真实 ACL 内工具）。"""
 
     def _make_run(self):
         run = AgentRun(user_id=self.user.id, goal="测试", status="running")
@@ -204,7 +204,7 @@ class AgentRunSnapshotTests(SnapshotFlowBase):
         # 硬撤销：token_version 递增
         auth_token_service.increment_token_version(self.db, self.user)
         result, _ = asyncio.run(agent_service._execute_tool(
-            "doc_read", {"document_id": 1}, self.user.id, self.db,
+            "document_search_tool", {"document_id": 1}, self.user.id, self.db,
             agent_run_id=run.id,
         ))
         self.assertFalse(result["success"])
@@ -213,16 +213,17 @@ class AgentRunSnapshotTests(SnapshotFlowBase):
     def test_agent_tool_allowed_with_valid_snapshot(self):
         import asyncio
 
+        from app.mcp.executor import tool_executor
         from app.services.agent_service import agent_service
 
         run = self._make_run()
         self.db.refresh(run)
         with patch.object(
             agent_service.settings, "AGENT_TOOL_TIMEOUT_SECONDS", 5
-        ), patch("app.services.agent_service.mcp_registry") as mock_registry:
+        ), patch.object(tool_executor, "_registry") as mock_registry:
             mock_registry.call_tool = AsyncMock(return_value={"success": True, "data": {}})
             result, _ = asyncio.run(agent_service._execute_tool(
-                "doc_read", {"document_id": 1}, self.user.id, self.db,
+                "document_search_tool", {"document_id": 1}, self.user.id, self.db,
                 agent_run_id=run.id,
             ))
         self.assertTrue(result["success"])
@@ -231,15 +232,16 @@ class AgentRunSnapshotTests(SnapshotFlowBase):
     def test_run_without_snapshot_not_blocked(self):
         import asyncio
 
+        from app.mcp.executor import tool_executor
         from app.services.agent_service import agent_service
 
         run = AgentRun(user_id=self.user.id, goal="测试", status="running")
         self.db.add(run)
         self.db.commit()
-        with patch("app.services.agent_service.mcp_registry") as mock_registry:
+        with patch.object(tool_executor, "_registry") as mock_registry:
             mock_registry.call_tool = AsyncMock(return_value={"success": True, "data": {}})
             result, _ = asyncio.run(agent_service._execute_tool(
-                "doc_read", {"document_id": 1}, self.user.id, self.db,
+                "document_search_tool", {"document_id": 1}, self.user.id, self.db,
                 agent_run_id=run.id,
             ))
         self.assertTrue(result["success"])

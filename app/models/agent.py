@@ -22,6 +22,12 @@ class AgentRun(Base):
     error = Column(Text, nullable=True)
     # 长流程权限快照：Agent 执行期间权限范围保持稳定，硬撤销立即终止。
     authorization_snapshot_id = Column(String(64), nullable=True, index=True)
+    # 可观测性与租户隔离：run 级 trace_id 与所属组织。
+    trace_id = Column(String(64), nullable=True, index=True)
+    organization_id = Column(Integer, nullable=True, index=True)
+    run_deadline_at = Column(DateTime(timezone=True), nullable=True)
+    retry_of_run_id = Column(Integer, nullable=True)
+    compensation_status = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -60,3 +66,33 @@ class AgentApprovalRequest(Base):
     decision_note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     decided_at = Column(DateTime(timezone=True), nullable=True)
+    # 审批生命周期加固：绑定步骤与参数摘要，支持过期/撤销/操作者追溯。
+    step_id = Column(Integer, nullable=True)
+    param_digest = Column(String(64), nullable=True)
+    decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    revoke_reason = Column(Text, nullable=True)
+
+
+class AgentAuditEvent(Base):
+    """结构化审计事件：run/step/trace 维度，记录计划决策、权限决策、工具执行、
+    审批、状态变更、重试/超时/取消/补偿与错误分类。可查询，不做事件溯源。"""
+
+    __tablename__ = "agent_audit_events"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("agent_runs.id"), nullable=True, index=True)
+    step = Column(Integer, nullable=True)
+    trace_id = Column(String(64), nullable=True, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    organization_id = Column(Integer, nullable=True)
+    tool_name = Column(String(128), nullable=True)
+    tool_version = Column(String(32), nullable=True)
+    decision_json = Column(Text, nullable=True)
+    summary_json = Column(Text, nullable=True)
+    error_category = Column(String(64), nullable=True)
+    status = Column(String(32), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

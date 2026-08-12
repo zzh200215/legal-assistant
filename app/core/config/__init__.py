@@ -22,6 +22,7 @@ from app.core.config.observability import ObservabilitySettings
 from app.core.config.payment import PaymentSettings
 from app.core.config.rag import RAGSettings
 from app.core.config.security import SecuritySettings
+from app.core.config.sql import SQLSettings
 from app.core.config.storage import StorageSettings
 from app.core.config.tasks import TaskSettings
 
@@ -51,6 +52,7 @@ SENSITIVE_FIELDS = frozenset(
         "STORAGE_MINIO_SECRET_KEY",
         "STORAGE_S3_SECRET_KEY",
         "STORAGE_OSS_SECRET_KEY",
+        "SQL_DATABASE_URL",
     }
 )
 
@@ -65,6 +67,7 @@ class Settings(
     PaymentSettings,
     ObservabilitySettings,
     TaskSettings,
+    SQLSettings,
     MessagingSettings,
 ):
     """合并后的应用配置单例结构。

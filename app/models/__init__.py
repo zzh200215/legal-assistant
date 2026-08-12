@@ -7,7 +7,7 @@ from app.models.task import Task, TaskComment, TaskLog
 from app.models.email import EmailDraft, EmailSendRequest, OutboundEmailPolicy
 from app.models.chat import ChatSession, ChatMessage, ChatSessionMemory, UserPreferenceMemory
 from app.models.calendar import CalendarSuggestion
-from app.models.agent import AgentApprovalRequest, AgentRun, ToolCallLog
+from app.models.agent import AgentApprovalRequest, AgentAuditEvent, AgentRun, ToolCallLog
 from app.models.prompt import PromptTemplate, PromptTemplateVersion
 from app.models.operation_log import OperationLog
 from app.models.token_usage import TokenUsage
@@ -79,6 +79,7 @@ __all__ = [
     "CalendarSuggestion",
     "AgentRun",
     "AgentApprovalRequest",
+    "AgentAuditEvent",
     "ToolCallLog",
     "PromptTemplate",
     "PromptTemplateVersion",

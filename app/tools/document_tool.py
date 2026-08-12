@@ -1,5 +1,6 @@
 import asyncio
 
+from app.mcp.tool_contract import ToolContract
 from app.services.analysis_service import analysis_service
 from app.services.document_service import document_service
 from app.services.rag_service import rag_service
@@ -10,6 +11,10 @@ class DocumentSearchTool(BaseAgentTool):
     name = "document_search_tool"
     description = "根据问题检索文档知识库，返回相关文档片段，可选限定 document_id。"
     auto_context_fields = ("user_id",)
+    contract = ToolContract(
+        name="document_search_tool", read_only=True, requires_approval=False,
+        side_effect="reads_knowledge_base", audit_level="summary",
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -36,6 +41,10 @@ class DocumentSummaryTool(BaseAgentTool):
     name = "document_summary_tool"
     description = "根据文档 ID 生成摘要，提取核心信息。"
     auto_context_fields = ("user_id", "db")
+    contract = ToolContract(
+        name="document_summary_tool", read_only=True, requires_approval=False,
+        side_effect="reads_document", audit_level="summary",
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -66,6 +75,10 @@ class DocumentRiskTool(BaseAgentTool):
     name = "document_risk_tool"
     description = "根据文档 ID 提取结构化风险点，返回标题、说明、证据、严重程度和建议动作。"
     auto_context_fields = ("user_id", "db")
+    contract = ToolContract(
+        name="document_risk_tool", read_only=True, requires_approval=False,
+        side_effect="reads_document", audit_level="summary",
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -93,6 +106,10 @@ class DocumentConflictTool(BaseAgentTool):
     name = "document_conflict_tool"
     description = "对两到五份文档中的日期、金额和负责人进行交叉核对，返回带原文定位的事实冲突；只读，不创建任务。"
     auto_context_fields = ("user_id", "db")
+    contract = ToolContract(
+        name="document_conflict_tool", read_only=True, requires_approval=False,
+        side_effect="reads_document", audit_level="summary",
+    )
     parameters = {
         "type": "object",
         "properties": {

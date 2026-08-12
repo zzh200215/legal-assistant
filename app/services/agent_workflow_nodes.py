@@ -16,10 +16,13 @@ from app.services.agent_prompts import (
     normalize_decision as _normalize_decision,
     sanitize_agent_error_message as _sanitize_agent_error_message,
 )
+from app.services.agent_run_state import AgentRunState
 
 
 class AgentWorkflowNodesMixin:
     def _workflow_route_decision(self, state: dict[str, Any]) -> str:
+        if state.get("timed_out"):
+            return "partial"
         if state.get("needs_evidence_verification"):
             return "verify_evidence"
         return str((state.get("current_decision") or {}).get("action_type") or "retry")
@@ -41,6 +44,17 @@ class AgentWorkflowNodesMixin:
         return "partial" if int(state.get("step") or 0) >= int(state.get("max_steps") or 0) else "continue"
 
     async def _workflow_decide(self, state: dict[str, Any]) -> dict[str, Any]:
+        # run 级截止时间：在步骤边界检查，超时直接收敛为 partial（timeout）。
+        model = state.get("_model")
+        if model is not None and model.is_expired():
+            state.update(
+                {
+                    "current_decision": {"action_type": "timeout", "thought": "[supervisor_agent] 执行已超时。"},
+                    "current_raw": "run_deadline_exceeded",
+                    "timed_out": True,
+                }
+            )
+            return state
         if self._is_cancel_requested(state):
             state.update({"current_decision": {"action_type": "cancelled"}, "current_raw": "cancel_requested"})
             return state
@@ -151,6 +165,9 @@ class AgentWorkflowNodesMixin:
 
     async def _workflow_cancelled(self, state: dict[str, Any]) -> dict[str, Any]:
         answer = "执行已取消，后续步骤未继续运行。"
+        model = state.get("_model")
+        if isinstance(model, AgentRunState):
+            model.cancel_requested = True
         log = self._create_log(
             db=state["db"], agent_run_id=state["agent_run"].id, step=int(state.get("step") or 0),
             decision={"action_type": "cancelled", "thought": "[supervisor_agent] 检测到取消请求。"}, raw_decision=state.get("current_raw") or "cancel_requested",
@@ -531,6 +548,9 @@ class AgentWorkflowNodesMixin:
         )
         state["last_observation"] = observation
         state["retry_count"] = int(state.get("retry_count") or 0) + 1
+        model = state.get("_model")
+        if isinstance(model, AgentRunState):
+            model.retry_count = state["retry_count"]
         self._save_workflow_snapshot(
             state,
             node="decide",
@@ -549,6 +569,10 @@ class AgentWorkflowNodesMixin:
             state["db"],
             agent_type=state["current_worker_agent"],
             agent_run_id=state["agent_run"].id,
+            step_id=int(state.get("step") or 0),
+            trace_id=state["agent_run"].trace_id,
+            organization_id=state["agent_run"].organization_id,
+            cancel_check=lambda: self._is_cancel_requested(state),
         )
         result.setdefault("data", {})
         if isinstance(result["data"], dict):
@@ -643,20 +667,25 @@ class AgentWorkflowNodesMixin:
         return state
 
     async def _workflow_partial(self, state: dict[str, Any]) -> dict[str, Any]:
-        partial_answer = "已达到最大执行步数，任务部分完成。"
+        if state.get("timed_out"):
+            partial_answer = "执行已超时，任务未完成。"
+            failure_reason = "run_timeout"
+        else:
+            partial_answer = "已达到最大执行步数，任务部分完成。"
+            failure_reason = state["agent_run"].failure_reason or "max_steps_reached"
         self._save_workflow_snapshot(state, node="partial")
         result_run = self._finalize_completed_run(
             db=state["db"],
             agent_run=state["agent_run"],
             final_answer=partial_answer,
             last_observation=state["last_observation"],
-            failure_reason=state["agent_run"].failure_reason,
+            failure_reason=failure_reason,
             total_steps=state["max_steps"],
             master_agent=state["master_agent"],
             worker_agent=state["worker_agent"],
             run_started=state["run_started"],
             summary_status="partial",
-            error_message=state["agent_run"].failure_reason,
+            error_message=failure_reason,
             worker_plan=state.get("worker_plan"),
             handoffs=state.get("handoffs"),
             supervisor_plan_details=state.get("supervisor_plan"),

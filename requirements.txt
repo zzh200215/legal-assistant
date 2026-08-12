@@ -33,6 +33,8 @@ faster-whisper>=1.1.1
 Pillow>=10.0.0
 mcp>=1.0.0
 jsonschema>=4.20.0
+# SQLTool 只读安全边界：AST 级 SQL 解析（非正则），判定单条 SELECT/WITH-SELECT
+sqlglot>=25.0
 # E-5 可观测性（Sentry 错误上报 + OpenTelemetry 链路追踪）
 sentry-sdk>=2.0
 # OTel 需统一版本组合，否则 `>=` 会解析出互不兼容的版本（api/sdk 与 instrumentation 需配套）

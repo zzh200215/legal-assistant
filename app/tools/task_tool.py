@@ -1,5 +1,6 @@
 import asyncio
 
+from app.mcp.tool_contract import ToolContract
 from app.services.task_service import task_service
 from app.tools.base import BaseAgentTool, tool_error, tool_success
 
@@ -8,6 +9,12 @@ class TaskCreateTool(BaseAgentTool):
     name = "task_create_tool"
     description = "创建任务，可指定标题、描述、负责人、优先级和截止时间。"
     auto_context_fields = ("user_id", "db")
+    contract = ToolContract(
+        name="task_create_tool", read_only=False, requires_approval=True,
+        side_effect="creates_task", idempotency_keyed=True, safely_retryable=False,
+        cancellable=True, compensable=True, compensation_handler="compensate_task",
+        audit_level="summary", sensitive_fields=("title", "description", "assignee"),
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -69,6 +76,10 @@ class TaskQueryTool(BaseAgentTool):
     name = "task_query_tool"
     description = "查询用户任务列表，可按状态筛选，适合后续汇总或生成催办邮件。"
     auto_context_fields = ("user_id", "db")
+    contract = ToolContract(
+        name="task_query_tool", read_only=True, requires_approval=False,
+        side_effect="reads_tasks", audit_level="summary",
+    )
     parameters = {
         "type": "object",
         "properties": {

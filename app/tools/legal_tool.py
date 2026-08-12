@@ -6,6 +6,7 @@ Tools:
 - legal_draft_tool: 法律文书草稿生成
 """
 
+from app.mcp.tool_contract import ToolContract
 from app.services.legal_service import (
     DRAFT_FIELDS,
     consultation_payload,
@@ -20,6 +21,10 @@ class LegalConsultationTool(BaseAgentTool):
     name = "legal_consultation_tool"
     description = "法律咨询辅助：对用户描述的法律问题进行分类、提取已知事实、识别待补充事实、评估风险等级，检索相关法规并给出一般性建议。不预测裁判结果。"
     auto_context_fields = ("user_id", "db")
+    contract = ToolContract(
+        name="legal_consultation_tool", read_only=True, requires_approval=False,
+        side_effect="llm_analysis", audit_level="summary",
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -94,6 +99,10 @@ class LegalContractReviewTool(BaseAgentTool):
     name = "legal_contract_review_tool"
     description = "合同智能审查：对合同内容逐条款审查，识别风险条款、缺失条款，给出审查意见和修改建议。不替代律师最终审查。"
     auto_context_fields = ("user_id",)
+    contract = ToolContract(
+        name="legal_contract_review_tool", read_only=True, requires_approval=False,
+        side_effect="llm_analysis", audit_level="summary",
+    )
     parameters = {
         "type": "object",
         "properties": {
@@ -121,6 +130,10 @@ class LegalDraftTool(BaseAgentTool):
     name = "legal_draft_tool"
     description = "法律文书草稿生成：根据文书类型和字段信息生成法律文书草稿。支持劳动仲裁申请书、民间借贷起诉状、消费纠纷投诉书、补充协议。缺失字段用【待补充】标注。"
     auto_context_fields = ("user_id",)
+    contract = ToolContract(
+        name="legal_draft_tool", read_only=True, requires_approval=False,
+        side_effect="llm_generation", audit_level="summary",
+    )
     parameters = {
         "type": "object",
         "properties": {
