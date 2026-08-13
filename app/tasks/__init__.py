@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
@@ -784,10 +785,11 @@ def scan_contract_expiry_alerts_task():
 @celery_app.task(name="dispatch_notification_events")
 @_beat_lock(task_name="dispatch_notification_events", ttl_seconds=180)
 def dispatch_notification_events_task():
-    """每60秒：投递已到提醒时间的 pending 通知事件。
+    """每60秒：Outbox 领取并投递已到提醒时间的 pending 通知事件。
 
-    站内通知标记为 delivered（进入铃铛未读），邮件渠道走 OutboundEmailService。
-    尚未到 scheduled_at 的事件跳过，到点后由后续 tick 投递。
+    站内通知标记为 delivered（进入铃铛未读）；邮件渠道真实投递（创建
+    EmailSendRequest 邮件 Outbox，内部低风险自动批准，需审批的等待人工审批）。
+    领取采用 keyset 原子 claim + 租约，worker 崩溃后由 recover 任务回收。
     """
     _record_beat_heartbeat()
     from app.services.notification_service import notification_service
@@ -795,6 +797,75 @@ def dispatch_notification_events_task():
     db = SessionLocal()
     try:
         return notification_service.dispatch_pending(db=db)
+    finally:
+        db.close()
+
+
+@celery_app.task(name="deliver_email_send_requests")
+@_beat_lock(task_name="deliver_email_send_requests", ttl_seconds=300)
+def deliver_email_send_requests_task():
+    """每60秒：领取已批准/可重试的 EmailSendRequest（邮件 Outbox）并投递。
+
+    幂等：claim 原子领取 + 租约；同请求不会重复发送；写超时按 AMBIGUOUS 不盲目重试。
+    不可恢复/重试耗尽进入 dead letter，人工重试保留原幂等键。
+    """
+    _record_beat_heartbeat()
+    from app.services.outbound_email_service import outbound_email_service
+
+    db = SessionLocal()
+    owner = f"email-deliver:{uuid.uuid4().hex}"
+    try:
+        delivered = 0
+        while delivered < 200:
+            batch = outbound_email_service.claim_pending_batch(db=db, owner=owner)
+            if not batch:
+                break
+            for request in batch:
+                try:
+                    outbound_email_service._perform_send(db=db, request=request, owner=owner)
+                    db.commit()
+                    delivered += 1
+                except Exception:
+                    db.rollback()
+        return {"delivered": delivered}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="recover_stale_outbox_claims")
+@_beat_lock(task_name="recover_stale_outbox_claims", ttl_seconds=600)
+def recover_stale_outbox_claims_task():
+    """每5分钟：回收租约过期的通知/邮件投递 claim（worker 崩溃后安全重领）。
+
+    已成功投递的记录不会再次产生外部副作用（幂等 claim + 状态机）。
+    """
+    _record_beat_heartbeat()
+    from datetime import timedelta
+
+    from app.models.legal_notifications import LegalNotificationEvent
+    from app.services.notification_service import STATUS_PENDING, notification_service
+
+    db = SessionLocal()
+    try:
+        from app.services.outbound_email_service import outbound_email_service
+
+        email_reclaimed = outbound_email_service.reclaim_stale(db=db)
+        settings = get_settings()
+        stale_before = utc_now() - timedelta(seconds=settings.NOTIFICATION_CLAIM_TTL_SECONDS)
+        stale = db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.status == "sending",
+            LegalNotificationEvent.claim_expires_at.isnot(None),
+            LegalNotificationEvent.claim_expires_at < stale_before,
+        ).limit(200).all()
+        reclaimed = 0
+        for ev in stale:
+            notification_service.transition(db=db, event=ev, to=STATUS_PENDING,
+                                             reason="lease_expired")
+            ev.claim_expires_at = None
+            ev.claimed_by = None
+            reclaimed += 1
+        db.commit()
+        return {"email_reclaimed": email_reclaimed, "notification_reclaimed": reclaimed}
     finally:
         db.close()
 
@@ -1226,3 +1297,57 @@ _register_task_run_spec(_TaskRunSpec(
     business_key_fn=lambda connector_id, *_: f"connector:{int(connector_id)}",
     context_fn=_connector_context,
 ))
+
+
+# ── 邮箱同步（mock 邮箱，MAILBOX_SYNC_ENABLED 默认关闭）────────────────────────
+
+@celery_app.task(name="mailbox_sync_task")
+def mailbox_sync_task(account_id: int, sync_mode: str = "manual"):
+    """邮箱同步任务：UIDVALIDITY+UID 幂等 + 附件安全 + 断点恢复（mock 邮箱）。
+
+    MAILBOX_SYNC_ENABLED 关闭时跳过；未获锁时安全跳过（防多实例并发）。
+    """
+    settings = get_settings()
+    if not settings.MAILBOX_SYNC_ENABLED:
+        return {"status": "disabled"}
+    from datetime import timedelta
+
+    from app.models.mailbox import MailboxSyncAccount
+    from app.services.mailbox_sync_service import mailbox_sync_service
+
+    ttl = int(settings.SYNC_RUN_LEASE_TTL_SECONDS)
+    token = _acquire_task_lock("mailbox_sync", scope=f"mailbox:{account_id}", ttl_seconds=ttl)
+    if token is None:
+        return {"status": "skipped", "reason": "lock_held"}
+    db = SessionLocal()
+    try:
+        account = db.query(MailboxSyncAccount).filter(MailboxSyncAccount.id == account_id).first()
+        if account is None:
+            return {"status": "error", "reason": "account_not_found"}
+        account.claimed_by = token
+        account.claim_expires_at = utc_now() + timedelta(seconds=ttl)
+        db.commit()
+        return mailbox_sync_service.sync_account(db=db, account=account, owner=token)
+    finally:
+        db.close()
+        _release_task_lock("mailbox_sync", scope=f"mailbox:{account_id}", token=token)
+
+
+@celery_app.task(name="recover_stale_mailbox_syncs")
+@_beat_lock(task_name="recover_stale_mailbox_syncs", ttl_seconds=180)
+def recover_stale_mailbox_syncs_task():
+    """Beat：回收租约过期的邮箱同步账户并重新入队（仅 MAILBOX_SYNC_ENABLED 时调度）。"""
+    _record_beat_heartbeat()
+    settings = get_settings()
+    if not settings.MAILBOX_SYNC_ENABLED:
+        return {"recovered": 0}
+    from app.services.mailbox_sync_service import mailbox_sync_service
+
+    db = SessionLocal()
+    try:
+        accounts = mailbox_sync_service.recover_stale(db=db)
+        for account in accounts:
+            mailbox_sync_task.delay(account.id, sync_mode="recover")
+        return {"recovered": len(accounts)}
+    finally:
+        db.close()

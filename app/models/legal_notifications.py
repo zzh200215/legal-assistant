@@ -1,6 +1,6 @@
-"""Phase 14 — 安全审计 / 通知偏好 / 引导进度"""
+"""Phase 14 — 安全审计 / 通知偏好 / 引导进度 / 通知模板与投递可靠性"""
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 
 from app.core.database import Base
 
@@ -61,7 +61,17 @@ class LegalNotificationPolicy(Base):
 
 
 class LegalNotificationEvent(Base):
+    """通知事件：同时承担「通知 Outbox」角色（业务记录与投递记录合一）。
+
+    状态机（requested/pending → approved → sending → sent/delivered，
+    failed → requested / dead_letter）由 notification_service 集中校验。
+    投递列（attempt/next_retry_at/claimed_by/claim_expires_at）支持 worker
+    原子领取与崩溃回收；idempotency_key 提供数据库级重复发送防护。
+    """
     __tablename__ = "legal_notification_events"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_legal_notification_events_idempotency_key"),
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
@@ -72,12 +82,59 @@ class LegalNotificationEvent(Base):
     body = Column(Text, nullable=True)
     channel = Column(String(16), nullable=False, comment="site / email / wechat / feishu")
     status = Column(String(16), nullable=False, default="pending", index=True,
-                    comment="pending / sent / delivered / read / acknowledged / failed / escalated")
+                    comment="pending/requested / approved / rejected / sending / sent / delivered / read / acknowledged / failed / escalated / dead_letter")
     reference_type = Column(String(64), nullable=True, comment="deadline / invoice / sign_request / ...")
     reference_id = Column(Integer, nullable=True)
     scheduled_at = Column(DateTime(timezone=True), nullable=True)
     sent_at = Column(DateTime(timezone=True), nullable=True)
     acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # 投递可靠性（Outbox 领取 / 重试 / 死信）
+    attempt = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=True)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    claimed_by = Column(String(128), nullable=True, comment="持有投递的 worker/run 标识")
+    claim_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    error_code = Column(String(64), nullable=True, comment="稳定业务错误码，脱敏")
+    sanitized_error_message = Column(Text, nullable=True)
+    provider_message_id = Column(String(256), nullable=True)
+    # 邮件通知回链：实际 SMTP 投递由 EmailSendRequest 承担
+    email_send_request_id = Column(Integer, ForeignKey("email_send_requests.id"), nullable=True, index=True)
+    # 模板与渲染
+    template_key = Column(String(128), nullable=True)
+    template_version = Column(Integer, nullable=True)
+    locale = Column(String(16), nullable=True)
+    # 幂等键（UNIQUE 约束兜底重复创建/重放）
+    idempotency_key = Column(String(128), nullable=True, index=True)
+
+
+class NotificationTemplate(Base):
+    """统一通知模板：按 channel + template_key + locale + version 精确选取。
+
+    - 版本不可原地覆盖：内容变化创建新版本，历史投递可追溯原模板。
+    - params_schema_json 校验渲染参数，禁止未校验的任意变量注入。
+    - status：draft / active / retired。
+    """
+    __tablename__ = "notification_templates"
+    __table_args__ = (
+        UniqueConstraint("channel", "template_key", "locale", "version",
+                         name="uq_notification_templates_channel_key_locale_version"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    channel = Column(String(16), nullable=False, index=True, comment="site / email / webhook / sms")
+    template_key = Column(String(128), nullable=False, index=True)
+    version = Column(Integer, nullable=False, default=1)
+    locale = Column(String(16), nullable=False, default="default", comment="zh-CN / zh / default")
+    subject_template = Column(String(512), nullable=True, comment="邮件主题模板（{{param}} 占位）")
+    body_template = Column(Text, nullable=False, comment="正文/载荷模板")
+    params_schema_json = Column(Text, nullable=True, comment="参数 JSON Schema")
+    status = Column(String(16), nullable=False, default="draft", index=True,
+                    comment="draft / active / retired")
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    content_hash = Column(String(64), nullable=False, comment="模板内容 SHA-256")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

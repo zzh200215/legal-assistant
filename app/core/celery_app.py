@@ -38,8 +38,10 @@ def _routes() -> dict:
         "dispatch_operational_alerts", "run_database_archive", "create_pilot_backup")
     add("notification", "dispatch_notification_events", "check_legal_deadline_reminders",
         "scan_expired_portal_links", "scan_contract_expiry_alerts",
-        "check_legal_approval_timeouts", "confirm_account_deletions")
+        "check_legal_approval_timeouts", "confirm_account_deletions",
+        "deliver_email_send_requests", "recover_stale_outbox_claims")
     add("billing", "scan_overdue_invoices", "scan_expired_subscriptions")
+    add("connector", "mailbox_sync_task", "recover_stale_mailbox_syncs")
     return routes
 
 
@@ -75,6 +77,14 @@ celery_app.conf.update(
         "dispatch-notification-events": {
             "task": "dispatch_notification_events",
             "schedule": 60.0,
+        },
+        "deliver-email-send-requests": {
+            "task": "deliver_email_send_requests",
+            "schedule": 60.0,
+        },
+        "recover-stale-outbox-claims": {
+            "task": "recover_stale_outbox_claims",
+            "schedule": 300.0,
         },
         "scan-overdue-invoices": {
             "task": "scan_overdue_invoices",
@@ -136,6 +146,13 @@ import app.tasks  # noqa: E402,F401
 if settings.CONNECTOR_SYNC_ENABLED:
     celery_app.conf.beat_schedule["recover-stale-connector-syncs"] = {
         "task": "recover_stale_connector_syncs",
+        "schedule": 60.0,
+    }
+
+# 邮箱同步回收 beat：仅 MAILBOX_SYNC_ENABLED 时注册（mock 邮箱，默认关闭）。
+if settings.MAILBOX_SYNC_ENABLED:
+    celery_app.conf.beat_schedule["recover-stale-mailbox-syncs"] = {
+        "task": "recover_stale_mailbox_syncs",
         "schedule": 60.0,
     }
 

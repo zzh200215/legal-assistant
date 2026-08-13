@@ -1,19 +1,25 @@
-"""Phase 11 — 通知服务
+"""Phase 11 — 通知服务（Outbox 化投递）
 
-统一管理站内通知、邮件通知、微信/飞书通知的创建、投递和偏好管理。
-基于 LegalNotificationEvent 模型存储通知事件，偏好由 LegalNotificationPreference 管理。
+统一管理站内通知、邮件通知的创建、投递（Outbox 领取）与偏好。
+- 业务事务内创建 LegalNotificationEvent（同幂等键去重），投递由 worker 领取执行。
+- 邮件渠道真实投递：创建 EmailDraft + EmailSendRequest（EmailSendRequest 即邮件
+  Outbox），自动批准的低风险通知直接入队，需审批的等待人工审批。
+- 状态机由本服务集中校验；投递列（attempt/next_retry_at/claimed_by/claim_expires_at）
+  支持 worker 原子领取与崩溃回收。
 """
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
-from typing import Sequence
+import uuid
+from datetime import datetime, timedelta
 
-from sqlalchemy import func as sa_func
+from sqlalchemy import or_ as sa_or
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
+from app.core.config import get_settings
+from app.core.observability import structured_log_json
 from app.core.time import utc_now
 from app.models.legal_notifications import (
     LegalNotificationEvent,
@@ -34,10 +40,106 @@ ALL_CHANNELS = (CHANNEL_SITE, CHANNEL_EMAIL, CHANNEL_WECHAT, CHANNEL_FEISHU)
 # 事件类型
 EVENT_TYPES = ("deadline", "approval", "invoice", "sign", "portal", "all")
 
+# ── 通知状态机（LegalNotificationEvent 作为通知 Outbox）────────────────────────
+# pending(=requested) -> approved -> sending -> sent / delivered / failed / dead_letter
+# 恢复：failed -> pending / dead_letter；dead_letter -> pending（人工）
+STATUS_PENDING = "pending"          # 已请求发送（等价 requested），等待审批或自动批准
+STATUS_APPROVED = "approved"        # 审批通过，允许进入投递队列
+STATUS_REJECTED = "rejected"        # 审批拒绝
+STATUS_SENDING = "sending"          # worker 已 claim，投递中
+STATUS_SENT = "sent"                # 邮件投递成功（provider 确认）
+STATUS_DELIVERED = "delivered"      # 站内投递完成
+STATUS_READ = "read"                # 已读
+STATUS_ACKNOWLEDGED = "acknowledged"
+STATUS_ESCALATED = "escalated"
+STATUS_FAILED = "failed"            # 可重试失败
+STATUS_DEAD_LETTER = "dead_letter"  # 超过最大尝试次数或不可恢复
+
+_NOTIFICATION_TRANSITIONS: dict[str, frozenset] = {
+    STATUS_PENDING: frozenset({STATUS_APPROVED, STATUS_REJECTED, STATUS_SENDING,
+                               STATUS_FAILED, STATUS_DEAD_LETTER}),
+    STATUS_APPROVED: frozenset({STATUS_SENDING, STATUS_SENT, STATUS_DELIVERED,
+                                STATUS_FAILED, STATUS_DEAD_LETTER, STATUS_REJECTED}),
+    STATUS_SENDING: frozenset({STATUS_SENT, STATUS_DELIVERED, STATUS_FAILED,
+                               STATUS_DEAD_LETTER, STATUS_PENDING, STATUS_APPROVED}),
+    STATUS_FAILED: frozenset({STATUS_PENDING, STATUS_DEAD_LETTER}),
+    STATUS_DEAD_LETTER: frozenset({STATUS_PENDING}),
+    STATUS_REJECTED: frozenset({STATUS_PENDING}),
+    STATUS_SENT: frozenset({STATUS_READ, STATUS_ACKNOWLEDGED}),
+    STATUS_DELIVERED: frozenset({STATUS_READ, STATUS_ACKNOWLEDGED}),
+    STATUS_READ: frozenset(),
+    STATUS_ACKNOWLEDGED: frozenset(),
+    STATUS_ESCALATED: frozenset(),
+}
+
+
+class NotificationStateError(ValueError):
+    """通知状态机非法跳转。"""
+
 
 class NotificationService:
 
-    # ── 创建通知 ──────────────────────────────────────────────────
+    # ── 状态机 ──────────────────────────────────────────────────────
+
+    def transition(self, *, db: Session, event: LegalNotificationEvent, to: str,
+                   reason: str | None = None) -> None:
+        """集中校验并执行通知状态迁移；禁止调用方任意改状态。"""
+        current = event.status
+        allowed = _NOTIFICATION_TRANSITIONS.get(current, frozenset())
+        if to not in allowed:
+            raise NotificationStateError(f"通知状态机拒绝迁移: {current} -> {to}")
+        event.status = to
+        structured_log_json(
+            source="notification", module="notification", action=f"notification_{to}",
+            actor=str(event.user_id), target_type="notification_event", target_id=str(event.id),
+            detail=reason or f"from={current}",
+        )
+
+    def mark_approved(self, db: Session, event: LegalNotificationEvent) -> None:
+        self.transition(db=db, event=event, to=STATUS_APPROVED)
+        event.claim_expires_at = None
+        event.next_retry_at = None
+
+    def mark_sent(self, db: Session, event: LegalNotificationEvent,
+                  provider_message_id: str | None = None) -> None:
+        self.transition(db=db, event=event, to=STATUS_SENT)
+        event.sent_at = utc_now()
+        if provider_message_id:
+            event.provider_message_id = provider_message_id
+        event.claim_expires_at = None
+
+    def mark_failed(self, db: Session, event: LegalNotificationEvent,
+                    error_code: str | None = None) -> None:
+        self.transition(db=db, event=event, to=STATUS_FAILED)
+        if error_code:
+            event.error_code = error_code
+        event.claim_expires_at = None
+        settings = get_settings()
+        delay = settings.NOTIFICATION_BACKOFF_BASE_SECONDS * (2 ** max(0, (event.attempt or 1) - 1))
+        event.next_retry_at = utc_now() + timedelta(seconds=delay)
+
+    def mark_dead_letter(self, db: Session, event: LegalNotificationEvent,
+                         reason: str, error_code: str | None = None) -> None:
+        self.transition(db=db, event=event, to=STATUS_DEAD_LETTER)
+        if error_code:
+            event.error_code = error_code
+        event.sanitized_error_message = reason
+        event.claim_expires_at = None
+        oplog_service.log(module="notification", action="notification_dead_letter", db=db,
+                          user_id=event.user_id, target_type="notification_event", target_id=event.id,
+                          detail=f"error_code={error_code or 'unknown'}; reason={reason}")
+
+    # ── 创建通知（幂等键去重）─────────────────────────────────────────
+
+    @staticmethod
+    def _idempotency_key(organization_id: int, user_id: int, channel: str, event_type: str,
+                         reference_type: str | None, reference_id: int | None,
+                         business_version: int | None) -> str:
+        version = business_version if business_version is not None else 1
+        return "notify:" + ":".join([
+            str(organization_id), str(user_id), str(channel), str(event_type),
+            str(reference_type or ""), str(reference_id or ""), str(version),
+        ])
 
     def create_notification(self, *, db: Session, organization_id: int,
                            user_id: int, event_type: str, title: str,
@@ -46,15 +148,28 @@ class NotificationService:
                            case_id: int | None = None,
                            reference_type: str | None = None,
                            reference_id: int | None = None,
-                           scheduled_at: datetime | None = None) -> LegalNotificationEvent:
-        """创建一条通知事件。
+                           scheduled_at: datetime | None = None,
+                           business_version: int | None = None,
+                           template_key: str | None = None,
+                           locale: str | None = None) -> LegalNotificationEvent:
+        """创建一条通知事件（幂等：同幂等键重复请求返回已有记录，不重复创建）。
 
-        站内通知是基础渠道，始终创建。
+        站内通知是基础渠道，始终创建。邮件渠道仅登记事件，实际投递由 Outbox 领取。
         """
         if event_type not in EVENT_TYPES and event_type != "deadline_reminder":
             raise ValueError(f"不支持的事件类型: {event_type}")
         if channel not in ALL_CHANNELS:
             raise ValueError(f"不支持的通知渠道: {channel}")
+
+        idem_key = self._idempotency_key(
+            organization_id, user_id, channel, event_type,
+            reference_type, reference_id, business_version,
+        )
+        existing = db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.idempotency_key == idem_key
+        ).first()
+        if existing is not None:
+            return existing  # 已去重：返回已有记录，保留审计
 
         event = LegalNotificationEvent(
             organization_id=organization_id,
@@ -64,14 +179,21 @@ class NotificationService:
             title=title,
             body=body,
             channel=channel,
-            status="pending",
+            status=STATUS_PENDING,
             reference_type=reference_type,
             reference_id=reference_id,
             scheduled_at=scheduled_at,
+            idempotency_key=idem_key,
+            max_attempts=get_settings().NOTIFICATION_MAX_ATTEMPTS,
+            template_key=template_key,
+            locale=locale,
         )
         db.add(event)
         db.commit()
         db.refresh(event)
+        oplog_service.log(module="notification", action="notification_created", db=db,
+                          user_id=user_id, target_type="notification_event", target_id=event.id,
+                          detail=f"channel={channel}; event_type={event_type}; idempotency_key={idem_key}")
         return event
 
     def create_multi_channel_notification(self, *, db: Session, organization_id: int,
@@ -81,11 +203,11 @@ class NotificationService:
                                           case_id: int | None = None,
                                           reference_type: str | None = None,
                                           reference_id: int | None = None,
-                                          scheduled_at: datetime | None = None) -> list[LegalNotificationEvent]:
-        """创建多渠道通知事件。
+                                          scheduled_at: datetime | None = None,
+                                          business_version: int | None = None) -> list[LegalNotificationEvent]:
+        """创建多渠道通知事件（幂等：每个渠道一个事件，同键去重）。
 
-        根据 user 通知偏好决定哪些渠道生效。
-        站内通知始终创建。
+        根据 user 通知偏好决定哪些渠道生效。站内通知始终创建。
         """
         effective_channels = self._resolve_channels(
             db=db, user_id=user_id, organization_id=organization_id,
@@ -106,9 +228,9 @@ class NotificationService:
                 reference_type=reference_type,
                 reference_id=reference_id,
                 scheduled_at=scheduled_at,
+                business_version=business_version,
             )
             events.append(event)
-
         return events
 
     def _resolve_channels(self, *, db: Session, user_id: int, organization_id: int,
@@ -206,69 +328,185 @@ class NotificationService:
         except Exception:
             return False
 
-    # ── 投递通知 ──────────────────────────────────────────────────
+    # ── 投递通知（Outbox 领取）──────────────────────────────────────
+
+    def _claim_events(self, db: Session, owner: str, now: datetime, batch_size: int) -> list[LegalNotificationEvent]:
+        """keyset 原子领取待投递事件（并发安全，多 worker 同一记录只投递一次）。
+
+        仅领取：status=pending/approved、已到期（next_retry_at/claim_expires_at）、
+        scheduled_at 已到、且邮件渠道尚未创建投递请求（避免重复建 Outbox）。
+        """
+        settings = get_settings()
+        ttl = settings.NOTIFICATION_CLAIM_TTL_SECONDS
+        claim_exp = now + timedelta(seconds=ttl)
+        stmt = sa_text(
+            "UPDATE legal_notification_events SET status=:sending, claimed_by=:owner, "
+            "claim_expires_at=:exp "
+            "WHERE id IN ("
+            "  SELECT id FROM legal_notification_events "
+            "  WHERE status IN (:st1, :st2) "
+            "  AND (next_retry_at IS NULL OR next_retry_at <= :now) "
+            "  AND (claim_expires_at IS NULL OR claim_expires_at < :now) "
+            "  AND (scheduled_at IS NULL OR scheduled_at <= :now) "
+            "  AND (channel <> 'email' OR email_send_request_id IS NULL) "
+            "  ORDER BY id LIMIT :batch"
+            ")"
+        )
+        db.execute(stmt, {
+            "sending": STATUS_SENDING, "owner": owner, "exp": claim_exp,
+            "st1": STATUS_PENDING, "st2": STATUS_APPROVED, "now": now, "batch": batch_size,
+        })
+        db.commit()
+        return (
+            db.query(LegalNotificationEvent)
+            .filter(LegalNotificationEvent.claimed_by == owner,
+                    LegalNotificationEvent.status == STATUS_SENDING)
+            .order_by(LegalNotificationEvent.id.asc())
+            .all()
+        )
 
     def dispatch_pending(self, *, db: Session) -> dict:
-        """投递所有待发送通知。返回统计。"""
-        pending = db.query(LegalNotificationEvent).filter(
-            LegalNotificationEvent.status == "pending",
-        ).all()
-
+        """投递待发送通知（Outbox 领取批次，返回统计）。"""
+        settings = get_settings()
+        batch = settings.NOTIFICATION_CLAIM_BATCH_SIZE
+        owner = f"dispatch:{uuid.uuid4().hex}"
         stats = {"delivered": 0, "failed": 0, "skipped": 0}
-        for event in pending:
-            # 如果 scheduled_at 在未来，跳过
-            if event.scheduled_at and event.scheduled_at > utc_now():
-                stats["skipped"] += 1
-                continue
-
-            result = self._dispatch_event(db, event)
-            if result:
-                stats["delivered"] += 1
-            else:
-                stats["failed"] += 1
-
-        db.commit()
+        total = 0
+        while total < batch * 20:
+            events = self._claim_events(db, owner, utc_now(), batch)
+            if not events:
+                break
+            for event in events:
+                result = self._dispatch_event(db, event)
+                if result in ("delivered", "sent"):
+                    stats["delivered"] += 1
+                elif result == "failed":
+                    stats["failed"] += 1
+                else:
+                    stats["skipped"] += 1
+            db.commit()
+            total += len(events)
         return stats
 
-    def _dispatch_event(self, db: Session, event: LegalNotificationEvent) -> bool:
-        """投递单条通知，返回是否成功。"""
+    def _dispatch_event(self, db: Session, event: LegalNotificationEvent) -> str:
+        """投递单条通知（事件已被 claim，status=sending）。返回 delivered/sent/failed/skipped。"""
         try:
             if event.channel == CHANNEL_SITE:
-                return self._deliver_site(db, event)
+                return self._dispatch_site(db, event)
             elif event.channel == CHANNEL_EMAIL:
-                return self._deliver_email(db, event)
-            elif event.channel == CHANNEL_WECHAT:
-                return self._deliver_wechat(db, event)
-            elif event.channel == CHANNEL_FEISHU:
-                return self._deliver_feishu(db, event)
+                return self._dispatch_email(db, event)
+            elif event.channel in (CHANNEL_WECHAT, CHANNEL_FEISHU):
+                return self._dispatch_external_channel(db, event)
             else:
-                logger.warning("未知渠道: %s", event.channel)
-                event.status = "failed"
-                return False
+                self.mark_dead_letter(db, event, reason="未知通知渠道", error_code="UNKNOWN_CHANNEL")
+                return "failed"
+        except NotificationStateError:
+            raise
         except Exception as exc:
             logger.error("通知投递异常 event_id=%s: %s", event.id, exc)
-            event.status = "failed"
-            return False
+            self.mark_failed(db, event, error_code=type(exc).__name__[:64])
+            return "failed"
 
-    def _deliver_site(self, db: Session, event: LegalNotificationEvent) -> bool:
-        """站内通知：直接标记为 delivered。"""
-        event.status = "delivered"
+    def _dispatch_site(self, db: Session, event: LegalNotificationEvent) -> str:
+        """站内通知：直接标记为 delivered（进入铃铛未读）。"""
+        event.attempt = (event.attempt or 0) + 1
+        self.transition(db=db, event=event, to=STATUS_DELIVERED)
         event.sent_at = utc_now()
-        return True
+        return "delivered"
 
-    def _deliver_email(self, db: Session, event: LegalNotificationEvent) -> bool:
-        """邮件通知：通过 OutboundEmailService 发送。"""
-        return self.send_email_notification(
-            db=db,
-            user_id=event.user_id,
-            organization_id=event.organization_id,
-            subject=event.title,
-            body=event.body or "",
-            event_type=event.event_type,
-            reference_type=event.reference_type,
-            reference_id=event.reference_id,
-            event_id=event.id,
+    def _dispatch_email(self, db: Session, event: LegalNotificationEvent) -> str:
+        """邮件通知：真实投递（创建 EmailDraft + EmailSendRequest 邮件 Outbox）。
+
+        - DLP block → dead_letter；review_required → 需人工审批。
+        - 内部低风险自动批准 → 事件 approved，由邮件 worker 发送。
+        - 需审批 → 事件回退 pending 等待审批（保持租约避免重复领取）。
+        """
+        from app.services.outbound_email_service import EMAIL_REQ_APPROVED, outbound_email_service
+
+        if event.status == STATUS_PENDING:
+            self.transition(db=db, event=event, to=STATUS_SENDING)
+        if event.email_send_request_id:
+            # 已交由邮件 Outbox，等待审批/投递 → 回退等待态，避免重复创建
+            self.transition(db=db, event=event, to=STATUS_PENDING)
+            event.claim_expires_at = utc_now() + timedelta(
+                seconds=get_settings().NOTIFICATION_CLAIM_TTL_SECONDS)
+            return "skipped"
+
+        user = db.query(User).filter(User.id == event.user_id).first()
+        if not user or not user.email:
+            self.mark_dead_letter(db, event, reason="用户无邮箱，无法发送邮件通知", error_code="NO_USER_EMAIL")
+            return "failed"
+
+        subject, body = self._render_email_content(db, event)
+        if subject is None:
+            self.mark_dead_letter(db, event, reason="通知模板渲染失败", error_code="TEMPLATE_ERROR")
+            return "failed"
+
+        # DLP 门禁（含收件人）：block → dead letter；review → 强制人工审批
+        from app.services.dlp_scanner import dlp_scanner
+        dlp = dlp_scanner.scan(payloads=[subject, body, user.email], action="block")
+        if dlp.blocked:
+            self.mark_dead_letter(db, event, reason="通知内容命中高风险 DLP 策略",
+                                  error_code="DLP_BLOCKED")
+            return "failed"
+        auto_approve = (not dlp.requires_review
+                        and get_settings().AUTO_APPROVE_EMAIL_NOTIFICATION_TO_OWNER)
+
+        request = outbound_email_service.create_notification_email(
+            db=db, user=user, notification_event=event,
+            subject=subject, body=body, recipient=user.email, auto_approve=auto_approve,
         )
+        if request is None:
+            self.mark_dead_letter(db, event, reason="无可用 SMTP 连接器或外发策略禁用",
+                                  error_code="NO_SMTP_CONNECTOR")
+            return "failed"
+
+        event.attempt = (event.attempt or 0) + 1
+        if auto_approve and request.status == EMAIL_REQ_APPROVED:
+            self.mark_approved(db, event)
+            return "sent"
+        # 需人工审批：回退等待态，保留租约防止重复领取
+        self.transition(db=db, event=event, to=STATUS_PENDING)
+        event.claim_expires_at = utc_now() + timedelta(
+            seconds=get_settings().NOTIFICATION_CLAIM_TTL_SECONDS)
+        return "skipped"
+
+    def _render_email_content(self, db: Session, event: LegalNotificationEvent) -> tuple[str | None, str | None]:
+        """渲染邮件通知内容：配置了模板则按模板渲染，否则用事件标题/正文。"""
+        if not event.template_key:
+            return event.title, event.body or ""
+        try:
+            from app.services.notification_template_service import notification_template_service
+            rendered = notification_template_service.render(
+                db=db, channel=CHANNEL_EMAIL, template_key=event.template_key,
+                locale=event.locale or "zh-CN",
+                params={"title": event.title, "body": event.body or "",
+                        "reference_id": str(event.reference_id or "")},
+            )
+            return rendered.get("subject") or event.title, rendered.get("body") or ""
+        except Exception as exc:  # noqa: BLE001 - 渲染失败按模板错误处理
+            logger.error("通知模板渲染失败 event_id=%s: %s", event.id, exc)
+            return None, None
+
+    def _dispatch_external_channel(self, db: Session, event: LegalNotificationEvent) -> str:
+        """微信/飞书通知：保留既有占位投递（无真实出站凭据，标记为 sent）。"""
+        try:
+            from app.models.connector import ExternalConnector
+            connector_type = "wecom" if event.channel == CHANNEL_WECHAT else "feishu"
+            connector = db.query(ExternalConnector).filter(
+                ExternalConnector.connector_type == connector_type,
+                ExternalConnector.status == "active",
+            ).first()
+            if not connector:
+                self.mark_failed(db, event, error_code="NO_CONNECTOR")
+                return "failed"
+            event.attempt = (event.attempt or 0) + 1
+            self.mark_sent(db, event)
+            return "sent"
+        except Exception as exc:
+            logger.error("外部渠道通知发送失败: %s", exc)
+            self.mark_failed(db, event, error_code="EXTERNAL_CHANNEL_FAILED")
+            return "failed"
 
     def send_email_notification(self, *, db: Session, user_id: int,
                                 organization_id: int, subject: str, body: str,
@@ -276,169 +514,98 @@ class NotificationService:
                                 reference_type: str | None = None,
                                 reference_id: int | None = None,
                                 event_id: int | None = None) -> bool:
-        """发送邮件通知，更新对应事件状态。"""
-        try:
-            user = db.query(User).filter(User.id == user_id).first()
-            if not user or not user.email:
-                logger.warning("用户 %s 无邮箱，跳过邮件通知", user_id)
-                return False
+        """真实发送邮件通知（Outbox）：创建 EmailDraft + EmailSendRequest。
 
-            # 创建邮件草稿
-            from app.models.email import EmailDraft
-            draft = EmailDraft(
-                user_id=user_id,
-                organization_id=organization_id,
-                subject=subject,
-                recipient=user.email,
-                content=body,
-                purpose="系统通知",
-                status="draft",
-                generation_type="notification_email",
-            )
-            db.add(draft)
-            db.commit()
-
-            # 更新关联通知事件状态：优先按当前事件 id（覆盖无 reference 事件，
-            # 避免投递成功后仍为 pending 导致每轮 beat 重复发送）
-            if event_id:
-                evt = db.query(LegalNotificationEvent).filter(
-                    LegalNotificationEvent.id == event_id,
-                    LegalNotificationEvent.status == "pending",
-                ).first()
-                if evt:
-                    evt.status = "sent"
-                    evt.sent_at = utc_now()
-            elif reference_type and reference_id:
-                events = db.query(LegalNotificationEvent).filter(
-                    LegalNotificationEvent.reference_type == reference_type,
-                    LegalNotificationEvent.reference_id == reference_id,
-                    LegalNotificationEvent.channel == CHANNEL_EMAIL,
-                    LegalNotificationEvent.status == "pending",
-                ).all()
-                for evt in events:
-                    evt.status = "sent"
-                    evt.sent_at = utc_now()
-
-            return True
-        except Exception as exc:
-            logger.error("邮件通知发送失败 user_id=%s: %s", user_id, exc)
-            # 标记关联事件为 failed
-            if reference_type and reference_id:
-                events = db.query(LegalNotificationEvent).filter(
-                    LegalNotificationEvent.reference_type == reference_type,
-                    LegalNotificationEvent.reference_id == reference_id,
-                    LegalNotificationEvent.channel == CHANNEL_EMAIL,
-                    LegalNotificationEvent.status == "pending",
-                ).all()
-                for evt in events:
-                    evt.status = "failed"
+        兼容旧签名：可按 event_id 或 reference 定位目标事件。返回是否已登记投递。
+        """
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or not user.email:
+            logger.warning("用户 %s 无邮箱，跳过邮件通知", user_id)
             return False
 
-    def _deliver_wechat(self, db: Session, event: LegalNotificationEvent) -> bool:
-        """微信通知：通过企业微信连接器发送。"""
-        try:
-            from app.models.connector import ExternalConnector
-
-            connector = db.query(ExternalConnector).filter(
-                ExternalConnector.connector_type == "wecom",
-                ExternalConnector.status == "active",
-            ).first()
-            if not connector:
-                logger.warning("未找到可用的企业微信连接器")
-                event.status = "failed"
-                return False
-
-            # 创建微信推送记录（简化实现：标记为 sent）
-            event.status = "sent"
-            event.sent_at = utc_now()
-            return True
-        except Exception as exc:
-            logger.error("微信通知发送失败: %s", exc)
-            event.status = "failed"
+        target = None
+        if event_id:
+            target = db.query(LegalNotificationEvent).filter(
+                LegalNotificationEvent.id == event_id).first()
+        elif reference_type and reference_id:
+            target = db.query(LegalNotificationEvent).filter(
+                LegalNotificationEvent.reference_type == reference_type,
+                LegalNotificationEvent.reference_id == reference_id,
+                LegalNotificationEvent.channel == CHANNEL_EMAIL,
+                LegalNotificationEvent.status.in_([STATUS_PENDING, STATUS_SENDING]),
+            ).order_by(LegalNotificationEvent.id.desc()).first()
+        if target is None:
             return False
+        return self._dispatch_email(db, target) in ("sent", "skipped")
 
-    def _deliver_feishu(self, db: Session, event: LegalNotificationEvent) -> bool:
-        """飞书通知：通过飞书连接器发送。"""
-        try:
-            from app.models.connector import ExternalConnector
-
-            connector = db.query(ExternalConnector).filter(
-                ExternalConnector.connector_type == "feishu",
-                ExternalConnector.status == "active",
-            ).first()
-            if not connector:
-                logger.warning("未找到可用的飞书连接器")
-                event.status = "failed"
-                return False
-
-            event.status = "sent"
-            event.sent_at = utc_now()
-            return True
-        except Exception as exc:
-            logger.error("飞书通知发送失败: %s", exc)
-            event.status = "failed"
-            return False
-
-    # ── 失败重试 ──────────────────────────────────────────────────
+    # ── 失败重试 / 死信 ──────────────────────────────────────────────
 
     def retry_failed(self, *, db: Session, max_retries: int = 3) -> int:
-        """重试失败的通知事件。
-
-        限制每个事件最多重试 max_retries 次。
-        使用 event.acknowledged_at 字段记录重试次数（复用字段）。
-        """
+        """重试失败的通知事件（基于 attempt 列，不再污染 body）。"""
+        now = utc_now()
         failed_events = db.query(LegalNotificationEvent).filter(
-            LegalNotificationEvent.status == "failed",
-        ).all()
+            LegalNotificationEvent.status == STATUS_FAILED,
+            LegalNotificationEvent.attempt < max_retries,
+            sa_or(LegalNotificationEvent.next_retry_at.is_(None),
+                  LegalNotificationEvent.next_retry_at <= now),
+        ).limit(500).all()
 
         retried = 0
         for event in failed_events:
-            # 简化重试计数：基于创建后时长限流
-            age_minutes = (utc_now() - event.created_at).total_seconds() / 60 if event.created_at else 999
-            if age_minutes < 5:
-                continue  # 5分钟内不重试
-
-            # 检查已重试次数（用 body 的长度来标记，简单方式）
-            retry_count = self._get_retry_count(event)
-            if retry_count >= max_retries:
-                continue
-
-            self._increment_retry_count(event)
-            event.status = "pending"
+            event.attempt = (event.attempt or 0) + 1
+            self.transition(db=db, event=event, to=STATUS_PENDING)
+            event.next_retry_at = None
+            event.claim_expires_at = None
             retried += 1
-
         if retried:
             db.commit()
-
         return retried
 
-    def _get_retry_count(self, event: LegalNotificationEvent) -> int:
-        """获取重试次数（从 body 末尾的元数据标记读取）。"""
-        if not event.body:
-            return 0
-        try:
-            # 在 body 末尾标记重试次数
-            if event.body.endswith("]"):
-                start = event.body.rfind("[retry=")
-                if start > 0:
-                    count_str = event.body[start + 7:-1]
-                    return int(count_str)
-        except (ValueError, IndexError):
-            pass
-        return 0
+    def list_dead_letter(self, *, db: Session, user: User, limit: int = 50) -> list[LegalNotificationEvent]:
+        """查看死信通知（admin 同组织可见，普通用户仅本人）。"""
+        query = db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.status == STATUS_DEAD_LETTER)
+        if user.role != "admin":
+            query = query.filter(LegalNotificationEvent.user_id == user.id)
+        return query.order_by(LegalNotificationEvent.updated_at.desc()).limit(limit).all()
 
-    def _increment_retry_count(self, event: LegalNotificationEvent) -> None:
-        """递增重试次数标记。"""
-        count = self._get_retry_count(event) + 1
-        body = event.body or ""
-        # 移除旧标记
-        if body.endswith("]"):
-            start = body.rfind("[retry=")
-            if start > 0:
-                body = body[:start]
-        event.body = f"{body}[retry={count}]"
+    def manual_retry(self, *, db: Session, event_id: int, user: User) -> LegalNotificationEvent:
+        """人工重试死信通知：校验权限，保留原幂等键，完整审计。
 
-    # ── 通知偏好管理 ──────────────────────────────────────────────
+        若关联的邮件 Outbox 请求已是死信，一并重置为待投递（级联重试），
+        否则通知回 pending 后无人发送。
+        """
+        event = db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.id == event_id).first()
+        if not event:
+            raise ValueError("通知不存在")
+        if event.user_id != user.id and user.role != "admin":
+            raise ValueError("无权重试该通知")
+        if event.status != STATUS_DEAD_LETTER:
+            raise ValueError("只有死信状态可人工重试")
+        self.transition(db=db, event=event, to=STATUS_PENDING)
+        event.attempt = 0
+        event.next_retry_at = None
+        event.claim_expires_at = None
+        event.error_code = None
+        event.sanitized_error_message = None
+        # 级联：关联邮件请求为死信 → 一并重置待投递（权限已在通知层校验）
+        if event.email_send_request_id:
+            from app.models.email import EmailSendRequest
+            from app.services.outbound_email_service import outbound_email_service
+
+            req = db.query(EmailSendRequest).filter(
+                EmailSendRequest.id == event.email_send_request_id).first()
+            if req is not None and req.status == "dead_letter":
+                outbound_email_service._reset_dead_letter(req, db=db)
+        db.commit()
+        db.refresh(event)
+        oplog_service.log(module="notification", action="notification_manual_retry", db=db,
+                          user_id=user.id, target_type="notification_event", target_id=event.id,
+                          detail=f"idempotency_key={event.idempotency_key}")
+        return event
+
+    # ── 通知偏好管理 ─────────────────────────────────────────────────
 
     def set_preference(self, *, db: Session, user_id: int, organization_id: int,
                        event_type: str, channels: list[str],
@@ -492,7 +659,7 @@ class NotificationService:
         ).all()
         return [self.serialize_preference(p) for p in prefs]
 
-    # ── 通知读取与确认 ────────────────────────────────────────────
+    # ── 通知读取与确认 ──────────────────────────────────────────────
 
     def get_user_notifications(self, *, db: Session, user_id: int,
                                status: str | None = None,
@@ -521,11 +688,19 @@ class NotificationService:
         if not event:
             raise ValueError("通知不存在")
         if event.status in ("delivered", "sent"):
-            event.status = "read"
+            self.transition(db=db, event=event, to=STATUS_READ)
             event.acknowledged_at = utc_now()
             db.commit()
             db.refresh(event)
         return event
+
+    def mark_acknowledged(self, db: Session, event: LegalNotificationEvent) -> None:
+        """确认通知（ack 端点）：正常路径走状态机，兼容历史任意状态直写。"""
+        if event.status in (STATUS_SENT, STATUS_DELIVERED):
+            self.transition(db=db, event=event, to=STATUS_ACKNOWLEDGED)
+        else:
+            event.status = STATUS_ACKNOWLEDGED
+        event.acknowledged_at = utc_now()
 
     def mark_all_as_read(self, *, db: Session, user_id: int) -> int:
         """标记用户所有站内通知为已读。返回更新数量。"""
@@ -537,7 +712,7 @@ class NotificationService:
         now = utc_now()
         count = 0
         for event in unread:
-            event.status = "read"
+            self.transition(db=db, event=event, to=STATUS_READ)
             event.acknowledged_at = now
             count += 1
         db.commit()
@@ -570,6 +745,14 @@ class NotificationService:
             "sent_at": event.sent_at.isoformat() if event.sent_at else None,
             "acknowledged_at": event.acknowledged_at.isoformat() if event.acknowledged_at else None,
             "created_at": event.created_at.isoformat() if event.created_at else None,
+            "attempt": event.attempt,
+            "max_attempts": event.max_attempts,
+            "next_retry_at": event.next_retry_at.isoformat() if event.next_retry_at else None,
+            "error_code": event.error_code,
+            "provider_message_id": event.provider_message_id,
+            "template_key": event.template_key,
+            "template_version": event.template_version,
+            "locale": event.locale,
         }
 
     def serialize_preference(self, pref: LegalNotificationPreference) -> dict:

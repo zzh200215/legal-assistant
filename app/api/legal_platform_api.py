@@ -731,8 +731,9 @@ def acknowledge_notification(
     ).first()
     if not notif:
         raise HTTPException(404)
-    notif.status = "acknowledged"
-    notif.acknowledged_at = datetime.now(timezone.utc)
+    from app.services.notification_service import notification_service
+
+    notification_service.mark_acknowledged(db, notif)
     db.commit()
     db.refresh(notif)
     return notif

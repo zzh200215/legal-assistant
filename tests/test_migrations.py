@@ -166,6 +166,69 @@ class MigrationChainTests(unittest.TestCase):
                     "idempotency_key", "next_retry_at"):
             self.assertIn(f'batch_op.drop_column("{col}")', src, f"downgrade 应回收 {col}")
 
+    def test_0076_creates_delivery_reliability_tables_and_columns(self):
+        """0076 必须建模板/附件/邮箱表，扩展通知与邮件投递列，含回填与 downgrade。"""
+        path = "alembic/versions/20260813_0076_delivery_reliability.py"
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        for table in ("notification_templates", "email_attachments",
+                      "mailbox_sync_accounts", "mailbox_messages", "mailbox_attachments"):
+            self.assertIn(f'"{table}"', src, f"0076 缺少建表 {table}")
+        for col in ("idempotency_key", "next_retry_at", "claim_expires_at", "claimed_by",
+                    "attempt", "error_code", "sanitized_error_message", "provider_message_id",
+                    "email_send_request_id", "template_key"):
+            self.assertIn(f'"{col}"', src, f"0076 缺少投递列 {col}")
+        for col in ("dead_letter_at", "bcc", "notification_event_id", "sanitized_error_message"):
+            self.assertIn(f'"{col}"', src, f"0076 缺少 email_send_requests.{col}")
+        self.assertIn("uq_notification_templates_channel_key_locale_version", src)
+        self.assertIn("uq_mailbox_messages_account_folder_uidvalidity_uid", src)
+        self.assertIn("_backfill", src, "0076 应包含旧数据回填")
+        self.assertIn("def downgrade", src)
+
+    def test_0076_backfill_adds_legacy_idempotency_keys(self):
+        """0076 回填：既有通知事件补 legacy 幂等键与默认计数（幂等）。"""
+        import importlib.util
+
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+
+        import app.models  # noqa: F401
+        from app.core.database import Base
+        from app.models.legal_notifications import LegalNotificationEvent
+        from app.models.org import Organization
+        from app.models.user import User, UserStatus
+
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:", future=True,
+            connect_args={"check_same_thread": False}, poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=engine)
+        db = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+        org = Organization(name="MigOrg", code="MIGO")
+        db.add(org)
+        db.flush()
+        user = User(username="m", email="m@x.com", hashed_password="pw",
+                    role="user", status=UserStatus.active.value, organization_id=org.id)
+        db.add(user)
+        db.commit()
+        event = LegalNotificationEvent(organization_id=org.id, user_id=user.id,
+                                       event_type="portal", title="t", channel="site",
+                                       status="pending", idempotency_key=None)
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+
+        spec = importlib.util.spec_from_file_location(
+            "mig_0076", "alembic/versions/20260813_0076_delivery_reliability.py")
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+        mig._backfill(engine)
+
+        db.refresh(event)
+        self.assertIsNotNone(event.idempotency_key)
+        self.assertTrue(event.idempotency_key.startswith("legacy:notify:"))
+        self.assertEqual(event.attempt, 0)
+
 
 class DirtyDataDedupeTests(unittest.TestCase):
     def setUp(self):

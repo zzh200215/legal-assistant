@@ -62,6 +62,43 @@ class ReliabilitySettings(BaseSettings):
     # ── 幂等 ────────────────────────────────────────────────────────
     EMAIL_SEND_DETERMINISTIC_IDEMPOTENCY: bool = Field(default=True)
 
+    # ── 通知/外发投递（Outbox 领取、租约、重试、死信）──────────────────
+    # 站内低风险通知自动批准（分级审批策略的一部分）。
+    AUTO_APPROVE_SITE_NOTIFICATION: bool = Field(default=True)
+    # 发往内部用户本人邮箱的通知自动批准（可信渠道）；对外收件人走审批。
+    AUTO_APPROVE_EMAIL_NOTIFICATION_TO_OWNER: bool = Field(default=True)
+    # 对外邮件通知是否需要审批。默认偏安全：无法判定时不得自动外发。
+    EMAIL_NOTIFICATION_REQUIRE_APPROVAL: bool = Field(default=True)
+    # 通知事件领取批次与租约 TTL（worker 崩溃后按 TTL 回收重领）。
+    NOTIFICATION_CLAIM_BATCH_SIZE: int = Field(default=50, ge=1, le=500)
+    NOTIFICATION_CLAIM_TTL_SECONDS: int = Field(default=300, ge=60, le=86400)
+    NOTIFICATION_MAX_ATTEMPTS: int = Field(default=5, ge=1, le=20)
+    NOTIFICATION_BACKOFF_BASE_SECONDS: int = Field(default=60, ge=5, le=3600)
+    # 邮件投递（EmailSendRequest 作为 Outbox）的重试与租约。
+    EMAIL_DELIVERY_MAX_ATTEMPTS: int = Field(default=5, ge=1, le=20)
+    EMAIL_DELIVERY_CLAIM_TTL_SECONDS: int = Field(default=300, ge=60, le=86400)
+    EMAIL_DEAD_LETTER_RETENTION_DAYS: int = Field(default=90, ge=7, le=3650)
+
+    # ── DLP 发送前硬门禁 ──────────────────────────────────────────────
+    # 扫描器异常/未配置时的默认行为：block（fail closed）。对外邮件与敏感内容强制 block。
+    DLP_SCAN_FAILURE_ACTION: str = Field(default="block", pattern="^(block|warn)$")
+    DLP_SCANNER_VERSION: str = Field(default="rule-based-v1")
+    # 显式运行模式：enabled（规则扫描器）/ disabled（未配置真实扫描器，不伪造通过，
+    # 默认按 fail closed 阻断对外发送）。
+    DLP_SCANNER_MODE: str = Field(default="enabled", pattern="^(enabled|disabled)$")
+
+    # ── 邮箱同步（绿地，mock 连接器，默认关闭；不复活真实 IMAP 供应商）──
+    MAILBOX_SYNC_ENABLED: bool = Field(default=False)
+    MAILBOX_SYNC_BATCH_SIZE: int = Field(default=50, ge=1, le=1000)
+    MAILBOX_ATTACHMENT_MAX_BYTES: int = Field(default=20 * 1024 * 1024, ge=1)
+    MAILBOX_ATTACHMENT_ALLOWED_MIME_JSON: list[str] = Field(default_factory=lambda: [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain",
+    ])
+    MAILBOX_ATTACHMENT_STORAGE_PREFIX: str = Field(default="mailbox-attachments")
+
     @model_validator(mode="after")
     def _validate_finite(self) -> "ReliabilitySettings":
         if self.EXTERNAL_MAX_WAIT_SECONDS <= 0:

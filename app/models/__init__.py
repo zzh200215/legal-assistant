@@ -7,7 +7,8 @@ from app.models.user import User, UserRole, UserStatus
 from app.models.auth_log import LoginLog, AdminAuditLog
 from app.models.document import Document, DocumentAccessRule, DocumentAssistantArtifact, DocumentAssistantRevision, DocumentChunk, DocumentConflictCase, DocumentParseArtifact, DocumentParseJob, DocumentQARecord, KnowledgeBase
 from app.models.task import Task, TaskComment, TaskLog
-from app.models.email import EmailDraft, EmailSendRequest, OutboundEmailPolicy
+from app.models.email import EmailDraft, EmailSendRequest, OutboundEmailPolicy, EmailAttachment
+from app.models.mailbox import MailboxSyncAccount, MailboxMessage, MailboxAttachment
 from app.models.chat import ChatSession, ChatMessage, ChatSessionMemory, UserPreferenceMemory
 from app.models.calendar import CalendarSuggestion
 from app.models.agent import AgentApprovalRequest, AgentAuditEvent, AgentRun, ToolCallLog
@@ -40,7 +41,7 @@ from app.models.legal_platform import (
 )
 from app.models.legal_notifications import (
     SecurityAuditEvent, LegalNotificationPreference, LegalNotificationPolicy,
-    LegalNotificationEvent, OrganizationOnboardingProgress,
+    LegalNotificationEvent, NotificationTemplate, OrganizationOnboardingProgress,
 )
 from app.models.api_key import APIKey
 from app.models.idempotency import IdempotencyKey
@@ -79,6 +80,10 @@ __all__ = [
     "EmailDraft",
     "EmailSendRequest",
     "OutboundEmailPolicy",
+    "EmailAttachment",
+    "MailboxSyncAccount",
+    "MailboxMessage",
+    "MailboxAttachment",
     "ChatSession",
     "ChatMessage",
     "ChatSessionMemory",
@@ -141,6 +146,7 @@ __all__ = [
     "LegalNotificationPreference",
     "LegalNotificationPolicy",
     "LegalNotificationEvent",
+    "NotificationTemplate",
     "OrganizationOnboardingProgress",
     "APIKey",
     "IdempotencyKey",

@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.api_response import api_error, should_passthrough_exception
@@ -10,6 +10,7 @@ from app.models.connector import ExternalConnector
 from app.models.user import User
 from app.schemas.connector import ConnectorOut
 from app.schemas.outbound import EmailSendRequestCreate, EmailSendRequestDecision, EmailSendRequestOut, OutboundEmailPolicyOut, OutboundEmailPolicyUpdate, SmtpConnectorCreateRequest
+from app.services.document_security import DocumentSecurityError
 from app.services.outbound_email_service import outbound_email_service
 
 router = APIRouter()
@@ -80,6 +81,31 @@ def request_send(draft_id: int, req: EmailSendRequestCreate, db: Session = Depen
         return EmailSendRequestOut(**outbound_email_service.serialize_request(row, db=db, viewer=current_user))
     except ValueError as exc:
         raise api_error(400, "发送申请失败", code="EMAIL_SEND_REQUEST_INVALID", detail=str(exc))
+
+
+@router.post("/drafts/{draft_id}/attachments")
+def upload_draft_attachment(draft_id: int, file: UploadFile = File(...),
+                            db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """上传邮件草稿附件：流式安全处理 + DLP 硬门禁，blocked 附件直接拒绝。"""
+    try:
+        row = outbound_email_service.upload_attachment(db=db, user=current_user, draft_id=draft_id, file=file)
+        return {
+            "id": row.id,
+            "draft_id": row.draft_id,
+            "filename": row.filename,
+            "mime_type": row.mime_type,
+            "size_bytes": row.size_bytes,
+            "content_hash": row.content_hash,
+            "scan_status": row.scan_status,
+        }
+    except DocumentSecurityError as exc:
+        raise api_error(400, exc.message, code=exc.code)
+    except ValueError as exc:
+        raise api_error(400, "附件上传失败", code="ATTACHMENT_UPLOAD_INVALID", detail=str(exc))
+    except Exception as exc:
+        if should_passthrough_exception(exc):
+            raise
+        raise api_error(500, "附件上传失败", code="ATTACHMENT_UPLOAD_FAILED", detail=str(exc))
 
 
 @router.get("/send-requests", response_model=list[EmailSendRequestOut])
