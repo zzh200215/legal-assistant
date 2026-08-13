@@ -99,6 +99,21 @@ class ReliabilitySettings(BaseSettings):
     ])
     MAILBOX_ATTACHMENT_STORAGE_PREFIX: str = Field(default="mailbox-attachments")
 
+    # ── 支付 Webhook 事件（验签 / 幂等 / 乱序 / 重放）──────────────────
+    # fail-closed：开启时未配置 PAYMENT_WEBHOOK_SECRET 也拒绝事件（生产要求）。
+    PAYMENT_WEBHOOK_REQUIRE_SIGNATURE: bool = Field(default=True)
+    PAYMENT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS: int = Field(default=300, ge=60, le=3600)
+    PAYMENT_EVENT_CLAIM_BATCH_SIZE: int = Field(default=50, ge=1, le=500)
+    PAYMENT_EVENT_CLAIM_TTL_SECONDS: int = Field(default=300, ge=60, le=86400)
+    PAYMENT_EVENT_MAX_ATTEMPTS: int = Field(default=5, ge=1, le=20)
+    PAYMENT_EVENT_BACKOFF_BASE_SECONDS: int = Field(default=60, ge=5, le=3600)
+
+    # ── 每日对账 ─────────────────────────────────────────────────────
+    RECONCILIATION_STALE_PAYMENT_DAYS: int = Field(default=7, ge=1, le=365)
+    RECONCILIATION_STALE_WEBHOOK_MINUTES: int = Field(default=60, ge=5, le=10080)
+    RECONCILIATION_RUN_LEASE_TTL_SECONDS: int = Field(default=900, ge=60, le=86400)
+    RECONCILIATION_MAX_DISCREPANCIES: int = Field(default=500, ge=10, le=10000)
+
     @model_validator(mode="after")
     def _validate_finite(self) -> "ReliabilitySettings":
         if self.EXTERNAL_MAX_WAIT_SECONDS <= 0:

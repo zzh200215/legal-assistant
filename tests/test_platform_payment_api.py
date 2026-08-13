@@ -180,6 +180,50 @@ class PlatformPaymentApiTests(unittest.TestCase):
         r = self.client.post(f"/api/billing/payments/{payment_id}/confirm", json={}, headers=self._headers(self.admin_token))
         self.assertEqual(r.status_code, 400, r.text)
 
+    def test_refund_confirmed_payment_cancels_subscription(self):
+        self.client.post(
+            "/api/billing/payments/bank-transfer",
+            json={"plan_tier": "pro", "amount": 199, "voucher_no": "V9"},
+            headers=self._headers(self.user_token),
+        )
+        payment_id = self.db.query(PlatformPayment).first().id
+        self.client.post(f"/api/billing/payments/{payment_id}/confirm", json={}, headers=self._headers(self.admin_token))
+        r = self.client.post(
+            f"/api/billing/payments/{payment_id}/refund",
+            json={"amount": 199, "note": "客户退款"},
+            headers=self._headers(self.admin_token),
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["data"]["status"], "refunded")
+        payment = self.db.query(PlatformPayment).get(payment_id)
+        self.assertEqual(str(payment.refunded_amount), "199.00")
+        # 订阅被取消
+        self.assertIsNone(subscription_service.get_active_subscription(self.db, self.user.id))
+        # 成本台账 refund 条目
+        from decimal import Decimal
+        from app.models.cost_ledger import CostLedgerEntry
+        refund_entry = self.db.query(CostLedgerEntry).filter(
+            CostLedgerEntry.direction == "refund",
+            CostLedgerEntry.source_id == str(payment_id)).first()
+        self.assertIsNotNone(refund_entry)
+        self.assertEqual(refund_entry.amount, Decimal("199"))
+
+    def test_over_refund_rejected(self):
+        self.client.post(
+            "/api/billing/payments/bank-transfer",
+            json={"plan_tier": "pro", "amount": 199, "voucher_no": "V10"},
+            headers=self._headers(self.user_token),
+        )
+        payment_id = self.db.query(PlatformPayment).first().id
+        self.client.post(f"/api/billing/payments/{payment_id}/confirm", json={}, headers=self._headers(self.admin_token))
+        r = self.client.post(
+            f"/api/billing/payments/{payment_id}/refund",
+            json={"amount": 999},
+            headers=self._headers(self.admin_token),
+        )
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("可退余额", r.text)
+
 
 if __name__ == "__main__":
     unittest.main()

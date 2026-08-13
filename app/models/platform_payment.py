@@ -4,6 +4,11 @@ from app.core.database import Base
 
 
 class PlatformPayment(Base):
+    """#83/平台收款（对公转账）模型：企业客户 → 平台订阅付款。
+
+    idempotency_key 防止重复提交；provider_event_id 关联支付回调（若走线上渠道）；
+    refunded_amount 记录累计退款金额（并发安全，DB 层校验）。
+    """
     __tablename__ = "platform_payments"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -19,4 +24,9 @@ class PlatformPayment(Base):
     note = Column(Text, nullable=True)
     confirmed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    # 支付可靠性与退款
+    idempotency_key = Column(String(128), nullable=True, unique=True, index=True)
+    provider = Column(String(64), nullable=True)
+    provider_event_id = Column(String(128), nullable=True, index=True)
+    refunded_amount = Column(Numeric(14, 2), nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

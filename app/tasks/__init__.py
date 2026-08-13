@@ -1299,6 +1299,84 @@ _register_task_run_spec(_TaskRunSpec(
 ))
 
 
+# ── 支付事件异步处理（Webhook 落库后由本任务领取，幂等/乱序保护）──────────────
+
+@celery_app.task(name="dispatch_payment_events")
+@_beat_lock(task_name="dispatch_payment_events", ttl_seconds=180)
+def dispatch_payment_events_task():
+    """每60秒：领取 pending 支付事件并异步处理（幂等、可重放、乱序保护）。
+
+    Webhook 仅负责验签与持久化；权益/账单变更在 worker 内执行，
+    失败可重试，worker 崩溃由 recover 任务回收。
+    """
+    _record_beat_heartbeat()
+    from app.services.payment_event_service import payment_event_service
+
+    db = SessionLocal()
+    owner = f"payment-event:{uuid.uuid4().hex}"
+    try:
+        processed = 0
+        while processed < 200:
+            batch = payment_event_service.claim_pending(db=db, owner=owner)
+            if not batch:
+                break
+            for event in batch:
+                payment_event_service.process_event(db, event)
+                processed += 1
+        return {"processed": processed}
+    finally:
+        db.close()
+
+
+@celery_app.task(name="recover_stale_payment_events")
+@_beat_lock(task_name="recover_stale_payment_events", ttl_seconds=600)
+def recover_stale_payment_events_task():
+    """每5分钟：回收租约过期的 payment event（worker 崩溃后安全重领）。"""
+    _record_beat_heartbeat()
+    from app.services.payment_event_service import payment_event_service
+
+    db = SessionLocal()
+    try:
+        return {"reclaimed": payment_event_service.reclaim_stale(db=db)}
+    finally:
+        db.close()
+
+
+# ── 每日对账 ─────────────────────────────────────────────────────────
+
+@celery_app.task(name="run_daily_reconciliation")
+@_beat_lock(task_name="run_daily_reconciliation", ttl_seconds=1800)
+def run_daily_reconciliation_task():
+    """每日对账（本地一致性）：未处理 webhook、卡住收款、发票/退款差异。
+
+    不自动修改财务记录；差异入 reconciliation_discrepancies 供人工处理。
+    """
+    _record_beat_heartbeat()
+    from app.services.reconciliation_service import reconciliation_service
+
+    db = SessionLocal()
+    try:
+        run_date = utc_now().strftime("%Y-%m-%d")
+        return reconciliation_service.run(db=db, run_date=run_date, provider="local", owner="daily")
+    finally:
+        db.close()
+
+
+@celery_app.task(name="recover_stale_reconciliation_runs")
+@_beat_lock(task_name="recover_stale_reconciliation_runs", ttl_seconds=1800)
+def recover_stale_reconciliation_runs_task():
+    """回收租约过期的对账 run（中断后可重跑，不重复修正财务记录）。"""
+    _record_beat_heartbeat()
+    from app.services.reconciliation_service import reconciliation_service
+
+    db = SessionLocal()
+    try:
+        runs = reconciliation_service.recover_stale_runs(db=db)
+        return {"recovered": len(runs)}
+    finally:
+        db.close()
+
+
 # ── 邮箱同步（mock 邮箱，MAILBOX_SYNC_ENABLED 默认关闭）────────────────────────
 
 @celery_app.task(name="mailbox_sync_task")

@@ -5,7 +5,6 @@ import requests
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.auth import create_access_token
 from app.core.api_response import api_error
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -121,10 +120,19 @@ async def miniapp_consultation(
 ):
     """
     小程序简化版咨询入口：单问题，返回精简响应。
-    复用法律咨询业务逻辑，配额共享。
+    复用法律咨询业务逻辑，配额共享（原子预留→业务→提交/失败释放）。
     """
+    import uuid
+
+    from app.services.subscription_service import QuotaExceededError
+
     subscription_service.ensure_default_plans(db)
-    if not subscription_service.check_quota(db, current_user.id, "consultation"):
+    usage_event_id = f"consultation:{uuid.uuid4().hex}"
+    try:
+        subscription_service.reserve_quota(
+            db=db, user_id=current_user.id, quota_type="consultation",
+            usage_event_id=usage_event_id, source_type="miniapp")
+    except QuotaExceededError:
         raise api_error(429, "本月咨询配额已用完，请升级订阅", code="QUOTA_EXCEEDED")
 
     # 延迟导入避免循环依赖
@@ -132,40 +140,44 @@ async def miniapp_consultation(
     from app.models.legal import LegalConsultation, LegalSource
     import json
 
-    ensure_demo_sources(db, current_user.id)
-    sources = db.query(LegalSource).filter(
-        LegalSource.user_id == current_user.id,
-        LegalSource.status == "active",
-    ).all()
+    try:
+        ensure_demo_sources(db, current_user.id)
+        sources = db.query(LegalSource).filter(
+            LegalSource.user_id == current_user.id,
+            LegalSource.status == "active",
+        ).all()
 
-    category, known, missing, refs, advice, risk, status = await consultation_payload(
-        question, sources, user_id=current_user.id, db=db
-    )
+        category, known, missing, refs, advice, risk, status = await consultation_payload(
+            question, sources, user_id=current_user.id, db=db
+        )
 
-    row = LegalConsultation(
-        user_id=current_user.id,
-        question=question,
-        category=category,
-        known_facts_json=json.dumps(known, ensure_ascii=False),
-        missing_facts_json=json.dumps(missing, ensure_ascii=False),
-        references_json=json.dumps(refs, ensure_ascii=False),
-        advice=advice,
-        risk_level=risk,
-        status=status,
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    subscription_service.record_usage(db, current_user.id, "consultation")
+        row = LegalConsultation(
+            user_id=current_user.id,
+            question=question,
+            category=category,
+            known_facts_json=json.dumps(known, ensure_ascii=False),
+            missing_facts_json=json.dumps(missing, ensure_ascii=False),
+            references_json=json.dumps(refs, ensure_ascii=False),
+            advice=advice,
+            risk_level=risk,
+            status=status,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        subscription_service.commit_usage(db=db, usage_event_id=usage_event_id)
 
-    # 小程序返回精简字段
-    return {
-        "id": row.id,
-        "advice": advice,
-        "risk_level": risk,
-        "category": category,
-        "missing_facts": missing,
-    }
+        # 小程序返回精简字段
+        return {
+            "id": row.id,
+            "advice": advice,
+            "risk_level": risk,
+            "category": category,
+            "missing_facts": missing,
+        }
+    except Exception:
+        subscription_service.release_usage(db=db, usage_event_id=usage_event_id)
+        raise
 
 
 @router.post("/contract-review")
@@ -177,37 +189,50 @@ async def miniapp_contract_review(
 ):
     """
     小程序合同审查入口：提交合同文本，返回风险摘要。
-    配额与主站共享。
+    配额与主站共享（原子预留→业务→提交/失败释放）。
     """
+    import uuid
+
+    from app.services.subscription_service import QuotaExceededError
+
     subscription_service.ensure_default_plans(db)
-    if not subscription_service.check_quota(db, current_user.id, "review"):
+    usage_event_id = f"review:{uuid.uuid4().hex}"
+    try:
+        subscription_service.reserve_quota(
+            db=db, user_id=current_user.id, quota_type="review",
+            usage_event_id=usage_event_id, source_type="miniapp")
+    except QuotaExceededError:
         raise api_error(429, "本月合同审查配额已用完，请升级订阅", code="QUOTA_EXCEEDED")
 
     from app.services.legal_service import review_contract
     from app.models.legal import ContractReview
     import json
 
-    risks, summary = await review_contract(content, user_id=current_user.id)
-    row = ContractReview(
-        user_id=current_user.id,
-        title=title.strip(),
-        content=content,
-        summary=summary,
-        risks_json=json.dumps(risks, ensure_ascii=False),
-        references_json="[]",
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    subscription_service.record_usage(db, current_user.id, "review")
+    try:
+        risks, summary = await review_contract(content, user_id=current_user.id)
+        row = ContractReview(
+            user_id=current_user.id,
+            title=title.strip(),
+            content=content,
+            summary=summary,
+            risks_json=json.dumps(risks, ensure_ascii=False),
+            references_json="[]",
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        subscription_service.commit_usage(db=db, usage_event_id=usage_event_id)
 
-    return {
-        "id": row.id,
-        "summary": summary,
-        "risk_count": len(risks),
-        "high_risk_count": sum(1 for r in risks if r.get("risk_level") == "high"),
-        "risks": risks[:5],  # 小程序精简返回前5条风险
-    }
+        return {
+            "id": row.id,
+            "summary": summary,
+            "risk_count": len(risks),
+            "high_risk_count": sum(1 for r in risks if r.get("risk_level") == "high"),
+            "risks": risks[:5],  # 小程序精简返回前5条风险
+        }
+    except Exception:
+        subscription_service.release_usage(db=db, usage_event_id=usage_event_id)
+        raise
 
 
 @router.get("/quota")

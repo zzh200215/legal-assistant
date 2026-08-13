@@ -1,7 +1,7 @@
 """Phase 10 Week 2 tests: subscription plans, quota management, payment webhook"""
 from datetime import datetime
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -12,7 +12,7 @@ import app.models  # noqa: F401
 from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
 from app.main import app
-from app.models.subscription import SubscriptionPlan, UserSubscription, QuotaUsage, PlanTier, SubscriptionStatus
+from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus
 from app.models.operation_log import OperationLog
 from app.models.user import User, UserStatus
 from app.services.subscription_service import subscription_service
@@ -347,60 +347,74 @@ class SubscriptionApiTests(unittest.TestCase):
         resp = self.client.post("/api/billing/subscriptions/checkout?tier=enterprise", headers=self.headers)
         self.assertEqual(resp.status_code, 400)
 
-    def test_webhook_requires_valid_signature_when_configured(self):
-        """#82/配置 PAYMENT_WEBHOOK_SECRET 后必须验签"""
+    def _signed_post(self, payload: dict, secret: str = "whsec_test_secret",
+                     signature: str | None = "auto"):
+        """POST webhook：生成有效/自定义签名。"""
         import hashlib
         import hmac
         import json
         import time as _time
 
-        payload = {"provider": "stripe", "event_type": "customer.subscription.created", "data": {"object": {"metadata": {"user_id": self.user.id, "plan_tier": "pro"}, "id": "sub_test", "customer": "cus_test"}}}
         raw = json.dumps(payload).encode("utf-8")
+        if signature == "auto":
+            ts = str(int(_time.time()))
+            sig = hmac.new(secret.encode("utf-8"), f"{ts}.{raw.decode('utf-8')}".encode("utf-8"),
+                           hashlib.sha256).hexdigest()
+            header = f"t={ts},v1={sig}"
+        elif signature is None:
+            header = None
+        else:
+            header = signature
+        headers = {"Content-Type": "application/json"}
+        if header:
+            headers["x-stripe-signature"] = header
+        return self.client.post("/api/billing/subscriptions/webhook", content=raw, headers=headers)
 
-        with patch("app.core.config.get_settings") as mock_settings:
-            mock_settings.return_value.PAYMENT_WEBHOOK_SECRET = "whsec_test_secret"
-            mock_settings.return_value.ALERT_WEBHOOK_URL = ""
-            from app.core.config import get_settings
-            import app.api.subscription_api as sub_api
-            with patch.object(sub_api, "settings", mock_settings.return_value):
-                # 有效签名
-                ts = str(int(_time.time()))
-                sig = hmac.new(b"whsec_test_secret", f"{ts}.{raw.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
-                resp = self.client.post(
-                    "/api/billing/subscriptions/webhook",
-                    content=raw,
-                    headers={"Content-Type": "application/json", "x-stripe-signature": f"t={ts},v1={sig}"},
-                )
-                self.assertEqual(resp.status_code, 200, resp.text)
-                self.assertTrue(resp.json()["success"])
+    def _dispatch_webhooks(self):
+        from app.tasks import dispatch_payment_events_task
+        with patch("app.tasks.SessionLocal", self.SessionLocal):
+            return dispatch_payment_events_task()
 
-                # 伪造签名
-                bad = hmac.new(b"wrong_secret", f"{ts}.{raw.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
-                resp = self.client.post(
-                    "/api/billing/subscriptions/webhook",
-                    content=raw,
-                    headers={"Content-Type": "application/json", "x-stripe-signature": f"t={ts},v1={bad}"},
-                )
-                self.assertEqual(resp.status_code, 400, resp.text)
-                self.assertIn("签名", resp.text)
+    def test_webhook_requires_valid_signature_when_configured(self):
+        """#82/配置 PAYMENT_WEBHOOK_SECRET 后必须验签；有效签名登记事件，伪造签名拒绝"""
+        from app.core.config import get_settings
 
-                # 缺少签名头
-                resp = self.client.post(
-                    "/api/billing/subscriptions/webhook",
-                    content=raw,
-                    headers={"Content-Type": "application/json"},
-                )
-                self.assertEqual(resp.status_code, 400, resp.text)
+        payload = {"provider": "stripe", "event_type": "customer.subscription.created",
+                   "data": {"object": {"metadata": {"user_id": self.user.id, "plan_tier": "pro"},
+                                       "id": "sub_test", "customer": "cus_test"}}}
+        with patch.object(get_settings(), "PAYMENT_WEBHOOK_SECRET", "whsec_test_secret"):
+            # 有效签名
+            resp = self._signed_post(payload)
+            self.assertEqual(resp.status_code, 200, resp.text)
+            self.assertTrue(resp.json()["success"])
+            # 伪造签名
+            import hashlib
+            import hmac
+            import json
+            import time as _time
+            raw = json.dumps(payload).encode("utf-8")
+            ts = str(int(_time.time()))
+            bad = hmac.new(b"wrong_secret", f"{ts}.{raw.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
+            resp = self._signed_post(payload, signature=f"t={ts},v1={bad}")
+            self.assertEqual(resp.status_code, 400, resp.text)
+            self.assertIn("签名", resp.text)
+            # 缺少签名头
+            resp = self._signed_post(payload, signature=None)
+            self.assertEqual(resp.status_code, 400, resp.text)
 
-    def test_webhook_without_secret_still_accepts(self):
-        """未配置 PAYMENT_WEBHOOK_SECRET 时保持兼容（测试/开发）"""
-        payload = {"provider": "stripe", "event_type": "customer.subscription.created", "data": {"object": {"metadata": {"user_id": self.user.id, "plan_tier": "pro"}, "id": "sub_ok", "customer": "cus_ok"}}}
-        resp = self.client.post(
-            "/api/billing/subscriptions/webhook",
-            json=payload,
-        )
-        self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertTrue(resp.json()["success"])
+    def test_webhook_rejected_when_no_secret_configured(self):
+        """fail-closed：未配置 PAYMENT_WEBHOOK_SECRET 时拒绝事件，不产生副作用"""
+        from app.core.config import get_settings
+
+        with patch.object(get_settings(), "PAYMENT_WEBHOOK_SECRET", ""):
+            payload = {"provider": "stripe", "event_type": "customer.subscription.created",
+                       "data": {"object": {"metadata": {"user_id": self.user.id, "plan_tier": "pro"},
+                                           "id": "sub_ok", "customer": "cus_ok"}}}
+            resp = self._signed_post(payload)
+            self.assertEqual(resp.status_code, 400, resp.text)
+            self.assertIn("WEBHOOK_SIGNATURE_NOT_CONFIGURED", resp.text)
+        # 不产生副作用：无订阅被激活
+        self.assertIsNone(subscription_service.get_active_subscription(self.db, self.user.id))
 
     def test_checkout_records_upgrade_intent_oplog(self):
         """#81/升级意图埋点：checkout 调用写 operation_logs (upgrade_intent)"""
@@ -416,7 +430,9 @@ class SubscriptionApiTests(unittest.TestCase):
         self.assertIn("tier=team", log.detail)
 
     def test_webhook_stripe_activate(self):
-        """Stripe webhook 激活订阅"""
+        """Stripe webhook：验签 → 落库 → 异步任务激活订阅"""
+        from app.core.config import get_settings
+
         subscription_service.ensure_default_plans(self.db)
         payload = {
             "provider": "stripe",
@@ -425,23 +441,32 @@ class SubscriptionApiTests(unittest.TestCase):
                 "object": {
                     "id": "sub_stripe_001",
                     "customer": "cus_001",
-                    "metadata": {
-                        "user_id": str(self.user.id),
-                        "plan_tier": "pro",
-                    },
+                    "metadata": {"user_id": str(self.user.id), "plan_tier": "pro"},
                 }
             },
         }
-        resp = self.client.post("/api/billing/subscriptions/webhook", json=payload)
-        self.assertEqual(resp.status_code, 200)
-
+        with patch.object(get_settings(), "PAYMENT_WEBHOOK_SECRET", "whsec_test_secret"):
+            resp = self._signed_post(payload)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        # 事件已落库但未同步激活（异步）
+        from app.models.payment_event import PaymentEvent
+        event = self.db.query(PaymentEvent).filter(
+            PaymentEvent.provider_event_id == "sub_stripe_001").first()
+        self.assertIsNotNone(event)
+        self.assertEqual(event.status, "pending")
+        # 异步任务处理 → 激活订阅
+        self._dispatch_webhooks()
         sub = subscription_service.get_active_subscription(self.db, self.user.id)
         self.assertIsNotNone(sub)
         plan = self.db.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first()
         self.assertEqual(plan.tier, "pro")
+        self.db.refresh(event)
+        self.assertEqual(event.status, "completed")
 
     def test_webhook_pingpp_activate(self):
-        """Ping++ webhook 激活订阅"""
+        """Ping++ webhook：异步任务激活订阅（team）"""
+        from app.core.config import get_settings
+
         subscription_service.ensure_default_plans(self.db)
         payload = {
             "provider": "pingpp",
@@ -449,16 +474,14 @@ class SubscriptionApiTests(unittest.TestCase):
             "data": {
                 "object": {
                     "id": "ch_pingpp_001",
-                    "metadata": {
-                        "user_id": str(self.user.id),
-                        "plan_tier": "team",
-                    },
+                    "metadata": {"user_id": str(self.user.id), "plan_tier": "team"},
                 }
             },
         }
-        resp = self.client.post("/api/billing/subscriptions/webhook", json=payload)
-        self.assertEqual(resp.status_code, 200)
-
+        with patch.object(get_settings(), "PAYMENT_WEBHOOK_SECRET", "whsec_test_secret"):
+            resp = self._signed_post(payload)
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self._dispatch_webhooks()
         sub = subscription_service.get_active_subscription(self.db, self.user.id)
         self.assertIsNotNone(sub)
         plan = self.db.query(SubscriptionPlan).filter(SubscriptionPlan.id == sub.plan_id).first()

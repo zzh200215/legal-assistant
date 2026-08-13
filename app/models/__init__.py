@@ -46,7 +46,11 @@ from app.models.legal_notifications import (
 from app.models.api_key import APIKey
 from app.models.idempotency import IdempotencyKey
 from app.models.archive import DatabaseArchiveRun
-from app.models.subscription import SubscriptionPlan, UserSubscription, QuotaUsage
+from app.models.subscription import SubscriptionPlan, UserSubscription, QuotaUsage, SubscriptionPlanVersion
+from app.models.payment_event import PaymentEvent
+from app.models.cost_ledger import CostLedgerEntry
+from app.models.usage_reservation import UsageReservation
+from app.models.reconciliation import ReconciliationRun, ReconciliationDiscrepancy
 from app.models.security_auth import (
     AuthorizationSnapshot, AuthDevice, MFACredential, MFAChallenge, MFARecoveryCode,
     RefreshToken, RevokedToken,

@@ -2,7 +2,6 @@
 from fastapi import APIRouter, Depends, Query, Request, Header
 from sqlalchemy.orm import Session
 from typing import Optional
-import hashlib, hmac
 import json
 
 from app.core.database import get_db
@@ -10,7 +9,7 @@ from app.core.auth import get_current_user
 from app.core.api_response import api_error
 from app.core.config import get_settings
 from app.models.user import User
-from app.models.subscription import SubscriptionPlan, UserSubscription, QuotaUsage
+from app.models.subscription import SubscriptionPlan, UserSubscription
 from app.services.subscription_service import subscription_service
 
 router = APIRouter()
@@ -23,7 +22,7 @@ settings = get_settings()
 def list_plans(db: Session = Depends(get_db)):
     """获取所有订阅计划"""
     subscription_service.ensure_default_plans(db)
-    plans = db.query(SubscriptionPlan).filter(SubscriptionPlan.is_active == True).all()
+    plans = db.query(SubscriptionPlan).filter(SubscriptionPlan.is_active).all()
     return [_serialize_plan(p) for p in plans]
 
 
@@ -127,31 +126,6 @@ def create_checkout(
 
 # ================== 支付 Webhook ==================
 
-def _verify_stripe_signature(raw_body: bytes, signature: str | None, secret: str) -> None:
-    """Stripe webhook 验签：t=<ts>,v1=<hmac>；HMAC-SHA256(secret, f"{ts}.{body}")。
-
-    失败抛 400（INVALID_WEBHOOK_SIGNATURE / WEBHOOK_SIGNATURE_EXPIRED）。
-    """
-    import time as _time
-
-    if not signature:
-        raise api_error(400, "缺少 Stripe 签名头", code="INVALID_WEBHOOK_SIGNATURE")
-    parts = dict(p.split("=", 1) for p in signature.split(",") if "=" in p)
-    timestamp = parts.get("t", "")
-    provided = parts.get("v1", "")
-    if not timestamp or not provided:
-        raise api_error(400, "签名头格式不正确", code="INVALID_WEBHOOK_SIGNATURE")
-    try:
-        if abs(int(_time.time()) - int(timestamp)) > 300:
-            raise api_error(400, "Webhook 签名已过期", code="WEBHOOK_SIGNATURE_EXPIRED")
-    except ValueError:
-        # 非数字时间戳：按格式错误处理，避免 500
-        raise api_error(400, "签名头格式不正确", code="INVALID_WEBHOOK_SIGNATURE")
-    expected = hmac.new(secret.encode("utf-8"), f"{timestamp}.{raw_body.decode('utf-8')}".encode("utf-8"), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, provided):
-        raise api_error(400, "Webhook 签名无效", code="INVALID_WEBHOOK_SIGNATURE")
-
-
 @router.post("/subscriptions/webhook")
 async def payment_webhook(
     request: Request,
@@ -160,99 +134,32 @@ async def payment_webhook(
 ):
     """
     支付回调（Stripe / Ping++）。
-    PAYMENT_WEBHOOK_SECRET 配置时强制验签（生产要求）；未配置时跳过验签（开发/测试）。
+
+    流程：验签（fail-closed，未配置密钥默认拒绝）→ 幂等持久化事件
+    （provider + provider_event_id 唯一）→ 由 dispatch_payment_events_task 异步处理。
+    本回调仅快速落库，不执行账单/权益逻辑；重复回调不产生副作用。
     """
+    from app.services.payment_event_service import WebhookRejectedError, payment_event_service
+
     raw_body = await request.body()
     try:
         payload = json.loads(raw_body)
     except Exception:
         raise api_error(400, "无法解析 Webhook 载荷", code="INVALID_PAYLOAD")
 
-    secret = settings.PAYMENT_WEBHOOK_SECRET
-    if secret:
-        _verify_stripe_signature(raw_body, x_stripe_signature, secret)
-
     provider = payload.get("provider", "stripe")
     event_type = payload.get("event_type") or payload.get("type", "")
-
-    if provider == "stripe":
-        return _handle_stripe_event(db, event_type, payload)
-    elif provider == "pingpp":
-        return _handle_pingpp_event(db, event_type, payload)
-    else:
+    if provider not in ("stripe", "pingpp"):
         raise api_error(400, f"不支持的支付提供商: {provider}", code="UNSUPPORTED_PROVIDER")
 
-
-def _handle_stripe_event(db: Session, event_type: str, payload: dict) -> dict:
-    """处理 Stripe 事件"""
-    if event_type in ("customer.subscription.created", "customer.subscription.updated"):
-        data = payload.get("data", {}).get("object", {})
-        _activate_from_webhook(
-            db=db,
-            user_id=int(data.get("metadata", {}).get("user_id", 0)),
-            plan_tier=data.get("metadata", {}).get("plan_tier", "pro"),
-            payment_provider="stripe",
-            payment_subscription_id=data.get("id", ""),
-            payment_customer_id=data.get("customer", ""),
+    try:
+        event = payment_event_service.handle_webhook(
+            db=db, provider=provider, event_type=event_type,
+            raw_body=raw_body, payload=payload, signature=x_stripe_signature,
         )
-    elif event_type == "customer.subscription.deleted":
-        sub_id = payload.get("data", {}).get("object", {}).get("id", "")
-        _cancel_by_provider_id(db, sub_id)
-
-    return {"received": True}
-
-
-def _handle_pingpp_event(db: Session, event_type: str, payload: dict) -> dict:
-    """处理 Ping++ 事件"""
-    if event_type == "charge.succeeded":
-        metadata = payload.get("data", {}).get("object", {}).get("metadata", {})
-        _activate_from_webhook(
-            db=db,
-            user_id=int(metadata.get("user_id", 0)),
-            plan_tier=metadata.get("plan_tier", "pro"),
-            payment_provider="pingpp",
-            payment_subscription_id=payload.get("data", {}).get("object", {}).get("id", ""),
-        )
-    return {"received": True}
-
-
-def _activate_from_webhook(
-    db: Session,
-    user_id: int,
-    plan_tier: str,
-    payment_provider: str,
-    payment_subscription_id: str,
-    payment_customer_id: Optional[str] = None,
-) -> None:
-    if not user_id:
-        return
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        return
-
-    subscription_service.ensure_default_plans(db)
-    subscription_service.activate_subscription(
-        db=db,
-        user_id=user_id,
-        plan_tier=plan_tier,
-        payment_provider=payment_provider,
-        payment_subscription_id=payment_subscription_id,
-        payment_customer_id=payment_customer_id,
-    )
-
-
-def _cancel_by_provider_id(db: Session, subscription_id: str) -> None:
-    from app.models.subscription import SubscriptionStatus
-    from datetime import datetime, timezone
-    sub = db.query(UserSubscription).filter(
-        UserSubscription.payment_subscription_id == subscription_id
-    ).first()
-    if sub:
-        sub.status = SubscriptionStatus.cancelled.value
-        sub.cancelled_at = datetime.now(timezone.utc)
-        db.add(sub)
-        db.commit()
+    except WebhookRejectedError as exc:
+        raise api_error(400, str(exc), code=exc.code)
+    return {"received": True, "event_id": event.id, "status": event.status}
 
 
 # ================== 取消订阅 ==================

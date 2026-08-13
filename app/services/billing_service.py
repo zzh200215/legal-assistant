@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -15,7 +16,6 @@ from typing import Sequence
 from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
 from app.core.time import utc_now
 from app.models.legal import LegalCase
 from app.models.legal_billing import (
@@ -27,7 +27,8 @@ from app.models.legal_billing import (
     LegalRefundRecord,
     LegalTimeEntry,
 )
-from app.models.user import User
+from app.services.billing_state_machines import invoice_transition, refund_transition
+from app.services.cost_ledger_service import cost_ledger_service
 from app.services.oplog_service import oplog_service
 
 logger = logging.getLogger(__name__)
@@ -391,6 +392,7 @@ class BillingService:
                        billing_period_end: date | None = None,
                        discount_amount: Decimal = ZERO,
                        tax_rate: Decimal = ZERO,
+                       currency: str = "CNY",
                        time_entry_ids: list[int] | None = None,
                        idempotency_key: str | None = None) -> LegalInvoice:
         """创建账单：从已确认计时条目自动生成明细行，计算小计/税额/合计。"""
@@ -484,6 +486,24 @@ class BillingService:
         if total < ZERO:
             total = ZERO
 
+        # 不可变账单快照（价格/税费/周期），出账后不受后续变更影响
+        snapshot_items = [
+            {"title": e.description or f"计时 #{e.id}", "unit_price": str(_d(e.hourly_rate)),
+             "quantity": str(Decimal(str(e.duration_minutes or 0)) / Decimal("60"))
+             if e.duration_minutes else "1", "amount": str(_d(e.billed_amount))}
+            for e in entries
+        ]
+        snapshot_items.extend([
+            {"title": rule.name, "unit_price": str(_d(rule.fixed_amount)),
+             "quantity": "1", "amount": str(_d(rule.fixed_amount))}
+            for rule in fixed_rules
+        ])
+        price_json, tax_json, snapshot_hash = self._build_invoice_snapshot(
+            currency=currency, tax_rate=tax_rate, discount_amount=discount_amount,
+            billing_period_start=billing_period_start, billing_period_end=billing_period_end,
+            items=snapshot_items,
+        )
+
         invoice = LegalInvoice(
             organization_id=organization_id,
             case_id=case_id,
@@ -497,6 +517,10 @@ class BillingService:
             tax_amount=tax_amount,
             discount_amount=_d(discount_amount),
             total_amount=total,
+            currency=currency,
+            price_snapshot_json=price_json,
+            tax_snapshot_json=tax_json,
+            snapshot_hash=snapshot_hash,
             status="draft",
             payment_progress="unpaid",
             idempotency_key=idempotency_key or uuid.uuid4().hex,
@@ -555,9 +579,46 @@ class BillingService:
         if invoice.status in ("sent", "paid") or invoice.payment_progress in ("fully_paid", "refunding", "refunded"):
             raise ValueError("已发送或已付款费用通知单不可修改")
 
+    @staticmethod
+    def _set_invoice_status(invoice: LegalInvoice, target: str) -> None:
+        """发票状态迁移（集中校验，draft 可经 sent 中间态到达 paid/overdue）。"""
+        current = invoice.status
+        if current == target:
+            return
+        if current == "draft" and target in ("paid", "overdue"):
+            invoice_transition(current, "sent")
+            current = "sent"
+        invoice_transition(current, target)
+        invoice.status = target
+
+    @staticmethod
+    def _build_invoice_snapshot(*, currency: str, tax_rate: Decimal, discount_amount: Decimal,
+                                billing_period_start: date | None, billing_period_end: date | None,
+                                items: list[dict]) -> tuple[str, str, str]:
+        """构造不可变账单快照：价格/税费/周期快照 + 内容哈希。
+
+        返回 (price_snapshot_json, tax_snapshot_json, snapshot_hash)。
+        """
+        price_snapshot = {
+            "currency": currency,
+            "discount_amount": str(_d(discount_amount)),
+            "billing_period_start": str(billing_period_start) if billing_period_start else None,
+            "billing_period_end": str(billing_period_end) if billing_period_end else None,
+            "items": items,
+        }
+        tax_snapshot = {
+            "tax_rate": str(_d(tax_rate)),
+            "tax_basis": "subtotal",
+            "tax_region": None,
+        }
+        price_json = json.dumps(price_snapshot, ensure_ascii=False, sort_keys=True)
+        tax_json = json.dumps(tax_snapshot, ensure_ascii=False, sort_keys=True)
+        digest = hashlib.sha256(f"{price_json}|{tax_json}".encode("utf-8")).hexdigest()
+        return price_json, tax_json, digest
+
     def update_invoice(self, *, db: Session, invoice_id: int, user_id: int,
                        **fields) -> LegalInvoice:
-        """更新草稿账单字段（discount_amount / tax 等）。"""
+        """更新草稿账单字段（discount_amount / tax 等），重建不可变快照。"""
         invoice = self._get_invoice_or_raise(db, invoice_id)
         self._assert_mutable(invoice)
         if invoice.status not in ("draft",):
@@ -573,10 +634,37 @@ class BillingService:
         tax = _d(invoice.tax_amount)
         discount = _d(invoice.discount_amount)
         invoice.total_amount = max(subtotal + tax - discount, ZERO)
+        self._rebuild_snapshot(db, invoice)
 
         db.commit()
         db.refresh(invoice)
         return invoice
+
+    def _rebuild_snapshot(self, db: Session, invoice: LegalInvoice) -> None:
+        """按当前明细与字段重建账单快照与哈希（仅草稿可编辑期调用）。"""
+        items = db.query(LegalInvoiceItem).filter(
+            LegalInvoiceItem.invoice_id == invoice.id).order_by(LegalInvoiceItem.id).all()
+        snapshot_items = [
+            {"title": item.title, "unit_price": str(item.unit_price),
+             "quantity": str(item.quantity), "amount": str(item.amount)}
+            for item in items
+        ]
+        tax_rate = ZERO
+        if invoice.tax_snapshot_json:
+            try:
+                tax_rate = _d(json.loads(invoice.tax_snapshot_json).get("tax_rate"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                tax_rate = ZERO
+        price_json, tax_json, snapshot_hash = self._build_invoice_snapshot(
+            currency=invoice.currency or "CNY", tax_rate=tax_rate,
+            discount_amount=_d(invoice.discount_amount),
+            billing_period_start=invoice.billing_period_start,
+            billing_period_end=invoice.billing_period_end,
+            items=snapshot_items,
+        )
+        invoice.price_snapshot_json = price_json
+        invoice.tax_snapshot_json = tax_json
+        invoice.snapshot_hash = snapshot_hash
 
     def generate_and_attach_pdf(self, *, db: Session, invoice_id: int,
                                 logo_path: str | None = None) -> LegalInvoice:
@@ -611,7 +699,7 @@ class BillingService:
         if invoice.payment_progress in ("partial_paid", "fully_paid"):
             raise ValueError("已有付款记录的账单不可作废，请先退款")
 
-        invoice.status = "voided"
+        self._set_invoice_status(invoice, "voided")
         invoice.voided_at = utc_now()
         invoice.void_reason = reason
         db.commit()
@@ -712,6 +800,12 @@ class BillingService:
         db.add(payment)
         db.flush()
 
+        # 成本台账（charge，幂等去重）
+        cost_ledger_service.record_payment(
+            db=db, invoice_id=invoice_id, organization_id=organization_id,
+            amount=amount, payment_record_id=payment.id, recorded_by=recorded_by,
+        )
+
         # 更新账单收款进度
         self._update_payment_progress(db, invoice)
 
@@ -724,22 +818,22 @@ class BillingService:
         return payment
 
     def _update_payment_progress(self, db: Session, invoice: LegalInvoice) -> None:
-        """根据已确认付款总额更新账单的收款进度和状态。"""
+        """根据已确认付款总额更新账单的收款进度和状态（经状态机）。"""
         paid_total = self._net_paid_total(db, invoice.id)
         total = _d(invoice.total_amount)
         if paid_total >= total and total > ZERO:
             invoice.payment_progress = "fully_paid"
-            invoice.status = "paid"
+            self._set_invoice_status(invoice, "paid")
             invoice.paid_at = invoice.paid_at or utc_now()
         elif paid_total > ZERO:
             invoice.payment_progress = "partial_paid"
             if invoice.status == "paid":
-                invoice.status = "sent"
+                self._set_invoice_status(invoice, "sent")
                 invoice.paid_at = None
         else:
             invoice.payment_progress = "unpaid"
             if invoice.status == "paid":
-                invoice.status = "sent"
+                self._set_invoice_status(invoice, "sent")
                 invoice.paid_at = None
 
     def _net_paid_total(self, db: Session, invoice_id: int) -> Decimal:
@@ -813,8 +907,10 @@ class BillingService:
         return refund
 
     def approve_refund(self, *, db: Session, refund_id: int, approved_by: int,
-                       approved: bool) -> LegalRefundRecord:
-        """审批退款申请。"""
+                       approved: bool, provider_refund_id: str | None = None) -> LegalRefundRecord:
+        """审批退款申请（DB 层原子校验：退款总额不得超已付未退余额）。"""
+        from sqlalchemy import text as sa_text
+
         refund = db.query(LegalRefundRecord).filter(LegalRefundRecord.id == refund_id).first()
         if not refund:
             raise ValueError("退款记录不存在")
@@ -822,18 +918,45 @@ class BillingService:
             raise ValueError("退款申请已处理")
 
         now = utc_now()
-        if approved:
-            refund.status = "completed"
-            refund.approved_by = approved_by
-            refund.approved_at = now
-            # 重新计算账单进度
-            invoice = db.query(LegalInvoice).filter(LegalInvoice.id == refund.invoice_id).first()
-            if invoice:
-                self._update_payment_progress(db, invoice)
-        else:
+        if not approved:
+            refund_transition(refund.status, "rejected")
             refund.status = "rejected"
             refund.approved_by = approved_by
             refund.approved_at = now
+            db.commit()
+            db.refresh(refund)
+            return refund
+
+        # 集中校验 + 数据库原子保证：amount <= 已付已确认 - 已退(pending+completed)
+        refund_transition(refund.status, "completed")
+        result = db.execute(sa_text(
+            "UPDATE legal_refund_records SET status='completed', approved_by=:by, approved_at=:now "
+            "WHERE id=:rid AND status='pending' AND amount <= ("
+            "  SELECT COALESCE(SUM(p.amount),0) - COALESCE(SUM(r.amount),0)"
+            "  FROM legal_payment_records p"
+            "  LEFT JOIN legal_refund_records r ON r.invoice_id = p.invoice_id"
+            "    AND r.status IN ('pending','completed')"
+            "  WHERE p.invoice_id = :inv AND p.status='confirmed'"
+            ")"
+        ), {"by": approved_by, "now": now, "rid": refund.id, "inv": refund.invoice_id})
+        if result.rowcount == 0:
+            db.rollback()
+            raise ValueError("退款金额超过可退余额，已拒绝（并发安全）")
+        # 原始 UPDATE 后重载 DB 状态，避免 ORM 缓存回写覆盖
+        refund = db.query(LegalRefundRecord).filter(
+            LegalRefundRecord.id == refund_id).populate_existing().first()
+        if provider_refund_id:
+            refund.provider_refund_id = provider_refund_id
+
+        # 成本台账（refund，幂等去重）
+        cost_ledger_service.record_refund(
+            db=db, invoice_id=refund.invoice_id, organization_id=refund.organization_id,
+            amount=_d(refund.amount), refund_record_id=refund.id, recorded_by=approved_by,
+        )
+        # 重新计算账单进度
+        invoice = db.query(LegalInvoice).filter(LegalInvoice.id == refund.invoice_id).first()
+        if invoice:
+            self._update_payment_progress(db, invoice)
 
         db.commit()
         db.refresh(refund)

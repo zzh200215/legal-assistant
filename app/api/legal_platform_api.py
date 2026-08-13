@@ -3,6 +3,7 @@
 import hashlib
 import ipaddress
 import json
+import logging
 import secrets
 import time
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from app.models.user import User
 from app.models.org import OrganizationMember, LegalMemberRole
 from app.models.legal_platform import (
     DeveloperApp, DeveloperApiKey, DeveloperApiUsage,
-    WebhookSubscription, WebhookDelivery, LegalAsyncJob,
+    WebhookDelivery, LegalAsyncJob,
     LegalAsyncJobInput,
 )
 from app.models.legal_notifications import (
@@ -31,6 +32,7 @@ from app.models.legal_notifications import (
     OrganizationOnboardingProgress,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 open_router = APIRouter()
 
@@ -384,7 +386,7 @@ def open_create_contract_review(
         db.commit()
         db.refresh(job)
 
-        # 联动扣减组织管理员的月度审查配额（失败不阻断接口）
+        # 联动扣减组织管理员的月度审查配额（原子；失败记日志不阻断接口）
         try:
             from app.models.org import OrganizationMember
             from app.services.subscription_service import subscription_service
@@ -393,9 +395,12 @@ def open_create_contract_review(
                 OrganizationMember.legal_role == "admin",
             ).first()
             if admin_member:
-                subscription_service.record_usage(db, admin_member.user_id, "review")
-        except Exception:
-            pass
+                subscription_service.try_consume_quota(
+                    db=db, user_id=admin_member.user_id, quota_type="review",
+                    usage_event_id=f"open-review:{job.id}",
+                    source_type="open_contract_review", source_id=str(job.id))
+        except Exception as exc:  # noqa: BLE001 - 联动扣减失败仅告警，不阻断受理
+            logger.warning("联动扣减审查配额失败 job_id=%s: %s", job.id, exc)
 
         duration_ms = int((time.monotonic() - started) * 1000)
         db.add(DeveloperApiUsage(app_id=app.id, organization_id=app.organization_id,
@@ -580,7 +585,8 @@ def export_audit_events(
         for e in events
     ]
     if fmt == "csv":
-        import csv, io
+        import csv
+        import io
         buf = io.StringIO()
         if rows:
             writer = csv.DictWriter(buf, fieldnames=rows[0].keys())

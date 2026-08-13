@@ -579,8 +579,11 @@ class OutboundEmailService:
             invoice_id = metadata.get("billing_invoice_id")
             if invoice_id:
                 from app.models.legal_billing import LegalInvoice
+                from app.services.billing_state_machines import invoice_transition
+
                 invoice = db.query(LegalInvoice).filter(LegalInvoice.id == invoice_id).first()
                 if invoice and invoice.organization_id == request.organization_id and invoice.status == "draft":
+                    invoice_transition("draft", "sent")
                     invoice.status = "sent"
                     invoice.sent_at = request.sent_at
             db.commit()

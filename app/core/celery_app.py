@@ -40,7 +40,9 @@ def _routes() -> dict:
         "scan_expired_portal_links", "scan_contract_expiry_alerts",
         "check_legal_approval_timeouts", "confirm_account_deletions",
         "deliver_email_send_requests", "recover_stale_outbox_claims")
-    add("billing", "scan_overdue_invoices", "scan_expired_subscriptions")
+    add("billing", "scan_overdue_invoices", "scan_expired_subscriptions",
+        "dispatch_payment_events", "recover_stale_payment_events",
+        "run_daily_reconciliation", "recover_stale_reconciliation_runs")
     add("connector", "mailbox_sync_task", "recover_stale_mailbox_syncs")
     return routes
 
@@ -84,6 +86,22 @@ celery_app.conf.update(
         },
         "recover-stale-outbox-claims": {
             "task": "recover_stale_outbox_claims",
+            "schedule": 300.0,
+        },
+        "dispatch-payment-events": {
+            "task": "dispatch_payment_events",
+            "schedule": 60.0,
+        },
+        "recover-stale-payment-events": {
+            "task": "recover_stale_payment_events",
+            "schedule": 300.0,
+        },
+        "run-daily-reconciliation": {
+            "task": "run_daily_reconciliation",
+            "schedule": crontab(minute=17, hour=1),
+        },
+        "recover-stale-reconciliation-runs": {
+            "task": "recover_stale_reconciliation_runs",
             "schedule": 300.0,
         },
         "scan-overdue-invoices": {

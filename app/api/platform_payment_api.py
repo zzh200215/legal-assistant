@@ -16,6 +16,8 @@ from app.models.org import OrganizationMember
 from app.models.platform_payment import PlatformPayment
 from app.models.subscription import SubscriptionPlan
 from app.models.user import User
+from app.services.billing_state_machines import platform_payment_transition
+from app.services.cost_ledger_service import cost_ledger_service
 from app.services.oplog_service import oplog_service
 from app.services.subscription_service import subscription_service
 
@@ -33,6 +35,11 @@ class BankTransferRequest(BaseModel):
 
 class ConfirmRequest(BaseModel):
     invoice_snapshot: Optional[dict] = None
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+class RefundRequest(BaseModel):
+    amount: Decimal = Field(..., gt=0)
     note: Optional[str] = Field(None, max_length=2000)
 
 
@@ -101,6 +108,7 @@ def confirm_bank_transfer(
         raise api_error(404, "收款记录不存在", code="PLATFORM_PAYMENT_NOT_FOUND")
     if payment.status != "pending":
         raise api_error(400, f"当前状态 {payment.status} 不可确认", code="PAYMENT_ALREADY_PROCESSED")
+    platform_payment_transition(payment.status, "confirmed")
 
     payment.status = "confirmed"
     payment.confirmed_by = current_user.id
@@ -130,6 +138,9 @@ def confirm_bank_transfer(
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    # 平台收款入成本台账（payment，幂等去重）
+    cost_ledger_service.record_platform_payment(db=db, platform_payment=payment, direction="payment")
+    db.commit()
     oplog_service.log(
         module="platform_payment", action="bank_transfer_confirmed", db=db,
         user_id=current_user.id, target_type="platform_payment", target_id=payment.id,
@@ -150,6 +161,7 @@ def reject_bank_transfer(
         raise api_error(404, "收款记录不存在", code="PLATFORM_PAYMENT_NOT_FOUND")
     if payment.status != "pending":
         raise api_error(400, f"当前状态 {payment.status} 不可驳回", code="PAYMENT_ALREADY_PROCESSED")
+    platform_payment_transition(payment.status, "rejected")
     payment.status = "rejected"
     if req.note:
         payment.note = (payment.note or "") + f"\n[驳回备注] {req.note}"
@@ -161,6 +173,63 @@ def reject_bank_transfer(
         detail=req.note or "",
     )
     return {"payment_id": payment.id, "status": "rejected"}
+
+
+@router.post("/payments/{payment_id}/refund")
+def refund_bank_transfer(
+    payment_id: int,
+    req: RefundRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """平台收款退款（admin）：全额/部分退款，DB 层保证退款累计不超过已收金额。
+
+    退款后关联的订阅取消，降回免费版；成本台账记 refund。
+    """
+    from decimal import Decimal as _Decimal
+    from sqlalchemy import text as sa_text
+
+    amount = _Decimal(str(req.amount))
+    payment = db.query(PlatformPayment).filter(PlatformPayment.id == payment_id).first()
+    if not payment:
+        raise api_error(404, "收款记录不存在", code="PLATFORM_PAYMENT_NOT_FOUND")
+    if payment.status != "confirmed":
+        raise api_error(400, f"仅已确认收款可退款，当前状态 {payment.status}", code="PAYMENT_NOT_REFUNDABLE")
+    if amount <= 0:
+        raise api_error(400, "退款金额必须大于零", code="INVALID_REFUND_AMOUNT")
+
+    platform_payment_transition(payment.status, "refunded")
+    # 原子并发保护：refunded_amount + amount <= amount
+    result = db.execute(sa_text(
+        "UPDATE platform_payments SET status='refunded', refunded_amount = refunded_amount + :amt "
+        "WHERE id=:pid AND status='confirmed' AND refunded_amount + :amt <= amount"
+    ), {"amt": str(amount), "pid": payment_id})
+    if result.rowcount == 0:
+        db.rollback()
+        raise api_error(400, "退款金额超过可退余额", code="REFUND_EXCEEDS_BALANCE")
+    payment = db.query(PlatformPayment).filter(PlatformPayment.id == payment_id).first()
+    if req.note:
+        payment.note = (payment.note or "") + f"\n[退款备注] {req.note}"
+    db.commit()
+    # 成本台账（refund）
+    cost_ledger_service.record_platform_payment(
+        db=db, platform_payment=payment, direction="refund", amount=amount)
+    db.commit()
+    # 取消该收款激活的订阅（若有）
+    member = (
+        db.query(OrganizationMember)
+        .filter(OrganizationMember.organization_id == payment.organization_id)
+        .order_by(OrganizationMember.organization_id.asc())
+        .first()
+    )
+    if member:
+        subscription_service.cancel_subscription(db, member.user_id, reason="platform_payment_refunded")
+    oplog_service.log(
+        module="platform_payment", action="bank_transfer_refunded", db=db,
+        user_id=current_user.id, target_type="platform_payment", target_id=payment.id,
+        detail=f"amount={amount}; refunded_total={payment.refunded_amount}",
+    )
+    return {"payment_id": payment.id, "status": "refunded", "refunded_amount": str(payment.refunded_amount)}
 
 
 @router.get("/payments")

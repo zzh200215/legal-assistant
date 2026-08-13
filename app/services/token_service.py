@@ -1,8 +1,7 @@
 import json
-import time
-from datetime import datetime, timedelta
+from datetime import timedelta
+from decimal import Decimal
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.models.token_usage import TokenUsage
 from app.core.config import get_settings
@@ -53,6 +52,15 @@ class TokenService:
             duration_ms=duration_ms,
         )
         db.add(usage)
+        db.flush()  # 取得 id 供成本台账幂等入账
+        # 统一成本台账（Decimal 精度；同事务，来源去重）
+        if user_id:
+            from app.services.cost_ledger_service import cost_ledger_service
+            cost_ledger_service.record_llm_cost(
+                db=db, user_id=user_id, model=model, action=action or "",
+                cost=Decimal(str(cost)), prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens, token_usage_id=usage.id,
+            )
         db.commit()
         db.refresh(usage)
         return usage

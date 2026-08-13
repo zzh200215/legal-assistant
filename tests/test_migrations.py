@@ -229,6 +229,75 @@ class MigrationChainTests(unittest.TestCase):
         self.assertTrue(event.idempotency_key.startswith("legacy:notify:"))
         self.assertEqual(event.attempt, 0)
 
+    def test_0077_creates_payment_reliability_tables_and_columns(self):
+        """0077 必须建事件/台账/配额预留/对账表，扩展订阅与发票投递列，含回填与 downgrade。"""
+        path = "alembic/versions/20260813_0077_payment_reliability.py"
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        for table in ("payment_events", "cost_ledger", "usage_reservations",
+                      "reconciliation_runs", "reconciliation_discrepancies",
+                      "subscription_plan_versions"):
+            self.assertIn(f'"{table}"', src, f"0077 缺少建表 {table}")
+        for col in ("price_version", "currency", "idempotency_key", "plan_version",
+                    "price_snapshot_json", "tax_snapshot_json", "snapshot_hash",
+                    "refunded_amount", "provider_refund_id"):
+            self.assertIn(f'"{col}"', src, f"0077 缺少列 {col}")
+        self.assertIn("uq_payment_events_provider_event_id", src)
+        self.assertIn("uq_cost_ledger_scope_key", src)
+        self.assertIn("uq_usage_reservations_event_id", src)
+        self.assertIn("uq_quota_usages_user_month", src)
+        self.assertIn("_backfill", src, "0077 应包含旧数据回填")
+        self.assertIn("def downgrade", src)
+
+    def test_0077_backfill_adds_legacy_keys_and_plan_snapshot(self):
+        """0077 回填：subscription/platform 补 legacy 幂等键，并生成套餐版本快照（幂等）。"""
+        import importlib.util
+
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+
+        import app.models  # noqa: F401
+        from app.core.database import Base
+        from app.models.platform_payment import PlatformPayment
+        from app.models.subscription import SubscriptionPlan, SubscriptionPlanVersion
+
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:", future=True,
+            connect_args={"check_same_thread": False}, poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=engine)
+        db = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+        plan = SubscriptionPlan(tier="pro", name="pro", price_monthly=199,
+                                quota_consultation=50, quota_review=20, quota_draft=20,
+                                price_version=1, currency="CNY")
+        db.add(plan)
+        db.commit()
+        db.refresh(plan)
+        pay = PlatformPayment(organization_id=1, user_id=1, plan_tier="pro",
+                              amount=199, currency="CNY", status="pending")
+        db.add(pay)
+        db.commit()
+        db.refresh(pay)
+        self.assertIsNone(pay.idempotency_key)
+
+        spec = importlib.util.spec_from_file_location(
+            "mig_0077", "alembic/versions/20260813_0077_payment_reliability.py")
+        mig = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mig)
+        mig._backfill(engine)
+
+        db.refresh(pay)
+        self.assertIsNotNone(pay.idempotency_key)
+        self.assertTrue(pay.idempotency_key.startswith("legacy:pay:"))
+        snap = db.query(SubscriptionPlanVersion).filter(
+            SubscriptionPlanVersion.plan_id == plan.id).first()
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap.price_version, 1)
+        self.assertEqual(snap.quota_consultation, 50)
+        # 幂等：重复回填不重复插入快照
+        mig._backfill(engine)
+        self.assertEqual(db.query(SubscriptionPlanVersion).count(), 1)
+
 
 class DirtyDataDedupeTests(unittest.TestCase):
     def setUp(self):

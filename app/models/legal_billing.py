@@ -72,6 +72,11 @@ class LegalInvoice(Base):
     tax_amount = Column(Numeric(14, 2), nullable=False, default=0)
     discount_amount = Column(Numeric(14, 2), nullable=False, default=0)
     total_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    currency = Column(String(8), nullable=False, default="CNY")
+    # 不可变账单快照：价格/税费/周期/客户信息，出账后不受后续变更影响
+    price_snapshot_json = Column(Text, nullable=True, comment="套餐/单价/数量/折扣快照")
+    tax_snapshot_json = Column(Text, nullable=True, comment="税率/税额/税务地区快照")
+    snapshot_hash = Column(String(64), nullable=True, comment="快照内容 SHA-256")
     # 收款进度：unpaid / partial_paid / fully_paid / refunding / refunded
     payment_progress = Column(String(16), nullable=False, default="unpaid", index=True)
     status = Column(String(16), nullable=False, default="draft", index=True,
@@ -137,6 +142,7 @@ class LegalRefundRecord(Base):
     amount = Column(Numeric(14, 2), nullable=False)
     reason = Column(Text, nullable=False)
     status = Column(String(16), nullable=False, default="pending", comment="pending / approved / rejected / completed")
+    provider_refund_id = Column(String(128), nullable=True, index=True, comment="供应商退款 ID")
     recorded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
