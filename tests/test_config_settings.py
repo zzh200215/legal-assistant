@@ -139,3 +139,28 @@ def test_engine_kwargs_sqlite_skips_pool_params():
 def test_idempotency_ttl_default():
     s = Settings(**_valid_settings_kwargs())
     assert s.IDEMPOTENCY_KEY_TTL_SECONDS == 86400
+
+
+def test_reliability_settings_defaults_are_finite():
+    """P0/P1 可靠性设置默认有限：不允许无限重试/超时/锁 TTL。"""
+    s = Settings(**_valid_settings_kwargs())
+    # 队列路由默认开、默认队列是已消费队列
+    assert s.TASK_QUEUE_ROUTING_ENABLED is True
+    assert s.TASK_DEFAULT_QUEUE == "connector"
+    # 外部调用：有限重试与等待
+    assert 1 <= s.EXTERNAL_MAX_ATTEMPTS <= 10
+    assert 1 <= s.EXTERNAL_MAX_WAIT_SECONDS <= 600
+    assert 1 <= s.EXTERNAL_DEFAULT_TIMEOUT_SECONDS <= 300
+    assert s.EXTERNAL_BACKOFF_JITTER is True
+    # 熔断阈值有限
+    assert 2 <= s.EXTERNAL_CIRCUIT_FAILURE_THRESHOLD <= 100
+    assert 5 <= s.EXTERNAL_CIRCUIT_COOLDOWN_SECONDS <= 3600
+    # 同步与锁
+    assert 1 <= s.SYNC_DEFAULT_BATCH_SIZE <= 1000
+    assert 60 <= s.SYNC_RUN_LEASE_TTL_SECONDS <= 86400
+    assert 10 <= s.TASK_LOCK_DEFAULT_TTL_SECONDS <= 86400
+    # 连接器同步默认关闭（mock 连接器，不产生真实外部调用）
+    assert s.CONNECTOR_SYNC_ENABLED is False
+    assert s.CONNECTOR_SYNC_MOCK_MODE is True
+    # 邮件确定性幂等默认开
+    assert s.EMAIL_SEND_DETERMINISTIC_IDEMPOTENCY is True

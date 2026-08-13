@@ -22,6 +22,7 @@ from app.core.config.messaging import MessagingSettings
 from app.core.config.observability import ObservabilitySettings
 from app.core.config.payment import PaymentSettings
 from app.core.config.rag import RAGSettings
+from app.core.config.reliability import ReliabilitySettings
 from app.core.config.security import SecuritySettings
 from app.core.config.sql import SQLSettings
 from app.core.config.storage import StorageSettings
@@ -69,6 +70,7 @@ class Settings(
     PaymentSettings,
     ObservabilitySettings,
     TaskSettings,
+    ReliabilitySettings,
     SQLSettings,
     MessagingSettings,
 ):

@@ -782,17 +782,30 @@ class FeishuMessenger:
         if not token:
             return {"configured": False}
         client = await self._client()
-        resp = await client.post(
-            f"{self.base_url}/im/v1/messages",
-            params={"receive_id_type": "open_id"},
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "receive_id": receive_id,
-                "msg_type": msg_type,
-                "content": json.dumps(content, ensure_ascii=False),
-            },
-        )
-        data = resp.json()
+
+        async def _post() -> dict:
+            resp = await client.post(
+                f"{self.base_url}/im/v1/messages",
+                params={"receive_id_type": "open_id"},
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "receive_id": receive_id,
+                    "msg_type": msg_type,
+                    "content": json.dumps(content, ensure_ascii=False),
+                },
+            )
+            resp.raise_for_status()  # HTTP 错误交给韧性层分类/重试/熔断
+            return resp.json()
+
+        try:
+            from app.core.external_resilience import ExternalError, external_resilience
+
+            data = await external_resilience.acall(
+                _post, service="feishu", op="send_message", method="POST",
+            )
+        except ExternalError:
+            # 传输/服务端错误已记日志并计熔断；按未发送返回，冷却/下一轮 beat 自然处理。
+            return {"configured": True, "sent": False}
         if data.get("code") != 0:
             return {
                 "configured": True,

@@ -7,6 +7,7 @@ import redis
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.external_resilience import external_resilience
 from app.core.time import utc_now
 from app.services.analytics_service import analytics_service
 from app.services.oplog_service import oplog_service
@@ -78,8 +79,14 @@ class OperationalAlertService:
             return {"status": "deduplicated", "sent_count": 0}
 
         payload = {"msgtype": "markdown", "markdown": {"content": self._format_message([item for _, item in unique])}}
-        response = httpx.post(webhook_url, json=payload, timeout=settings.ALERT_WEBHOOK_TIMEOUT_SECONDS)
-        response.raise_for_status()
+
+        def _post() -> None:
+            response = httpx.post(webhook_url, json=payload, timeout=settings.ALERT_WEBHOOK_TIMEOUT_SECONDS)
+            response.raise_for_status()
+
+        # 韧性层包裹：5xx/连接类可重试，写超时降级 AMBIGUOUS 不盲目重试；
+        # Redis 小时去重键仅在成功后写入，失败由下一 beat tick 自然重试。
+        external_resilience.call(_post, service="operational_alert", op="dispatch", method="POST")
         for key, _ in unique:
             cache.set(key, "1", ex=3600)
         oplog_service.log(

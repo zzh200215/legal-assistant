@@ -64,7 +64,34 @@ def main() -> None:
     )
     worker_pid = _start(
         "celery_worker",
-        [sys.executable, "-m", "celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info"],
+        [
+            sys.executable,
+            "-m",
+            "celery",
+            "-A",
+            "app.core.celery_app.celery_app",
+            "worker",
+            "--loglevel=info",
+            "-Q",
+            "document,notification,billing,connector",
+            "--concurrency=4",
+        ],
+        ROOT,
+    )
+    network_pid = _start(
+        "celery_worker_network",
+        [
+            sys.executable,
+            "-m",
+            "celery",
+            "-A",
+            "app.core.celery_app.celery_app",
+            "worker",
+            "--loglevel=info",
+            "-Q",
+            "llm,connector",
+            "--concurrency=2",
+        ],
         ROOT,
     )
     beat_pid = _start(
@@ -75,6 +102,7 @@ def main() -> None:
     print(f"backend pid: {backend_pid}")
     print(f"frontend pid: {frontend_pid}")
     print(f"celery worker pid: {worker_pid}")
+    print(f"celery worker_network pid: {network_pid}")
     print(f"celery beat pid: {beat_pid}")
 
 

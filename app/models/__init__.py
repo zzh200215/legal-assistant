@@ -1,5 +1,8 @@
 from app.models.org import Department, Organization
 from app.models.connector import ExternalConnector
+from app.models.connector_sync_item import ConnectorSyncItem
+from app.models.task_run import TaskRun
+from app.models.sync_run import SyncRun
 from app.models.user import User, UserRole, UserStatus
 from app.models.auth_log import LoginLog, AdminAuditLog
 from app.models.document import Document, DocumentAccessRule, DocumentAssistantArtifact, DocumentAssistantRevision, DocumentChunk, DocumentConflictCase, DocumentParseArtifact, DocumentParseJob, DocumentQARecord, KnowledgeBase
@@ -57,6 +60,9 @@ __all__ = [
     "Organization",
     "Department",
     "ExternalConnector",
+    "ConnectorSyncItem",
+    "TaskRun",
+    "SyncRun",
     "Document",
     "DocumentAccessRule",
     "DocumentAssistantArtifact",

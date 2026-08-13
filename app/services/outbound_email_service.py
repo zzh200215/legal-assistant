@@ -12,6 +12,8 @@ from email.utils import make_msgid
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
+from app.core.external_resilience import external_resilience
 from app.models.connector import ExternalConnector
 from app.models.email import EmailDraft, EmailSendRequest, OutboundEmailPolicy
 from app.models.user import User
@@ -77,6 +79,17 @@ class OutboundEmailService:
     def _draft_hash(draft: EmailDraft) -> str:
         source = "\n".join([draft.recipient or "", draft.cc or "", draft.subject or "", draft.content or ""])
         return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _smtp_send(config: dict, credentials: dict, message: EmailMessage) -> None:
+        """同步发送一封邮件。由韧性层包裹：连接类错误可重试，写超时降级 AMBIGUOUS 不重试。"""
+        with smtplib.SMTP(str(config.get("host")), int(config.get("port") or 587), timeout=20) as client:
+            client.ehlo()
+            if config.get("use_starttls", True):
+                client.starttls()
+                client.ehlo()
+            client.login(str(credentials.get("username") or ""), str(credentials.get("password") or ""))
+            client.send_message(message)
 
     def _policy(self, *, db: Session, organization_id: int | None) -> OutboundEmailPolicy | None:
         if organization_id is not None:
@@ -180,14 +193,35 @@ class OutboundEmailService:
         self._get_smtp_connector(connector_id, db=db, user=user)
         policy = self._validate_policy(db=db, user=user, recipient=draft.recipient or "", cc=draft.cc)
         fingerprint = self._draft_hash(draft)
+        # 兼容旧行（idempotency_key 为随机 uuid）：按 draft_id + content_hash 去重
         existing = db.query(EmailSendRequest).filter(EmailSendRequest.draft_id == draft.id, EmailSendRequest.content_hash == fingerprint, EmailSendRequest.status.in_(["pending", "approved", "sending", "sent"])).first()
         if existing:
             return existing
         dlp_result = self._scan_dlp(draft=draft, policy=policy)
+        # 确定性幂等键：同草稿+同内容复用同一行（跨请求去重），而非随机 uuid
+        idem_key = None
+        if get_settings().EMAIL_SEND_DETERMINISTIC_IDEMPOTENCY:
+            idem_key = f"email:{draft.id}:{fingerprint[:16]}"
+            by_key = db.query(EmailSendRequest).filter(EmailSendRequest.idempotency_key == idem_key).first()
+            if by_key is not None:
+                if by_key.status in ("pending", "approved", "sending", "sent"):
+                    return by_key
+                # failed/rejected：同一确定性键复用该行，重置为待审批（换连接器也允许）
+                by_key.smtp_connector_id = connector_id
+                by_key.status = "blocked" if dlp_result["blocked"] else "pending"
+                by_key.rejection_note = None
+                by_key.error_message = None
+                by_key.sent_at = None
+                by_key.provider_message_id = None
+                by_key.approved_at = None
+                by_key.approved_by_user_id = None
+                self._store_dlp_result(by_key, dlp_result)
+                db.commit(); db.refresh(by_key)
+                return by_key
         request = EmailSendRequest(
             draft_id=draft.id, smtp_connector_id=connector_id, user_id=user.id, organization_id=user.organization_id,
             recipient=draft.recipient or "", cc=draft.cc, subject=draft.subject, content_hash=fingerprint,
-            idempotency_key=uuid.uuid4().hex, status="blocked" if dlp_result["blocked"] else "pending",
+            idempotency_key=idem_key or uuid.uuid4().hex, status="blocked" if dlp_result["blocked"] else "pending",
         )
         self._store_dlp_result(request, dlp_result)
         db.add(request); db.commit(); db.refresh(request)
@@ -316,15 +350,20 @@ class OutboundEmailService:
         message["Subject"] = request.subject
         message["Message-ID"] = message_id
         message.set_content(draft.content)
-        request.status = "sending"; db.commit()
+        # 发送前持久化 provider_message_id 作幂等确认：即使后续超时/中断，
+        # 也能据此确认该邮件是否已交到 SMTP 服务（不盲目重试）。
+        request.status = "sending"
+        request.provider_message_id = message_id
+        db.commit()
         try:
-            with smtplib.SMTP(str(config.get("host")), int(config.get("port") or 587), timeout=20) as client:
-                client.ehlo()
-                if config.get("use_starttls", True):
-                    client.starttls(); client.ehlo()
-                client.login(str(credentials.get("username") or ""), str(credentials.get("password") or ""))
-                client.send_message(message)
-            request.status = "sent"; request.sent_at = datetime.now(timezone.utc); request.provider_message_id = message_id; request.error_message = None
+            external_resilience.call(
+                lambda: self._smtp_send(config, credentials, message),
+                service="smtp",
+                op="send_message",
+                connector_id=connector.id,
+                method="POST",
+            )
+            request.status = "sent"; request.sent_at = datetime.now(timezone.utc); request.error_message = None
             # Billing drafts remain drafts until this successful provider handoff.
             # The metadata binding is written by BillingService and is deliberately
             # evaluated only after policy, DLP, approval and SMTP have all passed.
@@ -382,12 +421,13 @@ class OutboundEmailService:
         message["To"] = recipient
         message["Subject"] = subject
         message.set_content(content)
-        with smtplib.SMTP(str(config.get("host")), int(config.get("port") or 587), timeout=20) as client:
-            client.ehlo()
-            if config.get("use_starttls", True):
-                client.starttls(); client.ehlo()
-            client.login(str(credentials.get("username") or ""), str(credentials.get("password") or ""))
-            client.send_message(message)
+        external_resilience.call(
+            lambda: self._smtp_send(config, credentials, message),
+            service="smtp",
+            op="send_portal_otp",
+            connector_id=connector.id,
+            method="POST",
+        )
         db.add(draft)
         db.commit()
         oplog_service.log(module="portal", action="portal_otp_sent", db=db, user_id=user.id,

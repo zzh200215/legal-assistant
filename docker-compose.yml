@@ -152,13 +152,78 @@ services:
       # 备份任务：输出与数据目录须匹配容器内挂载点（默认相对路径 data/ 在镜像内不存在，会静默产出空归档）
       BACKUP_OUTPUT_DIR: /app/backups
       BACKUP_DATA_DIRS: '["/app/uploads", "/app/chroma_db"]'
-    command: celery -A app.core.celery_app.celery_app worker --loglevel=info --hostname=worker@%h
+    # 队列拆分：CPU/IO 重任务（document/notification/billing）+ 外发（connector）一台；
+    # LLM/网络绑定任务（llm）+ 外发（connector）由 celery_worker_network 独立消费，互不阻塞。
+    command: celery -A app.core.celery_app.celery_app worker --loglevel=info --hostname=worker@%h -Q document,notification,billing,connector --concurrency=4 --max-tasks-per-child=200
     volumes:
       - ./data/uploads:/app/uploads
       - ./data/chroma_db:/app/chroma_db
       - ./data/backups:/app/backups
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery_app.celery_app inspect ping -d worker@$$HOSTNAME --timeout=5 | grep -q pong"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+  celery_worker_network:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-office-celery-network
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:?set DATABASE_URL_DOCKER in .env}
+      REDIS_URL: redis://redis:6379/0
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compatible}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-qwen-plus}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v3}
+      LLM_MODEL_ROUTING_ENABLED: ${LLM_MODEL_ROUTING_ENABLED:-true}
+      LLM_SMALL_MODEL: ${LLM_SMALL_MODEL:-}
+      LLM_SMALL_MODEL_PROVIDER: ${LLM_SMALL_MODEL_PROVIDER:-openai_compatible}
+      LLM_SMALL_MODEL_API_BASE_URL: ${LLM_SMALL_MODEL_API_BASE_URL:-}
+      LLM_SMALL_MODEL_API_KEY: ${LLM_SMALL_MODEL_API_KEY:-}
+      LLM_SIMPLE_REQUEST_MAX_CHARS: ${LLM_SIMPLE_REQUEST_MAX_CHARS:-600}
+      LLM_PRIMARY_REQUEST_RETRIES: ${LLM_PRIMARY_REQUEST_RETRIES:-2}
+      LLM_FALLBACK_REQUEST_RETRIES: ${LLM_FALLBACK_REQUEST_RETRIES:-1}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-60}
+      LLM_MODEL_FALLBACK_ENABLED: ${LLM_MODEL_FALLBACK_ENABLED:-true}
+      LLM_SMALL_MODEL_FALLBACK_TO_PRIMARY: ${LLM_SMALL_MODEL_FALLBACK_TO_PRIMARY:-true}
+      LLM_ROUTING_ALERT_MIN_REQUESTS: ${LLM_ROUTING_ALERT_MIN_REQUESTS:-10}
+      LLM_ROUTING_ALERT_PRIMARY_FAILURE_RATE: ${LLM_ROUTING_ALERT_PRIMARY_FAILURE_RATE:-0.20}
+      LLM_ROUTING_ALERT_FALLBACK_FAILURE_RATE: ${LLM_ROUTING_ALERT_FALLBACK_FAILURE_RATE:-0.30}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: ${CONNECTOR_CREDENTIAL_ENCRYPTION_KEY:-}
+      LEGAL_DATA_ENCRYPTION_KEY: ${LEGAL_DATA_ENCRYPTION_KEY:-}
+      LEGAL_DATA_ENCRYPTION_KEYS_JSON: ${LEGAL_DATA_ENCRYPTION_KEYS_JSON:-}
+      LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION: ${LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION:-v1}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      MAILBOX_RETENTION_DAYS: ${MAILBOX_RETENTION_DAYS:-90}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_TIMEOUT_SECONDS: ${ALERT_WEBHOOK_TIMEOUT_SECONDS:-5}
+      ALERT_WEBHOOK_MIN_SEVERITY: ${ALERT_WEBHOOK_MIN_SEVERITY:-high}
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+      BACKUP_OUTPUT_DIR: /app/backups
+      BACKUP_DATA_DIRS: '["/app/uploads", "/app/chroma_db"]'
+    # LLM 网络绑定 + 外发：与 CPU 重 worker 隔离，concurrency 低防打爆上游
+    command: celery -A app.core.celery_app.celery_app worker --loglevel=info --hostname=network@%h -Q llm,connector --concurrency=2 --max-tasks-per-child=200
+    volumes:
+      - ./data/uploads:/app/uploads
+      - ./data/chroma_db:/app/chroma_db
+      - ./data/backups:/app/backups
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app.celery_app inspect ping -d network@$$HOSTNAME --timeout=5 | grep -q pong"]
       interval: 30s
       timeout: 10s
       retries: 3

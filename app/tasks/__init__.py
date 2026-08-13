@@ -25,11 +25,16 @@ from app.services.document_state import (
 from app.services.storage_service import storage_service
 from app.tasks.runtime import (
     acquire_document_lock as _acquire_document_lock,
+    acquire_task_lock as _acquire_task_lock,
     background_error_detail as _background_error_detail,
+    beat_lock as _beat_lock,
     record_beat_heartbeat as _record_beat_heartbeat,
     release_document_lock as _release_document_lock,
+    release_task_lock as _release_task_lock,
 )
 from app.tasks.task_retry import retry_task as _retry_task_impl
+from app.tasks.task_run_registry import TaskRunSpec as _TaskRunSpec
+from app.tasks.task_run_registry import register as _register_task_run_spec
 
 
 def _retry_task(self, exc: Exception, **kwargs):
@@ -313,6 +318,7 @@ def document_export_task(document_id: int, export_type: str = "archive", user_id
 
 
 @celery_app.task(name="recover_stale_document_jobs")
+@_beat_lock(task_name="recover_stale_document_jobs", ttl_seconds=600)
 def recover_stale_document_jobs_task():
     """Beat 任务：回收租约过期/worker 崩溃残留的文档处理任务并重新入队。
 
@@ -491,6 +497,7 @@ def analyze_document_task(self, document_id: int, user_id: int, max_length: int 
 
 
 @celery_app.task(name="dispatch_operational_alerts")
+@_beat_lock(task_name="dispatch_operational_alerts", ttl_seconds=600)
 def dispatch_operational_alerts_task():
     _record_beat_heartbeat()
     db = SessionLocal()
@@ -503,6 +510,7 @@ def dispatch_operational_alerts_task():
 
 
 @celery_app.task(name="run_database_archive")
+@_beat_lock(task_name="run_database_archive", ttl_seconds=86400)
 def run_database_archive_task():
     """按表保留策略批量清理过期日志/用量记录。
 
@@ -529,6 +537,7 @@ def run_database_archive_task():
 
 
 @celery_app.task(name="check_legal_deadline_reminders")
+@_beat_lock(task_name="check_legal_deadline_reminders", ttl_seconds=1800)
 def check_legal_deadline_reminders_task():
     """每15分钟：扫描需要发送提醒的案件关键日期，写入通知事件（同一日期/渠道/偏移只发一次）。"""
     _record_beat_heartbeat()
@@ -586,6 +595,7 @@ def check_legal_deadline_reminders_task():
 
 
 @celery_app.task(name="scan_overdue_invoices")
+@_beat_lock(task_name="scan_overdue_invoices", ttl_seconds=7200)
 def scan_overdue_invoices_task():
     """每小时：将已超过 due_date 且仍为 sent 状态的账单标记为 overdue。"""
     _record_beat_heartbeat()
@@ -611,6 +621,7 @@ def scan_overdue_invoices_task():
 
 
 @celery_app.task(name="scan_expired_portal_links")
+@_beat_lock(task_name="scan_expired_portal_links", ttl_seconds=7200)
 def scan_expired_portal_links_task():
     """每小时：将已过 expires_at 的门户链接置为 expired，并通知创建律师。
 
@@ -696,6 +707,7 @@ def scan_expired_portal_links_task():
 
 
 @celery_app.task(name="scan_expired_subscriptions")
+@_beat_lock(task_name="scan_expired_subscriptions", ttl_seconds=7200)
 def scan_expired_subscriptions_task():
     """每小时：将已过 current_period_end 的 active 订阅置为 expired（配额回落免费版）。"""
     _record_beat_heartbeat()
@@ -709,6 +721,7 @@ def scan_expired_subscriptions_task():
 
 
 @celery_app.task(name="scan_contract_expiry_alerts")
+@_beat_lock(task_name="scan_contract_expiry_alerts", ttl_seconds=86400)
 def scan_contract_expiry_alerts_task():
     """每天：扫描已确认的合同里程碑，提前90/30/7天各创建一次通知事件。"""
     _record_beat_heartbeat()
@@ -769,6 +782,7 @@ def scan_contract_expiry_alerts_task():
 
 
 @celery_app.task(name="dispatch_notification_events")
+@_beat_lock(task_name="dispatch_notification_events", ttl_seconds=180)
 def dispatch_notification_events_task():
     """每60秒：投递已到提醒时间的 pending 通知事件。
 
@@ -786,6 +800,7 @@ def dispatch_notification_events_task():
 
 
 @celery_app.task(name="retry_failed_webhook_deliveries")
+@_beat_lock(task_name="retry_failed_webhook_deliveries", ttl_seconds=600)
 def retry_failed_webhook_deliveries_task():
     """每5分钟：对失败次数 < 3 的 Webhook 投递进行指数退避重试（含 HMAC-SHA256 签名头）。"""
     _record_beat_heartbeat()
@@ -843,17 +858,25 @@ def retry_failed_webhook_deliveries_task():
 
             try:
                 import httpx
-                resp = httpx.post(
-                    app_obj.webhook_url,
-                    content=payload_bytes,
-                    headers=headers,
-                    timeout=5.0,
-                )
+                from app.core.external_resilience import external_resilience
+
+                def _post() -> httpx.Response:
+                    resp = httpx.post(
+                        app_obj.webhook_url,
+                        content=payload_bytes,
+                        headers=headers,
+                        timeout=5.0,
+                    )
+                    resp.raise_for_status()
+                    return resp
+
+                # 韧性层：连接/5xx 重试；写超时 AMBIGUOUS 不盲目重试（跨 beat 状态机继续退避）。
+                resp = external_resilience.call(_post, service="webhook", op="deliver",
+                                                connector_id=app_obj.id, method="POST")
                 delivery.response_status = resp.status_code
                 delivery.response_body_snippet = resp.text[:512] if resp.text else None
-                if resp.status_code < 400:
-                    delivery.status = "success"
-                    retried += 1
+                delivery.status = "success"
+                retried += 1
             except Exception as exc:
                 delivery.response_body_snippet = str(exc)[:512]
 
@@ -900,6 +923,7 @@ def process_open_contract_review_task(job_id: int):
 
 
 @celery_app.task(name="parse_contract_versions")
+@_beat_lock(task_name="parse_contract_versions", ttl_seconds=600)
 def parse_contract_versions_task():
     """每5分钟：扫描 parse_status=uploading 的合同版本，提取条款写入 legal_contract_clauses。"""
     _record_beat_heartbeat()
@@ -997,6 +1021,7 @@ def parse_contract_versions_task():
 
 
 @celery_app.task(name="check_legal_approval_timeouts")
+@_beat_lock(task_name="check_legal_approval_timeouts", ttl_seconds=600)
 def check_legal_approval_timeouts_task():
     """Beat 任务：扫描超时审批步骤并标记为 timeout，推进审批链状态。"""
     _record_beat_heartbeat()
@@ -1053,6 +1078,7 @@ def check_legal_approval_timeouts_task():
 
 
 @celery_app.task(name="confirm_account_deletions")
+@_beat_lock(task_name="confirm_account_deletions", ttl_seconds=86400)
 def confirm_account_deletions_task():
     """Beat 任务：自动确认冷却期已满（默认30天）的账号注销请求，执行匿名化。"""
     _record_beat_heartbeat()
@@ -1067,6 +1093,7 @@ def confirm_account_deletions_task():
 
 
 @celery_app.task(name="create_pilot_backup")
+@_beat_lock(task_name="create_pilot_backup", ttl_seconds=86400)
 def create_pilot_backup_task():
     """Beat 任务：每日全量备份（数据库 + 本地数据目录），调度即授权 --confirm。
 
@@ -1102,6 +1129,7 @@ def create_pilot_backup_task():
 
 
 @celery_app.task(name="dispatch_feishu_reminders")
+@_beat_lock(task_name="dispatch_feishu_reminders", ttl_seconds=86400)
 def dispatch_feishu_reminders_task():
     """M4：向已绑定飞书用户推送激活引导/周报回访卡片（出站未配置凭据时自动跳过）。"""
     _record_beat_heartbeat()
@@ -1114,3 +1142,87 @@ def dispatch_feishu_reminders_task():
         return asyncio.run(dispatch_feishu_reminders(db))
     finally:
         db.close()
+
+
+# ── 连接器同步（mock 连接器，CONNECTOR_SYNC_ENABLED 默认关闭）──────────────────
+
+def _connector_context(db, connector_id: int, *_: int) -> dict:
+    from app.models.connector import ExternalConnector
+
+    conn = db.query(ExternalConnector).filter(ExternalConnector.id == int(connector_id)).first()
+    if not conn:
+        return {}
+    user = db.query(User).filter(User.id == conn.user_id).first()
+    if not user:
+        return {}
+    return {"tenant_id": user.organization_id, "user_id": user.id}
+
+
+@celery_app.task(name="connector_sync_task")
+def connector_sync_task(connector_id: int, sync_mode: str = "manual", trigger_id: int | None = None):
+    """连接器同步任务：分布式锁 + SyncRun 台账 + 断点恢复（mock 连接器）。
+
+    CONNECTOR_SYNC_ENABLED 关闭时跳过；未获锁时安全跳过（防多实例并发）。
+    """
+    settings = get_settings()
+    if not settings.CONNECTOR_SYNC_ENABLED:
+        return {"status": "disabled"}
+    ttl = int(settings.SYNC_RUN_LEASE_TTL_SECONDS)
+    token = _acquire_task_lock("connector_sync", scope=f"conn:{connector_id}", ttl_seconds=ttl)
+    if token is None:
+        log_async_task_event(
+            user_id=None,
+            module="async_task",
+            action="connector_sync_skipped_lock",
+            target_type="connector",
+            target_id=connector_id,
+            detail="lock held by another worker",
+        )
+        return {"status": "skipped", "reason": "lock_held"}
+    try:
+        from app.services.connector_sync_framework import _run_connector_sync
+
+        return _run_connector_sync(connector_id, sync_mode, trigger_id, token=token)
+    finally:
+        _release_task_lock("connector_sync", scope=f"conn:{connector_id}", token=token)
+
+
+@celery_app.task(name="recover_stale_connector_syncs")
+@_beat_lock(task_name="recover_stale_connector_syncs", ttl_seconds=180)
+def recover_stale_connector_syncs_task():
+    """Beat：回收租约过期的连接器同步 run 并重新入队（仅 CONNECTOR_SYNC_ENABLED 时调度）。"""
+    _record_beat_heartbeat()
+    settings = get_settings()
+    if not settings.CONNECTOR_SYNC_ENABLED:
+        return {"recovered": 0}
+    from datetime import timedelta
+
+    from app.models.sync_run import SyncRun
+
+    db = SessionLocal()
+    try:
+        stale_before = utc_now() - timedelta(seconds=int(settings.SYNC_RUN_LEASE_TTL_SECONDS))
+        stale_runs = db.query(SyncRun).filter(
+            SyncRun.status == "running",
+            SyncRun.lease_expires_at.isnot(None),
+            SyncRun.lease_expires_at < stale_before,
+        ).limit(50).all()
+        recovered = 0
+        for run in stale_runs:
+            run.status = "pending"
+            run.error_code = "lease_expired"
+            db.commit()
+            connector_sync_task.delay(run.connector_id, sync_mode="recover")
+            recovered += 1
+        return {"recovered": recovered}
+    finally:
+        db.close()
+
+
+# connector_sync_task 的台账注册保持单一来源（其余关键任务在 task_run_registry.py 登记）。
+_register_task_run_spec(_TaskRunSpec(
+    task_name="connector_sync_task",
+    queue="connector",
+    business_key_fn=lambda connector_id, *_: f"connector:{int(connector_id)}",
+    context_fn=_connector_context,
+))

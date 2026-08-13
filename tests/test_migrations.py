@@ -137,6 +137,35 @@ class MigrationChainTests(unittest.TestCase):
         self.assertEqual(len(facts), 2)
         self.assertEqual({f.fact_type for f in facts}, {"known", "missing"})
 
+    def test_0075_creates_task_and_sync_reliability_tables(self):
+        """0075 必须建 task_runs / connector_sync_items、扩展 connector_sync_jobs，并实现 downgrade。"""
+        path = "alembic/versions/20260813_0075_task_reliability.py"
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        for table in ("task_runs", "connector_sync_items"):
+            self.assertIn(f'"{table}"', src, f"0075 缺少建表 {table}")
+        for col in ("cursor_json", "checkpoint_json", "source_version", "processed",
+                    "succeeded", "failed", "error_code", "attempt", "next_retry_at",
+                    "idempotency_key", "lease_owner", "lease_expires_at"):
+            self.assertIn(f'"{col}"', src, f"0075 缺少 connector_sync_jobs.{col}")
+        for index in ("ix_task_runs_name_key_created", "ix_task_runs_status_tenant",
+                      "ix_connector_sync_items_connector_ts"):
+            self.assertIn(index, src, f"0075 缺少索引 {index}")
+        self.assertIn("uq_connector_sync_items_connector_external", src)
+        self.assertIn("_backfill", src, "0075 应包含旧数据回填")
+        self.assertIn("def downgrade", src)
+
+    def test_0075_downgrade_reverses_reliability_tables(self):
+        """0075 downgrade 必须 drop 两新表并逐列回收 connector_sync_jobs 扩展列。"""
+        path = "alembic/versions/20260813_0075_task_reliability.py"
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn('op.drop_table("connector_sync_items")', src)
+        self.assertIn('op.drop_table("task_runs")', src)
+        for col in ("cursor_json", "checkpoint_json", "lease_owner", "lease_expires_at",
+                    "idempotency_key", "next_retry_at"):
+            self.assertIn(f'batch_op.drop_column("{col}")', src, f"downgrade 应回收 {col}")
+
 
 class DirtyDataDedupeTests(unittest.TestCase):
     def setUp(self):

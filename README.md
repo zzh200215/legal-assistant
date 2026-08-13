@@ -120,7 +120,7 @@
 
 - **FastAPI**：异步 API 服务
 - **SQLAlchemy + MySQL / PostgreSQL / SQLite**：元数据与业务台账（生产建议 MySQL/PostgreSQL）
-- **Celery + Redis**：异步任务与计划任务（beat：每日备份、提醒、到期扫描、告警等 15+ 计划任务）
+- **Celery + Redis**：异步任务与计划任务（beat：每日备份、提醒、到期扫描、告警等 16 个计划任务）；任务按 `llm/document/connector/notification/billing` 五队列隔离，双 worker 消费，分布式锁互斥、外部调用统一韧性层 + DB 级幂等
 - **sqlglot**：SQLTool 只读安全边界（AST 级解析与白名单）
 - **Chroma（默认）/ Qdrant**：向量检索
 - **千问 / Ollama**：LLM 推理与向量化（qwen-plus 主模型 + 简单请求路由小模型）
@@ -219,8 +219,12 @@ python scripts/bootstrap_system.py
 # 后端 API
 uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 
-# Celery Worker（新终端）
-celery -A app.core.celery_app.celery_app worker --loglevel=info
+# Celery Worker（新终端，推荐双 worker：CPU 重任务 与 LLM/外发 隔离）
+celery -A app.core.celery_app.celery_app worker --loglevel=info -Q document,notification,billing,connector --concurrency=4
+celery -A app.core.celery_app.celery_app worker --loglevel=info -Q llm,connector --concurrency=2
+
+# 单 worker 兜底（本地低配环境）：消费全部 5 队列
+celery -A app.core.celery_app.celery_app worker --loglevel=info -Q llm,document,connector,notification,billing
 
 # Celery Beat（新终端，计划任务）
 celery -A app.core.celery_app.celery_app beat --loglevel=info

@@ -10,6 +10,39 @@ celery_app = Celery(
     backend=settings.REDIS_URL,
 )
 
+# ── 队列拆分与路由（P1）：5 队列 + 每队列专属超时 ──────────────────────────
+# Redis broker 优先级仅对未预取消息生效、单 worker 队头阻塞，故不启用优先级，
+# 用「独立队列 + 每队列专属 worker/concurrency」实现同等隔离（见 operations-runbook）。
+_QUEUE_LIMITS = {
+    "llm": (300, 270),
+    "document": (600, 540),
+    "connector": (240, 210),
+    "notification": (120, 100),
+    "billing": (300, 270),
+}
+
+
+def _routes() -> dict:
+    routes: dict[str, dict] = {}
+
+    def add(queue: str, *names: str) -> None:
+        hard, soft = _QUEUE_LIMITS[queue]
+        for name in names:
+            routes[name] = {"queue": queue, "time_limit": hard, "soft_time_limit": soft}
+
+    add("document", "parse_document", "document_chunk", "document_index", "document_export",
+        "recover_stale_document_jobs", "parse_contract_versions")
+    add("llm", "summarize_document", "analyze_document", "process_open_contract_review")
+    add("connector", "connector_sync_task", "recover_stale_connector_syncs",
+        "retry_failed_webhook_deliveries", "dispatch_feishu_reminders",
+        "dispatch_operational_alerts", "run_database_archive", "create_pilot_backup")
+    add("notification", "dispatch_notification_events", "check_legal_deadline_reminders",
+        "scan_expired_portal_links", "scan_contract_expiry_alerts",
+        "check_legal_approval_timeouts", "confirm_account_deletions")
+    add("billing", "scan_overdue_invoices", "scan_expired_subscriptions")
+    return routes
+
+
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
@@ -17,10 +50,14 @@ celery_app.conf.update(
     timezone="Asia/Shanghai",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=240,
-    task_soft_time_limit=210,
+    # 全局默认超时抬到 300/270；未显式路由任务落已消费队列（task_default_queue），
+    # 不无意进默认 `celery` 队列。
+    task_time_limit=300,
+    task_soft_time_limit=270,
     task_acks_late=True,
+    task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    task_default_queue=settings.TASK_DEFAULT_QUEUE,
     imports=("app.tasks",),
     beat_schedule={
         "dispatch-operational-alerts": {
@@ -86,8 +123,21 @@ celery_app.conf.update(
     },
 )
 
+if settings.TASK_QUEUE_ROUTING_ENABLED:
+    celery_app.conf.task_routes = _routes()
+
 # 自动发现 tasks 模块
 celery_app.autodiscover_tasks(["app.tasks"])
 
 # 确保任务在 worker 与应用进程中都能稳定注册。
 import app.tasks  # noqa: E402,F401
+
+# 连接器同步回收 beat：仅 CONNECTOR_SYNC_ENABLED 时注册（mock 连接器，默认关闭）。
+if settings.CONNECTOR_SYNC_ENABLED:
+    celery_app.conf.beat_schedule["recover-stale-connector-syncs"] = {
+        "task": "recover_stale_connector_syncs",
+        "schedule": 60.0,
+    }
+
+# 任务运行台账信号：注册关键任务后自动写入 task_runs（未注册任务零开销）。
+import app.tasks.signals  # noqa: E402,F401
