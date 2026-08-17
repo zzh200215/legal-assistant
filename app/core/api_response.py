@@ -41,17 +41,33 @@ def error_payload(
     code: str,
     detail: Any = None,
     data: Any = None,
+    field_errors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    request_id, trace_id = _obs_ids()
+    error = {
+        "code": code,
+        "detail": detail if detail is not None else message,
+    }
+    if field_errors:
+        error["field_errors"] = field_errors
     return {
         "success": False,
         "message": message,
         "data": data,
-        "error": {
-            "code": code,
-            "detail": detail if detail is not None else message,
-        },
+        "error": error,
         "detail": message,
+        "request_id": request_id,
+        "trace_id": trace_id,
     }
+
+
+def _obs_ids() -> tuple[str, str]:
+    """从可观测上下文取 request_id/trace_id；无上下文时返回空串，绝不抛异常。"""
+    try:
+        from app.core.obs_context import current_request_id, current_trace_id
+        return current_request_id() or "", current_trace_id() or ""
+    except Exception:
+        return "", ""
 
 
 def paginated_payload(
@@ -62,12 +78,16 @@ def paginated_payload(
     page_size: int,
     message: str = "OK",
 ) -> dict[str, Any]:
+    has_previous = page > 1
+    has_next = page * page_size < total
     return success_payload(
         {
             "items": items,
             "total": total,
             "page": page,
             "page_size": page_size,
+            "has_next": has_next,
+            "has_previous": has_previous,
         },
         message=message,
     )
@@ -104,14 +124,19 @@ async def wrap_api_response(request: Request, response: Response) -> Response:
 
     if isinstance(payload, dict) and {"success", "message", "data", "error"}.issubset(payload.keys()):
         wrapped = payload
+        wrapped.setdefault("request_id", _obs_ids()[0])
+        wrapped.setdefault("trace_id", _obs_ids()[1])
     else:
         message = HTTPStatus(response.status_code).phrase if response.status_code in HTTPStatus._value2member_map_ else "OK"
+        request_id, trace_id = _obs_ids()
         wrapped = success_payload(payload, message=message)
+        wrapped["request_id"] = request_id
+        wrapped["trace_id"] = trace_id
 
     return JSONResponse(
         content=wrapped,
         status_code=response.status_code,
-        headers=_filtered_headers(response),
+        headers=_filtered_headers(response, extra={"X-API-Version": "1"}),
     )
 
 
@@ -124,12 +149,15 @@ def _rebuild_response(response: Response, body: bytes) -> Response:
     )
 
 
-def _filtered_headers(response: Response) -> dict[str, str]:
-    return {
+def _filtered_headers(response: Response, extra: dict[str, str] | None = None) -> dict[str, str]:
+    headers = {
         key: value
         for key, value in response.headers.items()
         if key.lower() not in {"content-length", "content-type"}
     }
+    if extra:
+        headers.update(extra)
+    return headers
 
 
 async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
@@ -153,14 +181,23 @@ async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse
 
 async def validation_exception_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
     details = []
+    field_errors: list[dict[str, Any]] = []
     for item in exc.errors():
         normalized = dict(item)
         if "ctx" in normalized and normalized["ctx"] is not None:
             normalized["ctx"] = {key: str(value) for key, value in normalized["ctx"].items()}
         details.append(normalized)
+        loc = normalized.get("loc") or []
+        field_errors.append({
+            "field": ".".join(str(part) for part in loc if part not in ("body", "query", "path", "header")),
+            "code": str(normalized.get("type") or "INVALID"),
+            "message": str(normalized.get("msg") or "参数校验失败"),
+        })
     return JSONResponse(
         status_code=422,
-        content=error_payload("请求参数校验失败", code="VALIDATION_ERROR", detail=details),
+        content=error_payload(
+            "请求参数校验失败", code="VALIDATION_ERROR", detail=details, field_errors=field_errors,
+        ),
         headers={"x-api-wrapped": "1"},
     )
 

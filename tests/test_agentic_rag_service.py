@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.services.agentic_rag_service import AgenticRAGService
+from app.services.rag.agentic_rag_service import AgenticRAGService
 
 
 class AgenticRAGServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -30,16 +30,16 @@ class AgenticRAGServiceTests(unittest.IsolatedAsyncioTestCase):
         self.service.settings.AGENTIC_RAG_PLANNER_ENABLED = False
         try:
             with patch(
-                "app.services.agentic_rag_service.rag_service.search_async",
+                "app.services.rag.agentic_rag_service.rag_service.search_async",
                 new=AsyncMock(return_value=[self.chunk]),
             ) as search, patch(
-                "app.services.agentic_rag_service.rag_service._estimate_confidence",
+                "app.services.rag.agentic_rag_service.rag_service._estimate_confidence",
                 return_value=0.8,
             ), patch(
-                "app.services.agentic_rag_service.rag_service.answer_from_chunks_async",
+                "app.services.rag.agentic_rag_service.rag_service.answer_from_chunks_async",
                 new=AsyncMock(return_value=dict(self.answer)),
             ) as answer, patch(
-                "app.services.agentic_rag_service.llm_observability_service.log_event",
+                "app.services.rag.agentic_rag_service.llm_observability_service.log_event",
             ):
                 result = await self.service.answer_async("差旅报销多久内提交", document_id=1, user_id=7)
         finally:
@@ -57,16 +57,16 @@ class AgenticRAGServiceTests(unittest.IsolatedAsyncioTestCase):
         self.service.settings.AGENTIC_RAG_PLANNER_ENABLED = False
         try:
             with patch(
-                "app.services.agentic_rag_service.rag_service.search_async",
+                "app.services.rag.agentic_rag_service.rag_service.search_async",
                 new=AsyncMock(return_value=[self.chunk]),
             ) as search, patch(
-                "app.services.agentic_rag_service.rag_service._estimate_confidence",
+                "app.services.rag.agentic_rag_service.rag_service._estimate_confidence",
                 return_value=0.8,
             ), patch(
-                "app.services.agentic_rag_service.rag_service.answer_from_chunks_async",
+                "app.services.rag.agentic_rag_service.rag_service.answer_from_chunks_async",
                 new=AsyncMock(return_value=dict(self.answer)),
             ) as answer, patch(
-                "app.services.agentic_rag_service.llm_observability_service.log_event",
+                "app.services.rag.agentic_rag_service.llm_observability_service.log_event",
             ):
                 await self.service.answer_async(
                     "差旅报销多久内提交", document_id=1, user_id=7,
@@ -86,16 +86,16 @@ class AgenticRAGServiceTests(unittest.IsolatedAsyncioTestCase):
         self.service.settings.AGENTIC_RAG_PLANNER_ENABLED = False
         try:
             with patch(
-                "app.services.agentic_rag_service.rag_service.search_async",
+                "app.services.rag.agentic_rag_service.rag_service.search_async",
                 new=AsyncMock(return_value=[self.chunk]),
             ) as search, patch(
-                "app.services.agentic_rag_service.rag_service._estimate_confidence",
+                "app.services.rag.agentic_rag_service.rag_service._estimate_confidence",
                 return_value=0.8,
             ), patch(
-                "app.services.agentic_rag_service.rag_service.answer_from_chunks_async",
+                "app.services.rag.agentic_rag_service.rag_service.answer_from_chunks_async",
                 new=AsyncMock(return_value=dict(self.answer)),
             ) as answer, patch(
-                "app.services.agentic_rag_service.llm_observability_service.log_event",
+                "app.services.rag.agentic_rag_service.llm_observability_service.log_event",
             ):
                 await self.service.answer_async(
                     "那经济补偿怎么算？", document_id=1, user_id=7,
@@ -118,16 +118,16 @@ class AgenticRAGServiceTests(unittest.IsolatedAsyncioTestCase):
         self.service.settings.AGENTIC_RAG_PLANNER_ENABLED = False
         try:
             with patch(
-                "app.services.agentic_rag_service.rag_service.search_async",
+                "app.services.rag.agentic_rag_service.rag_service.search_async",
                 new=AsyncMock(side_effect=[[weak_chunk], [self.chunk]]),
             ) as search, patch(
-                "app.services.agentic_rag_service.rag_service._estimate_confidence",
+                "app.services.rag.agentic_rag_service.rag_service._estimate_confidence",
                 side_effect=[0.2, 0.8],
             ), patch(
-                "app.services.agentic_rag_service.rag_service.answer_from_chunks_async",
+                "app.services.rag.agentic_rag_service.rag_service.answer_from_chunks_async",
                 new=AsyncMock(return_value=dict(self.answer)),
             ) as answer, patch(
-                "app.services.agentic_rag_service.llm_observability_service.log_event",
+                "app.services.rag.agentic_rag_service.llm_observability_service.log_event",
             ):
                 result = await self.service.answer_async("差旅报销多久内提交", document_id=1, user_id=7)
         finally:

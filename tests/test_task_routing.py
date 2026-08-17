@@ -1,5 +1,6 @@
 """队列路由与超时测试：所有注册任务显式归属一队列、无遗漏、旧任务名保留。"""
 import unittest
+from unittest.mock import patch
 
 from app.core.celery_app import _QUEUE_LIMITS, _routes, celery_app
 from app.core.config import get_settings
@@ -13,6 +14,7 @@ def _registered_task_names() -> set[str]:
         "scan_overdue_invoices", "scan_expired_portal_links", "scan_expired_subscriptions",
         "scan_contract_expiry_alerts", "dispatch_notification_events",
         "retry_failed_webhook_deliveries", "process_open_contract_review",
+        "recover_queued_open_contract_reviews",
         "parse_contract_versions", "check_legal_approval_timeouts", "confirm_account_deletions",
         "create_pilot_backup", "dispatch_feishu_reminders", "connector_sync_task",
         "recover_stale_connector_syncs",
@@ -20,6 +22,13 @@ def _registered_task_names() -> set[str]:
 
 
 class TaskRoutingTests(unittest.TestCase):
+    def test_document_export_task_fails_explicitly_until_implemented(self):
+        from app.tasks import document_export_task
+
+        with patch("app.tasks.document_tasks.log_async_task_event"):
+            with self.assertRaises(NotImplementedError):
+                document_export_task.run(document_id=1, export_type="archive", user_id=1)
+
     def test_all_registered_tasks_have_explicit_route(self):
         """验收 #1：注册的业务任务全部显式归属一队列，无遗漏落入默认队列。"""
         routes = _routes()

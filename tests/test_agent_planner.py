@@ -3,8 +3,8 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.services.agent_planner import Planner, build_worker_plan
-from app.services.agent_run_state import AgentPlan
+from app.services.agent.agent_planner import Planner, build_worker_plan
+from app.services.agent.agent_run_state import AgentPlan
 
 
 class PlannerTests(unittest.IsolatedAsyncioTestCase):
@@ -22,21 +22,21 @@ class PlannerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plan_dict_single_domain_direct_route_without_llm(self):
         generate = AsyncMock(side_effect=AssertionError("LLM must not run for single domain"))
-        with patch("app.services.agent_planner.llm_service.generate", new=generate):
+        with patch("app.services.agent.agent_planner.llm_service.generate", new=generate):
             plan = await self.planner.plan_dict("查询合同 12 的交付日期", user_id=1)
         self.assertEqual(plan["workers"], ["legal_compliance_agent"])
         self.assertEqual(plan["plan_source"], "deterministic_direct_route")
 
     async def test_plan_returns_typed_agent_plan_and_marks_write_approval(self):
         with patch(
-            "app.services.agent_planner.llm_service.generate",
+            "app.services.agent.agent_planner.llm_service.generate",
             new=AsyncMock(return_value='{"workers": ["legal_compliance_agent"]}'),
         ):
             plan = await self.planner.plan("审查合同 12 并创建跟进任务", user_id=1)
         self.assertIsInstance(plan, AgentPlan)
         # workflow_agent 出现在计划中 → requires_approval
         with patch(
-            "app.services.agent_planner.llm_service.generate",
+            "app.services.agent.agent_planner.llm_service.generate",
             new=AsyncMock(
                 return_value=(
                     '{"workers": ["legal_compliance_agent", "workflow_agent"],'
@@ -56,7 +56,7 @@ class PlannerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(hasattr(self.planner, "call_tool"))
 
     async def test_plan_never_invokes_tools(self):
-        with patch("app.services.agent_planner.llm_service.generate", new=AsyncMock(return_value="{}")):
+        with patch("app.services.agent.agent_planner.llm_service.generate", new=AsyncMock(return_value="{}")):
             plan = await self.planner.plan("总结文档 1", user_id=1)
         # 单领域请求直连路由，不调用 LLM；不产生任何工具副作用
         self.assertEqual(plan.plan_source, "deterministic_direct_route")

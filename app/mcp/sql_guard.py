@@ -71,6 +71,29 @@ _BLOCKED_FUNCTIONS = frozenset(
     }
 )
 
+# 多租户表 → 强制行级过滤列：查询这些表时必须在 WHERE 中出现对应过滤列的条件，
+# 防止白名单表内被合法 SELECT 跨租户读取全表行。
+_TENANT_SCOPE_COLUMNS: dict[str, str] = {
+    "legal_cases": "organization_id",
+    "legal_consultations": "user_id",
+    "legal_contract_reviews": "user_id",
+    "legal_drafts": "user_id",
+    "legal_invoices": "organization_id",
+    "legal_payment_records": "organization_id",
+    "legal_refund_records": "organization_id",
+    "legal_time_entries": "organization_id",
+    "legal_deadlines": "organization_id",
+    "legal_notification_events": "organization_id",
+    "legal_portal_links": "organization_id",
+    "documents": "user_id",
+    "tasks": "user_id",
+    "chat_sessions": "user_id",
+    "chat_messages": "user_id",
+    "user_subscriptions": "user_id",
+    "usage_reservations": "user_id",
+    "quota_usages": "user_id",
+}
+
 
 class SqlGuardError(ValueError):
     """SQL 安全校验失败（携带错误码，供 API/执行器映射）。"""
@@ -153,6 +176,31 @@ def _check_functions(root: exp.Expression) -> None:
                 raise SqlGuardError("SQL_DANGEROUS_FUNCTION", f"禁止调用函数 {func_name}")
 
 
+def _where_references_column(root: exp.Expression, column_name: str) -> bool:
+    """任一 SELECT 的 WHERE 子树中是否出现指定列（忽略表限定符/别名）。"""
+    for select in root.find_all(exp.Select):
+        where = select.args.get("where")
+        if where is None:
+            continue
+        for node in where.walk():
+            if isinstance(node, exp.Column) and str(node.name or "").lower() == column_name:
+                return True
+    return False
+
+
+def _check_tenant_scope(root: exp.Expression, referenced_tables: list[str]) -> None:
+    """多租户表必须带行级过滤条件（fail-closed），防白名单表内跨租户全表读取。"""
+    for table in referenced_tables:
+        scope_column = _TENANT_SCOPE_COLUMNS.get(table)
+        if scope_column is None:
+            continue
+        if not _where_references_column(root, scope_column):
+            raise SqlGuardError(
+                "SQL_TENANT_SCOPE_REQUIRED",
+                f"表 {table} 为多租户表，查询必须在 WHERE 中包含 {scope_column} 行级过滤条件",
+            )
+
+
 def _normalize_template(root: exp.Expression) -> tuple[str, str]:
     """把字面量替换为占位符，生成规范化模板并求参数哈希（审计用，不保留原文）。"""
     for node in root.walk():
@@ -202,6 +250,7 @@ def check_read_only(
             allowed_tables=set(allowed_tables or ()),
         )
         _check_functions(root)
+        _check_tenant_scope(root, _referenced_tables(root))
     except SqlGuardError as exc:
         return SqlCheckResult(ok=False, reason=str(exc), root_type=root_type, error_code=exc.code)
 

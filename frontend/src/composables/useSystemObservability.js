@@ -1,9 +1,10 @@
 import { ref } from 'vue'
+import { tokenDays } from './useSystemPeriod'
 
 const emptyHealth = () => ({ status: '', checks: {}, timestamp: '' })
 const emptyExperiment = () => ({ artifact_status: {}, summary: {}, experiments: [], rollouts: { items: [] }, prompt_traffic: { items: [] } })
 
-export function useSystemObservability({ client, message, isAdmin, tokenDays }) {
+export function useSystemObservability({ client, message, isAdmin }) {
   const healthLoading = ref(false)
   const healthData = ref(emptyHealth())
   const experimentDays = ref(30)

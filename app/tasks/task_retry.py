@@ -2,7 +2,7 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.core.observability import log_async_task_event
 from app.core.observability_sanitizer import sanitize_background_error_message
-from app.services.document_job_service import document_job_service
+from app.services.documents.document_job_service import document_job_service
 from app.tasks.runtime import background_error_detail
 def retry_task(
     self,

@@ -15,7 +15,7 @@ from app.models.user import User, UserStatus
 from app.models.org import Organization, OrganizationMember
 from app.models.legal import LegalCase
 from app.models.legal_billing import LegalBillingRule, LegalTimeEntry, LegalInvoice, LegalInvoiceItem
-from app.services.billing_service import billing_service
+from app.services.billing.billing_service import billing_service
 from fastapi.testclient import TestClient
 from app.core.auth import create_access_token
 

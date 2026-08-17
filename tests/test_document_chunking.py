@@ -10,7 +10,7 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.document import Document, DocumentChunk
 from app.models.user import User
-from app.services.document_parsing import (
+from app.services.documents.document_parsing import (
     DocumentParsePermanentError,
     _build_segment,
     _build_visual_summary,
@@ -23,8 +23,8 @@ from app.services.document_parsing import (
     _split_markdown_sections,
     _split_text,
 )
-from app.services.document_parsing import _extract_segments
-from app.services.document_service import document_service
+from app.services.documents.document_parsing import _extract_segments
+from app.services.documents.document_service import document_service
 
 
 class DocumentChunkingTests(unittest.TestCase):
@@ -91,7 +91,7 @@ class DocumentChunkingTests(unittest.TestCase):
 
     def test_normalize_text_strips_page_number_lines(self):
         """清洗：剥离页眉/页脚中的纯页码行。"""
-        from app.services.document_parsing import _normalize_text
+        from app.services.documents.document_parsing import _normalize_text
         cleaned = _normalize_text("合同正文\n第 3 页\n甲方义务\n- 12 -\n乙方权利")
         self.assertNotIn("第 3 页", cleaned)
         self.assertNotIn("- 12 -", cleaned)
@@ -101,7 +101,7 @@ class DocumentChunkingTests(unittest.TestCase):
 
     def test_normalize_text_cleans_control_chars_and_spaces(self):
         """清洗：去除控制字符、全角空格转半角并折叠连续空格。"""
-        from app.services.document_parsing import _normalize_text
+        from app.services.documents.document_parsing import _normalize_text
         cleaned = _normalize_text("a\x00b　c  d\x1f")
         self.assertEqual(cleaned, "ab c d")
 
@@ -127,7 +127,7 @@ class DocumentChunkingTests(unittest.TestCase):
 
     def test_split_merges_short_fragments(self):
         """分块：过短片段并入前一块，避免碎块。"""
-        from app.services.document_parsing import _merge_short_chunks
+        from app.services.documents.document_parsing import _merge_short_chunks
         chunks = [
             {"chunk_index": 0, "content": "A" * 100, "section_title": "s", "section_path": ["s"]},
             {"chunk_index": 1, "content": "B" * 10, "section_title": "s", "section_path": ["s"]},
@@ -389,8 +389,8 @@ class DocumentChunkingTests(unittest.TestCase):
             captured["knowledge_base_id"] = knowledge_base_id
             captured["document_status"] = document_status
 
-        with patch("app.services.document_service._extract_segments", return_value=fake_segments), patch(
-            "app.services.document_service.rag_service.index_document",
+        with patch("app.services.documents.document_service._extract_segments", return_value=fake_segments), patch(
+            "app.services.documents.document_service.rag_service.index_document",
             side_effect=fake_index_document,
         ):
             doc = document_service.upload(upload, user_id=self.user.id, db=self.db, async_mode=False)
@@ -429,8 +429,8 @@ class DocumentChunkingTests(unittest.TestCase):
             )
         ]
 
-        with patch("app.services.document_parsing._extract_segments", return_value=fake_segments), patch(
-            "app.services.document_service.rag_service.index_document",
+        with patch("app.services.documents.document_parsing._extract_segments", return_value=fake_segments), patch(
+            "app.services.documents.document_service.rag_service.index_document",
             side_effect=RuntimeError("embedding service unavailable"),
         ):
             doc = document_service.upload(upload, user_id=self.user.id, db=self.db, async_mode=False)
@@ -440,8 +440,8 @@ class DocumentChunkingTests(unittest.TestCase):
         self.assertEqual(stored.status, "parsed")
 
     def test_extract_segments_supports_image_via_ocr(self):
-        with patch("app.services.document_parsing._ocr_image_to_table_text", return_value=None), patch(
-            "app.services.document_parsing._ocr_image_to_text",
+        with patch("app.services.documents.document_parsing._ocr_image_to_table_text", return_value=None), patch(
+            "app.services.documents.document_parsing._ocr_image_to_text",
             return_value="图片里的付款条款",
         ):
             segments = _extract_segments("data/uploads/contract.png", "png")
@@ -454,7 +454,7 @@ class DocumentChunkingTests(unittest.TestCase):
 
     def test_extract_image_raises_when_ocr_is_unavailable(self):
         with patch(
-            "app.services.document_parsing._ocr_image_to_text",
+            "app.services.documents.document_parsing._ocr_image_to_text",
             side_effect=DocumentParsePermanentError("当前环境未启用 OCR，无法解析图片或扫描 PDF。"),
         ):
             with self.assertRaises(DocumentParsePermanentError):
@@ -481,11 +481,11 @@ class DocumentChunkingTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-        with patch("app.services.document_parsing.pdfplumber.open", return_value=FakePdf()), patch(
-            "app.services.document_parsing._ocr_image_to_table_text",
+        with patch("app.services.documents.document_parsing.pdfplumber.open", return_value=FakePdf()), patch(
+            "app.services.documents.document_parsing._ocr_image_to_table_text",
             return_value=None,
         ), patch(
-            "app.services.document_parsing._ocr_image_to_text",
+            "app.services.documents.document_parsing._ocr_image_to_text",
             return_value="扫描页中的合同文本",
         ):
             segments = _extract_segments_from_pdf("uploads/scanned.pdf")
@@ -516,11 +516,11 @@ class DocumentChunkingTests(unittest.TestCase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-        with patch("app.services.document_parsing.pdfplumber.open", return_value=FakePdf()), patch(
-            "app.services.document_parsing._ocr_image_to_table_text",
+        with patch("app.services.documents.document_parsing.pdfplumber.open", return_value=FakePdf()), patch(
+            "app.services.documents.document_parsing._ocr_image_to_table_text",
             return_value=None,
         ), patch(
-            "app.services.document_parsing._ocr_image_to_text",
+            "app.services.documents.document_parsing._ocr_image_to_text",
             return_value="扫描页中的合同正文",
         ):
             segments = _extract_segments_from_pdf("uploads/low-quality.pdf")
@@ -532,7 +532,7 @@ class DocumentChunkingTests(unittest.TestCase):
 
     def test_extract_segments_supports_table_screenshot_via_ocr_layout(self):
         with patch(
-            "app.services.document_parsing._ocr_image_to_table_text",
+            "app.services.documents.document_parsing._ocr_image_to_table_text",
             return_value="| 日期 | 金额 |\n| 2026-07-01 | 100万 |",
         ):
             segments = _extract_segments("uploads/table.png", "png")

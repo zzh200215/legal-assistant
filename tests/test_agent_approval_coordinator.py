@@ -12,7 +12,7 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.core.time import utc_now
 from app.models.user import User
-from app.services.agent_approval_service import (
+from app.services.agent.agent_approval_service import (
     ApprovalStateError,
     agent_approval_service,
     param_digest,

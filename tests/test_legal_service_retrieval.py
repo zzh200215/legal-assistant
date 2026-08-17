@@ -2,7 +2,7 @@ import unittest
 from datetime import date
 
 from app.models.legal import LegalSource
-from app.services.legal_service import (
+from app.services.legal.legal_service import (
     _extract_citations,
     _rank_sources_by_relevance,
     _tokenize,

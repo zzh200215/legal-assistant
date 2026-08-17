@@ -18,7 +18,7 @@ from app.models.legal import ContractReview, LegalCase, LegalDraft, LegalSource
 from app.models.legal_domain import ContractRiskItem
 from app.models.org import Organization, OrganizationMember
 from app.models.user import User
-from app.services.legal_domain_service import persist_review_artifacts
+from app.services.legal.legal_domain_service import persist_review_artifacts
 
 HIGH_RISK = {
     "clause_type": "breach", "label": "违约责任", "risk_level": "high",

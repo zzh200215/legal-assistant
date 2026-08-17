@@ -114,6 +114,11 @@ class ReliabilitySettings(BaseSettings):
     RECONCILIATION_RUN_LEASE_TTL_SECONDS: int = Field(default=900, ge=60, le=86400)
     RECONCILIATION_MAX_DISCREPANCIES: int = Field(default=500, ge=10, le=10000)
 
+    # ── P1-D SSRF 防护（出站 URL 目标校验，fail-closed）───────────────
+    # 默认开启：拒绝回环/私网/链路本地/未指定/组播/保留地址与 localhost；
+    # 显式关闭属降级（内网直连出站的部署场景），必须持续审计并记录于文档。
+    SSRF_GUARD_ENABLED: bool = Field(default=True)
+
     @model_validator(mode="after")
     def _validate_finite(self) -> "ReliabilitySettings":
         if self.EXTERNAL_MAX_WAIT_SECONDS <= 0:

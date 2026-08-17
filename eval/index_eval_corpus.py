@@ -9,8 +9,8 @@ if str(ROOT_DIR) not in sys.path:
 
 from eval.common import ensure_eval_llm_ready
 from eval.bundle_utils import DEFAULT_MANIFEST_PATH, resolve_eval_paths
-from app.services.document_service import _extract_segments, _split_text
-from app.services.rag_service import rag_service
+from app.services.documents.document_service import _extract_segments, _split_text
+from app.services.rag.rag_service import rag_service
 
 
 def load_manifest(path: Path) -> list[dict]:

@@ -1,9 +1,9 @@
 import asyncio
 
 from app.mcp.tool_contract import ToolContract
-from app.services.analysis_service import analysis_service
-from app.services.document_service import document_service
-from app.services.rag_service import rag_service
+from app.services.documents.analysis_service import analysis_service
+from app.services.documents.document_service import document_service
+from app.services.rag.rag_service import rag_service
 from app.tools.base import BaseAgentTool, tool_error, tool_success
 
 

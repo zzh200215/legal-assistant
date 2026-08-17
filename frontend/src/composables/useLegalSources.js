@@ -22,7 +22,7 @@ export function useLegalSources({ client, message, confirm }) {
     try {
       const { data } = await client.listLegalSources()
       legalSources.value = data
-    } catch {}
+    } catch { /* 静默忽略 */ }
   }
 
   const handleSourceImport = async (file) => {
@@ -85,7 +85,7 @@ export function useLegalSources({ client, message, confirm }) {
       await client.deleteSource(row.id)
       message.success('法源已删除')
       await loadLegalSources()
-    } catch {}
+    } catch { /* 静默忽略 */ }
   }
 
   const updateSourceStatus = async (row) => {

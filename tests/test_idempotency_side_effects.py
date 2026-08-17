@@ -19,8 +19,8 @@ from app.models.legal_billing import LegalInvoice
 from app.models.legal_notifications import LegalNotificationEvent
 from app.models.org import Organization
 from app.models.user import User
-from app.services.notification_service import notification_service
-from app.services.outbound_email_service import outbound_email_service
+from app.services.notification.notification_service import notification_service
+from app.services.notification.outbound_email_service import outbound_email_service
 
 
 def _engine():
@@ -154,7 +154,7 @@ class BillingSingleTransitionTests(unittest.TestCase):
         )
         self.db.add(invoice)
         self.db.commit()
-        with patch("app.tasks.SessionLocal", return_value=self.db):
+        with patch("app.tasks.billing_tasks.SessionLocal", return_value=self.db):
             from app.tasks import scan_overdue_invoices_task
             first = scan_overdue_invoices_task()
             self.assertEqual(first["marked_overdue"], 1)

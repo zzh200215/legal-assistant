@@ -1,6 +1,7 @@
 """预算桶 / 限流桶 / LLM 响应缓存 / 按 attempt 成本统计 专项测试。"""
 
 import unittest
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -15,8 +16,8 @@ from app.core.response_cache import LLMResponseCache
 from app.core.model_policy import TaskPolicy
 from app.models.token_usage import TokenUsage
 from app.models.user import User
-from app.services.llm_governance_service import LLMGovernanceError, llm_governance_service
-from app.services.token_service import token_service
+from app.services.llm.llm_governance_service import LLMGovernanceError, llm_governance_service
+from app.services.billing.token_service import token_service
 
 _CONTRACT_SCHEMA = {
     "type": "object",
@@ -50,13 +51,15 @@ class FakeRedis:
 class TokenCostTests(unittest.TestCase):
     def test_compute_cost_by_pricing(self):
         cost = token_service.compute_cost("qwen-plus", 1000, 1000)
-        self.assertAlmostEqual(cost, 0.004 + 0.012, places=6)
+        # 成本契约：Decimal 计算并 quantize 到 6 位小数（不承载 float 金额）
+        self.assertIsInstance(cost, Decimal)
+        self.assertEqual(cost, Decimal("0.016000"))
 
     def test_compute_cost_unknown_model_zero(self):
-        self.assertEqual(token_service.compute_cost("unknown-model", 1000, 1000), 0.0)
+        self.assertEqual(token_service.compute_cost("unknown-model", 1000, 1000), Decimal("0"))
 
     def test_compute_cost_zero_tokens(self):
-        self.assertEqual(token_service.compute_cost("qwen-plus", 0, 0), 0.0)
+        self.assertEqual(token_service.compute_cost("qwen-plus", 0, 0), Decimal("0"))
 
 
 class LLMResponseCacheUnitTests(unittest.TestCase):
@@ -112,8 +115,8 @@ class _GovernanceDBMixin:
         self.db.commit()
         self.db.refresh(self.user)
         self.sessionlocal_patchers = [
-            patch("app.services.llm_governance_service.SessionLocal", self.TestingSessionLocal),
-            patch("app.services.llm_observability_service.SessionLocal", self.TestingSessionLocal),
+            patch("app.services.llm.llm_governance_service.SessionLocal", self.TestingSessionLocal),
+            patch("app.services.llm.llm_observability_service.SessionLocal", self.TestingSessionLocal),
         ]
         for patcher in self.sessionlocal_patchers:
             patcher.start()
@@ -435,7 +438,7 @@ class AttemptCostAccountingTests(_GatewaySettingsMixin, unittest.IsolatedAsyncio
             return _OK_RESPONSE
 
         with patch.object(self.gateway, "_post_json_with_retry", new=AsyncMock(side_effect=fake_post)), patch(
-            "app.services.token_service.token_service.record", side_effect=fake_record,
+            "app.services.billing.token_service.token_service.record", side_effect=fake_record,
         ), patch("app.core.database.SessionLocal", TestingSessionLocal), patch.object(
             settings,
             "LLM_MODEL_PRICING",

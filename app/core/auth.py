@@ -1,5 +1,6 @@
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
@@ -12,8 +13,11 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.user import UserStatus, User
 from app.models.org import OrganizationMember, LegalMemberRole
-from app.services.auth_token_service import auth_token_service, new_jti
-from app.services.org_service import org_service
+from app.services.auth.auth_token_service import auth_token_service, new_jti
+from app.services.org.org_service import org_service
+
+if TYPE_CHECKING:
+    from app.services.org.authorization_service import AuthorizationContext
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 settings = get_settings()
@@ -46,13 +50,29 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     if "iat" not in to_encode:
         to_encode["iat"] = int(now.timestamp())
     to_encode.update({"exp": expire})
+    # P1-D：配置了 issuer/audience 时签发强制写入（校验端同步强制核对）。
+    if settings.JWT_ISSUER:
+        to_encode["iss"] = settings.JWT_ISSUER
+    if settings.JWT_AUDIENCE:
+        to_encode["aud"] = settings.JWT_AUDIENCE
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def decode_token(token: str) -> dict | None:
-    """解码 JWT token，返回 payload 或 None"""
+    """解码 JWT token，返回 payload 或 None（配置了 iss/aud 时强制核对）。"""
+    options: dict = {}
+    kwargs: dict = {}
+    if settings.JWT_ISSUER:
+        options["verify_iss"] = True
+        kwargs["issuer"] = settings.JWT_ISSUER
+    if settings.JWT_AUDIENCE:
+        options["verify_aud"] = True
+        kwargs["audience"] = settings.JWT_AUDIENCE
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return jwt.decode(
+            token, settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM], options=options, **kwargs,
+        )
     except JWTError:
         return None
 
@@ -82,6 +102,13 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = auth_token_service.validate_access_token(token, db)
     if user is None:
         raise credentials_exception
+    # 观察上下文：身份与租户来自已认证上下文（不信任外部传入）。
+    try:
+        from app.core.obs_context import enrich_context
+
+        enrich_context(user_id=user.id, org_id=user.organization_id)
+    except Exception:
+        pass
     # #95：deletion_pending 视为可执行注销流程（撤销/确认），其余状态按禁用处理
     if user.status == UserStatus.deletion_pending.value:
         return user
@@ -91,6 +118,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             "账号已被禁用",
             code="USER_DISABLED",
         )
+    # Authentication is the trusted source of user/org context. Never accept
+    # these fields from request headers.
+    from app.core.obs_context import get_context, set_context
+    set_context(replace(get_context(), user_id=user.id, org_id=user.organization_id))
     return user
 
 
@@ -113,7 +144,7 @@ def get_current_context(
     request: Request = None,
 ) -> "AuthorizationContext":
     """构建统一授权上下文（组织成员关系实时从数据库解析）。"""
-    from app.services.authorization_service import authorization_service
+    from app.services.org.authorization_service import authorization_service
 
     return authorization_service.build_context(
         db,

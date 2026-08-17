@@ -17,10 +17,10 @@ from app.models.email import EmailDraft, EmailSendRequest
 from app.models.legal_notifications import LegalNotificationEvent
 from app.models.org import Organization
 from app.models.user import User, UserStatus
-from app.services.notification_service import (
+from app.services.notification.notification_service import (
     NotificationStateError, notification_service,
 )
-from app.services.outbound_email_service import outbound_email_service
+from app.services.notification.outbound_email_service import outbound_email_service
 
 
 class FakeSMTP:
@@ -109,7 +109,7 @@ class NotificationOutboxTests(unittest.TestCase):
 
     def test_email_send_happens_only_in_outbox_worker(self):
         event = self._create_email_notification()
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             notification_service.dispatch_pending(db=self.db)
         self.assertEqual(len(FakeSMTP.sent), 0, "dispatch 只登记 Outbox，不真正发送")
         # 邮件 Outbox 请求已创建（自动批准）
@@ -120,7 +120,7 @@ class NotificationOutboxTests(unittest.TestCase):
         self.db.refresh(event)
         self.assertEqual(event.status, "approved")
         # 邮件 worker 领取并真正发送
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             owner = "worker-1"
             batch = outbound_email_service.claim_pending_batch(db=self.db, owner=owner)
             self.assertEqual(len(batch), 1)
@@ -171,7 +171,7 @@ class NotificationOutboxTests(unittest.TestCase):
         # 关闭自动批准 → 需人工审批，worker 不得发送
         with patch.object(get_settings(), "AUTO_APPROVE_EMAIL_NOTIFICATION_TO_OWNER", False):
             event = self._create_email_notification()
-            with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+            with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
                 notification_service.dispatch_pending(db=self.db)
         self.db.refresh(event)
         request = self.db.query(EmailSendRequest).filter(
@@ -179,7 +179,7 @@ class NotificationOutboxTests(unittest.TestCase):
         self.assertIsNotNone(request)
         self.assertEqual(request.status, "pending")  # 等待审批
         self.assertEqual(event.status, "pending")
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             outbound_email_service.claim_pending_batch(db=self.db, owner="w")
         self.assertEqual(len(FakeSMTP.sent), 0, "未审批不得发送")
         # 人工审批 → 通知镜像 approved → worker 发送
@@ -187,7 +187,7 @@ class NotificationOutboxTests(unittest.TestCase):
                                               db=self.db, user=self.approver)
         self.db.refresh(event)
         self.assertEqual(event.status, "approved")
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             owner = "w2"
             batch = outbound_email_service.claim_pending_batch(db=self.db, owner=owner)
             for req in batch:
@@ -199,7 +199,7 @@ class NotificationOutboxTests(unittest.TestCase):
 
     def test_dlp_block_goes_to_dead_letter(self):
         event = self._create_email_notification(body="使用令牌 sk_abcdefghijklmnopqrstuvwxyz123456 访问")
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             notification_service.dispatch_pending(db=self.db)
         self.db.refresh(event)
         self.assertEqual(event.status, "dead_letter")
@@ -229,13 +229,13 @@ class NotificationOutboxTests(unittest.TestCase):
             event.claim_expires_at = utc_now() - timedelta(seconds=1)
             self.db.commit()
             from app.tasks import recover_stale_outbox_claims_task
-            with patch("app.tasks.SessionLocal", self.Session):
+            with patch("app.tasks.notification_tasks.SessionLocal", self.Session):
                 result = recover_stale_outbox_claims_task()
             self.db.refresh(event)
             self.assertEqual(event.status, "pending")
             self.assertGreaterEqual(result.get("notification_reclaimed", 0), 1)
             # 重新领取可正常投递
-            with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+            with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
                 notification_service.dispatch_pending(db=self.db)
             self.db.refresh(event)
             self.assertNotEqual(event.status, "sending")
@@ -251,7 +251,7 @@ class NotificationOutboxTests(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def test_email_notification_uses_template_rendering(self):
-        from app.services.notification_template_service import notification_template_service
+        from app.services.notification.notification_template_service import notification_template_service
 
         notification_template_service.create_template(
             db=self.db, channel="email", template_key="deadline", locale="zh-CN",
@@ -264,7 +264,7 @@ class NotificationOutboxTests(unittest.TestCase):
             event_type="deadline", title="关键日期提醒", body="案件 X 今日到期",
             channel="email", template_key="deadline", locale="zh-CN",
             reference_type="deadline", reference_id=88)
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             notification_service.dispatch_pending(db=self.db)
         request = self.db.query(EmailSendRequest).filter(
             EmailSendRequest.notification_event_id == event.id).first()
@@ -276,7 +276,7 @@ class NotificationOutboxTests(unittest.TestCase):
         self.db.refresh(event)
         self.assertEqual(event.template_key, "deadline")
         # worker 实际发送的即渲染后的主题
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             owner = "w-tpl"
             batch = outbound_email_service.claim_pending_batch(db=self.db, owner=owner)
             for req in batch:
@@ -287,7 +287,7 @@ class NotificationOutboxTests(unittest.TestCase):
     def test_notification_manual_retry_cascades_to_email_dead_letter(self):
         # 通知关联的邮件请求已死信 → 通知级人工重试应一并重置请求待投递
         event = self._create_email_notification(reference_id=77)
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             notification_service.dispatch_pending(db=self.db)
         self.db.refresh(event)
         request = self.db.query(EmailSendRequest).filter(

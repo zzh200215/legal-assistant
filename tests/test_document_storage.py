@@ -8,8 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.core.config import get_settings
-from app.services.storage_cloud_adapters import build_cloud_adapter
-from app.services.storage_service import (
+from app.services.storage.storage_cloud_adapters import build_cloud_adapter
+from app.services.storage.storage_service import (
     LocalStorageAdapter,
     StorageBackendUnavailable,
     build_storage_adapter,

@@ -19,7 +19,7 @@ from app.models.legal_domain import (
     LegalFact,
     LegalReference,
 )
-from app.services.legal_reference_service import check_applicability
+from app.services.legal.legal_reference_service import check_applicability
 
 
 class LegalDomainModelTests(unittest.TestCase):

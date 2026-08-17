@@ -30,7 +30,7 @@ def _demo_service():
          patch.object(s, "DINGTALK_APP_SECRET", ""), patch.object(s, "LDAP_URL", ""), \
          patch.object(s, "LDAP_BASE_DN", ""), patch.object(s, "LDAP_BIND_DN", ""), \
          patch.object(s, "LDAP_BIND_PASSWORD", ""):
-        from app.services.enterprise_auth_service import EnterpriseAuthService
+        from app.services.auth.enterprise_auth_service import EnterpriseAuthService
         return EnterpriseAuthService()
 
 

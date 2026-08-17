@@ -19,10 +19,10 @@ from app.core.database import Base
 from app.models.payment_event import PaymentEvent
 from app.models.subscription import SubscriptionStatus, UserSubscription
 from app.models.user import User, UserStatus
-from app.services.payment_event_service import (
+from app.services.billing.payment_event_service import (
     WebhookRejectedError, payment_event_service,
 )
-from app.services.subscription_service import subscription_service
+from app.services.billing.subscription_service import subscription_service
 
 
 def _engine():
@@ -158,7 +158,7 @@ class PaymentWebhookReliabilityTests(unittest.TestCase):
     def test_refund_duplicate_and_over(self):
         from app.models.legal import LegalCase
         from app.models.legal_billing import LegalInvoice
-        from app.services.billing_service import billing_service
+        from app.services.billing.billing_service import billing_service
 
         case = LegalCase(organization_id=1, user_id=self.user.id, title="c", case_type="other")
         self.db.add(case)

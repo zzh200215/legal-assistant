@@ -1,0 +1,55 @@
+# 律智检后端 · Ruff 配置（统一格式与静态检查基线）
+# 说明：首轮仅固化配置并记录基线，存量告警按 P3 阶段逐文件治理。
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [
+    "alembic/versions",   # 历史迁移脚本，冻结不重排
+    "frontend",
+    "data",
+    "eval/outputs",
+    ".venv",
+    "venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "W",     # pycodestyle warnings
+    "I",     # isort 导入排序
+    "B",     # flake8-bugbear
+    "UP",    # pyupgrade（py311 语法升级）
+    "SIM",   # flake8-simplify
+    "C4",    # flake8-comprehensions
+]
+ignore = [
+    "E501",  # 行宽交给 ruff format 处理
+    "B008",  # FastAPI Depends() 作默认参数是有意为之
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+# ── 测试与覆盖率（阶段1 分层测试补齐）────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 说明：不加全局 addopts --cov（避免拖慢全量测试与污染既有 pytest 行为）；
+# 覆盖率按需显式启用，见 docs/TESTING_AND_RELEASE.md 的命令。
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# 门槛（本地/CI 报告对照口径，CI 不设硬失败，由人工把关）：
+#   全量 ≥60%；关键路径（幂等/乐观锁/支付/outbox/契约模块）≥80%
+# 本地硬验命令：
+#   python -m pytest tests/ --cov=app --cov-fail-under=60
+#   python -m pytest tests/ --cov=app.core.versioning --cov=app.services.jobs \
+#     --cov=app.services.billing --cov=app.services.notification --cov=app.core.external_resilience \
+#     --cov=app.core.circuit_breaker --cov=app.tasks --cov-fail-under=80

@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.agent_approval_service import agent_approval_service
+from app.services.agent.agent_approval_service import agent_approval_service
 
 
 class AgentApprovalPolicyTests(unittest.TestCase):

@@ -9,7 +9,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from app.services.vector_store import (
+from app.services.rag.vector_store import (
     ChromaVectorStoreCollection,
     QdrantVectorStoreCollection,
 )
@@ -188,8 +188,8 @@ class QdrantVectorStoreContractTests(unittest.TestCase):
     def setUp(self):
         self.client = FakeQdrantClient()
         self.patchers = [
-            patch("app.services.vector_store.QDRANT_AVAILABLE", True),
-            patch("app.services.vector_store.qdrant_models", FakeModels),
+            patch("app.services.rag.vector_store.QDRANT_AVAILABLE", True),
+            patch("app.services.rag.vector_store.qdrant_models", FakeModels),
         ]
         for p in self.patchers:
             p.start()

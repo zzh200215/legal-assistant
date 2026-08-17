@@ -1,4 +1,5 @@
 import { createApp } from 'vue'
+import { createPinia } from 'pinia'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElAside, ElContainer, ElHeader, ElMain } from 'element-plus/es/components/container/index'
 import { ElIcon } from 'element-plus/es/components/icon/index'
@@ -109,6 +110,7 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 app.directive('loading', ElLoadingDirective)
+app.use(createPinia())
 app.use(router)
 router.onError(showRuntimeError)
 // 等初始导航解析完成再挂载：否则 App.vue 挂载时 route 还是初始空路由，

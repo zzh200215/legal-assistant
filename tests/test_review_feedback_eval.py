@@ -148,7 +148,7 @@ class EndToEndFeedbackLoopTests(unittest.TestCase):
             return None
 
         async def runner():
-            with patch("app.services.legal_service._llm_chat", new=_no_llm):
+            with patch("app.services.legal.legal_service._llm_chat", new=_no_llm):
                 return await run_eval(dataset, db)
 
         report = asyncio.run(runner())

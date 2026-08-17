@@ -36,7 +36,10 @@ _NAME_RE = re.compile(r"(?<=[\u4e00-\u9fff])(张三|李四|王五|赵六|孙七|
 
 
 def _redact(text: str) -> str:
-    return _NAME_RE.sub("【当事人】", text)
+    """脱敏（阶段 4 扩展）：走 eval/redact 规则（姓名/手机/证件/金额/邮箱/案号/律所名）。"""
+    from eval.redact import redact_pii
+
+    return redact_pii(text)
 
 
 def main() -> int:

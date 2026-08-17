@@ -61,6 +61,25 @@ class LLMSettings(BaseSettings):
     LLM_RESPONSE_CACHE_REDIS_ENABLED: bool = False
     LLM_RESPONSE_CACHE_REDIS_PREFIX: str = "aibg:llm-response-cache"
 
+    # ── P0 出站数据保护（统一安全网关：分级 + PII 检测/脱敏 + 极敏感拦截）──────────
+    # 出站 LLM 请求统一安全网关开关：启用时对所有出站请求做数据分级 + PII 检测/脱敏。
+    # 默认启用；关闭仅用于开发调试，生产不得关闭。
+    LLM_OUTBOUND_DLP_ENABLED: bool = True
+    # DLP 审计开关：关闭时跳过 data_level/pii 统计等审计字段（基础 LLMCallLog 审计照旧）。
+    LLM_OUTBOUND_AUDIT_ENABLED: bool = True
+    # highly_sensitive 显式放行 action 名单（JSON 数组）。默认空 = 全部拦截（deny-by-default）。
+    # 例：LLM_OUTBOUND_HIGHLY_SENSITIVE_ACTIONS_JSON=["legal_contract_review"]
+    LLM_OUTBOUND_HIGHLY_SENSITIVE_ACTIONS_JSON: str = "[]"
+    # action → 基础数据等级覆盖（JSON 对象，键为精确 action，值为
+    # public/internal/sensitive/highly_sensitive）。未配置的 action 走内置安全默认。
+    # 例：LLM_OUTBOUND_ACTION_DATA_LEVEL_JSON={"chat":"internal","legal_contract_review":"sensitive"}
+    LLM_OUTBOUND_ACTION_DATA_LEVEL_JSON: str = "{}"
+    # 检测服务异常时的默认行为：block（fail closed，阻断全部出站并记录原因）/
+    # warn（放行并记录，仅逃生通道，不保证 PII 不外泄）。
+    LLM_OUTBOUND_DLP_FAILURE_ACTION: str = Field(default="block", pattern="^(block|warn)$")
+    # 规则检测器版本（审计/对账用）。
+    LLM_OUTBOUND_DLP_RULES_VERSION: str = "rule-based-v1"
+
     # 供应商熔断：仅超时/传输/5xx 计入；参数/鉴权/权限/内容拦截不计入。
     CIRCUIT_BREAKER_ENABLED: bool = True
     CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = Field(default=5, ge=1, le=100)
@@ -129,6 +148,38 @@ class LLMSettings(BaseSettings):
             unknown = set(limits) - allowed
             if unknown:
                 raise ValueError(f"限流桶 {category} 含未知配置键：{sorted(unknown)}")
+        return v
+
+    @field_validator("LLM_OUTBOUND_HIGHLY_SENSITIVE_ACTIONS_JSON")
+    @classmethod
+    def validate_highly_sensitive_actions_json(cls, v: str) -> str:
+        if not v:
+            return v
+        try:
+            actions = json.loads(v)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"LLM_OUTBOUND_HIGHLY_SENSITIVE_ACTIONS_JSON格式错误：{e}") from e
+        if not isinstance(actions, list) or not all(isinstance(item, str) and item.strip() for item in actions):
+            raise ValueError("LLM_OUTBOUND_HIGHLY_SENSITIVE_ACTIONS_JSON必须是非空字符串数组")
+        return v
+
+    @field_validator("LLM_OUTBOUND_ACTION_DATA_LEVEL_JSON")
+    @classmethod
+    def validate_action_data_level_json(cls, v: str) -> str:
+        if not v:
+            return v
+        try:
+            cfg = json.loads(v)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"LLM_OUTBOUND_ACTION_DATA_LEVEL_JSON格式错误：{e}") from e
+        allowed = {"public", "internal", "sensitive", "highly_sensitive"}
+        if not isinstance(cfg, dict):
+            raise ValueError("LLM_OUTBOUND_ACTION_DATA_LEVEL_JSON必须是JSON对象")
+        for action, level in cfg.items():
+            if not isinstance(action, str) or not action.strip():
+                raise ValueError("LLM_OUTBOUND_ACTION_DATA_LEVEL_JSON的键必须是action字符串")
+            if level not in allowed:
+                raise ValueError(f"action {action} 的数据等级必须是 {sorted(allowed)} 之一")
         return v
 
     @staticmethod

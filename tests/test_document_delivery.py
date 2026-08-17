@@ -66,7 +66,7 @@ class DocumentDeliveryApiTests(unittest.TestCase):
         self.owner_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(self.owner_id)})}"}
         self.viewer_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(self.viewer_id)})}"}
         self.storage_patcher = patch(
-            "app.services.document_delivery_service.storage_service.base_dir",
+            "app.services.documents.document_delivery_service.storage_service.base_dir",
             return_value=self.storage_root,
         )
         self.storage_patcher.start()

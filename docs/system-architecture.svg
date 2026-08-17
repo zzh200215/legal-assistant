@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="940" viewBox="0 0 1440 940" role="img" aria-labelledby="title desc">
+  <title id="title">律智检分层系统架构</title>
+  <desc id="desc">展示访问层、应用服务层、智能能力层及数据基础设施层之间的关系。</desc>
+  <style>
+    text { font-family: "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif; fill: #172033; }
+    .title { font-size: 30px; font-weight: 700; }
+    .subtitle { font-size: 15px; fill: #667085; }
+    .layer { font-size: 16px; font-weight: 700; fill: #344054; }
+    .node-title { font-size: 17px; font-weight: 700; }
+    .node-text { font-size: 13px; fill: #475467; }
+    .band { stroke-width: 1.5; rx: 14; }
+    .node { stroke-width: 1.5; rx: 10; }
+    .edge { fill: none; stroke: #98a2b3; stroke-width: 2; marker-end: url(#arrow); }
+    .edge-dashed { fill: none; stroke: #8b5cf6; stroke-width: 2; stroke-dasharray: 6 5; marker-end: url(#arrow-purple); }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#98a2b3" />
+    </marker>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#8b5cf6" />
+    </marker>
+  </defs>
+
+  <rect width="1440" height="940" fill="#f8fafc" />
+  <rect x="24" y="24" width="1392" height="892" rx="18" fill="#ffffff" stroke="#e4e7ec" />
+  <text x="64" y="78" class="title">律智检分层系统架构</text>
+  <text x="64" y="106" class="subtitle">前端与外部入口经 API 进入领域服务，智能、异步与数据能力作为可治理的底层支撑。</text>
+
+  <rect x="48" y="140" width="1344" height="126" class="band" fill="#f0f9ff" stroke="#7dd3fc" />
+  <text x="72" y="174" class="layer">访问与展示层</text>
+  <rect x="220" y="162" width="240" height="76" class="node" fill="#ffffff" stroke="#38bdf8" />
+  <text x="340" y="193" text-anchor="middle" class="node-title">Vue 3 前端</text>
+  <text x="340" y="216" text-anchor="middle" class="node-text">工作台、知识库、系统中心</text>
+  <rect x="600" y="162" width="240" height="76" class="node" fill="#ffffff" stroke="#38bdf8" />
+  <text x="720" y="193" text-anchor="middle" class="node-title">客户门户</text>
+  <text x="720" y="216" text-anchor="middle" class="node-text">OTP、进度、文件与反馈</text>
+  <rect x="980" y="162" width="240" height="76" class="node" fill="#ffffff" stroke="#38bdf8" />
+  <text x="1100" y="193" text-anchor="middle" class="node-title">飞书适配层</text>
+  <text x="1100" y="216" text-anchor="middle" class="node-text">咨询、初筛、提醒与回写</text>
+
+  <rect x="48" y="294" width="1344" height="182" class="band" fill="#f5f3ff" stroke="#c4b5fd" />
+  <text x="72" y="328" class="layer">应用服务层</text>
+  <rect x="190" y="350" width="220" height="88" class="node" fill="#ffffff" stroke="#8b5cf6" />
+  <text x="300" y="383" text-anchor="middle" class="node-title">FastAPI API</text>
+  <text x="300" y="406" text-anchor="middle" class="node-text">REST、WebSocket、鉴权入口</text>
+  <rect x="470" y="350" width="220" height="88" class="node" fill="#ffffff" stroke="#8b5cf6" />
+  <text x="580" y="383" text-anchor="middle" class="node-title">法律工作台</text>
+  <text x="580" y="406" text-anchor="middle" class="node-text">咨询、案件、合同、审核</text>
+  <rect x="750" y="350" width="220" height="88" class="node" fill="#ffffff" stroke="#8b5cf6" />
+  <text x="860" y="383" text-anchor="middle" class="node-title">文档治理</text>
+  <text x="860" y="406" text-anchor="middle" class="node-text">上传、解析、索引、交付</text>
+  <rect x="1030" y="350" width="220" height="88" class="node" fill="#ffffff" stroke="#8b5cf6" />
+  <text x="1140" y="383" text-anchor="middle" class="node-title">Agent 与平台服务</text>
+  <text x="1140" y="406" text-anchor="middle" class="node-text">MCP、计费、通知、开放接口</text>
+
+  <rect x="48" y="504" width="1344" height="166" class="band" fill="#f0fdf4" stroke="#86efac" />
+  <text x="72" y="538" class="layer">智能能力层</text>
+  <rect x="220" y="560" width="230" height="76" class="node" fill="#ffffff" stroke="#22c55e" />
+  <text x="335" y="591" text-anchor="middle" class="node-title">Agentic RAG</text>
+  <text x="335" y="614" text-anchor="middle" class="node-text">规划、检索、证据评估</text>
+  <rect x="570" y="560" width="230" height="76" class="node" fill="#ffffff" stroke="#22c55e" />
+  <text x="685" y="591" text-anchor="middle" class="node-title">模型网关</text>
+  <text x="685" y="614" text-anchor="middle" class="node-text">路由、预算、熔断与降级</text>
+  <rect x="920" y="560" width="230" height="76" class="node" fill="#ffffff" stroke="#22c55e" />
+  <text x="1035" y="591" text-anchor="middle" class="node-title">向量检索与图谱</text>
+  <text x="1035" y="614" text-anchor="middle" class="node-text">Chroma / Qdrant / Neo4j</text>
+
+  <rect x="48" y="698" width="1344" height="174" class="band" fill="#fff7ed" stroke="#fdba74" />
+  <text x="72" y="732" class="layer">数据与基础设施层</text>
+  <rect x="175" y="754" width="210" height="78" class="node" fill="#ffffff" stroke="#f97316" />
+  <text x="280" y="786" text-anchor="middle" class="node-title">关系数据库</text>
+  <text x="280" y="809" text-anchor="middle" class="node-text">MySQL / PostgreSQL / SQLite</text>
+  <rect x="465" y="754" width="210" height="78" class="node" fill="#ffffff" stroke="#f97316" />
+  <text x="570" y="786" text-anchor="middle" class="node-title">Redis 与 Celery</text>
+  <text x="570" y="809" text-anchor="middle" class="node-text">五队列、Worker、Beat</text>
+  <rect x="755" y="754" width="210" height="78" class="node" fill="#ffffff" stroke="#f97316" />
+  <text x="860" y="786" text-anchor="middle" class="node-title">对象存储</text>
+  <text x="860" y="809" text-anchor="middle" class="node-text">Local / MinIO / S3 / OSS</text>
+  <rect x="1045" y="754" width="210" height="78" class="node" fill="#ffffff" stroke="#f97316" />
+  <text x="1150" y="786" text-anchor="middle" class="node-title">观测与审计</text>
+  <text x="1150" y="809" text-anchor="middle" class="node-text">日志、告警、Sentry、OTel</text>
+
+  <path d="M340 238 L340 350" class="edge" />
+  <path d="M720 238 L720 294 L300 294 L300 350" class="edge" />
+  <path d="M1100 238 L1100 294 L300 294 L300 350" class="edge" />
+  <path d="M410 394 L470 394" class="edge" />
+  <path d="M410 394 L750 394" class="edge" />
+  <path d="M410 394 L1030 394" class="edge" />
+  <path d="M580 438 L580 500 L335 500 L335 560" class="edge" />
+  <path d="M1140 438 L1140 500 L685 500 L685 560" class="edge" />
+  <path d="M335 636 L335 754 L280 754" class="edge" />
+  <path d="M685 636 L685 754 L570 754" class="edge" />
+  <path d="M1035 636 L1035 754 L860 754" class="edge" />
+  <path d="M1035 598 L1150 598" class="edge-dashed" />
+</svg>

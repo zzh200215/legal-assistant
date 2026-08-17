@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.database import Base
 from app.core.time import utc_now
-from app.services.task_run_service import task_run_service
+from app.services.jobs.task_run_service import task_run_service
 
 
 def _engine():

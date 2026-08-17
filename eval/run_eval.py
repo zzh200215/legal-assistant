@@ -15,9 +15,9 @@ if str(ROOT_DIR) not in sys.path:
 import app.models  # noqa: F401
 from eval.bundle_utils import DEFAULT_DATASET_PATH, load_bundle_meta, resolve_eval_paths
 from eval.common import ensure_eval_llm_ready
-from app.services.agentic_rag_service import agentic_rag_service
-from app.services.prompt_service import prompt_service
-from app.services.rag_service import rag_service
+from app.services.rag.agentic_rag_service import agentic_rag_service
+from app.services.llm.prompt_service import prompt_service
+from app.services.rag.rag_service import rag_service
 
 
 def load_dataset(path: Path) -> list[dict]:
@@ -103,6 +103,18 @@ def _classify_case(item: dict, result: dict, *, hit: bool, citation_ok: bool) ->
 def collect_badcases(cases: list[dict]) -> list[dict]:
     non_badcase_outcomes = {"pass", "correct_refusal"}
     return [case for case in cases if case.get("case_outcome") not in non_badcase_outcomes]
+
+
+def _percentile(sorted_values: list[float], p: int) -> float:
+    """线性插值分位（sorted 升序）；空列表返回 0.0。"""
+    n = len(sorted_values)
+    if n == 0:
+        return 0.0
+    idx = (n - 1) * p / 100.0
+    lower = int(idx)
+    upper = min(lower + 1, n - 1)
+    weight = idx - lower
+    return round(sorted_values[lower] * (1 - weight) + sorted_values[upper] * weight, 2)
 
 
 def run_eval(
@@ -214,6 +226,9 @@ def run_eval(
     refusal_count = totals["refusal_count"] or 1
     badcases = collect_badcases(cases)
     fingerprint = dataset_fingerprint(dataset)
+    latencies = sorted(c.get("latency_ms") or 0 for c in cases)
+    latency_p50 = _percentile(latencies, 50)
+    latency_p95 = _percentile(latencies, 95)
     return {
         "evaluation_id": f"rag_eval_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{fingerprint[:8]}",
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
@@ -246,6 +261,8 @@ def run_eval(
             "answer_correct_count": totals["answer_correct_count"],
             "answer_accuracy": round(totals["answer_correct_count"] / totals["answer_labeled_count"], 4) if totals["answer_labeled_count"] else None,
             "average_latency_ms": round(totals["latency_ms_total"] / totals["count"], 2) if totals["count"] else None,
+            "latency_p50_ms": latency_p50,
+            "latency_p95_ms": latency_p95,
             "average_retrieval_rounds": round(
                 totals["agentic_retrieval_rounds_total"] / totals["count"], 2
             ) if totals["count"] else None,

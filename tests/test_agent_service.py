@@ -10,10 +10,10 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.database import Base
-from app.services.agent_approval_service import agent_approval_service
+from app.services.agent.agent_approval_service import agent_approval_service
 from app.models.agent import AgentRun, ToolCallLog
 from app.models.user import User
-from app.services.agent_service import AgentService
+from app.services.agent.agent_service import AgentService
 from app.tools.base import BaseAgentTool, tool_success
 
 
@@ -50,7 +50,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
         self.db.refresh(self.user)
         self.service = AgentService()
         self.supervisor_generate = patch(
-            "app.services.agent_service.llm_service.generate",
+            "app.services.agent.agent_service.llm_service.generate",
             new=AsyncMock(return_value="{}"),
         )
         self.supervisor_generate.start()
@@ -71,7 +71,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         with patch(
-            "app.services.agent_service.llm_service.generate",
+            "app.services.agent.agent_service.llm_service.generate",
             new=AsyncMock(return_value=valid_plan),
         ):
             plan = await self.service._plan_with_supervisor("审查合同并生成跟进任务", self.user.id)
@@ -88,7 +88,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         with patch(
-            "app.services.agent_service.llm_service.generate",
+            "app.services.agent.agent_service.llm_service.generate",
             new=AsyncMock(return_value=invalid_plan),
         ):
             fallback = await self.service._plan_with_supervisor("审查合同并生成跟进任务", self.user.id)
@@ -119,7 +119,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
             ),
         }
 
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
+        with patch("app.services.agent.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
             "app.mcp.registry._TOOL_INSTANCES", fake_tools, clear=True,
         ):
             run = await self.service.run("提取文档 1 风险并创建任务", self.user.id, self.db, max_steps=4)
@@ -210,7 +210,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
             ),
         }
 
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
+        with patch("app.services.agent.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
             "app.mcp.registry._TOOL_INSTANCES",
             fake_tools,
             clear=True,
@@ -261,7 +261,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
             "meeting_action_tool": FakeTool("meeting_action_tool", "创建任务"),
         }
 
-        with patch("app.services.agent_service.llm_service.generate", side_effect=fake_generate), patch.dict(
+        with patch("app.services.agent.agent_service.llm_service.generate", side_effect=fake_generate), patch.dict(
             "app.mcp.registry._TOOL_INSTANCES",
             fake_tools,
             clear=True,
@@ -328,7 +328,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
             ),
         }
 
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
+        with patch("app.services.agent.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
             "app.mcp.registry._TOOL_INSTANCES",
             fake_tools,
             clear=True,
@@ -346,7 +346,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
         async def fake_chat(messages, stream=False, temperature=0.7):
             raise RuntimeError("db_password=secret")
 
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat):
+        with patch("app.services.agent.agent_service.llm_service.chat", side_effect=fake_chat):
             run = await self.service.run("执行失败示例", self.user.id, self.db, max_steps=2)
 
         self.assertEqual(run.status, "error")
@@ -363,7 +363,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
         async def fake_chat(messages, stream=False, temperature=0.7):
             return calls.pop(0)
 
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat):
+        with patch("app.services.agent.agent_service.llm_service.chat", side_effect=fake_chat):
             run = await self.service.run("触发重试", self.user.id, self.db, max_steps=1)
 
         logs = self.service.get_run_logs(run.id, self.db, user_id=self.user.id)
@@ -417,7 +417,7 @@ class AgentServiceFlowTests(unittest.IsolatedAsyncioTestCase):
             ),
         }
 
-        with patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
+        with patch("app.services.agent.agent_service.llm_service.chat", side_effect=fake_chat), patch.dict(
             "app.mcp.registry._TOOL_INSTANCES",
             fake_tools,
             clear=True,

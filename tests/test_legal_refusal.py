@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from app.services.legal_service import REFUSAL_ADVICE, _should_refuse, classify_question, consultation_payload
+from app.services.legal.legal_service import REFUSAL_ADVICE, _should_refuse, classify_question, consultation_payload
 
 
 class RefusalDetectionTests(unittest.TestCase):

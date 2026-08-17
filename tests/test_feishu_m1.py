@@ -13,8 +13,8 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.database import Base
-from app.services import feishu_service
-from app.services.rag_service import rag_service
+from app.services.integration import feishu_service
+from app.services.rag.rag_service import rag_service
 
 
 def _make_session():
@@ -115,11 +115,11 @@ class BuildCardTests(unittest.IsolatedAsyncioTestCase):
     async def test_card_built_from_consultation(self):
         engine, db = _make_session()
         try:
-            with patch("app.services.legal_service.consultation_payload", new=AsyncMock(return_value=(
+            with patch("app.services.legal.legal_service.consultation_payload", new=AsyncMock(return_value=(
                     "劳动纠纷", ["上班途中受伤"], ["事故发生时间", "工伤认定书"],
                     [{"title": "工伤保险条例", "citation": "2010年修订"}],
                     "依据条例申请工伤认定", "high", "needs_lawyer_review"))), \
-                 patch("app.services.legal_service.ensure_demo_sources", new=MagicMock()), \
+                 patch("app.services.legal.legal_service.ensure_demo_sources", new=MagicMock()), \
                  patch.object(rag_service, "search_async", new=AsyncMock(return_value=[])):
                 card = await feishu_service.build_consultation_card("工伤", 1, db)
             serialized = json.dumps(card, ensure_ascii=False)

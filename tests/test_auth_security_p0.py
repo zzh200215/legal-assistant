@@ -28,13 +28,13 @@ from app.models.legal import LegalCase
 from app.models.document import Document, DocumentAccessRule
 from app.models.legal_portal import LegalCaseMember, LegalPortalLink
 from app.models.security_auth import MFAChallenge
-from app.services.authorization_service import (
+from app.services.org.authorization_service import (
     AuthorizationContext,
     PermissionAction,
     authorization_service,
 )
-from app.services.auth_token_service import auth_token_service
-from app.services.mfa_service import mfa_service
+from app.services.auth.auth_token_service import auth_token_service
+from app.services.auth.mfa_service import mfa_service
 
 
 def _now():
@@ -673,7 +673,7 @@ class PortalScopeTests(unittest.TestCase):
 
         from app.models.document import Document
         from app.models.legal import LegalCase
-        from app.models.legal_portal import LegalPortalLink, LegalPortalLinkItem
+        from app.models.legal_portal import LegalPortalLinkItem
         from app.models.org import Organization, OrganizationMember
 
         self._tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)

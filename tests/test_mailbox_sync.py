@@ -10,7 +10,7 @@ import app.models  # noqa: F401
 from app.core.config import get_settings
 from app.core.database import Base
 from app.models.mailbox import MailboxAttachment, MailboxMessage, MailboxSyncAccount
-from app.services.mailbox_sync_service import (
+from app.services.integration.mailbox_sync_service import (
     MockMailboxClient, build_mock_mailbox, mailbox_sync_service,
 )
 

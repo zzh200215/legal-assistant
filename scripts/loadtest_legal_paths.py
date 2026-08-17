@@ -42,7 +42,7 @@ from app.core.database import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.subscription import PlanTier, SubscriptionPlan, UserSubscription  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.services.llm_service import llm_service  # noqa: E402
+from app.services.llm.llm_service import llm_service  # noqa: E402
 
 BASE = "http://testserver/api/legal"
 

@@ -1,7 +1,7 @@
 import unittest
 
-from app.services.agent_harness_service import get_harness_profile
-from app.services.agent_skill_registry import get_agent_skill, list_agent_skills, resolve_agent_skill
+from app.services.agent.agent_harness_service import get_harness_profile
+from app.services.agent.agent_skill_registry import get_agent_skill, list_agent_skills, resolve_agent_skill
 
 
 class AgentSkillRegistryTests(unittest.TestCase):

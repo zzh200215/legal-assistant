@@ -5,11 +5,23 @@ import httpx
 import redis
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from sqlalchemy import text
 from sqlalchemy.orm.exc import StaleDataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import account_deletion_api, agent_api, analytics_api, api_key_api, auth_api, chat_api, dashboard_api, document_api, document_conflict_api, feishu_api, legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_domain_api, legal_platform_api, legal_portal_api, mcp_api, memory_api, miniapp_api, org_api, org_member_api, outbound_api, pilot_feedback_api, platform_payment_api, prompt_api, subscription_api, task_api, ws_api
+from app.api.admin import analytics_api, dashboard_api, pilot_feedback_api, prompt_api
+from app.api.agent import agent_api, mcp_api
+from app.api.auth import account_deletion_api, auth_api
+from app.api.billing import platform_payment_api, subscription_api
+from app.api.channels import feishu_api, miniapp_api, outbound_api
+from app.api.conversation import chat_api, memory_api, ws_api
+from app.api.developer import api_key_api, legal_platform_api
+from app.api.documents import document_api, document_conflict_api
+from app.api.legal import legal_api, legal_approval_api, legal_billing_api, legal_case_api, legal_contract_api, legal_domain_api, legal_portal_api, org_member_api
+from app.api.org import org_api
+from app.api.tasks import task_api
+import app.tasks  # noqa: F401  (显式注册 Celery 任务：应用进程内 .delay() 需任务已注册)
 from app.core.config import get_settings
 from app.core.api_response import (
     ApiResponseMiddleware,
@@ -21,6 +33,7 @@ from app.core.api_response import (
 from app.core.database import SessionLocal
 from app.core.model_gateway import model_gateway
 from app.core.oplog_middleware import OperationLogMiddleware
+from app.core.obs_middleware import ObservabilityContextMiddleware
 from app.core.telemetry import init_telemetry
 
 
@@ -72,6 +85,7 @@ app.include_router(ws_api.router, prefix="/api", tags=["WebSocket"])
 
 app.add_middleware(ApiResponseMiddleware)
 app.add_middleware(OperationLogMiddleware)
+app.add_middleware(ObservabilityContextMiddleware)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
@@ -82,6 +96,102 @@ settings = get_settings()
 # 生产/试点环境严格配置校验：关键配置缺失则启动失败；开发/测试不校验。
 settings.validate_production_or_raise()
 init_telemetry(app)
+
+
+# ── P1: 统一 OpenAPI 契约（代码自动生成，禁止手维护文档）────────────────────
+_IDEMPOTENCY_HEADER = {
+    "name": "Idempotency-Key",
+    "in": "header",
+    "required": False,
+    "schema": {"type": "string", "maxLength": 128},
+    "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409",
+}
+_IF_MATCH_HEADER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": False,
+    "schema": {"type": "string", "pattern": '^"v\\d+"$'},
+    "description": 'ETag 值（形如 "v{n}"）：与资源当前版本不匹配返回 409 CONCURRENT_UPDATE_CONFLICT',
+}
+# 声明 202 + JobOut 的异步创建端点（(method, path) 名单，与服务端实际行为一致）。
+_ASYNC_CREATE_ENDPOINTS = {
+    ("post", "/api/open/v1/contract-reviews"),
+    ("get", "/api/developer/orgs/{org_id}/security-audit/export"),
+    ("post", "/api/documents/{document_id}/summarize"),
+    ("post", "/api/documents/{document_id}/analyze"),
+}
+# 声明 If-Match 的版本化更新端点（服务端已实现校验的名单）。
+# 注意：org 更新真实路由为 /api/org/organizations/{org_id}（org_api.router 挂载于 /api/org）。
+_IF_MATCH_ENDPOINTS = {
+    ("put", "/api/tasks/{task_id}"),
+    ("patch", "/api/tasks/{task_id}"),
+    ("put", "/api/org/organizations/{org_id}"),
+}
+
+
+def _inject_unified_contract(schema: dict) -> dict:
+    from app.schemas.api import ErrorEnvelope, JobOut, PagePayload, SuccessEnvelope
+
+    schema["info"]["x-api-version"] = "1"
+    # 错误码注册表随规范固化（contract gate 检测错误码删除/变更这一 breaking change）
+    from app.core import error_codes as error_codes_module
+    schema["x-error-codes"] = sorted({
+        value for name, value in vars(error_codes_module).items()
+        if name.isupper() and isinstance(value, str)
+    })
+    components = schema.setdefault("components", {})
+    schemas = components.setdefault("schemas", {})
+    for model in (SuccessEnvelope, ErrorEnvelope, PagePayload, JobOut):
+        schemas[model.__name__] = model.model_json_schema(
+            ref_template="#/components/schemas/{model}"
+        )
+    components.setdefault("securitySchemes", {})["ApiKeyHeader"] = {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "开放平台 API Key（/api/open/* 必填）",
+    }
+
+    for path, methods in schema.get("paths", {}).items():
+        for method, op in methods.items():
+            if not isinstance(op, dict) or "operationId" not in op:
+                continue
+            if path.startswith("/api/open/"):
+                op.setdefault("security", [{"ApiKeyHeader": []}])
+            if method.lower() in ("post", "put", "patch", "delete"):
+                params = op.setdefault("parameters", [])
+                if not any(p.get("name") == "Idempotency-Key" for p in params):
+                    params.append(_IDEMPOTENCY_HEADER)
+            if (method.lower(), path) in _IF_MATCH_ENDPOINTS:
+                params = op.setdefault("parameters", [])
+                if not any(p.get("name") == "If-Match" for p in params):
+                    params.append(_IF_MATCH_HEADER)
+            if (method.lower(), path) in _ASYNC_CREATE_ENDPOINTS:
+                op.setdefault("responses", {})["202"] = {
+                    "description": "已接受：任务已创建，通过 status_url 查询结果",
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/JobOut"}
+                        }
+                    },
+                }
+    return schema
+
+
+def custom_openapi():
+    if app.openapi_schema is not None:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    app.openapi_schema = _inject_unified_contract(schema)
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 @app.get("/")

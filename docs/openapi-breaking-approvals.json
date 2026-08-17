@@ -1,0 +1,6 @@
+{
+  "comment": "OpenAPI breaking change 显式批准清单（scripts/check_openapi_contract.py 读取）。",
+  "comment2": "kind ∈ endpoint_removed/method_removed/param_removed/param_required_added/request_required/response_removed/schema_removed/schema_field_removed/schema_required_added/schema_type_changed/error_code_removed",
+  "comment3": "approved_until 过期后自动失效，需重新批准。",
+  "approvals": []
+}

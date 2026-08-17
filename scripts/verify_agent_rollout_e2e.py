@@ -35,8 +35,8 @@ from app.mcp.tool_contract import ToolContract  # noqa: E402
 from app.models.agent import AgentAuditEvent, AgentApprovalRequest, AgentRun  # noqa: E402
 from app.models.task import Task  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.services.agent_approval_service import agent_approval_service  # noqa: E402
-from app.services.agent_service import agent_service  # noqa: E402
+from app.services.agent.agent_approval_service import agent_approval_service  # noqa: E402
+from app.services.agent.agent_service import agent_service  # noqa: E402
 from app.tools.base import BaseAgentTool, tool_success  # noqa: E402
 
 
@@ -111,8 +111,8 @@ def main() -> None:
 
     run = None
     with patch.dict("app.mcp.registry._TOOL_INSTANCES", fake_tools, clear=True), \
-         patch("app.services.agent_service.llm_service.chat", side_effect=fake_chat), \
-         patch("app.services.agent_service.llm_service.generate", side_effect=fake_generate):
+         patch("app.services.agent.agent_service.llm_service.chat", side_effect=fake_chat), \
+         patch("app.services.agent.agent_service.llm_service.generate", side_effect=fake_generate):
         run = asyncio.run(agent_service.run("总结文档 1 并创建跟进任务", user.id, db, max_steps=6))
         print(f"[OK] run -> {run.status} (awaiting_approval)")
 

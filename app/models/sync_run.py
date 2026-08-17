@@ -35,5 +35,6 @@ class SyncRun(Base):
     idempotency_key = Column(String(128), nullable=True, index=True)
     lease_owner = Column(String(128), nullable=True, comment="持有 worker/run 标识")
     lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    trace_id = Column(String(64), nullable=True, index=True, comment="P1 链路关联（统一上下文）")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -15,7 +15,7 @@ from app.main import app
 from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus
 from app.models.operation_log import OperationLog
 from app.models.user import User, UserStatus
-from app.services.subscription_service import subscription_service
+from app.services.billing.subscription_service import subscription_service
 
 
 class SubscriptionServiceTests(unittest.TestCase):
@@ -372,7 +372,7 @@ class SubscriptionApiTests(unittest.TestCase):
 
     def _dispatch_webhooks(self):
         from app.tasks import dispatch_payment_events_task
-        with patch("app.tasks.SessionLocal", self.SessionLocal):
+        with patch("app.tasks.billing_tasks.SessionLocal", self.SessionLocal):
             return dispatch_payment_events_task()
 
     def test_webhook_requires_valid_signature_when_configured(self):

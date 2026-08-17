@@ -1,7 +1,7 @@
 import asyncio
 
 from app.mcp.tool_contract import ToolContract
-from app.services.task_service import task_service
+from app.services.jobs.task_service import task_service
 from app.tools.base import BaseAgentTool, tool_error, tool_success
 
 

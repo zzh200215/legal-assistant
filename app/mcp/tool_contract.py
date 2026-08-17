@@ -78,6 +78,6 @@ def requires_approval_for(tool_name: str, contract: ToolContract | None) -> bool
     if contract is not None and contract.name and not contract.read_only:
         return True
     # 回退：既有 AgentApprovalService.HIGH_RISK_TOOLS
-    from app.services.agent_approval_service import agent_approval_service
+    from app.services.agent.agent_approval_service import agent_approval_service
 
     return agent_approval_service.requires_approval(tool_name)

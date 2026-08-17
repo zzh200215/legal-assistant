@@ -1,3 +1,11 @@
 # Dev / CI-only dependencies (not needed at runtime)
 ruff==0.7.0
 pytest==9.1.1
+pre-commit==4.0.1
+pytest-cov==7.1.0         # 覆盖率报告（阶段1 分层测试 coverage；关键路径≥80%/全量≥60%）
+fakeredis==2.37.0         # Redis 契约/韧性测试内存替身（阶段2/3，仅测试使用）
+# ── P1-E 供应链门禁（本地与 CI 同命令，见 docs/dependency-supply-chain.md）──
+uv==0.11.32             # 锁文件生成/新鲜度校验（uv pip compile --generate-hashes）
+pip-audit==2.10.1       # 依赖漏洞扫描（scripts/dependency_scan.py）
+pip-licenses==5.5.5     # 许可证报告（scripts/dependency_report.py）
+cyclonedx-bom==7.3.1    # CycloneDX SBOM（cyclonedx-py）

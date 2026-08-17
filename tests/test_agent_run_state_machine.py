@@ -2,7 +2,7 @@
 
 import unittest
 
-from app.services.agent_run_state import (
+from app.services.agent.agent_run_state import (
     AgentPlan,
     AgentRunState,
     IllegalRunTransition,

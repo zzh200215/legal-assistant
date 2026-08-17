@@ -1,0 +1,8 @@
+# 提交门禁：后端 Ruff（前端 Prettier/ESLint 待 P0 后续小步单独落地）
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.models.legal import ContractReview
-from app.services.legal_workspace_service import (
+from app.services.legal.legal_workspace_service import (
     LegalWorkspaceModule,
     LegalWorkspaceReadModule,
     compute_confidence,
@@ -71,8 +71,8 @@ class LegalWorkspaceReadModuleTests(unittest.TestCase):
     def test_owner_can_submit_own_record_for_review(self):
         row = SimpleNamespace(id=19, user_id=3, status="pending_review")
         user = SimpleNamespace(id=3, role="user")
-        with patch("app.services.legal_workspace_service.target_query", return_value=row), \
-             patch("app.services.legal_workspace_service.serialize_workspace_row", return_value={"id": 19, "status": "needs_lawyer_review"}):
+        with patch("app.services.legal.legal_workspace_service.target_query", return_value=row), \
+             patch("app.services.legal.legal_workspace_service.serialize_workspace_row", return_value={"id": 19, "status": "needs_lawyer_review"}):
             result = self.module.apply_review_action(
                 self.db, user, target_type="consultation", target_id=19,
                 action="submit_review", note=None,
@@ -85,7 +85,7 @@ class LegalWorkspaceReadModuleTests(unittest.TestCase):
     def test_non_reviewer_cannot_approve(self):
         row = SimpleNamespace(id=19, user_id=3, status="pending_review")
         user = SimpleNamespace(id=3, role="user")
-        with patch("app.services.legal_workspace_service.target_query", return_value=row):
+        with patch("app.services.legal.legal_workspace_service.target_query", return_value=row):
             with self.assertRaisesRegex(PermissionError, "LEGAL_REVIEW_FORBIDDEN"):
                 self.module.apply_review_action(
                     self.db, user, target_type="consultation", target_id=19,
@@ -96,7 +96,7 @@ class LegalWorkspaceReadModuleTests(unittest.TestCase):
     def test_unknown_review_action_is_rejected_before_write(self):
         row = SimpleNamespace(id=19, user_id=3, status="pending_review")
         user = SimpleNamespace(id=3, role="user")
-        with patch("app.services.legal_workspace_service.target_query", return_value=row):
+        with patch("app.services.legal.legal_workspace_service.target_query", return_value=row):
             with self.assertRaisesRegex(ValueError, "LEGAL_REVIEW_ACTION_INVALID"):
                 self.module.apply_review_action(
                     self.db, user, target_type="consultation", target_id=19,
@@ -114,14 +114,14 @@ class LegalWorkspaceModuleCaseTests(unittest.TestCase):
         user = SimpleNamespace(organization_id=2)
         self.assertIsNone(self.module._resolve_case_id(self.db, user, None))
 
-    @patch("app.services.legal_workspace_service.verify_case_access")
+    @patch("app.services.legal.legal_workspace_service.verify_case_access")
     def test_resolve_case_id_accepts_same_org(self, mock_verify):
         user = SimpleNamespace(id=1, organization_id=2)
         # verify_case_access 通过（不抛错）→ 返回 case_id
         self.assertEqual(self.module._resolve_case_id(self.db, user, 5), 5)
         mock_verify.assert_called_once_with(5, user.id, self.db)
 
-    @patch("app.services.legal_workspace_service.verify_case_access")
+    @patch("app.services.legal.legal_workspace_service.verify_case_access")
     def test_resolve_case_id_rejects_foreign_org(self, mock_verify):
         user = SimpleNamespace(id=1, organization_id=2)
         from fastapi import HTTPException

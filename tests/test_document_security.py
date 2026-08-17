@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.core.config import get_settings
-from app.services.document_security import (
+from app.services.documents.document_security import (
     DocumentSecurityError,
     build_virus_scanner,
     detect_mime,
@@ -81,13 +81,15 @@ class StreamingUploadTests(unittest.TestCase):
             Path(path).unlink(missing_ok=True)
 
     def test_spool_enforces_size_limit(self):
-        stream = io.BytesIO(b"x" * 2048)
-        with self.assertRaises(DocumentSecurityError) as ctx:
-            spool_upload_to_temp(stream, max_bytes=1024)
-        self.assertEqual(ctx.exception.code, "DOCUMENT_TOO_LARGE")
-        # 超限后临时文件被清理
-        leftovers = [p for p in Path(tempfile.gettempdir()).glob("aibg-upload-*.tmp")]
-        self.assertFalse(leftovers)
+        # 隔离临时目录：避免断言被全局临时目录中其他测试/历史运行残留的 aibg-upload-*.tmp 干扰。
+        with tempfile.TemporaryDirectory() as tmpdir, patch("tempfile.gettempdir", return_value=tmpdir):
+            stream = io.BytesIO(b"x" * 2048)
+            with self.assertRaises(DocumentSecurityError) as ctx:
+                spool_upload_to_temp(stream, max_bytes=1024)
+            self.assertEqual(ctx.exception.code, "DOCUMENT_TOO_LARGE")
+            # 超限后临时文件被清理
+            leftovers = [p for p in Path(tmpdir).glob("aibg-upload-*.tmp")]
+            self.assertFalse(leftovers)
 
 
 class ZipBombTests(unittest.TestCase):

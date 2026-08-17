@@ -13,7 +13,7 @@ from app.core.database import Base
 from app.models.subscription import QuotaUsage
 from app.models.usage_reservation import UsageReservation
 from app.models.user import User, UserStatus
-from app.services.subscription_service import QuotaExceededError, subscription_service
+from app.services.billing.subscription_service import QuotaExceededError, subscription_service
 
 
 class AtomicQuotaTests(unittest.TestCase):

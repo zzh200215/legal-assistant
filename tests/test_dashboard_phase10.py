@@ -13,7 +13,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.subscription import SubscriptionPlan, UserSubscription, QuotaUsage, SubscriptionStatus
 from app.models.user import User, UserStatus, WechatUser
-from app.services.subscription_service import subscription_service
+from app.services.billing.subscription_service import subscription_service
 
 
 class MiniAppLoginTests(unittest.TestCase):
@@ -49,10 +49,10 @@ class MiniAppLoginTests(unittest.TestCase):
             "session_key": "session_key",
         }
 
-        with patch("app.api.miniapp_api.settings") as mock_settings:
+        with patch("app.api.channels.miniapp_api.settings") as mock_settings:
             mock_settings.WECHAT_APP_ID = "test_mp_appid"
             mock_settings.WECHAT_APP_SECRET = "test_mp_secret"
-            with patch("app.api.miniapp_api.requests.get", return_value=mock_resp):
+            with patch("app.api.channels.miniapp_api.requests.get", return_value=mock_resp):
                 resp = self.client.post(
                     "/api/miniapp/login?js_code=code_001&nickname=小明用户"
                 )
@@ -85,10 +85,10 @@ class MiniAppLoginTests(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"openid": "mp_openid_existing"}
 
-        with patch("app.api.miniapp_api.settings") as mock_settings:
+        with patch("app.api.channels.miniapp_api.settings") as mock_settings:
             mock_settings.WECHAT_APP_ID = "test_mp_appid"
             mock_settings.WECHAT_APP_SECRET = "test_mp_secret"
-            with patch("app.api.miniapp_api.requests.get", return_value=mock_resp):
+            with patch("app.api.channels.miniapp_api.requests.get", return_value=mock_resp):
                 resp = self.client.post("/api/miniapp/login?js_code=code_existing")
 
         self.assertEqual(resp.status_code, 200)
@@ -100,10 +100,10 @@ class MiniAppLoginTests(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"errcode": 40029, "errmsg": "invalid code"}
 
-        with patch("app.api.miniapp_api.settings") as mock_settings:
+        with patch("app.api.channels.miniapp_api.settings") as mock_settings:
             mock_settings.WECHAT_APP_ID = "test_mp_appid"
             mock_settings.WECHAT_APP_SECRET = "test_mp_secret"
-            with patch("app.api.miniapp_api.requests.get", return_value=mock_resp):
+            with patch("app.api.channels.miniapp_api.requests.get", return_value=mock_resp):
                 resp = self.client.post("/api/miniapp/login?js_code=bad_code")
 
         self.assertEqual(resp.status_code, 401)

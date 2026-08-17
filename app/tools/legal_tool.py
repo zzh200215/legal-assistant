@@ -7,7 +7,7 @@ Tools:
 """
 
 from app.mcp.tool_contract import ToolContract
-from app.services.legal_service import (
+from app.services.legal.legal_service import (
     DRAFT_FIELDS,
     consultation_payload,
     draft_content,
@@ -36,7 +36,7 @@ class LegalConsultationTool(BaseAgentTool):
 
     async def run(self, question: str, user_id: int, db) -> dict:
         from app.models.legal import LegalSource
-        from app.services.rag_service import rag_service
+        from app.services.rag.rag_service import rag_service
 
         ensure_demo_sources(db, user_id)
         sources = db.query(LegalSource).filter(
@@ -47,7 +47,7 @@ class LegalConsultationTool(BaseAgentTool):
         rag_chunks = []
         try:
             from app.models.user import User
-            from app.services.document_governance_service import document_governance_service
+            from app.services.documents.document_governance_service import document_governance_service
 
             user = db.query(User).filter(User.id == user_id).first()
             authorized_ids = document_governance_service.list_accessible_document_ids(

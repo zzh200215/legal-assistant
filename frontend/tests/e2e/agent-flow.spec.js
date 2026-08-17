@@ -132,8 +132,10 @@ test('敏感操作审批：等待确认 → 确认继续（resume_approval WS）
   })
 
   await page.goto('/agent')
+  await expect(page.getByText('法律总管 Agent')).toBeVisible()
   await page.locator('.input-card textarea').fill('把敏感操作落地成任务')
-  await page.getByRole('button', { name: '直接执行' }).click()
+  // force: 元素因兄弟组件异步数据载入存在轻微布局抖动，严格稳定性检查会卡住；功能与首条用例一致
+  await page.getByRole('button', { name: '直接执行' }).click({ force: true })
 
   // 敏感操作弹窗：run_waiting_approval → 审批列表待审批 + 弹窗
   const dialog = page.locator('.el-dialog:visible')

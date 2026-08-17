@@ -14,7 +14,7 @@ from app.models.legal import LegalCase
 from app.models.legal_billing import LegalBillingRule, LegalTimeEntry
 from app.models.org import Organization
 from app.models.user import User, UserStatus
-from app.services.billing_service import billing_service
+from app.services.billing.billing_service import billing_service
 
 
 def _engine():

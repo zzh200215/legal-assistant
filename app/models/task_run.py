@@ -35,5 +35,7 @@ class TaskRun(Base):
     finished_at = Column(DateTime(timezone=True), nullable=True)
     duration_ms = Column(Integer, nullable=True)
     trace_id = Column(String(64), nullable=True, index=True)
+    request_id = Column(String(64), nullable=True, index=True, comment="API 入口 request_id（经 headers 传播）")
+    agent_run_id = Column(Integer, nullable=True, index=True, comment="关联 Agent run")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

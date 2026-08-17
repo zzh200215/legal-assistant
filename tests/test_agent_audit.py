@@ -10,7 +10,7 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.agent import AgentAuditEvent
 from app.models.user import User
-from app.services.agent_audit import agent_audit_service
+from app.services.agent.agent_audit import agent_audit_service
 
 
 class AgentAuditTests(unittest.TestCase):

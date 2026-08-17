@@ -17,6 +17,8 @@ class DeveloperApp(Base):
     ip_whitelist_json = Column(Text, nullable=True, comment="IP白名单CIDR列表JSON数组")
     webhook_url = Column(String(512), nullable=True, comment="Webhook回调地址，必须HTTPS")
     webhook_secret_hash = Column(String(64), nullable=True, comment="签名密钥哈希")
+    webhook_secret_ciphertext = Column(EncryptedText, nullable=True,
+                                       comment="Webhook 签名密钥（AES-256-GCM）")
     subscribed_events_json = Column(Text, nullable=True, comment="订阅事件类型JSON数组")
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -101,8 +103,10 @@ class LegalAsyncJob(Base):
     job_type = Column(String(64), nullable=False, index=True,
                       comment="contract_parse / contract_diff / invoice_pdf / expiry_scan / export / ...")
     status = Column(String(16), nullable=False, default="queued", index=True,
-                    comment="queued / processing / succeeded / failed / cancelled")
+                    comment="queued / processing / succeeded / failed / cancelled / expired")
     idempotency_key = Column(String(128), nullable=True, unique=True, index=True)
+    cancel_requested = Column(Integer, nullable=False, default=0, server_default="0",
+                              comment="取消请求标记：queued 直改 cancelled；processing 由消费者检查后终止")
     retry_count = Column(Integer, nullable=False, default=0)
     progress = Column(Integer, nullable=True, comment="进度百分比 0-100")
     error_summary = Column(Text, nullable=True, comment="脱敏后的错误摘要，不含敏感数据")
@@ -110,6 +114,8 @@ class LegalAsyncJob(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     ended_at = Column(DateTime(timezone=True), nullable=True)
     result_summary = Column(Text, nullable=True, comment="结果摘要，不含合同正文/密钥/令牌")
+    input_json = Column(Text, nullable=True, comment="任务输入参数 JSON（审计导出条件等，脱敏）")
+    output_json = Column(Text, nullable=True, comment="任务产物元数据 JSON（文件路径/计数/哈希，脱敏）")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

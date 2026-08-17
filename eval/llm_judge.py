@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.services.llm_service import llm_service
+from app.services.llm.llm_service import llm_service
 
 
 _SCORE_FIELDS = ("groundedness", "answer_relevance", "completeness")

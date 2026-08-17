@@ -29,7 +29,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.legal import LegalArticle, LegalSource
-from app.services.legal_retrieval_service import LegalRetrievalService
+from app.services.legal.legal_retrieval_service import LegalRetrievalService
 
 
 EVAL_DIR = Path(__file__).resolve().parent

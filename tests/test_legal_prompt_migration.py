@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.prompt import PromptTemplate, PromptTemplateVersion  # noqa: F401
-from app.services.prompt_defaults import DEFAULT_PROMPT_TEMPLATES
+from app.services.llm.prompt_defaults import DEFAULT_PROMPT_TEMPLATES
 
 LEGAL_NAMES = {
     "legal_consultation",

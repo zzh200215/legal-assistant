@@ -86,8 +86,11 @@ import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/tab-pane/style/css'
 import 'element-plus/es/components/tabs/style/css'
 import api from '../api'
+import { setAccessToken, setRefreshToken } from '../api/http'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { useAuthStore } from '../stores/auth'
 
+const authStore = useAuthStore()
 const router = useRouter()
 const tab = ref('login')
 const loading = ref(false)
@@ -114,12 +117,15 @@ const handleLogin = async () => {
   loading.value = true
   try {
     const { data } = await api.login(loginForm.value)
-    localStorage.setItem('token', data.access_token)
+    setAccessToken(data.access_token)
+    setRefreshToken(data.refresh_token || null)
     try {
       const me = await api.getMe()
       localStorage.setItem('user_role', me.data.role || 'user')
+      authStore.setUser(me.data)
     } catch {
-      localStorage.removeItem('token')
+      setAccessToken(null)
+      setRefreshToken(null)
       ElMessage.error('登录失败，无法获取用户信息')
       loading.value = false
       return
@@ -139,12 +145,15 @@ const handleRegister = async () => {
   loading.value = true
   try {
     const { data } = await api.register(regForm.value)
-    localStorage.setItem('token', data.access_token)
+    setAccessToken(data.access_token)
+    setRefreshToken(data.refresh_token || null)
     try {
       const me = await api.getMe()
       localStorage.setItem('user_role', me.data.role || 'user')
+      authStore.setUser(me.data)
     } catch {
-      localStorage.removeItem('token')
+      setAccessToken(null)
+      setRefreshToken(null)
       ElMessage.error('注册失败，无法获取用户信息')
       loading.value = false
       return

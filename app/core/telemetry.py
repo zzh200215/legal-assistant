@@ -8,6 +8,7 @@
 本地/测试环境未安装 sentry-sdk、opentelemetry 相关包时也可正常运行。
 """
 import logging
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +80,59 @@ def _init_otel(app) -> None:
         logger.info("OpenTelemetry 已启用（endpoint=%s）", endpoint)
     except Exception as exc:
         logger.warning("OpenTelemetry 初始化失败（不影响启动）：%s", exc)
+
+
+def _otel_active() -> bool:
+    """OTel 是否已启用（配置齐备且已初始化）。"""
+    try:
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        return bool(settings.OTEL_ENABLED and settings.OTEL_EXPORTER_OTLP_ENDPOINT.strip())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _span_attributes(attributes: dict | None) -> dict:
+    """合并统一上下文（低基数关联字段）与调用方属性；禁止完整业务正文/密钥。"""
+    merged: dict = {}
+    try:
+        from app.core.obs_context import get_context
+
+        ctx = get_context()
+        merged = {
+            "obs.request_id": ctx.request_id or "unknown",
+            "obs.task_id": ctx.task_id or "unknown",
+            "obs.agent_run_id": ctx.agent_run_id,
+            "obs.org_id": ctx.org_id,
+        }
+    except Exception:  # noqa: BLE001
+        pass
+    if attributes:
+        merged.update(attributes)
+    return merged
+
+
+@contextmanager
+def observe_span(name: str, attributes: dict | None = None):
+    """创建 OTel 子 span（P1）：LLM/Agent/连接器/通知调用点使用。
+
+    - OTel 未启用时零开销 no-op（yield None）。
+    - 属性仅限低基数元数据（model/status/duration/error_category 等），
+      绝不把 prompt、合同正文、邮件正文或模型返回原文作为 span attribute。
+    - 任何异常不抛出：观测失败不影响业务。
+    """
+    context_manager = None
+    try:
+        if _otel_active():
+            from opentelemetry import trace
+
+            tracer = trace.get_tracer("aibg-api")
+            context_manager = tracer.start_as_current_span(name, attributes=_span_attributes(attributes))
+    except Exception:  # noqa: BLE001
+        context_manager = None
+    if context_manager is None:
+        yield None
+        return
+    with context_manager as span:
+        yield span

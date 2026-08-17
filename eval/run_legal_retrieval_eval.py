@@ -17,7 +17,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.models.legal import LegalSource
-from app.services.legal_service import _rank_sources_by_relevance
+from app.services.legal.legal_service import _rank_sources_by_relevance
 
 EVAL_DIR = Path(__file__).resolve().parent
 DEFAULT_CORPUS_PATH = EVAL_DIR / "legal_sources_corpus.json"

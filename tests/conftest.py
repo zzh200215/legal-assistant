@@ -73,7 +73,7 @@ import pytest  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _clear_rag_embedding_cache():
-    from app.services.rag_cache import rag_embedding_cache
+    from app.services.rag.rag_cache import rag_embedding_cache
     rag_embedding_cache.clear()
     yield
     rag_embedding_cache.clear()
@@ -93,11 +93,28 @@ def _close_model_gateway_clients():
 
 
 @pytest.fixture(autouse=True)
+def _reset_chroma_ephemeral_system():
+    """chromadb 的 EphemeralClient 共享全局 "ephemeral" 标识的 SharedSystemClient。
+
+    不同测试用不同 Settings（如 anonymized_telemetry 默认值不同）创建 ephemeral
+    客户端时，会抛 "already exists for ephemeral with different settings"。每个测试
+    后只清理 ephemeral 条目——persistent 条目（如 rag_service 单例的 store）不受影响。
+    """
+    yield
+    try:
+        from chromadb.api.shared_system_client import SharedSystemClient
+        SharedSystemClient._identifier_to_system.pop("ephemeral", None)
+        SharedSystemClient._identifier_to_refcount.pop("ephemeral", None)
+    except Exception:  # chromadb 不可用的非向量库测试环境
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _force_heuristic_rerank_in_tests():
     """BGE/LLM 重排依赖外部模型/网络，单元测试统一走启发式（快速、确定性）。"""
     from unittest.mock import patch
     from app.core.config import get_settings
-    from app.services.rag_service import rag_service
+    from app.services.rag.rag_service import rag_service
     rag_service._reranker = None  # 懒重建，按当前（被 patch 的）引擎选择
     settings = get_settings()
     with patch.object(settings, "RAG_RERANK_ENGINE", "heuristic"), patch.object(

@@ -11,8 +11,8 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.agent import AgentRun, ToolCallLog
 from app.models.user import User
-from app.services.agent_run_repository import run_state_repository
-from app.services.agent_run_state import AgentPlan, AgentRunState
+from app.services.agent.agent_run_repository import run_state_repository
+from app.services.agent.agent_run_state import AgentPlan, AgentRunState
 
 
 class RunStateRepositoryTests(unittest.TestCase):

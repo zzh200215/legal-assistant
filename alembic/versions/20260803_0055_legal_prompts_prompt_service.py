@@ -35,7 +35,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     if not _table_exists(bind, "prompt_templates") or not _table_exists(bind, "prompt_template_versions"):
         return
-    from app.services.prompt_defaults import DEFAULT_PROMPT_TEMPLATES
+    from app.services.llm.prompt_defaults import DEFAULT_PROMPT_TEMPLATES
 
     templates = sa.table(
         "prompt_templates",

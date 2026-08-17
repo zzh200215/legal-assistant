@@ -370,6 +370,22 @@ class ExternalResilience:
     def key(*, service: str, connector_id: int | None = None, op: str) -> str:
         return f"external:{service}|{connector_id if connector_id is not None else '-'}|{op}"
 
+    @staticmethod
+    def _guard_url(url: str | None) -> None:
+        """对外部目标 URL 做 SSRF 校验（fail-closed）；None 表示调用方无 URL 可校验。"""
+        if url is None:
+            return
+        from app.core.ssrf_guard import SSRFGuardError, assert_safe_url
+
+        try:
+            assert_safe_url(url)
+        except SSRFGuardError as exc:
+            raise ExternalError(
+                kind=ExternalErrorKind.PARAMS,
+                message=f"external call blocked by SSRF guard: {exc.reason}",
+                exc_type="SSRFGuardError",
+            ) from exc
+
     def call(
         self,
         fn: Callable[[], Any],
@@ -378,9 +394,15 @@ class ExternalResilience:
         op: str,
         connector_id: int | None = None,
         method: str = "GET",
+        url: str | None = None,
         **overrides: Any,
     ) -> Any:
-        """执行外部调用：熔断检查 + 重试 + 可观测日志。失败抛 ``ExternalError``。"""
+        """执行外部调用：SSRF 校验 + 熔断检查 + 重试 + 可观测日志。失败抛 ``ExternalError``。
+
+        ``url`` 传外部目标 URL 时，执行前经 ``ssrf_guard.assert_safe_url`` 校验
+        （fail-closed，见 app/core/ssrf_guard.py）。
+        """
+        self._guard_url(url)
         circuit_key: str | None = None
         if self._breaker is not None:
             circuit_key = self.key(service=service, connector_id=connector_id, op=op)
@@ -433,9 +455,12 @@ class ExternalResilience:
         op: str,
         connector_id: int | None = None,
         method: str = "GET",
+        url: str | None = None,
         **overrides: Any,
     ) -> Any:
-        """async 版 call：供 httpx.AsyncClient 等异步出站调用使用（同一熔断键 + 可观测日志）。"""
+        """async 版 call：供 httpx.AsyncClient 等异步出站调用使用（SSRF 校验 +
+        同一熔断键 + 可观测日志）。"""
+        self._guard_url(url)
         circuit_key: str | None = None
         if self._breaker is not None:
             circuit_key = self.key(service=service, connector_id=connector_id, op=op)

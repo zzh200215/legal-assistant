@@ -89,6 +89,27 @@ class SqlReadOnlyGuardTests(unittest.TestCase):
         self.assertEqual(out[0]["Phone"], "****")
         self.assertEqual(out[0]["name"], "x")
 
+    def test_tenant_tables_require_row_scope(self):
+        # 多租户表必须带行级过滤条件，防止白名单表内跨租户全表读取
+        r = check_read_only("SELECT * FROM legal_cases", allowed_tables={"legal_cases"})
+        self.assertEqual(r.error_code, "SQL_TENANT_SCOPE_REQUIRED")
+        ok = check_read_only(
+            "SELECT * FROM legal_cases WHERE organization_id = 5",
+            allowed_tables={"legal_cases"},
+        )
+        self.assertTrue(ok.ok)
+        # 普通表白名单不受行级过滤约束
+        self.assertTrue(
+            check_read_only("SELECT * FROM pub_tbl", allowed_tables={"pub_tbl"}).ok
+        )
+        # 任务表按 user_id 过滤可通过
+        self.assertTrue(
+            check_read_only(
+                "SELECT * FROM tasks WHERE user_id = 7",
+                allowed_tables={"tasks"},
+            ).ok
+        )
+
     def test_guard_error_code_contract(self):
         with self.assertRaises(SqlGuardError) as ctx:
             from app.mcp.sql_guard import _parse_single

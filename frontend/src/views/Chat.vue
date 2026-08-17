@@ -160,28 +160,41 @@ const connectWS = () => {
       currentSessionId.value = data.session_id
     } else if (data.type === 'chunk') {
       const last = messages.value[messages.value.length - 1]
-      if (last && last.role === 'assistant') {
+      if (last && last.role === 'assistant' && last.streaming === true) {
         last.content += data.content
       }
     } else if (data.type === 'done') {
       const last = messages.value[messages.value.length - 1]
-      if (last && last.role === 'assistant') {
+      if (last && last.role === 'assistant' && last.streaming === true) {
         last.streaming = false
       }
       loading.value = false
     } else if (data.type === 'error') {
+      const last = messages.value[messages.value.length - 1]
+      if (last && last.role === 'assistant' && last.streaming === true) {
+        last.streaming = false
+      }
       ElMessage.error(data.content)
       loading.value = false
     }
   }
 
   ws.onerror = (e) => {
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant' && last.streaming === true) {
+      last.streaming = false
+    }
     console.error('WebSocket error:', e)
     ElMessage.error('实时连接失败')
     loading.value = false
   }
 
   ws.onclose = (e) => {
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant' && last.streaming === true) {
+      last.streaming = false
+    }
+    loading.value = false
     if (e.code !== 1000) {
       reconnectTimer = setTimeout(connectWS, 3000)
     }
@@ -197,12 +210,23 @@ const send = () => {
 
   const ts = Date.now()
   messages.value.push({ id: `u-${ts}`, role: 'user', content: input.value })
-  messages.value.push({ id: `a-${ts}`, role: 'assistant', content: '', streaming: true })
+  const assistantMsg = { id: `a-${ts}`, role: 'assistant', content: '', streaming: true }
+  const assistantIndex = messages.value.push(assistantMsg) - 1
 
-  ws.send(JSON.stringify({
-    content: input.value,
-    session_id: currentSessionId.value,
-  }))
+  try {
+    ws.send(JSON.stringify({
+      content: input.value,
+      session_id: currentSessionId.value,
+    }))
+  } catch (e) {
+    console.error('发送消息失败', e)
+    if (messages.value[assistantIndex] && messages.value[assistantIndex].streaming) {
+      messages.value[assistantIndex].streaming = false
+    }
+    loading.value = false
+    ElMessage.error('消息发送失败')
+    return
+  }
 
   input.value = ''
   loading.value = true

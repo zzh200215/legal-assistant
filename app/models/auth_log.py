@@ -28,6 +28,8 @@ class LoginLog(Base):
     user_agent = Column(String(512), nullable=True)
     detail = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True,
+                         comment="归档时间（保留任务归档后标记，默认不物理删除）")
 
 
 class AdminAuditLog(Base):
@@ -44,3 +46,5 @@ class AdminAuditLog(Base):
     detail = Column(Text, nullable=True)
     ip_address = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True,
+                         comment="归档时间（保留任务归档后标记，默认不物理删除）")

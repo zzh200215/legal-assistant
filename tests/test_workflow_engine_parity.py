@@ -9,7 +9,7 @@
 
 import unittest
 
-from app.services.agent_service import AgentService
+from app.services.agent.agent_service import AgentService
 from app.workflows import langgraph_compat
 from app.workflows.langgraph_compat import _FallbackStateGraph
 

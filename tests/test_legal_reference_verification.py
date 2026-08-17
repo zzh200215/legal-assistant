@@ -9,8 +9,8 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.legal import LegalSource
-from app.services.legal_reference_service import enrich_references, verify_source
-from app.services.legal_service import consultation_payload
+from app.services.legal.legal_reference_service import enrich_references, verify_source
+from app.services.legal.legal_service import consultation_payload
 
 _MISSING = object()
 
@@ -159,7 +159,7 @@ class LegalReferenceVerificationTests(unittest.TestCase):
         import asyncio
         from unittest.mock import patch
 
-        from app.services.legal_service import ensure_demo_sources
+        from app.services.legal.legal_service import ensure_demo_sources
 
         if db is _MISSING:
             db = self.db
@@ -171,13 +171,13 @@ class LegalReferenceVerificationTests(unittest.TestCase):
         if db is None:
             # db=None 模拟"无 db"调用（跳过核验），sources 仍来自 self.db
             sources = self.db.query(LegalSource).filter(LegalSource.user_id == 1).all()
-            with patch("app.services.legal_service._llm_chat", new=_no_llm):
+            with patch("app.services.legal.legal_service._llm_chat", new=_no_llm):
                 return asyncio.run(consultation_payload(
                     "公司无故辞退我，劳动合同法第40条怎么适用？", sources, user_id=1, db=None,
                 ))
         ensure_demo_sources(db, 1)
         sources = db.query(LegalSource).filter(LegalSource.user_id == 1).all()
-        with patch("app.services.legal_service._llm_chat", new=_no_llm):
+        with patch("app.services.legal.legal_service._llm_chat", new=_no_llm):
             return asyncio.run(consultation_payload(
                 "公司无故辞退我，劳动合同法第40条怎么适用？", sources, user_id=1, db=db,
             ))

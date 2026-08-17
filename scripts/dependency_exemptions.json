@@ -1,0 +1,11 @@
+{
+  "_comment": "依赖漏洞豁免（P1-E）。键为漏洞 ID（pip-audit 输出），值为豁免条目。",
+  "_policy": "必须带 reason 与 until（YYYY-MM-DD）；过期未续即门禁失败；只豁免指定漏洞，不豁免整个包。",
+  "_example": {
+    "CVE-2026-0000": {
+      "reason": "等待上游修复版本发布（真实漏洞需部署方评估后启用）",
+      "until": "2027-12-31",
+      "who": "security-owner"
+    }
+  }
+}

@@ -14,13 +14,13 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401 — registers all ORM metadata
 from app.core.database import Base
 from app.models.legal import LegalArticle, LegalSource
-from app.services.legal_retrieval_service import (
+from app.services.legal.legal_retrieval_service import (
     LegalRetrievalService,
     _article_vector_id,
     _graph_support_boost,
     _like_escape,
 )
-from app.services.vector_store import ChromaVectorStoreCollection
+from app.services.rag.vector_store import ChromaVectorStoreCollection
 
 USER_ID = 1
 EMBED_DIM = 4  # tiny deterministic vectors
@@ -136,8 +136,8 @@ class LegalRetrievalServiceTests(unittest.IsolatedAsyncioTestCase):
         self.db.commit()
         self.assertEqual(self.fake_llm.embed.call_count, 0)
 
-        with patch("app.services.legal_retrieval_service.settings.RAG_LLM_RERANK_ENABLED", True), patch(
-            "app.services.legal_retrieval_service.llm_client.generate",
+        with patch("app.services.legal.legal_retrieval_service.settings.RAG_LLM_RERANK_ENABLED", True), patch(
+            "app.services.legal.legal_retrieval_service.llm_client.generate",
             new=AsyncMock(return_value='{"scores": [5, 9]}'),
         ) as mock_gen:
             results = await self.service.search(self.db, "经济补偿", user_id=USER_ID)
@@ -151,8 +151,8 @@ class LegalRetrievalServiceTests(unittest.IsolatedAsyncioTestCase):
         _fake_article(self.db, src.id, article_number="第47条", content="经济补偿按工作年限计算")
         self.db.commit()
 
-        with patch("app.services.legal_retrieval_service.settings.RAG_LLM_RERANK_ENABLED", False), patch(
-            "app.services.legal_retrieval_service.llm_client.generate",
+        with patch("app.services.legal.legal_retrieval_service.settings.RAG_LLM_RERANK_ENABLED", False), patch(
+            "app.services.legal.legal_retrieval_service.llm_client.generate",
             new=AsyncMock(),
         ) as mock_gen:
             results = await self.service.search(self.db, "经济补偿", user_id=USER_ID)

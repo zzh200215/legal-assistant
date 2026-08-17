@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from app.core.config import get_settings
-from app.services.dlp_scanner import DlpScanner
+from app.services.notification.dlp_scanner import DlpScanner
 
 
 class DlpScannerTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class DlpScannerTests(unittest.TestCase):
         self.assertEqual(result.decision, "review_required")
 
     def test_fail_closed_on_scanner_error(self):
-        with patch("app.services.dlp_scanner.data_protection_service.inspect", side_effect=RuntimeError("boom")):
+        with patch("app.services.notification.dlp_scanner.data_protection_service.inspect", side_effect=RuntimeError("boom")):
             result = self.scanner.scan(payloads=["任何内容"], action="block")
         self.assertEqual(result.decision, "block")
         self.assertEqual(result.error_code, "DLP_SCAN_ERROR")

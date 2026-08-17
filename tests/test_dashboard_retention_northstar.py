@@ -13,7 +13,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.user import User, UserStatus
 from app.models.legal import LegalCase, LegalConsultation, ContractReview, LegalDraft
-from app.api.dashboard_api import _week_start
+from app.api.admin.dashboard_api import _week_start
 
 # 固定"当前时间"为 2026-08-03（周一），消除对运行日期的依赖：
 # seed 里 uA draft 在 now-10d = 7/24，落 north-star 的桶1（7/20~7/27），不污染 prev 桶。
@@ -37,7 +37,7 @@ class DashboardRetentionNorthStarTests(unittest.TestCase):
         Base.metadata.create_all(bind=self.engine)
         self.db = Session()
         # 端点内部 utc_now() 同样固定到 FIXED_NOW，保证 retention/north-star 分桶日期无关
-        patcher = __import__("unittest.mock").mock.patch("app.api.dashboard_api.utc_now", return_value=FIXED_NOW)
+        patcher = __import__("unittest.mock").mock.patch("app.api.admin.dashboard_api.utc_now", return_value=FIXED_NOW)
         self._utc_now_patcher = patcher
         patcher.start()
         self.addCleanup(patcher.stop)

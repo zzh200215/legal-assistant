@@ -34,14 +34,14 @@ from app.models.legal_domain import (
 )
 from app.models.org import Organization, OrganizationMember
 from app.models.user import User
-from app.services.legal_domain_service import (
+from app.services.legal.legal_domain_service import (
     assert_publishable,
     persist_consultation_artifacts,
     persist_draft_artifacts,
     persist_review_artifacts,
     update_risk_item_status,
 )
-from app.services.legal_workspace_service import (
+from app.services.legal.legal_workspace_service import (
     LegalWorkspaceModule,
     LegalWorkspaceReadModule,
 )
@@ -261,7 +261,7 @@ class LegalDomainServiceTests(unittest.TestCase):
         self.assertEqual(len(old_claims), 1)
         self.assertEqual(old_claims[0].claim_type, "fact_to_confirm")
 
-        with patch("app.services.legal_workspace_service.draft_content",
+        with patch("app.services.legal.legal_workspace_service.draft_content",
                    new=AsyncMock(return_value="修改后的新草稿")):
             asyncio.run(self.workspace_module.resubmit_draft(
                 self.db, self.user, draft_id=draft.id,
@@ -384,7 +384,7 @@ class LegalDomainServiceTests(unittest.TestCase):
         self.assertFalse(assert_publishable(self.db, self.user, "contract_review", review.id)["ok"])
 
         # 修改后重提（新版本）→ 重新审核
-        with patch("app.services.legal_workspace_service.review_contract",
+        with patch("app.services.legal.legal_workspace_service.review_contract",
                    new=AsyncMock(return_value=([LOW_RISK], "新摘要"))):
             asyncio.run(self.workspace_module.resubmit_contract_review(
                 self.db, self.user, review_id=review.id, title="服务合同", content="新正文",

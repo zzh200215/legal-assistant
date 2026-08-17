@@ -86,7 +86,8 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
   await expect(dialog.getByText('子任务A')).toBeVisible()
   await expect(dialog.getByText('联调评论一')).toBeVisible()
   await expect(dialog.getByText('完成合同审查')).toBeVisible()
-  expect(requests.filter((r) => r.startsWith('GET /tasks/101/')).length).toBeGreaterThanOrEqual(4)
+  // 详情对话框 4 路并行 = 子任务/评论/日志（/tasks/{id}/…）+ 关联 Agent（/agent/runs）
+  expect(requests.filter((r) => r.startsWith('GET /tasks/101/')).length).toBeGreaterThanOrEqual(3)
   expect(requests.some((r) => r.startsWith('GET /agent/runs?artifact_type=task&artifact_id=101'))).toBe(true)
 
   // owner 可编辑：添加评论

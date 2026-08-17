@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from app.services.legal_service import NO_VALID_SOURCE, REFUSAL_ADVICE
+from app.services.legal.legal_service import NO_VALID_SOURCE, REFUSAL_ADVICE
 from eval.run_generation_eval import build_db, eval_consultation_case, run_eval
 
 

@@ -20,10 +20,10 @@ from app.core.database import Base
 from app.core.time import utc_now
 from app.models.document import Document, DocumentChunk, DocumentParseArtifact, DocumentParseJob
 from app.models.user import User
-from app.services.document_job_service import document_job_service
-from app.services.document_pipeline import run_chunk, run_index, run_parse
-from app.services.document_service import document_service
-from app.services.storage_service import LocalStorageAdapter, storage_service
+from app.services.documents.document_job_service import document_job_service
+from app.services.documents.document_pipeline import run_chunk, run_index, run_parse
+from app.services.documents.document_service import document_service
+from app.services.storage.storage_service import LocalStorageAdapter, storage_service
 
 
 def _sha(content: bytes) -> str:
@@ -201,7 +201,7 @@ class PipelineIdempotencyTests(PipelineTestCase):
 class UploadDedupAndAsyncTests(PipelineTestCase):
     def test_duplicate_upload_returns_existing_document(self):
         content = "# 合同\n\n重复上传内容".encode("utf-8")
-        with patch("app.services.document_service.rag_service.index_document", return_value=None):
+        with patch("app.services.documents.document_service.rag_service.index_document", return_value=None):
             first = document_service.upload(
                 self._stub_file("合同.md", content), user_id=self.user.id, db=self.db, async_mode=False
             )

@@ -17,8 +17,8 @@ from app.main import app
 from app.models.auth_log import AdminAuditLog, LoginLog
 from app.models.operation_log import OperationLog
 from app.models.user import User, UserStatus
-from app.services.audit_log_service import audit_log_service
-from app.services.oplog_service import oplog_service
+from app.services.observability.audit_log_service import audit_log_service
+from app.services.observability.oplog_service import oplog_service
 
 AUDIT_LOGGER = "audit.json"
 

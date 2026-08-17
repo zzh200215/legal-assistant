@@ -30,8 +30,8 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.core.llm_client import LLMClient
 from app.models.legal import LegalArticle, LegalSource
-from app.services.legal_retrieval_service import LegalRetrievalService
-from app.services.vector_store import ChromaVectorStoreCollection
+from app.services.legal.legal_retrieval_service import LegalRetrievalService
+from app.services.rag.vector_store import ChromaVectorStoreCollection
 from eval.common import ensure_eval_llm_ready
 
 EVAL_DIR = Path(__file__).resolve().parent

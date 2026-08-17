@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.database import Base
-from app.services import feishu_service
+from app.services.integration import feishu_service
 
 
 def _make_session():
@@ -102,7 +102,7 @@ class DispatchRemindersTests(unittest.IsolatedAsyncioTestCase):
         engine, db = _make_session()
         try:
             user = _bound_user(db)
-            from app.services.legal_workspace_service import legal_workspace_read_module
+            from app.services.legal.legal_workspace_service import legal_workspace_read_module
 
             messenger = AsyncMock()
             messenger.send_card.return_value = {"configured": True, "sent": True}
@@ -123,7 +123,7 @@ class DispatchRemindersTests(unittest.IsolatedAsyncioTestCase):
         try:
             user = _bound_user(db)
             _seed_activity(db, user.id)
-            from app.services.legal_workspace_service import legal_workspace_read_module
+            from app.services.legal.legal_workspace_service import legal_workspace_read_module
 
             messenger = AsyncMock()
             messenger.send_card.return_value = {"configured": True, "sent": True}

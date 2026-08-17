@@ -16,7 +16,7 @@ from app.core.time import utc_now
 from app.models.email import EmailDraft, EmailSendRequest
 from app.models.org import Organization
 from app.models.user import User, UserStatus
-from app.services.outbound_email_service import outbound_email_service
+from app.services.notification.outbound_email_service import outbound_email_service
 
 
 def _engine():
@@ -107,7 +107,7 @@ class EmailOutboxDeliveryTests(unittest.TestCase):
 
     def test_worker_replay_no_duplicate_send(self):
         request = self._approved_request()
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             owner = "worker-1"
             batch = outbound_email_service.claim_pending_batch(db=self.db, owner=owner)
             self.assertEqual(len(batch), 1)
@@ -116,7 +116,7 @@ class EmailOutboxDeliveryTests(unittest.TestCase):
             self.db.commit()
         self.assertEqual(len(FakeSMTP.sent), 1)
         # worker 重放：已 sent 不再投递
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             batch2 = outbound_email_service.claim_pending_batch(db=self.db, owner="worker-2")
         self.assertEqual(len(batch2), 0)
         self.assertEqual(len(FakeSMTP.sent), 1)
@@ -141,7 +141,7 @@ class EmailOutboxDeliveryTests(unittest.TestCase):
         def _fail(_fn, **_kw):
             raise ExternalError(kind=ExternalErrorKind.SERVER_5XX, message="5xx", status_code=500)
 
-        with patch("app.services.outbound_email_service.external_resilience.call", side_effect=_fail):
+        with patch("app.services.notification.outbound_email_service.external_resilience.call", side_effect=_fail):
             owner = "worker-1"
             batch = outbound_email_service.claim_pending_batch(db=self.db, owner=owner)
             for req in batch:
@@ -162,7 +162,7 @@ class EmailOutboxDeliveryTests(unittest.TestCase):
         def _fail(_fn, **_kw):
             raise ExternalError(kind=ExternalErrorKind.SERVER_5XX, message="5xx", status_code=500)
 
-        with patch("app.services.outbound_email_service.external_resilience.call", side_effect=_fail):
+        with patch("app.services.notification.outbound_email_service.external_resilience.call", side_effect=_fail):
             owner = "worker-1"
             batch = outbound_email_service.claim_pending_batch(db=self.db, owner=owner)
             for req in batch:
@@ -182,7 +182,7 @@ class EmailOutboxDeliveryTests(unittest.TestCase):
         def _fail(_fn, **_kw):
             raise ExternalError(kind=ExternalErrorKind.AUTH, message="auth failed", status_code=401)
 
-        with patch("app.services.outbound_email_service.external_resilience.call", side_effect=_fail):
+        with patch("app.services.notification.outbound_email_service.external_resilience.call", side_effect=_fail):
             owner = "worker-1"
             batch = outbound_email_service.claim_pending_batch(db=self.db, owner=owner)
             for req in batch:
@@ -206,7 +206,7 @@ class EmailOutboxDeliveryTests(unittest.TestCase):
         self.assertEqual(request.status, "failed")
         self.assertEqual(request.error_code, "LEASE_EXPIRED")
         # 重新领取可投递
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             batch = outbound_email_service.claim_pending_batch(db=self.db, owner="worker-2")
             self.assertEqual(len(batch), 1)
             for req in batch:
@@ -238,9 +238,9 @@ class EmailOutboxDeliveryTests(unittest.TestCase):
 
     def test_task_wrapper_delivers_approved(self):
         request = self._approved_request()
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             from app.tasks import deliver_email_send_requests_task
-            with patch("app.tasks.SessionLocal", self.SessionLocal):
+            with patch("app.tasks.notification_tasks.SessionLocal", self.SessionLocal):
                 result = deliver_email_send_requests_task()
         self.assertEqual(result["delivered"], 1)
         self.db.refresh(request)

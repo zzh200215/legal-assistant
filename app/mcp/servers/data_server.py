@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
+from app.core.database import SessionLocal
 from app.mcp.executor import tool_executor
 
 mcp = FastMCP(
@@ -24,10 +25,14 @@ mcp = FastMCP(
 async def sql_query(sql: str, user_id: int | None = None):
     if user_id is None:
         return str({"success": False, "message": "缺少认证上下文，SQL 查询被拒绝", "error": "unauthorized"})
-    out, _ = await tool_executor.execute(
-        "sql_query_tool", {"sql": sql},
-        agent_type="general_agent", user_id=user_id, db=None,
-    )
+    db = SessionLocal()
+    try:
+        out, _ = await tool_executor.execute(
+            "sql_query_tool", {"sql": sql},
+            agent_type="general_agent", user_id=user_id, db=db,
+        )
+    finally:
+        db.close()
     return str(out)
 
 

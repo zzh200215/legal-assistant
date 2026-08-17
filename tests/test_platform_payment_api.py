@@ -14,7 +14,7 @@ from app.models.user import User, UserStatus
 from app.models.org import Organization, OrganizationMember
 from app.models.platform_payment import PlatformPayment
 from app.models.subscription import UserSubscription, SubscriptionStatus
-from app.services.subscription_service import subscription_service
+from app.services.billing.subscription_service import subscription_service
 
 
 def _make_engine():

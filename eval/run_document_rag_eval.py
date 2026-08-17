@@ -24,9 +24,9 @@ if str(ROOT_DIR) not in sys.path:
 
 import chromadb
 
-from app.services.document_parsing import _split_text
-from app.services.rag_service import RAGService
-from app.services.vector_store import ChromaVectorStoreCollection
+from app.services.documents.document_parsing import _split_text
+from app.services.rag.rag_service import RAGService
+from app.services.rag.vector_store import ChromaVectorStoreCollection
 
 EVAL_DIR = Path(__file__).resolve().parent
 EMBED_DIM = 256
@@ -122,7 +122,7 @@ def main() -> int:
     service._reranker = None
 
     # 注入确定性嵌入（离线）
-    import app.services.rag_service as rag_module
+    import app.services.rag.rag_service as rag_module
     rag_module.llm_client.embed = _embed
 
     # 索引语料（每个文档切块）

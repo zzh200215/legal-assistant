@@ -115,7 +115,7 @@ class AccountDeletionApiTests(unittest.TestCase):
 
     def test_service_confirms_expired_pending(self):
         """验证 confirm_expired_pending service 能自动确认冷却期已满的注销请求（beat 任务实际调用的是这个）"""
-        from app.services.account_deletion_service import request_deletion, confirm_expired_pending, DELETION_COOL_DOWN_DAYS
+        from app.services.auth.account_deletion_service import request_deletion, confirm_expired_pending, DELETION_COOL_DOWN_DAYS
 
         # 发起注销并手动回拨 requested_at 到 31 天前
         request_deletion(self.db, self.user)

@@ -23,8 +23,8 @@ from app.main import app
 from app.models.user import User, UserStatus
 from app.models.org import Organization, OrganizationMember
 from app.models.security_auth import AuthDevice, MFAChallenge, MFARecoveryCode
-from app.services.auth_token_service import auth_token_service
-from app.services.mfa_service import mfa_service
+from app.services.auth.auth_token_service import auth_token_service
+from app.services.auth.mfa_service import mfa_service
 
 
 class MfaRiskBase(unittest.TestCase):
@@ -279,7 +279,7 @@ class MfaSetupGuardTests(MfaRiskBase):
 
     def test_recovery_codes_hashed_in_db(self):
         self._setup_mfa()
-        from app.services.auth_token_service import hash_opaque
+        from app.services.auth.auth_token_service import hash_opaque
 
         row = self.db.query(MFARecoveryCode).first()
         self.assertIsNotNone(row)

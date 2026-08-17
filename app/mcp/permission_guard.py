@@ -63,7 +63,7 @@ class PermissionGuard:
 
     def check_run_snapshot(self, db: Session, *, agent_run_id: int, user_id: int) -> PermissionDecision:
         """长流程权限快照：无快照视为通过；快照失效（禁用/撤销/过期/token 失效）→ 拒绝。"""
-        from app.services.authorization_service import authorization_service
+        from app.services.org.authorization_service import authorization_service
 
         run = db.query(AgentRun).filter(AgentRun.id == agent_run_id).first()
         snapshot_id = run.authorization_snapshot_id if run else None

@@ -22,6 +22,10 @@ class IdempotencyKey(Base):
     scope = Column(String(64), nullable=False, index=True, comment="业务域，如 open_api.contract_review")
     idempotency_key = Column(String(128), nullable=False, comment="调用方幂等键")
     request_hash = Column(String(64), nullable=False, comment="规范化请求体 SHA-256")
+    endpoint = Column(String(128), nullable=True, comment="动作/端点，如 POST /v1/contract-reviews")
+    user_id = Column(Integer, nullable=True, index=True, comment="租户/用户作用域（服务端解析，不信任客户端）")
+    organization_id = Column(Integer, nullable=True, index=True, comment="组织作用域")
+    resource_id = Column(String(64), nullable=True, comment="关联资源/任务 ID（如 job id）")
     status = Column(String(16), nullable=False, default="in_progress", index=True,
                     comment="in_progress / completed / failed")
     response_snapshot = Column(Text, nullable=True, comment="completed 时缓存响应 JSON")

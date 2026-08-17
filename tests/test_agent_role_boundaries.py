@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from app.mcp.permissions import agent_allows_tool, canonical_agent_type
-from app.services.agent_registry import AGENT_REGISTRY_VERSION, TASK_PROTOCOL_VERSION, list_agent_registrations
-from app.services.agent_service import AgentService, POLICY_GUARDRAIL_ROLE, SUB_AGENTS
+from app.services.agent.agent_registry import AGENT_REGISTRY_VERSION, TASK_PROTOCOL_VERSION, list_agent_registrations
+from app.services.agent.agent_service import AgentService, POLICY_GUARDRAIL_ROLE, SUB_AGENTS
 
 
 class AgentRoleBoundaryTests(unittest.IsolatedAsyncioTestCase):
@@ -78,7 +78,7 @@ class AgentRoleBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_single_domain_request_uses_direct_route_without_supervisor_llm(self):
         generate = AsyncMock(side_effect=AssertionError("Supervisor LLM must not run for a single domain"))
-        with patch("app.services.agent_service.llm_service.generate", new=generate):
+        with patch("app.services.agent.agent_service.llm_service.generate", new=generate):
             plan = await self.service._plan_with_supervisor("查询合同 12 的交付日期", user_id=1)
         generate.assert_not_awaited()
         self.assertEqual(plan["workers"], ["legal_compliance_agent"])

@@ -26,7 +26,7 @@ from app.models.prompt import PromptTemplate, PromptTemplateVersion
 from app.models.task import Task
 from app.models.token_usage import TokenUsage
 from app.models.user import User
-from app.services.llm_governance_service import llm_governance_service
+from app.services.llm.llm_governance_service import llm_governance_service
 from app.tools.base import BaseAgentTool, tool_success
 
 
@@ -91,8 +91,8 @@ class ApiStabilityTests(unittest.TestCase):
         }
         llm_governance_service.reset_local_state()
         self.sessionlocal_patchers = [
-            patch("app.services.llm_governance_service.SessionLocal", self.TestingSessionLocal),
-            patch("app.services.llm_observability_service.SessionLocal", self.TestingSessionLocal),
+            patch("app.services.llm.llm_governance_service.SessionLocal", self.TestingSessionLocal),
+            patch("app.services.llm.llm_observability_service.SessionLocal", self.TestingSessionLocal),
             patch("app.core.database.SessionLocal", self.TestingSessionLocal),
         ]
         for patcher in self.sessionlocal_patchers:
@@ -203,7 +203,7 @@ class ApiStabilityTests(unittest.TestCase):
 
     def test_chat_request_500_does_not_leak_internal_error_detail(self):
         with patch(
-            "app.api.chat_api.llm_service.chat",
+            "app.api.conversation.chat_api.llm_service.chat",
             new=AsyncMock(side_effect=RuntimeError("api-key=test-secret")),
         ):
             response = self.client.post(
@@ -222,20 +222,24 @@ class ApiStabilityTests(unittest.TestCase):
     def test_ws_agent_rejects_invalid_max_steps(self):
         with self.client.websocket_connect("/api/ws/agent", subprotocols=self._ws_subprotocols(), timeout=5) as websocket:
             websocket.send_json({"goal": "生成计划", "max_steps": 99})
+            welcome = websocket.receive_json()
             message = websocket.receive_json()
 
+        self.assertEqual(welcome["type"], "welcome")
         self.assertEqual(message["type"], "error")
         self.assertIn("max_steps", message["message"])
 
     def test_ws_agent_internal_error_does_not_leak_detail(self):
         with patch(
-            "app.api.ws_api.agent_service.run",
+            "app.api.conversation.ws_api.agent_service.run",
             new=AsyncMock(side_effect=RuntimeError("db_password=secret")),
         ):
             with self.client.websocket_connect("/api/ws/agent", subprotocols=self._ws_subprotocols(), timeout=5) as websocket:
                 websocket.send_json({"goal": "生成计划"})
+                welcome = websocket.receive_json()
                 message = websocket.receive_json()
 
+        self.assertEqual(welcome["type"], "welcome")
         self.assertEqual(message["type"], "error")
         self.assertEqual(message["message"], "请求失败")
         self.assertNotIn("secret", json.dumps(message, ensure_ascii=False))
@@ -262,19 +266,21 @@ class ApiStabilityTests(unittest.TestCase):
         )()
 
         with patch(
-            "app.api.ws_api.agent_service.resume_after_approval",
+            "app.api.conversation.ws_api.agent_service.resume_after_approval",
             new=AsyncMock(return_value=fake_run),
         ), patch(
-            "app.api.ws_api.agent_service.get_run_logs",
+            "app.api.conversation.ws_api.agent_service.get_run_logs",
             return_value=[],
         ), patch(
-            "app.api.ws_api.agent_service.serialize_run",
+            "app.api.conversation.ws_api.agent_service.serialize_run",
             return_value={"id": 12, "status": "completed", "artifacts": {}},
         ):
             with self.client.websocket_connect("/api/ws/agent", subprotocols=self._ws_subprotocols(), timeout=5) as websocket:
                 websocket.send_json({"action": "resume_approval", "approval_id": 9})
+                welcome = websocket.receive_json()
                 message = websocket.receive_json()
 
+        self.assertEqual(welcome["type"], "welcome")
         self.assertEqual(message["type"], "run_snapshot")
         self.assertEqual(message["run"]["id"], 12)
         self.assertEqual(message["run"]["status"], "completed")
@@ -307,25 +313,29 @@ class ApiStabilityTests(unittest.TestCase):
     def test_ws_chat_rejects_too_long_content(self):
         with self.client.websocket_connect("/api/ws/chat", subprotocols=self._ws_subprotocols(), timeout=5) as websocket:
             websocket.send_json({"content": "a" * 8001})
+            welcome = websocket.receive_json()
             message = websocket.receive_json()
 
+        self.assertEqual(welcome["type"], "welcome")
         self.assertEqual(message["type"], "error")
-        self.assertIn("消息长度不能超过", message["content"])
+        self.assertIn("消息长度不能超过", message["message"])
 
     def test_ws_chat_internal_error_does_not_leak_detail(self):
         async def _raise_stream(*_args, **_kwargs):
             raise RuntimeError("token=secret")
             yield
 
-        with patch("app.api.ws_api.llm_client.chat_stream", side_effect=_raise_stream):
+        with patch("app.api.conversation.ws_api.llm_client.chat_stream", side_effect=_raise_stream):
             with self.client.websocket_connect("/api/ws/chat", subprotocols=self._ws_subprotocols(), timeout=5) as websocket:
                 websocket.send_json({"content": "你好"})
+                welcome = websocket.receive_json()
                 session_msg = websocket.receive_json()
                 message = websocket.receive_json()
 
+        self.assertEqual(welcome["type"], "welcome")
         self.assertEqual(session_msg["type"], "session")
         self.assertEqual(message["type"], "error")
-        self.assertEqual(message["content"], "请求失败")
+        self.assertEqual(message["message"], "请求失败")
         self.assertNotIn("secret", json.dumps(message, ensure_ascii=False))
 
     def test_ws_chat_records_document_qa(self):
@@ -355,12 +365,14 @@ class ApiStabilityTests(unittest.TestCase):
             "agentic_rag": {"enabled": True, "retrieval_rounds": 1, "steps": []},
         }
 
-        with patch("app.api.ws_api.agentic_rag_service.answer_async", new=AsyncMock(return_value=fake_result)):
+        with patch("app.api.conversation.ws_api.agentic_rag_service.answer_async", new=AsyncMock(return_value=fake_result)):
             with self.client.websocket_connect("/api/ws/chat", subprotocols=self._ws_subprotocols(), timeout=5) as websocket:
                 websocket.send_json({"content": "付款条件是什么", "document_id": self.document.id})
+                welcome = websocket.receive_json()
                 session_msg = websocket.receive_json()
                 done = websocket.receive_json()
 
+        self.assertEqual(welcome["type"], "welcome")
         self.assertEqual(session_msg["type"], "session")
         self.assertEqual(done["type"], "done")
         self.assertTrue(done["can_answer"])
@@ -430,7 +442,7 @@ class ApiStabilityTests(unittest.TestCase):
         self.db.commit()
 
         with patch(
-            "app.api.document_api.document_service.analyze_visual",
+            "app.api.documents.document_api.document_service.analyze_visual",
             new=AsyncMock(
                 return_value={
                     "document_id": self.document.id,
@@ -456,7 +468,7 @@ class ApiStabilityTests(unittest.TestCase):
 
     def test_document_visual_analyze_returns_stable_error_code_for_invalid_type(self):
         with patch(
-            "app.api.document_api.document_service.analyze_visual",
+            "app.api.documents.document_api.document_service.analyze_visual",
             new=AsyncMock(side_effect=ValueError("Document visual analysis only supports image and PDF files")),
         ):
             response = self.client.post(
@@ -476,7 +488,7 @@ class ApiStabilityTests(unittest.TestCase):
         self.db.commit()
 
         with patch(
-            "app.api.document_api.document_service.ask",
+            "app.api.documents.document_api.document_service.ask",
             return_value={
                 "qa_record_id": 9,
                 "answer": "该页包含签字和公章。",
@@ -1130,16 +1142,16 @@ class ApiStabilityTests(unittest.TestCase):
 
     def test_document_batch_upload_supports_governance_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "app.services.document_service.UPLOAD_DIR",
+            "app.services.documents.document_service.UPLOAD_DIR",
             Path(tmpdir),
         ), patch(
-            "app.services.document_service._extract_segments",
+            "app.services.documents.document_service._extract_segments",
             return_value=[{"text": "付款条款", "page_number": 1, "section_title": "正文"}],
         ), patch(
-            "app.services.document_service._split_text",
+            "app.services.documents.document_service._split_text",
             return_value=[{"chunk_index": 0, "content": "付款条款", "page_number": 1, "section_title": "正文"}],
         ), patch(
-            "app.services.document_service._try_index_document",
+            "app.services.documents.document_service._try_index_document",
             return_value=None,
         ):
             response = self.client.post(

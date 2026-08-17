@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.models.idempotency import IdempotencyKey
-from app.services.idempotency_service import IdempotencyConflictError, idempotency_service
+from app.services.jobs.idempotency_service import IdempotencyConflictError, idempotency_service
 
 SCOPE = "open_api.contract_review"
 

@@ -151,7 +151,7 @@ class PortalAggregateTests(unittest.TestCase):
 
     def _download(self, raw_token: str, doc_id: int):
         with patch(
-            "app.services.document_delivery_service.document_delivery_service.prepare_download",
+            "app.services.documents.document_delivery_service.document_delivery_service.prepare_download",
             return_value={"path": self.tmp.name, "filename": "doc.txt",
                           "media_type": "text/plain", "temporary": False},
         ):

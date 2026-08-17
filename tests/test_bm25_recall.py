@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from app.services.rag_service import RAGService
+from app.services.rag.rag_service import RAGService
 
 
 class BM25RecallTests(unittest.TestCase):
@@ -70,7 +70,7 @@ class BM25RecallTests(unittest.TestCase):
         self.assertNotIn("c2", [c["id"] for c in res])
 
     def test_bm25_disabled_falls_back_to_jieba_scan(self):
-        with patch("app.services.rag_service.settings.RAG_BM25_ENABLED", False):
+        with patch("app.services.rag.rag_service.settings.RAG_BM25_ENABLED", False):
             res = self._run(self._rows4(), ["货款支付"], where=None)
         self.assertTrue(res)
         self.assertIn("c1", [c["id"] for c in res])

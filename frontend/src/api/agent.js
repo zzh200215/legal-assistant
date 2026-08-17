@@ -1,32 +1,40 @@
-import http from './http'
+import http, { idempotencyHeaders } from './http'
 
 export default {
-  getAgentRegistry() { return http.get('/agent/registry') },
-  previewAgentPlan(goal, maxSteps = 5) {
-    return http.post('/agent/preview', { goal, max_steps: maxSteps })
+  getAgentRegistry(config = {}) {
+    return http.get('/agent/registry', config)
   },
-  runAgent(goal, maxSteps = 5) {
-    return http.post('/agent/run', { goal, max_steps: maxSteps })
+  previewAgentPlan(goal, maxSteps = 5, options = {}) {
+    return http.post('/agent/preview', { goal, max_steps: maxSteps }, { headers: idempotencyHeaders(options) })
   },
-  listAgentRuns(params) {
-    return http.get('/agent/runs', { params })
+  runAgent(goal, maxSteps = 5, options = {}) {
+    return http.post('/agent/run', { goal, max_steps: maxSteps }, { headers: idempotencyHeaders(options) })
   },
-  getAgentRun(id) {
-    return http.get(`/agent/runs/${id}`)
+  listAgentRuns(params = {}, config = {}) {
+    return http.get('/agent/runs', { params, ...config })
   },
-  getAgentLogs(id) {
-    return http.get(`/agent/runs/${id}/logs`)
+  getAgentRun(id, config = {}) {
+    return http.get(`/agent/runs/${id}`, config)
   },
-  cancelAgentRun(id, reason = '') { return http.post(`/agent/runs/${id}/cancel`, { reason }) },
-  retryAgentRun(id) { return http.post(`/agent/runs/${id}/retry`) },
-  getAgentMetrics(days = 30) { return http.get('/agent/metrics', { params: { days } }) },
-  listApprovals(params) {
-    return http.get('/agent/approvals', { params })
+  getAgentLogs(id, config = {}) {
+    return http.get(`/agent/runs/${id}/logs`, config)
   },
-  decideApproval(id, payload) {
-    return http.post(`/agent/approvals/${id}/decision`, payload)
+  cancelAgentRun(id, reason = '', options = {}) {
+    return http.post(`/agent/runs/${id}/cancel`, { reason }, { headers: idempotencyHeaders(options) })
   },
-  resumeApproval(id, payload = {}) {
-    return http.post(`/agent/approvals/${id}/resume`, payload)
+  retryAgentRun(id, options = {}) {
+    return http.post(`/agent/runs/${id}/retry`, null, { headers: idempotencyHeaders(options) })
+  },
+  getAgentMetrics(days = 30, config = {}) {
+    return http.get('/agent/metrics', { params: { days }, ...config })
+  },
+  listApprovals(params = {}, config = {}) {
+    return http.get('/agent/approvals', { params, ...config })
+  },
+  decideApproval(id, payload, options = {}) {
+    return http.post(`/agent/approvals/${id}/decision`, payload, { headers: idempotencyHeaders(options) })
+  },
+  resumeApproval(id, payload = {}, options = {}) {
+    return http.post(`/agent/approvals/${id}/resume`, payload, { headers: idempotencyHeaders(options) })
   },
 }

@@ -75,7 +75,7 @@ class NotificationDispatchTests(unittest.TestCase):
 
     def _run_dispatch(self):
         from app.tasks import dispatch_notification_events_task
-        with patch("app.tasks.SessionLocal", self.SessionLocal):
+        with patch("app.tasks.notification_tasks.SessionLocal", self.SessionLocal):
             return dispatch_notification_events_task()
 
     def test_pending_site_event_becomes_delivered(self):
@@ -88,7 +88,7 @@ class NotificationDispatchTests(unittest.TestCase):
     def test_delivered_event_counts_as_unread_for_bell(self):
         ev = self._pending_event(scheduled_at=utc_now() - timedelta(minutes=5))
         self._run_dispatch()
-        from app.services.notification_service import notification_service
+        from app.services.notification.notification_service import notification_service
         count = notification_service.get_unread_count(db=self.db, user_id=self.user_id)
         self.assertEqual(count, 1)
 

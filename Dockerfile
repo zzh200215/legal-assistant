@@ -5,8 +5,9 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# P1-E：锁文件（含哈希）保证镜像依赖可复现；--require-hashes 校验完整性
+COPY requirements.lock .
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # 备份任务依赖 mysqldump（docker compose 使用 MySQL 8.4）
 RUN apt-get update && apt-get install -y --no-install-recommends default-mysql-client \

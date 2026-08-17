@@ -51,15 +51,26 @@ onMounted(async () => {
     const { data } = await http.get('/developer/onboarding')
     if (data) {
       role.value = data.user_role || role.value
-      completed.value = JSON.parse(data.completed_steps_json || '[]')
+      let parsed = []
+      try {
+        parsed = JSON.parse(data.completed_steps_json || '[]')
+      } catch (e) {
+        console.warn('解析 completed_steps_json 失败', e)
+        parsed = []
+      }
+      completed.value = Array.isArray(parsed) ? parsed : []
     }
   } catch {}
 })
 
 async function complete() {
   completed.value = steps.value
-  await http.put('/developer/onboarding', { user_role: role.value, completed_steps_json: JSON.stringify(completed.value) })
-  ElMessage.success('引导进度已保存')
+  try {
+    await http.put('/developer/onboarding', { user_role: role.value, completed_steps_json: JSON.stringify(completed.value) })
+    ElMessage.success('引导进度已保存')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '保存引导进度失败')
+  }
 }
 
 function enterWorkspace() {

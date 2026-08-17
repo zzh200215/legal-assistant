@@ -405,7 +405,7 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 
 推荐在交付前至少做这几步：
 
-1. `python -m pytest -q`（全量测试，当前 1186 项通过）
+1. `python -m pytest -q`（全量测试，当前 1429 项通过）
 2. `ruff check --select E9,F821,F823,F632,F706,F811 app scripts tests`（CI 静态门禁）
 3. `python scripts/check_openapi_contract.py`（OpenAPI 契约快照一致性）
 4. `npm run build`（在 `frontend/` 下执行）
@@ -415,25 +415,34 @@ python eval/run_eval.py --bundle-dir eval/bundles/real_legal_q3 --user-id 9000 -
 ## 项目结构
 
 ```
-├── app/                    # 后端代码
-│   ├── api/                # API 路由（legal/feishu/portal/subscription/dashboard/admin…）
-│   ├── services/           # 业务逻辑（legal_service / feishu_service / prompt_service…）
-│   ├── models/             # 数据模型（legal / legal_billing / subscription / feishu_binding…）
-│   ├── tools/              # Agent 工具
-│   ├── mcp/                # 工具注册表 / 权限守卫 / 统一执行器 / SQL 守卫
-│   ├── tasks/              # Celery 任务（beat 计划任务、备份、飞书提醒）
-│   └── core/               # 核心模块（config/auth/telemetry/observability/encryption…）
-├── frontend/               # 前端代码（Vue 3 + Element Plus）
+├── app/                       # 后端代码
+│   ├── api/                   # 表现层：HTTP/WS 路由（按域分包）
+│   │   ├── admin/ agent/ auth/ billing/ channels/ conversation/
+│   │   ├── developer/ documents/ legal/ org/ tasks/
+│   ├── services/              # 业务层：按有界上下文分包
+│   │   ├── auth/ org/ legal/ documents/ billing/ agent/ rag/ llm/
+│   │   ├── notification/ observability/ integration/ storage/ jobs/ memory/
+│   ├── models/                # 数据层：ORM，按域分包子包
+│   ├── schemas/               # Pydantic DTO
+│   ├── core/                  # 横切基础设施：config/db/llm/security/observability/time/errors
+│   ├── mcp/                   # MCP 工具执行 / 权限守卫 / 注册表 / SQL 守卫
+│   ├── tools/                 # Agent 工具
+│   └── tasks/                 # Celery 任务（按域拆 document/notification/legal/billing/integration/ops）
+├── frontend/                  # 前端代码（Vue 3 + Element Plus）
 │   └── src/
-│       ├── views/          # LegalWorkspace / LegalPortal / LegalBilling / Pricing…
-│       └── components/legal/
-├── eval/                   # 评测（bundle 构建、LLM 评测、法律检索/图谱评测、反馈回流评测）
-├── scripts/                # 运维与数据脚本（备份、周报、A/B 判定、契约检查、压测…）
-├── docs/                   # 产品/合规/接入文档（含等保自评、飞书接入指南、合规四件套）
-├── alembic/                # 数据库迁移版本
-├── FL.md                   # 法律平台需求文档
-└── README.md               # 本文件
+│       ├── views/             # LegalWorkspace / Documents / Agent / System / Tasks…
+│       ├── components/
+│       ├── composables/
+│       └── api/
+├── eval/                      # 评测（bundle 构建、LLM 评测、法律检索/图谱评测、反馈回流评测）
+├── scripts/                   # 运维与数据脚本（备份、周报、A/B 判定、契约检查、压测…）
+├── docs/                      # 产品/合规/接入文档 + 架构（ARCHITECTURE.md、adr/）
+├── alembic/                   # 数据库迁移版本
+├── FL.md                      # 法律平台需求文档
+└── README.md                  # 本文件
 ```
+
+> 分层依赖规则与目标架构详见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ## 常见问题
 
@@ -464,7 +473,7 @@ VECTOR_STORE_COLLECTION_NAME=legal_docs
 
 ### 4. 如何自定义文书模板？
 
-修改 `app/services/legal_service.py` 中的 `DRAFT_FIELDS` 和 `DRAFT_REQUIRED_FIELDS`，添加新的文书类型和字段定义。
+修改 `app/services/legal/legal_service.py` 中的 `DRAFT_FIELDS` 和 `DRAFT_REQUIRED_FIELDS`，添加新的文书类型和字段定义。
 
 ### 5. 合同审查支持哪些文件格式？
 

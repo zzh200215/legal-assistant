@@ -11,7 +11,7 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.email import EmailDraft
 from app.models.user import User
-from app.services.outbound_email_service import outbound_email_service
+from app.services.notification.outbound_email_service import outbound_email_service
 
 
 class FakeSMTP:
@@ -82,7 +82,7 @@ class OutboundEmailServiceTests(unittest.TestCase):
         self.assertEqual(approved.status, "approved")
         self.assertEqual(approved.approved_by_user_id, self.approver.id)
         FakeSMTP.sent_messages = []
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             sent = outbound_email_service.execute_request(request.id, db=self.db, user=self.user)
             repeated = outbound_email_service.execute_request(request.id, db=self.db, user=self.user)
         self.assertEqual(sent.status, "sent")

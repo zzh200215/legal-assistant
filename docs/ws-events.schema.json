@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.local/ws-events.schema.json",
+  "title": "WebSocket 事件契约（P1）",
+  "description": "服务端→客户端事件 envelope 与客户端→服务端消息的 JSON Schema；tests/test_ws_protocol_contract.py 校验与 ws_session_service 常量一致。",
+  "definitions": {
+    "envelope": {
+      "type": "object",
+      "required": ["type", "seq", "ts", "trace_id"],
+      "properties": {
+        "type": { "type": "string" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "ts": { "type": "string", "format": "date-time" },
+        "trace_id": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "welcome": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "welcome" },
+        "session_id": { "type": "string" },
+        "resume_token": { "type": "string" },
+        "last_seq": { "type": "integer" },
+        "resumed": { "type": "boolean" }
+      },
+      "required": ["session_id", "resume_token", "last_seq", "resumed"]
+    },
+    "ping": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": { "type": { "const": "ping" } }
+    },
+    "pong": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": { "type": { "const": "pong" } }
+    },
+    "resync_required": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "resync_required" },
+        "reason": { "type": "string" },
+        "last_seq": { "type": "integer" }
+      },
+      "required": ["reason", "last_seq"]
+    },
+    "error": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "error" },
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "required": ["code", "message"]
+    },
+    "chunk": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "chunk" },
+        "content": { "type": "string" }
+      },
+      "required": ["content"]
+    },
+    "done": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "done" },
+        "content": { "type": "string" }
+      },
+      "required": ["content"]
+    },
+    "session": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "session" },
+        "session_id": { "type": "integer" }
+      },
+      "required": ["session_id"]
+    },
+    "run_snapshot": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "run_snapshot" },
+        "run": { "type": "object" },
+        "logs": { "type": "array" }
+      },
+      "required": ["run", "logs"]
+    },
+    "subscribed": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "subscribed" },
+        "channels": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["channels"]
+    },
+    "client_message": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": ["ack", "resume", "subscribe", "unsubscribe", "cancel", "chat", "agent_run", "pong", "ping", null]
+        },
+        "ack_seq": { "type": "integer" },
+        "resume_token": { "type": "string" },
+        "channels": { "type": "array", "items": { "type": "string" } },
+        "kind": { "enum": ["job", "agent_run"] },
+        "id": { "type": "integer" },
+        "content": { "type": "string", "maxLength": 8000 },
+        "document_id": { "type": "integer" },
+        "session_id": { "type": "integer" },
+        "goal": { "type": "string", "maxLength": 8000 },
+        "max_steps": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "approval_id": { "type": "integer" },
+        "action": { "enum": ["run", "resume_approval", null] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/definitions/envelope" },
+    { "$ref": "#/definitions/client_message" }
+  ]
+}

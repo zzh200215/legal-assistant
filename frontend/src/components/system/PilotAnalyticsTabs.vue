@@ -208,10 +208,6 @@ const windowNote = (row) => {
   if (!row.d30 || row.d30.observed === 0) parts.push('D30 窗口未经历')
   return parts.length ? parts.join('；') : 'D7/D30 窗口均已完全观察'
 }
-
-onMounted(async () => {
-  await Promise.allSettled([fetchFunnel(), fetchRetention(), fetchNorthStar()])
-})
 </script>
 
 <style scoped>

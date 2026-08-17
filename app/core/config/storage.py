@@ -28,6 +28,8 @@ class StorageSettings(BaseSettings):
     STORAGE_OSS_BUCKET: str = "documents"
     # 文档上传安全（流式读取、大小/MIME/zip-bomb 防护）
     DOCUMENT_MAX_UPLOAD_MB: int = Field(default=50, ge=1, le=1024)
+    # 批量上传总大小上限（batch-upload 逐文件累计，超过即整体拒绝；单文件仍受 DOCUMENT_MAX_UPLOAD_MB 限制）
+    DOCUMENT_MAX_BATCH_TOTAL_MB: int = Field(default=200, ge=1, le=8192)
     DOCUMENT_ALLOWED_EXTENSIONS: str = "pdf,docx,xlsx,md,txt,png,jpg,jpeg,bmp,webp"
     DOCUMENT_VIRUS_SCAN_ENABLED: bool = False
     DOCUMENT_CLAMAV_SOCKET: str = "/var/run/clamav/clamd.ctl"

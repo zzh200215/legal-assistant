@@ -26,7 +26,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.legal import LegalSource
-from app.services.legal_service import (
+from app.services.legal.legal_service import (
     DISCLAIMER,
     NO_VALID_SOURCE,
     REFUSAL_ADVICE,
@@ -435,7 +435,7 @@ def main():
         async def _no_llm(*_args, **_kwargs):
             return None
 
-        with patch("app.services.legal_service._llm_chat", new=_no_llm):
+        with patch("app.services.legal.legal_service._llm_chat", new=_no_llm):
             report = asyncio.run(run_eval(dataset, db))
     else:
         report = asyncio.run(run_eval(dataset, db))

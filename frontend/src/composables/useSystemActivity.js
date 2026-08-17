@@ -1,8 +1,11 @@
 import { ref } from 'vue'
 
+// 操作日志/告警为模块级单例：任务重试后会触发告警刷新（任务中心 tab 经 fetchAlerts 复用），
+// 日志与告警两个 tab 以及任务中心共享同一份状态，避免拆分后各自持有副本。
+const logDays = ref(30), logModule = ref(null), logScope = ref('mine'), logs = ref([]), logStats = ref({}), logLoading = ref(false), logPage = ref(1), logPageSize = ref(20), logTotal = ref(0)
+const alertDays = ref(30), alertScope = ref('mine'), alertSource = ref(null), alertCategory = ref(null), alertSeverity = ref(null), alerts = ref([]), alertStats = ref({}), alertLoading = ref(false), alertPage = ref(1), alertPageSize = ref(20), alertTotal = ref(0)
+
 export function useSystemActivity({ client, message, isAdmin }) {
-  const logDays = ref(30), logModule = ref(null), logScope = ref('mine'), logs = ref([]), logStats = ref({}), logLoading = ref(false), logPage = ref(1), logPageSize = ref(20), logTotal = ref(0)
-  const alertDays = ref(30), alertScope = ref('mine'), alertSource = ref(null), alertCategory = ref(null), alertSeverity = ref(null), alerts = ref([]), alertStats = ref({}), alertLoading = ref(false), alertPage = ref(1), alertPageSize = ref(20), alertTotal = ref(0)
   const fetchLogData = async () => {
     logLoading.value = true
     try {

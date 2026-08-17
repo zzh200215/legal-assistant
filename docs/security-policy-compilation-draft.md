@@ -41,16 +41,18 @@
 | 制度 | 要求 | 现状实现 |
 |---|---|---|
 | 密钥分级 | 主密钥与业务密钥分离 | 加密密钥 `LEGAL_DATA_ENCRYPTION_KEY` 独立于 SECRET_KEY；轮换支持 `LEGAL_DATA_ENCRYPTION_KEYS_JSON` |
-| 密钥存储 | 不落源码/日志 | CI 用占位密钥、生产用真实密钥（conftest 不回退覆盖） |
-| 密钥轮换 | 定期轮换【管理确认】 | 支持密文版本前缀 `_v1:` 的多版本轮换机制 |
+| 密钥存储 | 不落源码/日志 | CI 用占位密钥、生产用真实密钥（conftest 不回退覆盖）；配置脱敏 `redacted_dict()` |
+| 统一读取 | 集中式密钥访问 | SecretProvider 接口（app/core/secrets）：env 实现为默认；KMS/Secret Manager 为可插拔骨架（未接入真实云 KMS，见 docs/secret-management.md） |
+| 密钥轮换 | 受控轮换，不导致历史数据不可解密 | 版本化密钥环 + 密文版本前缀 `enc:v{n}:`；rotate 脚本全量重加密 + `--retire` 四道门禁受控摘除；轮换各阶段写 key_rotation 审计（不含密钥原文） |
+| 轮换审计 | 留痕且不记录密钥原文 | security_audit_events（event_type=key_rotation，哈希链，只存版本/统计元数据） |
 
 ## 6. 数据安全管理制度
 
 | 制度 | 要求 | 现状实现 |
 |---|---|---|
-| 数据分类分级 | 分类分级与标识 | 数据分类见 data-retention-sla-draft §1（A-F 六类 + 期限） |
+| 数据分类分级 | 分类分级与标识 | 数据分类见 data-retention-sla-draft §1（A-F 六类 + 期限）；LLM 出站统一数据分级见 docs/llm-outbound-data-protection.md（public/internal/sensitive/highly_sensitive） |
 | 静态加密 | 敏感字段加密 | EncryptedText（AES-256-GCM）覆盖案件/咨询/审查/文书/合同/客户联系/平台密文 |
-| 出站防护 | 防敏感信息外泄 | LLM 出站 PII 脱敏（data_protection_service）、邮件 DLP（outbound_email_service） |
+| 出站防护 | 防敏感信息外泄 | LLM 出站统一安全网关（分级 + PII 检测/脱敏 + 极敏感拦截 + 审计，P0 已实现，见 docs/llm-outbound-data-protection.md）、邮件 DLP（outbound_email_service） |
 | 供应商管理 | 供应商数据处理约束 | 供应商清单 docs/supplier-list-and-data-transfer-draft.md；dashscope 境内处理不涉及出境 |
 | 数据删除 | 注销后处置 | 30 天冷却期 + 匿名化状态机（#95 已实现） |
 

@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.database import Base
-from app.services import feishu_service
+from app.services.integration import feishu_service
 
 
 def _make_session():
@@ -156,7 +156,7 @@ class AnswerFileReviewTests(unittest.IsolatedAsyncioTestCase):
                       "source_location": {"snippet": "甲方有权单方解除"}, "suggestion": "加提前通知期"}]
             with patch.object(feishu_service, "FeishuMessenger", return_value=messenger), \
                  patch.object(feishu_service, "_extract_file_text", return_value="合同正文，甲方有权单方解除本协议"), \
-                 patch("app.services.legal_service.review_contract", new=AsyncMock(
+                 patch("app.services.legal.legal_service.review_contract", new=AsyncMock(
                      return_value=(risks, "共识别 1 项审查提示"))):
                 result = await feishu_service.answer_file_review("ou_1", "fk", "劳务合同.pdf", db)
             self.assertTrue(result["sent"])

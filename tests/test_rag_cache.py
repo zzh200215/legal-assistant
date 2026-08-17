@@ -8,7 +8,7 @@ class RagEmbeddingCacheTests(unittest.TestCase):
     """RagEmbeddingCache 单元测试（不依赖 rag_service）"""
 
     def _make(self, *, capacity=4, model="m", redis_enabled=False):
-        from app.services.rag_cache import RagEmbeddingCache
+        from app.services.rag.rag_cache import RagEmbeddingCache
         return RagEmbeddingCache(
             capacity=capacity, redis_enabled=redis_enabled, ttl_seconds=60,
             redis_prefix="aibg:rag:embed", model=model,
@@ -44,14 +44,14 @@ class RagEmbeddingCacheTests(unittest.TestCase):
     def test_redis_enabled_get_hit_and_put_write(self):
         mock_redis = MagicMock()
         mock_redis.get.return_value = json.dumps([0.5, 0.6]).encode("utf-8")
-        with patch("app.services.rag_cache.redis.from_url", return_value=mock_redis):
+        with patch("app.services.rag.rag_cache.redis.from_url", return_value=mock_redis):
             c = self._make(redis_enabled=True)
             self.assertEqual(c.get("hello"), [0.5, 0.6])  # 命中 Redis
             c.put("world", [0.7])
             mock_redis.setex.assert_called()
 
     def test_redis_unavailable_falls_back_to_memory(self):
-        with patch("app.services.rag_cache.redis.from_url", side_effect=Exception("no redis")):
+        with patch("app.services.rag.rag_cache.redis.from_url", side_effect=Exception("no redis")):
             c = self._make(redis_enabled=True)
             c.put("a", [1])
             self.assertEqual(c.get("a"), [1])  # 内存可用

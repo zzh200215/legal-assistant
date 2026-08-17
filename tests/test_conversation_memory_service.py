@@ -9,8 +9,8 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.chat import ChatMessage, ChatSession, ChatSessionMemory
 from app.models.user import User
-from app.services.agent_service import AgentService
-from app.services.conversation_memory_service import conversation_memory_service
+from app.services.agent.agent_service import AgentService
+from app.services.memory.conversation_memory_service import conversation_memory_service
 
 
 class ConversationMemoryServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -97,7 +97,7 @@ class ConversationMemoryServiceTests(unittest.IsolatedAsyncioTestCase):
         session = self._session(self.user.id)
         self._messages(session.id, 10)
         with patch(
-            "app.services.conversation_memory_service.llm_service.generate",
+            "app.services.memory.conversation_memory_service.llm_service.generate",
             new=AsyncMock(
                 side_effect=[
                     "- 用户需要一份风险结论\n- 后续需要生成邮件草稿",
@@ -122,7 +122,7 @@ class ConversationMemoryServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_document_rag_session_is_not_compacted(self):
         session = self._session(self.user.id, session_type="document_rag")
         self._messages(session.id, 10)
-        with patch("app.services.conversation_memory_service.llm_service.generate", new=AsyncMock()) as generate:
+        with patch("app.services.memory.conversation_memory_service.llm_service.generate", new=AsyncMock()) as generate:
             compacted = await conversation_memory_service.compact_session_if_needed(self.db, self.user.id, session.id)
         self.assertFalse(compacted)
         generate.assert_not_awaited()
@@ -146,7 +146,7 @@ class ConversationMemoryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.db.add(ChatSessionMemory(session_id=session.id, user_id=self.user.id, summary="用户提到手机号和身份证信息。"))
         self.db.commit()
         with patch(
-            "app.services.conversation_memory_service.llm_service.generate",
+            "app.services.memory.conversation_memory_service.llm_service.generate",
             new=AsyncMock(
                 return_value='{"preferences":[{"category":"general","preference_key":"contact","preference_value":"手机号 13800138000"}]}'
             ),

@@ -89,6 +89,10 @@ for _name, _queue, _bf, _cf, _idem in [
     ("parse_contract_versions", "document", lambda *_: None, None, None),
     ("run_database_archive", "connector", lambda *_: None, None, None),
     ("create_pilot_backup", "connector", lambda *_: None, None, None),
+    # P1 可观测性任务（台账便于回溯聚合/快照/导出运行历史）
+    ("snapshot_ops_metrics", "document", lambda *_: None, None, None),
+    ("aggregate_ops_metrics", "document", lambda *_: None, None, None),
+    ("run_audit_export", "document", _async_job_key, None, None),
 ]:
     register(TaskRunSpec(task_name=_name, queue=_queue, business_key_fn=_bf, context_fn=_cf, idempotency_key_fn=_idem))
 

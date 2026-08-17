@@ -33,7 +33,7 @@ from app.models.legal import (  # noqa: E402
     LegalDraft,
     LegalReviewAction,
 )
-from app.services.legal_service import target_query  # noqa: E402
+from app.services.legal.legal_service import target_query  # noqa: E402
 
 DEFAULT_ACTIONS = ("approve", "return", "offline")
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "eval" / "review_feedback_eval.jsonl"

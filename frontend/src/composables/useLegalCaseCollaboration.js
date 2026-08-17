@@ -13,7 +13,7 @@ export function useLegalCaseCollaboration({ client, message, confirm, organizati
   const hasCase = () => Boolean(caseId.value)
   const loadPortalLinks = async () => {
     if (!hasCase()) return
-    try { portalLinks.value = (await client.listPortalLinks(organizationId.value, caseId.value)).data } catch {}
+    try { portalLinks.value = (await client.listPortalLinks(organizationId.value, caseId.value)).data } catch { /* 静默忽略 */ }
   }
   const createPortalLink = async () => {
     portalCreating.value = true
@@ -31,11 +31,11 @@ export function useLegalCaseCollaboration({ client, message, confirm, organizati
       await client.revokePortalLink(row.id)
       message.success('已撤销')
       await loadPortalLinks()
-    } catch {}
+    } catch { /* 静默忽略 */ }
   }
   const loadProgressUpdates = async () => {
     if (!hasCase()) return
-    try { const { data } = await client.listProgressUpdates(organizationId.value, caseId.value); progressUpdates.value = data.items || data } catch {}
+    try { const { data } = await client.listProgressUpdates(organizationId.value, caseId.value); progressUpdates.value = data.items || data } catch { /* 静默忽略 */ }
   }
   const submitProgressUpdate = async () => {
     if (!progressForm.value.title.trim() || !progressForm.value.body.trim()) return message.warning('标题和内容为必填')
@@ -48,17 +48,17 @@ export function useLegalCaseCollaboration({ client, message, confirm, organizati
     } catch (error) { message.error(error.response?.data?.detail || '创建失败') } finally { progressLoading.value = false }
   }
   const publishProgress = async (row) => {
-    try { await confirm('确认发布该进度更新？客户可见更新将通知客户。', '发布确认'); await client.publishProgressUpdate(row.id); message.success('已发布'); await loadProgressUpdates() } catch {}
+    try { await confirm('确认发布该进度更新？客户可见更新将通知客户。', '发布确认'); await client.publishProgressUpdate(row.id); message.success('已发布'); await loadProgressUpdates() } catch { /* 静默忽略 */ }
   }
   const withdrawProgress = async (row) => {
-    try { await confirm('确认撤回该进度更新？', '撤回确认', { type: 'warning' }); await client.withdrawProgressUpdate(row.id); message.success('已撤回'); await loadProgressUpdates() } catch {}
+    try { await confirm('确认撤回该进度更新？', '撤回确认', { type: 'warning' }); await client.withdrawProgressUpdate(row.id); message.success('已撤回'); await loadProgressUpdates() } catch { /* 静默忽略 */ }
   }
   const loadCaseMembers = async () => {
     if (!organizationId.value || !hasCase()) return
-    try { caseMembers.value = (await client.listCaseMembers(organizationId.value, caseId.value)).data } catch {}
+    try { caseMembers.value = (await client.listCaseMembers(organizationId.value, caseId.value)).data } catch { /* 静默忽略 */ }
   }
   const removeCaseMember = async (row) => {
-    try { await confirm('确认移除该成员？', '移除确认', { type: 'warning' }); await client.patchCaseMember(row.id, { revoke: true }); message.success('已移除'); await loadCaseMembers() } catch {}
+    try { await confirm('确认移除该成员？', '移除确认', { type: 'warning' }); await client.patchCaseMember(row.id, { revoke: true }); message.success('已移除'); await loadCaseMembers() } catch { /* 静默忽略 */ }
   }
 
   return {

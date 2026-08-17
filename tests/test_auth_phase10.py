@@ -53,7 +53,7 @@ class AuthPhase10Tests(unittest.TestCase):
 
     def test_send_verification_code_new_email(self):
         """新邮箱可以发送验证码"""
-        with patch("app.services.user_auth_service.user_auth_service.send_email", return_value=True):
+        with patch("app.services.auth.user_auth_service.user_auth_service.send_email", return_value=True):
             resp = self.client.post("/api/auth/send-verification-code", json={
                 "email": "newuser@test.com",
                 "purpose": "register",
@@ -73,7 +73,7 @@ class AuthPhase10Tests(unittest.TestCase):
 
     def test_send_verification_code_existing_email_reset(self):
         """已注册邮箱发reset验证码可以成功"""
-        with patch("app.services.user_auth_service.user_auth_service.send_email", return_value=True):
+        with patch("app.services.auth.user_auth_service.user_auth_service.send_email", return_value=True):
             resp = self.client.post("/api/auth/send-verification-code", json={
                 "email": "existing@test.com",
                 "purpose": "reset_password",
@@ -204,7 +204,7 @@ class AuthPhase10Tests(unittest.TestCase):
 
     def test_forgot_password_existing_email(self):
         """已存在邮箱请求密码重置，返回成功（无论是否发送邮件）"""
-        with patch("app.services.user_auth_service.user_auth_service.send_email", return_value=True):
+        with patch("app.services.auth.user_auth_service.user_auth_service.send_email", return_value=True):
             resp = self.client.post("/api/auth/forgot-password", json={
                 "email": "existing@test.com",
             })
@@ -311,11 +311,11 @@ class AuthPhase10Tests(unittest.TestCase):
             "headimgurl": "https://wx.example.com/avatar.jpg",
         }
 
-        with patch("app.services.user_auth_service.settings") as mock_settings:
+        with patch("app.services.auth.user_auth_service.settings") as mock_settings:
             mock_settings.WECHAT_APP_ID = "test_appid"
             mock_settings.WECHAT_APP_SECRET = "test_secret"
             mock_settings.WECHAT_REDIRECT_URI = "https://example.com/callback"
-            with patch("app.services.user_auth_service.requests.get") as mock_get:
+            with patch("app.services.auth.user_auth_service.requests.get") as mock_get:
                 mock_get.side_effect = [mock_token_resp, mock_user_resp]
                 resp = self.client.get("/api/auth/wechat/callback?code=wx_code_001&state=test_state")
 
@@ -354,11 +354,11 @@ class AuthPhase10Tests(unittest.TestCase):
         mock_user_resp = MagicMock()
         mock_user_resp.json.return_value = {"nickname": "已有用户", "headimgurl": ""}
 
-        with patch("app.services.user_auth_service.settings") as mock_settings:
+        with patch("app.services.auth.user_auth_service.settings") as mock_settings:
             mock_settings.WECHAT_APP_ID = "test_appid"
             mock_settings.WECHAT_APP_SECRET = "test_secret"
             mock_settings.WECHAT_REDIRECT_URI = "https://example.com/callback"
-            with patch("app.services.user_auth_service.requests.get") as mock_get:
+            with patch("app.services.auth.user_auth_service.requests.get") as mock_get:
                 mock_get.side_effect = [mock_token_resp, mock_user_resp]
                 resp = self.client.get("/api/auth/wechat/callback?code=wx_code_002&state=test_state2")
 
@@ -368,11 +368,11 @@ class AuthPhase10Tests(unittest.TestCase):
 
     def test_wechat_callback_api_failure(self):
         """微信API调用失败时返回401"""
-        with patch("app.services.user_auth_service.settings") as mock_settings:
+        with patch("app.services.auth.user_auth_service.settings") as mock_settings:
             mock_settings.WECHAT_APP_ID = "test_appid"
             mock_settings.WECHAT_APP_SECRET = "test_secret"
             mock_settings.WECHAT_REDIRECT_URI = "https://example.com/callback"
-            with patch("app.services.user_auth_service.requests.get", side_effect=Exception("network error")):
+            with patch("app.services.auth.user_auth_service.requests.get", side_effect=Exception("network error")):
                 resp = self.client.get("/api/auth/wechat/callback?code=bad_code&state=state")
 
         self.assertEqual(resp.status_code, 401)

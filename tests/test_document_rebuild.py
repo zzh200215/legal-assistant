@@ -16,9 +16,9 @@ from app.core.config import get_settings
 from app.core.database import Base
 from app.models.document import Document, DocumentParseArtifact
 from app.models.user import User
-from app.services import document_pipeline
-from app.services.document_pipeline import run_chunk, run_index, run_parse
-from app.services.storage_service import LocalStorageAdapter, storage_service
+from app.services.documents import document_pipeline
+from app.services.documents.document_pipeline import run_chunk, run_index, run_parse
+from app.services.storage.storage_service import LocalStorageAdapter, storage_service
 
 
 class RebuildTestCase(unittest.TestCase):

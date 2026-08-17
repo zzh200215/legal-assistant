@@ -11,7 +11,7 @@ from app.core.database import Base
 from app.models.archive import DatabaseArchiveRun
 from app.models.legal_notifications import SecurityAuditEvent
 from app.models.operation_log import OperationLog
-from app.services.archive_service import archive_service
+from app.services.documents.archive_service import archive_service
 
 OLD = datetime(2020, 1, 1)  # naive UTC，匹配 SQLite 无时区存储
 NEW = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=5)
@@ -127,7 +127,12 @@ class ArchiveServiceTests(unittest.TestCase):
         self.assertIsNotNone(stale_run, "陈旧运行应被标记 failed 并抢占")
 
     def test_archive_uses_table_specific_time_column(self):
-        # security_audit_events 用 occurred_at 而非 created_at
+        # security_audit_events 用 occurred_at 而非 created_at；
+        # P1 安全策略：审计表默认不物理删除（retained_by_policy），
+        # 启用归档 + 受控清理后才删除已归档的过期行。
+        import tempfile
+        from pathlib import Path
+
         self.db.add(SecurityAuditEvent(
             organization_id=None, event_type="login", actor_type="user",
             actor_id="1", result="success", occurred_at=OLD, seq_no=1, current_hash="h1",
@@ -137,10 +142,26 @@ class ArchiveServiceTests(unittest.TestCase):
             actor_id="2", result="success", occurred_at=NEW, seq_no=2, current_hash="h2",
         ))
         self.db.commit()
-        with _enable_archive('{"security_audit_events": 365}', dry_run=False):
-            result = archive_service.run(self.db)
+
+        settings = get_settings()
+        with tempfile.TemporaryDirectory() as tmp:
+            with _enable_archive('{"security_audit_events": 365}', dry_run=False), \
+                 patch.multiple(settings, OBS_AUDIT_ARCHIVE_DIR=str(Path(tmp) / "archives")):
+                result = archive_service.run(self.db)
+            self.assertEqual(result["tables"]["security_audit_events"]["status"], "retained_by_policy")
+            self.assertEqual(self.db.query(SecurityAuditEvent).count(), 2)  # 审计默认保留不删
+
+            with _enable_archive('{"security_audit_events": 365}', dry_run=False), \
+                 patch.multiple(settings, OBS_AUDIT_ARCHIVE_ENABLED=True,
+                                OBS_AUDIT_PURGE_AFTER_ARCHIVE=True,
+                                OBS_AUDIT_ARCHIVE_DIR=str(Path(tmp) / "archives")):
+                result = archive_service.run(self.db)
+        # 受控清理按 occurred_at 判定：仅过期行被归档并删除
+        # （归档行为本身会写 event_type=export 审计事件，故按业务事件过滤计数）
         self.assertEqual(result["tables"]["security_audit_events"]["deleted"], 1)
-        self.assertEqual(self.db.query(SecurityAuditEvent).count(), 1)
+        remaining_login = self.db.query(SecurityAuditEvent).filter(
+            SecurityAuditEvent.event_type == "login").count()
+        self.assertEqual(remaining_login, 1)
 
     def test_unknown_table_is_skipped(self):
         self._seed_operation_logs()

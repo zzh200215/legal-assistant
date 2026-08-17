@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.cost_ledger import CostLedgerEntry
-from app.services.cost_ledger_service import cost_ledger_service
+from app.services.billing.cost_ledger_service import cost_ledger_service
 
 
 def _engine():

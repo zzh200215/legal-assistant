@@ -12,7 +12,8 @@ import logging
 from celery import signals
 
 from app.core.database import SessionLocal
-from app.services.task_run_service import task_run_service
+from app.core.obs_context import build_context, context_from_headers, reset_context, set_context
+from app.services.jobs.task_run_service import task_run_service
 from app.tasks.task_run_registry import get_spec
 
 logger = logging.getLogger(__name__)
@@ -25,10 +26,33 @@ def _error_fields(exc: Exception | None) -> tuple[str | None, str | None]:
     return type(exc).__name__, None
 
 
+def _record_task_outcome(task, outcome: str, exc: Exception | None) -> None:
+    """任务终态指标（P1）：task_name/outcome/error_category 均为有限枚举标签。"""
+    if task is None:
+        return
+    try:
+        from app.core.metrics import metrics
+        from app.core.observability import classify_error_category
+
+        metrics.increment(
+            "task_outcomes",
+            labels={
+                "task_name": task.name,
+                "outcome": outcome,
+                "error_category": classify_error_category(exc) if exc is not None else "none",
+            },
+        )
+    except Exception:  # noqa: BLE001 - 指标失败不影响任务
+        pass
+
+
 @signals.task_prerun.connect
 def _on_task_prerun(task_id=None, task=None, args=None, kwargs=None, **kw):  # noqa: ANN001
     if task is None:
         return
+    header_context = context_from_headers(getattr(task.request, "headers", None))
+    context = build_context(**header_context, task_id=str(task_id) if task_id else None)
+    set_context(context)
     spec = get_spec(task.name)
     if spec is None:
         return
@@ -36,7 +60,7 @@ def _on_task_prerun(task_id=None, task=None, args=None, kwargs=None, **kw):  # n
     try:
         retries = int(getattr(task.request, "retries", 0) or 0)
         call_args = args or ()
-        context = spec.context_fn(db, *call_args) if spec.context_fn else {}
+        context_fields = spec.context_fn(db, *call_args) if spec.context_fn else {}
         queue = getattr(task, "queue", None) or spec.queue
         task_run_service.start(
             db,
@@ -44,10 +68,13 @@ def _on_task_prerun(task_id=None, task=None, args=None, kwargs=None, **kw):  # n
             task_name=task.name,
             queue=queue,
             business_key=spec.business_key_fn(*call_args),
-            tenant_id=context.get("tenant_id"),
+            tenant_id=context_fields.get("tenant_id"),
             idempotency_key=spec.idempotency_key_fn(*call_args) if spec.idempotency_key_fn else None,
             max_attempts=spec.max_attempts,
             attempt=retries + 1,
+            trace_id=context.trace_id,
+            request_id=context.request_id,
+            agent_run_id=context.agent_run_id,
         )
     except Exception:  # noqa: BLE001 - 台账失败不阻断任务
         logger.warning("task_run start failed for %s", task.name, exc_info=True)
@@ -55,8 +82,15 @@ def _on_task_prerun(task_id=None, task=None, args=None, kwargs=None, **kw):  # n
         db.close()
 
 
+@signals.task_postrun.connect
+def _on_task_postrun(**kw):  # noqa: ANN003
+    """ContextVars must not leak between reused Celery worker processes."""
+    reset_context()
+
+
 @signals.task_success.connect
 def _on_task_success(task_id=None, task=None, **kw):  # noqa: ANN001
+    _record_task_outcome(task, "succeeded", None)
     if task is None or get_spec(task.name) is None:
         return
     db = SessionLocal()
@@ -70,11 +104,12 @@ def _on_task_success(task_id=None, task=None, **kw):  # noqa: ANN001
 
 @signals.task_failure.connect
 def _on_task_failure(task_id=None, task=None, exception=None, einfo=None, **kw):  # noqa: ANN001
+    exc = exception if exception is not None else (einfo.exception if einfo is not None else None)
+    _record_task_outcome(task, "failed", exc)
     if task is None or get_spec(task.name) is None:
         return
     db = SessionLocal()
     try:
-        exc = exception if exception is not None else (einfo.exception if einfo is not None else None)
         code, message = _error_fields(exc)
         task_run_service.mark_failed(db, task_id=task_id, error_code=code, error_message=message)
     except Exception:  # noqa: BLE001
@@ -85,13 +120,14 @@ def _on_task_failure(task_id=None, task=None, exception=None, einfo=None, **kw):
 
 @signals.task_retry.connect
 def _on_task_retry(task_id=None, task=None, request=None, einfo=None, **kw):  # noqa: ANN001
+    exc = einfo.exception if einfo is not None else None
+    _record_task_outcome(task, "retrying", exc)
     if task is None or get_spec(task.name) is None:
         return
     db = SessionLocal()
     try:
         retries = int(getattr(request, "retries", 0) or 0)
         eta = getattr(request, "eta", None)
-        exc = einfo.exception if einfo is not None else None
         code, message = _error_fields(exc)
         task_run_service.mark_retrying(
             db,

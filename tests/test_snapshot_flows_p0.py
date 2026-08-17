@@ -24,8 +24,8 @@ from app.models.legal_portal import LegalCaseMember
 from app.models.document import Document, DocumentAccessRule
 from app.models.agent import AgentRun
 from app.models.security_auth import AuthorizationSnapshot
-from app.services.authorization_service import authorization_service
-from app.services.auth_token_service import auth_token_service
+from app.services.org.authorization_service import authorization_service
+from app.services.auth.auth_token_service import auth_token_service
 
 
 class SnapshotFlowBase(unittest.TestCase):
@@ -80,7 +80,7 @@ class SnapshotFlowBase(unittest.TestCase):
         )
 
     def _assert_flow(self, snapshot_id, *, case_id=None):
-        from app.services.legal_workspace_service import legal_workspace_module
+        from app.services.legal.legal_workspace_service import legal_workspace_module
 
         legal_workspace_module._assert_flow_snapshot(self.db, self.user, snapshot_id, case_id=case_id)
 
@@ -197,7 +197,7 @@ class AgentRunSnapshotTests(SnapshotFlowBase):
     def test_agent_tool_denied_after_hard_revoke(self):
         import asyncio
 
-        from app.services.agent_service import agent_service
+        from app.services.agent.agent_service import agent_service
 
         run = self._make_run()
         self.db.refresh(run)
@@ -214,7 +214,7 @@ class AgentRunSnapshotTests(SnapshotFlowBase):
         import asyncio
 
         from app.mcp.executor import tool_executor
-        from app.services.agent_service import agent_service
+        from app.services.agent.agent_service import agent_service
 
         run = self._make_run()
         self.db.refresh(run)
@@ -233,7 +233,7 @@ class AgentRunSnapshotTests(SnapshotFlowBase):
         import asyncio
 
         from app.mcp.executor import tool_executor
-        from app.services.agent_service import agent_service
+        from app.services.agent.agent_service import agent_service
 
         run = AgentRun(user_id=self.user.id, goal="测试", status="running")
         self.db.add(run)
@@ -256,7 +256,7 @@ class FlowPersistenceGuardTests(SnapshotFlowBase):
     def test_contract_review_aborted_on_hard_revoke_before_persist(self):
         import asyncio
 
-        from app.services.legal_workspace_service import legal_workspace_module
+        from app.services.legal.legal_workspace_service import legal_workspace_module
         from app.models.legal import ContractReview
 
         async def revoke_then_review(input_text, user_id=None):
@@ -264,10 +264,10 @@ class FlowPersistenceGuardTests(SnapshotFlowBase):
             auth_token_service.increment_token_version(self.db, self.user)
             return ([], "ok")
 
-        with patch("app.services.legal_workspace_service.subscription_service.check_quota", self._quota_ok), \
-             patch("app.services.legal_workspace_service.subscription_service.ensure_default_plans", lambda *a, **k: None), \
-             patch("app.services.legal_workspace_service.review_contract", side_effect=revoke_then_review), \
-             patch("app.services.legal_workspace_service.ensure_demo_sources", lambda *a, **k: None):
+        with patch("app.services.legal.legal_workspace_service.subscription_service.check_quota", self._quota_ok), \
+             patch("app.services.legal.legal_workspace_service.subscription_service.ensure_default_plans", lambda *a, **k: None), \
+             patch("app.services.legal.legal_workspace_service.review_contract", side_effect=revoke_then_review), \
+             patch("app.services.legal.legal_workspace_service.ensure_demo_sources", lambda *a, **k: None):
             with self.assertRaises(Exception):
                 asyncio.run(
                     legal_workspace_module.create_contract_review(
@@ -282,7 +282,7 @@ class FlowPersistenceGuardTests(SnapshotFlowBase):
     def test_draft_generation_aborted_on_hard_revoke_before_persist(self):
         import asyncio
 
-        from app.services.legal_workspace_service import legal_workspace_module
+        from app.services.legal.legal_workspace_service import legal_workspace_module
         from app.models.legal import LegalDraft
 
         async def revoke_then_draft(document_type, fields, missing, user_id=None):
@@ -290,10 +290,10 @@ class FlowPersistenceGuardTests(SnapshotFlowBase):
             auth_token_service.increment_token_version(self.db, self.user)
             return "生成的文书"
 
-        with patch("app.services.legal_workspace_service.subscription_service.check_quota", self._quota_ok), \
-             patch("app.services.legal_workspace_service.subscription_service.ensure_default_plans", lambda *a, **k: None), \
-             patch("app.services.legal_workspace_service.draft_content", side_effect=revoke_then_draft), \
-             patch("app.services.legal_workspace_service.ensure_demo_sources", lambda *a, **k: None):
+        with patch("app.services.legal.legal_workspace_service.subscription_service.check_quota", self._quota_ok), \
+             patch("app.services.legal.legal_workspace_service.subscription_service.ensure_default_plans", lambda *a, **k: None), \
+             patch("app.services.legal.legal_workspace_service.draft_content", side_effect=revoke_then_draft), \
+             patch("app.services.legal.legal_workspace_service.ensure_demo_sources", lambda *a, **k: None):
             with self.assertRaises(Exception):
                 asyncio.run(
                     legal_workspace_module.create_draft(

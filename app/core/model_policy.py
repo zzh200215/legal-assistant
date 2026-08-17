@@ -114,6 +114,12 @@ class ModelRequest:
     estimated_output_tokens: int | None = None
     trace_id: str = ""
     request_id: str = ""
+    # P0 出站数据保护审计字段（由 llm_outbound_gate 填充；None/0 表示未检测或无命中）。
+    # pii_hit_codes 为 JSON 数组字符串（仅规则 code，不含任何原始文本）。
+    data_level: str | None = None
+    pii_hit_codes: str | None = None
+    pii_hit_count: int = 0
+    redacted_count: int = 0
 
 
 _TASK_POLICIES = {

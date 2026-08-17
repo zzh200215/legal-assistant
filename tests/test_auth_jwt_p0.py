@@ -26,7 +26,7 @@ from app.main import app
 from app.models.user import User, UserStatus
 from app.models.org import Organization, OrganizationMember
 from app.models.security_auth import RefreshToken, RevokedToken
-from app.services.auth_token_service import auth_token_service
+from app.services.auth.auth_token_service import auth_token_service
 
 settings = get_settings()
 
@@ -140,7 +140,7 @@ class TokenRevocationJwtTests(AuthJwtBase):
     def test_force_logout_via_service_invalidates_tokens(self):
         resp = self.login()
         token = resp.json()["data"]["access_token"]
-        from app.services.enterprise_auth_service import enterprise_auth_service
+        from app.services.auth.enterprise_auth_service import enterprise_auth_service
 
         enterprise_auth_service.force_logout(self.db, self.user_id, operator_id=self.user_id)
         self.assertEqual(self._protected(token).status_code, 401)
@@ -162,7 +162,7 @@ class RefreshTokenJwtTests(AuthJwtBase):
         row = self.db.query(RefreshToken).first()
         self.assertIsNotNone(row)
         self.assertNotEqual(row.token_hash, refresh)
-        from app.services.auth_token_service import hash_opaque
+        from app.services.auth.auth_token_service import hash_opaque
 
         self.assertEqual(row.token_hash, hash_opaque(refresh))
 

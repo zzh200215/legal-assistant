@@ -53,3 +53,26 @@ eval/outputs/
 
 # External repo export artifacts (_repo_main.py, _repo_meta.json, etc.)
 _repo_*
+
+# Test artifacts (accidental mock-object dirs created by tests)
+MagicMock/
+MagicMock*/
+
+# Archived dead/legacy code (大扫除封存，非运行代码)
+_archive/
+
+# Ruff cache
+.ruff_cache/
+
+# Coverage artifacts (阶段1：报告本地生成，不提交)
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+coverage.json
+
+# Supply chain reports (P1-E): SBOM (sbom/backend-cyclonedx.json) 基于锁文件、
+# 可复现，随仓库提交；许可证/过期报告依赖本地安装环境，仅 CI/本地审计用，不提交
+sbom/licenses.json
+sbom/licenses.csv
+sbom/outdated.json

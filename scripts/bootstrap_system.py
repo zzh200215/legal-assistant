@@ -8,7 +8,8 @@ from app.core.database import SessionLocal
 from app.core.migration import run_migrations
 from app.core.config import get_settings
 from app.models.user import User
-from app.services.prompt_service import prompt_service
+from app.services.llm.prompt_service import prompt_service
+from app.services.billing.subscription_service import subscription_service
 
 
 def ensure_admin_user() -> bool:
@@ -47,9 +48,18 @@ def seed_prompts() -> int:
         db.close()
 
 
+def ensure_default_subscription_plans() -> None:
+    db = SessionLocal()
+    try:
+        subscription_service.ensure_default_plans(db)
+    finally:
+        db.close()
+
+
 def main() -> None:
     run_migrations()
     created = ensure_admin_user()
+    ensure_default_subscription_plans()
     seeded = seed_prompts()
     print(f"Prompt templates seeded: {seeded}")
     print("Admin user created." if created else "Admin user bootstrap skipped.")

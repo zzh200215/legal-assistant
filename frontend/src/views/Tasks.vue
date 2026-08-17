@@ -40,9 +40,9 @@
         </div>
       </template>
       <el-space wrap class="toolbar-actions">
-        <el-button type="primary" @click="showCreateDialog = true">新建任务</el-button>
-        <el-button type="warning" @click="showExtractDialog = true">从文档提取</el-button>
-        <el-button type="info" @click="showChatExtractDialog = true">从聊天提取</el-button>
+        <el-button type="primary" @click="createDialogs.openCreate()">新建任务</el-button>
+        <el-button type="warning" @click="createDialogs.openDocExtract()">从文档提取</el-button>
+        <el-button type="info" @click="createDialogs.openChatExtract()">从聊天提取</el-button>
         <el-select v-model="scopeFilter" style="width: 140px" @change="handleScopeChange">
           <el-option v-for="item in scopeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -154,171 +154,20 @@
       @current-change="handleTaskPageChange"
     />
 
-    <el-dialog v-model="detailVisible" title="任务详情" width="720px" class="task-dialog">
-      <template v-if="selectedTask">
-        <div class="detail-metrics">
-          <div class="detail-metric">
-            <span>当前状态</span>
-            <strong>{{ selectedTask.title }}</strong>
-            <StatusTag kind="task" :status="selectedTask.status" size="small" />
-          </div>
-          <div class="detail-metric">
-            <span>执行归属</span>
-            <strong>{{ selectedTask.assignee || '待分配' }}</strong>
-            <el-tag size="small" :type="scopeTagType(selectedTask)">{{ scopeLabel(selectedTask) }}</el-tag>
-          </div>
-          <div class="detail-metric">
-            <span>完成进度</span>
-            <strong>{{ selectedTask.progress || 0 }}%</strong>
-            <span class="inline-hint">优先级 {{ priorityLabelMap[selectedTask.priority] || selectedTask.priority }}</span>
-          </div>
-        </div>
+    <TaskDetailDialog
+      ref="taskDetailRef"
+      v-model="detailVisible"
+      :task="selectedTask"
+      :can-edit="canEditSelectedTask"
+      @refresh="fetchTasks"
+      @task-updated="handleTaskUpdated"
+      @status-change="changeStatus"
+      @decompose="decompose"
+      @open-source="openSource"
+      @open-agent-run="openAgentRun"
+    />
 
-        <el-descriptions :column="2" border class="detail-descriptions">
-          <el-descriptions-item label="ID">{{ selectedTask.id }}</el-descriptions-item>
-          <el-descriptions-item label="标题">{{ selectedTask.title }}</el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <StatusTag kind="task" :status="selectedTask.status" />
-          </el-descriptions-item>
-          <el-descriptions-item label="优先级">
-            <el-tag :type="selectedTask.priority === 'high' ? 'danger' : selectedTask.priority === 'medium' ? 'warning' : 'info'">
-              {{ priorityLabelMap[selectedTask.priority] || selectedTask.priority }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="负责人">{{ selectedTask.assignee || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="协作者">{{ (selectedTask.collaborators || []).join('、') || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="进度">{{ selectedTask.progress || 0 }}%</el-descriptions-item>
-          <el-descriptions-item label="来源">
-            <el-tag v-if="selectedTask.source_type" size="small" type="info">
-              {{ sourceTypeLabelMap[selectedTask.source_type] || selectedTask.source_type }}
-              <span v-if="selectedTask.source_id"> #{{ selectedTask.source_id }}</span>
-            </el-tag>
-            <span v-else>手动创建</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="父任务">{{ selectedTask.parent_id || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="描述" :span="2">{{ selectedTask.description || '-' }}</el-descriptions-item>
-        </el-descriptions>
-
-        <div v-if="subTasks.length" class="detail-section">
-          <h4>子任务 ({{ subTasks.length }})</h4>
-          <el-table :data="subTasks" border size="small" class="detail-table">
-            <el-table-column prop="id" label="ID" width="60" />
-            <el-table-column prop="title" label="标题" />
-            <el-table-column prop="status" label="状态" width="80">
-              <template #default="{ row }">
-                <StatusTag kind="task" :status="row.status" size="small" />
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-
-        <div class="detail-action-row">
-          <el-button type="warning" :disabled="!canEditSelectedTask" @click="decompose(selectedTask); detailVisible = false">拆解任务</el-button>
-          <el-button
-            v-if="selectedTask.source_type === 'document' && selectedTask.source_id"
-            type="info"
-            @click="openSource(selectedTask)"
-          >
-            查看来源文档
-          </el-button>
-          <el-button v-if="selectedTask.status !== 'in_progress'" type="primary" :disabled="!canEditSelectedTask" @click="changeStatus(selectedTask, 'in_progress')">开始执行</el-button>
-          <el-button v-if="selectedTask.status !== 'done'" type="success" :disabled="!canEditSelectedTask" @click="changeStatus(selectedTask, 'done')">标记完成</el-button>
-        </div>
-        <div v-if="!canEditSelectedTask" class="readonly-note app-readonly-banner">
-          共享任务当前仅支持查看，更新、评论和状态变更需由创建人操作
-        </div>
-
-        <div class="detail-section">
-          <h4>协作更新</h4>
-          <div class="editor-row">
-            <el-input v-model.number="progressDraft" :disabled="!canEditSelectedTask" type="number" style="width: 120px" placeholder="进度 %" />
-            <el-input v-model="collaboratorsDraft" :disabled="!canEditSelectedTask" placeholder="协作者，逗号分隔" style="width: 260px" />
-            <el-button type="primary" :disabled="!canEditSelectedTask" @click="updateCollaboration">保存协作信息</el-button>
-          </div>
-        </div>
-
-        <div class="detail-section">
-          <h4>评论</h4>
-          <div class="editor-row editor-row-top">
-            <el-input v-model="commentDraft" :disabled="!canEditSelectedTask" type="textarea" :rows="2" placeholder="记录进展、阻塞项或协作说明" style="flex: 1" />
-            <el-button type="primary" :disabled="!canEditSelectedTask" @click="submitComment">添加评论</el-button>
-          </div>
-          <div v-if="comments.length" class="comment-list">
-            <div v-for="item in comments" :key="`comment-${item.id}`" class="comment-item">
-              <div class="comment-meta">用户 {{ item.user_id }} · {{ item.created_at }}</div>
-              <div class="comment-content">{{ item.content }}</div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="taskLogs.length" class="detail-section">
-          <h4>操作日志</h4>
-          <el-table :data="taskLogs" border size="small" class="detail-table">
-            <el-table-column prop="action" label="动作" width="160" />
-            <el-table-column prop="detail" label="详情" show-overflow-tooltip />
-            <el-table-column prop="created_at" label="时间" width="180" />
-          </el-table>
-        </div>
-
-        <div class="detail-section">
-          <h4>关联 Agent 执行</h4>
-          <div v-if="relatedAgentRuns.length" class="agent-run-list">
-            <div v-for="item in relatedAgentRuns" :key="`task-agent-${item.id}`" class="agent-run-item">
-              <div class="agent-run-top">
-                <strong>#{{ item.id }} {{ item.goal }}</strong>
-                <StatusTag kind="agent" :status="item.status" size="small" />
-              </div>
-              <div class="agent-run-meta">{{ item.created_at }} · 步数 {{ item.total_steps || 0 }}</div>
-              <el-button size="small" text type="primary" @click="openAgentRun(item.id)">查看执行</el-button>
-            </div>
-          </div>
-          <div v-else class="readonly-note app-state-banner">暂无关联 Agent 执行记录</div>
-        </div>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="showCreateDialog" title="新建任务" width="560px" class="task-dialog">
-      <div class="form-grid">
-        <el-input v-model="newTask.title" placeholder="任务标题" />
-        <el-input v-model="newTask.description" type="textarea" :rows="3" placeholder="任务描述（可选）" />
-        <el-input v-model="newTask.assignee" placeholder="负责人（可选）" />
-        <el-input v-model="newTask.collaborators" placeholder="协作者，逗号分隔" />
-        <div class="form-inline">
-          <el-input v-model.number="newTask.progress" type="number" placeholder="进度 0-100" />
-          <el-select v-model="newTask.priority">
-            <el-option label="高优先级" value="high" />
-            <el-option label="中优先级" value="medium" />
-            <el-option label="低优先级" value="low" />
-          </el-select>
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" :loading="loading" @click="createTask">创建</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="showExtractDialog" title="从文档提取任务" width="500px" class="task-dialog">
-      <div class="form-grid">
-        <div class="dialog-copy">输入来源文档 ID，系统会抽取待办并自动落成任务。</div>
-        <el-input v-model.number="extractDocId" placeholder="输入文档 ID" type="number" />
-      </div>
-      <template #footer>
-        <el-button @click="showExtractDialog = false">取消</el-button>
-        <el-button type="primary" :loading="loading" @click="extractFromDoc">提取</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="showChatExtractDialog" title="从聊天提取任务" width="500px" class="task-dialog">
-      <div class="form-grid">
-        <div class="dialog-copy">输入聊天内容，系统会识别执行项、责任人和时间要求。</div>
-        <el-input v-model="chatMessage" type="textarea" :rows="3" placeholder="输入聊天消息，例如：明天下午 3 点开会讨论方案" />
-      </div>
-      <template #footer>
-        <el-button @click="showChatExtractDialog = false">取消</el-button>
-        <el-button type="primary" :loading="loading" @click="extractFromChat">提取</el-button>
-      </template>
-    </el-dialog>
+    <TaskCreateDialogs ref="createDialogs" :loading="loading" @refresh="handleDialogsRefresh" />
   </div>
 </template>
 
@@ -354,10 +203,16 @@ import 'element-plus/es/components/tag/style/css'
 import api from '../api'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import StatusTag from '../components/StatusTag.vue'
+import { useAuthStore } from '../stores/auth'
+import TaskCreateDialogs from '../components/tasks/TaskCreateDialogs.vue'
+import TaskDetailDialog from '../components/tasks/TaskDetailDialog.vue'
 
+const authStore = useAuthStore()
+const createDialogs = ref(null)
+const taskDetailRef = ref(null)
 const route = useRoute()
 const router = useRouter()
-const currentUser = ref(null)
+const currentUser = computed(() => authStore.user)
 const tasks = ref([])
 const taskPage = ref(1)
 const taskPageSize = ref(12)
@@ -367,22 +222,6 @@ const viewMode = ref('kanban')
 const scopeFilter = ref('all')
 const detailVisible = ref(false)
 const selectedTask = ref(null)
-const subTasks = ref([])
-const comments = ref([])
-const taskLogs = ref([])
-const relatedAgentRuns = ref([])
-const commentDraft = ref('')
-const progressDraft = ref(0)
-const collaboratorsDraft = ref('')
-
-const showCreateDialog = ref(false)
-const newTask = ref({ title: '', description: '', assignee: '', collaborators: '', priority: 'medium', progress: 0 })
-
-const showExtractDialog = ref(false)
-const extractDocId = ref(null)
-
-const showChatExtractDialog = ref(false)
-const chatMessage = ref('')
 
 const priorityLabelMap = {
   high: '高',
@@ -483,6 +322,12 @@ const openAgentRun = (runId) => {
   router.push({ path: '/agent', query: { runId: String(runId) } })
 }
 
+const handleTaskUpdated = (task) => {
+  if (task && selectedTask.value?.id === task.id) {
+    selectedTask.value = task
+  }
+}
+
 const fetchTasks = async () => {
   loading.value = true
   try {
@@ -518,22 +363,9 @@ const handleTaskPageChange = async (page) => {
   await fetchTasks()
 }
 
-const createTask = async () => {
-  if (!newTask.value.title.trim()) return ElMessage.warning('请输入标题')
-  loading.value = true
-  try {
-    await api.createTask({
-      ...newTask.value,
-      collaborators: newTask.value.collaborators
-        ? newTask.value.collaborators.split(',').map((item) => item.trim()).filter(Boolean)
-        : [],
-    })
-    ElMessage.success('创建成功')
-    showCreateDialog.value = false
-    newTask.value = { title: '', description: '', assignee: '', collaborators: '', priority: 'medium', progress: 0 }
-    fetchTasks()
-  } catch (e) { ElMessage.error(e.response?.data?.detail || '创建失败') }
-  loading.value = false
+const handleDialogsRefresh = (payload) => {
+  if (payload?.resetPage) taskPage.value = 1
+  fetchTasks()
 }
 
 const changeStatus = async (task, status) => {
@@ -551,115 +383,18 @@ const decompose = async (task) => {
     ElMessage.success(`已拆解为 ${data.created_sub_tasks} 个子任务`)
     fetchTasks()
     if (selectedTask.value && selectedTask.value.id === task.id) {
-      loadSubTasks(task.id)
+      taskDetailRef.value?.reloadSubTasks(task.id)
     }
   } catch (e) { ElMessage.error(e.response?.data?.detail || '拆解失败') }
   loading.value = false
 }
 
-const selectTask = async (task) => {
+const selectTask = (task) => {
   selectedTask.value = task
-  progressDraft.value = task.progress || 0
-  collaboratorsDraft.value = (task.collaborators || []).join(', ')
-  commentDraft.value = ''
   detailVisible.value = true
   replaceTaskQuery(task.id)
-  await Promise.all([loadSubTasks(task.id), loadComments(task.id), loadTaskLogs(task.id), loadRelatedAgentRuns(task.id)])
 }
 
-const loadSubTasks = async (taskId) => {
-  try {
-    const { data } = await api.getSubTasks(taskId)
-    subTasks.value = data?.items || []
-  } catch {
-    subTasks.value = []
-  }
-}
-
-const loadComments = async (taskId) => {
-  try {
-    const { data } = await api.listTaskComments(taskId)
-    comments.value = data || []
-  } catch {
-    comments.value = []
-  }
-}
-
-const loadTaskLogs = async (taskId) => {
-  try {
-    const { data } = await api.listTaskLogs(taskId)
-    taskLogs.value = data || []
-  } catch {
-    taskLogs.value = []
-  }
-}
-
-const loadRelatedAgentRuns = async (taskId) => {
-  try {
-    const { data } = await api.listAgentRuns({ artifact_type: 'task', artifact_id: taskId, page: 1, page_size: 5 })
-    relatedAgentRuns.value = data?.items || []
-  } catch {
-    relatedAgentRuns.value = []
-  }
-}
-
-const updateCollaboration = async () => {
-  if (!selectedTask.value) return
-  try {
-    await api.updateTask(selectedTask.value.id, {
-      progress: progressDraft.value,
-      collaborators: collaboratorsDraft.value
-        ? collaboratorsDraft.value.split(',').map((item) => item.trim()).filter(Boolean)
-        : [],
-    })
-    ElMessage.success('协作信息已更新')
-    await fetchTasks()
-    const { data } = await api.getTask(selectedTask.value.id)
-    selectedTask.value = data
-    await loadTaskLogs(selectedTask.value.id)
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '协作信息更新失败')
-  }
-}
-
-const submitComment = async () => {
-  if (!selectedTask.value || !commentDraft.value.trim()) return
-  try {
-    await api.addTaskComment(selectedTask.value.id, { content: commentDraft.value.trim() })
-    commentDraft.value = ''
-    ElMessage.success('评论已添加')
-    await Promise.all([loadComments(selectedTask.value.id), loadTaskLogs(selectedTask.value.id)])
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '添加评论失败')
-  }
-}
-
-const extractFromDoc = async () => {
-  if (!extractDocId.value) return ElMessage.warning('请输入文档 ID')
-  loading.value = true
-  try {
-    const { data } = await api.extractTasksFromDoc(extractDocId.value)
-    ElMessage.success(`从文档提取了 ${data.created_tasks} 个任务`)
-    showExtractDialog.value = false
-    taskPage.value = 1
-    fetchTasks()
-  } catch (e) { ElMessage.error(e.response?.data?.detail || '提取失败') }
-  loading.value = false
-}
-
-const extractFromChat = async () => {
-  if (!chatMessage.value.trim()) return ElMessage.warning('请输入消息')
-  loading.value = true
-  try {
-    const { data } = await api.extractTasksFromChat(chatMessage.value)
-    ElMessage.success(`从聊天提取了 ${data.created_tasks} 个任务`)
-    showChatExtractDialog.value = false
-    chatMessage.value = ''
-    taskPage.value = 1
-    fetchTasks()
-  } catch (e) { ElMessage.error(e.response?.data?.detail || '提取失败') }
-  loading.value = false
-}
 
 const applyTaskRoute = async (rawTaskId) => {
   const nextId = Number(rawTaskId)
@@ -681,12 +416,7 @@ const applyTaskRoute = async (rawTaskId) => {
 }
 
 onMounted(async () => {
-  try {
-    const { data } = await api.getMe()
-    currentUser.value = data
-  } catch {
-    currentUser.value = null
-  }
+  await authStore.loadMe()
   if (route.query.view === 'table' || route.query.taskId) {
     viewMode.value = 'table'
   }
@@ -736,11 +466,6 @@ watch(
 watch(detailVisible, (visible) => {
   if (!visible) {
     selectedTask.value = null
-    subTasks.value = []
-    comments.value = []
-    taskLogs.value = []
-    relatedAgentRuns.value = []
-    commentDraft.value = ''
     replaceTaskQuery(null)
   }
 })

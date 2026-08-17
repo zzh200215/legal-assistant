@@ -90,7 +90,7 @@ class PortalExpiryNotificationTests(unittest.TestCase):
 
     def _run_scan(self):
         from app.tasks import scan_expired_portal_links_task
-        with patch("app.tasks.SessionLocal", self.SessionLocal):
+        with patch("app.tasks.legal_tasks.SessionLocal", self.SessionLocal):
             return scan_expired_portal_links_task()
 
     def test_expired_link_creates_delivered_notification(self):

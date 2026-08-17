@@ -3,11 +3,16 @@
 对应用中所有 EncryptedText 列做一次全量重写：
 - 仍为明文的存量行 -> 加密为当前激活版本（收尾惰性迁移遗留）
 - 旧版本密文行 -> 重加密为当前激活版本
-密钥以版本化密钥环 LEGAL_DATA_ENCRYPTION_KEYS_JSON 管理，轮换时新旧密钥同时保留在环中，
-直到确认全量重写完成、且所有进程已切换到新版本后，再摘除旧密钥。
+密钥以版本化密钥环 LEGAL_DATA_ENCRYPTION_KEYS_JSON 管理（经统一 SecretProvider 读取），
+轮换时新旧密钥同时保留在环中，直到确认全量重写完成、且所有进程已切换到新版本后，
+再用 --retire 受控摘除旧密钥。
 
 安全约束（本脚本严格遵守）：
 - 不修改 .env；只在 stdout 打印需要由运维写入 .env 的新密钥环值。
+- 密钥原文不写日志/审计：轮换各阶段写 security_audit_event（key_rotation），
+  只记录版本号/行数等元数据（app/core/secrets/audit.py）。
+- --retire 受控摘除：先校验全表可解密 + 无该版本密文残留 + 非激活版本，
+  任一不满足即拒绝（fail-closed）。
 - 执行前应先用 scripts/create_pilot_backup.py 备份。
 
 用法:
@@ -17,6 +22,8 @@
         # 首次加密（无存量密钥环）或轮换到指定新版本密钥
     python -B scripts/rotate_encryption_key.py --verify
         # 校验所有行可解密，并报告版本分布
+    python -B scripts/rotate_encryption_key.py --retire v1
+        # 受控摘除旧版本（需先完成轮换与全量重加密）
 
 首次加密: 没有存量密钥时运行 `--new-key`，等价于建立 v1 并加密所有明文。
 """
@@ -38,6 +45,8 @@ from sqlalchemy import text as sa_text  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.database import Base, engine  # noqa: E402
 from app.core.encryption import EncryptedText, decrypt_text, encrypt_text  # noqa: E402
+from app.core.secrets.audit import write_key_rotation_audit  # noqa: E402
+from app.core.secrets.rotation import validate_key_retirement  # noqa: E402
 
 
 def _decode_key(configured: str) -> bytes:
@@ -175,12 +184,72 @@ def reencrypt_all() -> dict:
     return changed
 
 
+def do_retire(version: str) -> int:
+    """受控摘除旧版本：门禁全部通过才输出新密钥环值（不修改 .env），并写审计。"""
+    ring = _load_current_ring()
+    active_version = (os.getenv("LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION", "") or "v1").strip() or "v1"
+    column_state = report_state()
+    ok, _distribution, failures = verify_decryptable()
+    reasons = validate_key_retirement(
+        version=version,
+        ring=ring,
+        active_version=active_version,
+        column_state=column_state,
+        decrypt_failures=failures,
+    )
+    if reasons:
+        write_key_rotation_audit(
+            action="retire",
+            result="failure",
+            target_version=version,
+            reason_code="retire_rejected",
+            sanitized_metadata={"reasons": reasons},
+        )
+        print(
+            json.dumps(
+                {"mode": "retire", "retired_version": version, "rejected": reasons},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 1
+
+    new_ring = {k: v for k, v in ring.items() if k != version}
+    write_key_rotation_audit(
+        action="retire",
+        result="success",
+        target_version=version,
+        sanitized_metadata={"remaining_versions": sorted(new_ring), "decryptable": ok},
+    )
+    print(
+        json.dumps(
+            {
+                "mode": "retire",
+                "retired_version": version,
+                "decryptable": ok,
+                "remaining_versions": sorted(new_ring),
+                # 由运维写入 .env 的值（本脚本不修改 .env）
+                "env_to_set": {
+                    "LEGAL_DATA_ENCRYPTION_KEYS_JSON": json.dumps(new_ring),
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="E-2 法律数据加密密钥轮换")
     parser.add_argument("--dry-run", action="store_true", help="只统计版本分布，不改写数据")
     parser.add_argument("--verify", action="store_true", help="校验所有行可解密")
     parser.add_argument("--new-key", type=str, help="目标新密钥（32 字节 URL-safe Base64）；缺省自动生成")
+    parser.add_argument("--retire", type=str, metavar="VERSION", help="受控摘除旧版本（需先轮换并全量重加密）")
     args = parser.parse_args()
+
+    if args.retire:
+        return do_retire(args.retire)
 
     if args.dry_run:
         state = report_state()
@@ -189,6 +258,14 @@ def main() -> int:
 
     if args.verify:
         ok, distribution, failures = verify_decryptable()
+        if failures:
+            write_key_rotation_audit(
+                action="verify",
+                result="failure",
+                target_version="*",
+                reason_code="decrypt_failed",
+                sanitized_metadata={"failures_count": len(failures)},
+            )
         print(
             json.dumps(
                 {"mode": "verify", "decryptable": ok, "distribution": distribution,
@@ -216,6 +293,32 @@ def main() -> int:
 
     changed = reencrypt_all()
     ok, distribution, failures = verify_decryptable()
+
+    if failures:
+        # 轮换后校验失败：不把新环写入生产（本进程内环境变量已临时指向新版本，
+        # 但未写入 .env）；运维须排查失败行后重跑。
+        write_key_rotation_audit(
+            action="rotate",
+            result="failure",
+            target_version=new_version,
+            reason_code="verify_failed",
+            sanitized_metadata={
+                "old_versions": sorted(ring.keys()),
+                "failures_count": len(failures),
+            },
+        )
+    else:
+        write_key_rotation_audit(
+            action="rotate",
+            result="success",
+            target_version=new_version,
+            sanitized_metadata={
+                "old_versions": sorted(ring.keys()),
+                "new_version": new_version,
+                "rewritten_columns": changed,
+                "decryptable_after": ok,
+            },
+        )
 
     print(
         json.dumps(

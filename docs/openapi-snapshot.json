@@ -3,7 +3,8 @@
   "info": {
     "title": "律智检｜法律文书与合同审查智能体平台",
     "description": "法律检索、合同审查、文书草稿与律师审核工作台",
-    "version": "0.1.0"
+    "version": "0.1.0",
+    "x-api-version": "1"
   },
   "paths": {
     "/api/auth/login": {
@@ -43,7 +44,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/oauth/authorize-url": {
@@ -74,6 +87,16 @@
               "type": "string",
               "title": "Redirect Uri"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -137,7 +160,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/ldap/login": {
@@ -177,7 +212,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/refresh": {
@@ -217,7 +264,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/logout": {
@@ -269,6 +328,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -293,6 +364,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -334,7 +417,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/me": {
@@ -411,6 +506,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -436,6 +543,16 @@
               "type": "string",
               "title": "Code"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -482,6 +599,16 @@
               "type": "string",
               "title": "Code"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -528,6 +655,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -557,6 +696,16 @@
               "type": "string",
               "title": "Code"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -758,6 +907,16 @@
               "type": "integer",
               "title": "User Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -814,6 +973,16 @@
               "type": "integer",
               "title": "User Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -870,6 +1039,16 @@
               "type": "integer",
               "title": "User Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -916,6 +1095,16 @@
               "type": "integer",
               "title": "User Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -972,6 +1161,16 @@
               "type": "integer",
               "title": "User Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -1239,7 +1438,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/verify-email": {
@@ -1279,7 +1490,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/register-with-code": {
@@ -1319,7 +1542,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/forgot-password": {
@@ -1359,7 +1594,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/reset-password": {
@@ -1399,7 +1646,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/auth/wechat/login-url": {
@@ -1495,6 +1754,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -1519,6 +1790,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -1542,6 +1825,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -1638,6 +1933,16 @@
               "type": "integer",
               "title": "User Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -1703,6 +2008,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -1778,6 +2095,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -1802,6 +2131,16 @@
               "type": "integer",
               "title": "Preference Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -1847,6 +2186,16 @@
               "type": "integer",
               "title": "Session Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -2140,6 +2489,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -2167,6 +2528,16 @@
               "title": "Async Mode"
             },
             "description": "是否异步解析"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -2227,6 +2598,16 @@
               "title": "Async Mode"
             },
             "description": "是否异步解析"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -2284,6 +2665,16 @@
               "type": "integer",
               "title": "Qa Record Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -2388,6 +2779,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -2490,6 +2891,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -2520,6 +2931,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "description": "已接受：任务已创建，通过 status_url 查询结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
           }
         }
       }
@@ -2545,6 +2966,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -2575,6 +3006,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "description": "已接受：任务已创建，通过 status_url 查询结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
           }
         }
       }
@@ -2600,6 +3041,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -2677,6 +3128,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -2701,6 +3164,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -2756,6 +3229,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -2801,6 +3284,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -2846,6 +3339,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -2891,6 +3394,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -3053,6 +3566,16 @@
               "type": "integer",
               "title": "Document Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -3378,6 +3901,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -3422,6 +3957,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -3468,6 +4015,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -3513,6 +4072,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -3538,6 +4109,16 @@
               "type": "integer",
               "title": "Source Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -3594,6 +4175,16 @@
               "type": "integer",
               "title": "Source Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -3648,6 +4239,16 @@
               "type": "integer",
               "title": "Source Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -3884,6 +4485,16 @@
               ],
               "title": "Source Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -3977,6 +4588,16 @@
               "type": "integer",
               "title": "Source Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -4064,6 +4685,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -4089,6 +4722,16 @@
               "type": "integer",
               "title": "Item Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -4209,6 +4852,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -4274,6 +4929,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -4390,6 +5057,16 @@
               "type": "integer",
               "title": "Item Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -4465,6 +5142,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -4513,6 +5202,16 @@
               ],
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -4628,6 +5327,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -4790,6 +5501,16 @@
               "type": "integer",
               "title": "Item Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -4878,6 +5599,16 @@
               "type": "integer",
               "title": "Target Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -4943,6 +5674,16 @@
               "type": "integer",
               "title": "Target Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -5166,6 +5907,16 @@
               "type": "integer",
               "title": "Source Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -5219,6 +5970,16 @@
               "type": "integer",
               "title": "Source Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -5265,6 +6026,16 @@
               "type": "integer",
               "title": "Item Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -5321,6 +6092,16 @@
               "type": "integer",
               "title": "Item Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -5377,6 +6158,16 @@
               "type": "integer",
               "title": "Item Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -5478,6 +6269,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -5552,6 +6355,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -5576,6 +6391,16 @@
               "type": "integer",
               "title": "Draft Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -5596,6 +6421,72 @@
                 "schema": {
                   "$ref": "#/components/schemas/EmailSendRequestOut"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/outbound/drafts/{draft_id}/attachments": {
+      "post": {
+        "tags": [
+          "Outbound Email"
+        ],
+        "summary": "Upload Draft Attachment",
+        "description": "上传邮件草稿附件：流式安全处理 + DLP 硬门禁，blocked 附件直接拒绝。",
+        "operationId": "upload_draft_attachment_api_outbound_drafts__draft_id__attachments_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "draft_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Draft Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_draft_attachment_api_outbound_drafts__draft_id__attachments_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -5691,6 +6582,16 @@
               "type": "integer",
               "title": "Request Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -5748,6 +6649,16 @@
               "type": "integer",
               "title": "Request Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -5817,7 +6728,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       },
       "get": {
         "tags": [
@@ -5989,6 +6912,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -6033,6 +6968,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -6103,6 +7050,32 @@
               "type": "integer",
               "title": "Task Id"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -6158,6 +7131,32 @@
               "type": "integer",
               "title": "Task Id"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -6216,6 +7215,16 @@
               "type": "integer",
               "title": "Task Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -6383,6 +7392,16 @@
               "type": "integer",
               "title": "Task Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -6511,6 +7530,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -6554,6 +7585,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -6682,6 +7725,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -6758,6 +7813,16 @@
               "type": "integer",
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -6813,6 +7878,16 @@
               "type": "integer",
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -6890,6 +7965,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -6935,6 +8022,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -7308,6 +8407,16 @@
               "type": "integer",
               "title": "Run Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -7413,6 +8522,16 @@
               "type": "integer",
               "title": "Run Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -7518,6 +8637,16 @@
               "type": "integer",
               "title": "Approval Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -7575,6 +8704,16 @@
               "type": "integer",
               "title": "Approval Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -7724,6 +8863,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -7733,7 +8884,7 @@
           "Org"
         ],
         "summary": "List Organizations",
-        "description": "查询组织列表",
+        "description": "查询组织列表（系统管理员可见全部；普通用户仅可见本组织，防止跨租户枚举）",
         "operationId": "list_organizations_api_org_organizations_get",
         "responses": {
           "200": {
@@ -7800,6 +8951,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -7809,7 +8972,7 @@
           "Org"
         ],
         "summary": "Get Organization",
-        "description": "获取组织详情",
+        "description": "获取组织详情（系统管理员或本组织成员；其他组织按 404 隐藏存在性）",
         "operationId": "get_organization_api_org_organizations__org_id__get",
         "security": [
           {
@@ -7855,7 +9018,7 @@
           "Org"
         ],
         "summary": "Update Organization",
-        "description": "更新组织（系统管理员）",
+        "description": "更新组织（系统管理员）；支持 If-Match 版本冲突校验（409）。",
         "operationId": "update_organization_api_org_organizations__org_id__put",
         "security": [
           {
@@ -7871,6 +9034,32 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -7927,6 +9116,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -7957,7 +9156,7 @@
           "Org"
         ],
         "summary": "List Departments",
-        "description": "查询部门列表",
+        "description": "查询部门列表（系统管理员可见全部；其他用户仅可见本组织部门，防止跨租户枚举）",
         "operationId": "list_departments_api_org_departments_get",
         "security": [
           {
@@ -8052,7 +9251,19 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
       }
     },
     "/api/org/departments/{dept_id}": {
@@ -8061,7 +9272,7 @@
           "Org"
         ],
         "summary": "Get Department",
-        "description": "获取部门详情",
+        "description": "获取部门详情（系统管理员或本组织成员；其他组织按 404 隐藏存在性）",
         "operationId": "get_department_api_org_departments__dept_id__get",
         "security": [
           {
@@ -8123,6 +9334,16 @@
               "type": "integer",
               "title": "Dept Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -8179,6 +9400,16 @@
               "type": "integer",
               "title": "Dept Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -8225,6 +9456,16 @@
               "type": "integer",
               "title": "User Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -8325,6 +9566,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -8390,6 +9641,16 @@
               "type": "integer",
               "title": "Member Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -8453,6 +9714,16 @@
               "type": "integer",
               "title": "Member Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -8494,6 +9765,16 @@
               "type": "string",
               "title": "Invite Token"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -8614,6 +9895,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -8730,6 +10021,16 @@
               "type": "integer",
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -8841,6 +10142,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -8952,6 +10263,16 @@
               "type": "integer",
               "title": "Chain Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -9105,6 +10426,16 @@
               "title": "Tier"
             },
             "description": "pro / team"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -9135,7 +10466,7 @@
           "Subscription"
         ],
         "summary": "Payment Webhook",
-        "description": "支付回调（Stripe / Ping++）。\nPAYMENT_WEBHOOK_SECRET 配置时强制验签（生产要求）；未配置时跳过验签（开发/测试）。",
+        "description": "支付回调（Stripe / Ping++）。\n\n流程：验签（fail-closed，未配置密钥默认拒绝）→ 幂等持久化事件\n（provider + provider_event_id 唯一）→ 由 dispatch_payment_events_task 异步处理。\n本回调仅快速落库，不执行账单/权益逻辑；重复回调不产生副作用。",
         "operationId": "payment_webhook_api_billing_subscriptions_webhook_post",
         "parameters": [
           {
@@ -9153,6 +10484,16 @@
               ],
               "title": "X-Stripe-Signature"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -9199,6 +10540,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -9243,6 +10596,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -9267,6 +10632,16 @@
               "type": "integer",
               "title": "Payment Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -9322,6 +10697,16 @@
               "type": "integer",
               "title": "Payment Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -9330,6 +10715,72 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/billing/payments/{payment_id}/refund": {
+      "post": {
+        "tags": [
+          "Platform Payments"
+        ],
+        "summary": "Refund Bank Transfer",
+        "description": "平台收款退款（admin）：全额/部分退款，DB 层保证退款累计不超过已收金额。\n\n退款后关联的订阅取消，降回免费版；成本台账记 refund。",
+        "operationId": "refund_bank_transfer_api_billing_payments__payment_id__refund_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Payment Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundRequest"
               }
             }
           }
@@ -9469,6 +10920,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -9515,6 +10978,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -9524,7 +10999,7 @@
           "Feishu"
         ],
         "summary": "Feishu Event Callback",
-        "description": "飞书事件回调（M1 咨询卡片等）：验签 + 解密 + 分派。\n\n- encrypt_key 模式：body 为 {\"encrypt\": ...}，AES-256-CBC 解密后分派；\n- url_verification 握手：回显 challenge；\n- im.message.receive_v1：ack 后转后台处理（咨询卡片回复），不阻塞回调。",
+        "description": "飞书事件回调（M1 咨询卡片等）：验签 + 解密 + 分派。\n\n- encrypt_key 模式：body 为 {\"encrypt\": ...}，AES-256-CBC 解密后分派；\n- url_verification 握手：平台明文 challenge（不经签名）直接回显；\n- 事件回调验签 fail-closed（未配置密钥即拒绝）+ v2 时间窗 + nonce 去重；\n- im.message.receive_v1：ack 后转后台处理（咨询卡片回复），不阻塞回调。",
         "operationId": "feishu_event_callback_api_feishu_callbacks_event_post",
         "parameters": [
           {
@@ -9574,6 +11049,16 @@
               ],
               "title": "X-Lark-Request-Nonce"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -9675,6 +11160,16 @@
               ],
               "title": "Avatar Url"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -9705,7 +11200,7 @@
           "Mini App"
         ],
         "summary": "Miniapp Consultation",
-        "description": "小程序简化版咨询入口：单问题，返回精简响应。\n复用法律咨询业务逻辑，配额共享。",
+        "description": "小程序简化版咨询入口：单问题，返回精简响应。\n复用法律咨询业务逻辑，配额共享（原子预留→业务→提交/失败释放）。",
         "operationId": "miniapp_consultation_api_miniapp_consultations_post",
         "security": [
           {
@@ -9723,6 +11218,16 @@
               "maxLength": 2000,
               "title": "Question"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -9753,7 +11258,7 @@
           "Mini App"
         ],
         "summary": "Miniapp Contract Review",
-        "description": "小程序合同审查入口：提交合同文本，返回风险摘要。\n配额与主站共享。",
+        "description": "小程序合同审查入口：提交合同文本，返回风险摘要。\n配额与主站共享（原子预留→业务→提交/失败释放）。",
         "operationId": "miniapp_contract_review_api_miniapp_contract_review_post",
         "security": [
           {
@@ -9784,6 +11289,16 @@
               "title": "Content"
             },
             "description": "合同文本内容"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -10308,6 +11823,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -10377,6 +11904,16 @@
               "type": "integer",
               "title": "Template Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -10432,6 +11969,16 @@
               "type": "integer",
               "title": "Template Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -10477,6 +12024,16 @@
               "type": "integer",
               "title": "Template Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -10534,6 +12091,16 @@
               "type": "integer",
               "title": "Template Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -10591,6 +12158,16 @@
               "type": "integer",
               "title": "Template Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -10648,6 +12225,16 @@
               "type": "integer",
               "title": "Template Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -10702,6 +12289,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -11522,6 +13121,16 @@
               ],
               "title": "Detail"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -12013,6 +13622,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -12415,6 +14036,16 @@
               "type": "integer",
               "title": "Qa Record Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -12550,7 +14181,157 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
+      }
+    },
+    "/api/analytics/slo/overview": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Slo Overview",
+        "description": "SLO 每日系列（读 ops_metric_daily 预聚合表）。",
+        "operationId": "slo_overview_api_analytics_slo_overview_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "统计天数",
+              "default": 30,
+              "title": "Days"
+            },
+            "description": "统计天数"
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按组织过滤（管理员可查任意组织）",
+              "title": "Org Id"
+            },
+            "description": "按组织过滤（管理员可查任意组织）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analytics/slo/status": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Slo Status",
+        "description": "SLO 达成状态：按 (org, labels) 汇总 numerator/denominator 与配置目标对比。",
+        "operationId": "slo_status_api_analytics_slo_status_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "窗口天数",
+              "default": 7,
+              "title": "Days"
+            },
+            "description": "窗口天数"
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按组织过滤",
+              "title": "Org Id"
+            },
+            "description": "按组织过滤"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/developer/api-keys": {
@@ -12618,6 +14399,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -12643,6 +14436,16 @@
               "type": "integer",
               "title": "Key Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -12742,6 +14545,16 @@
               "type": "integer",
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -12811,9 +14624,12 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "description": "页码",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "页码"
           },
           {
             "name": "page_size",
@@ -12821,9 +14637,13 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数",
               "default": 20,
               "title": "Page Size"
-            }
+            },
+            "description": "每页条数"
           }
         ],
         "responses": {
@@ -12869,6 +14689,16 @@
               "type": "integer",
               "title": "Entry Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -12924,6 +14754,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -13038,6 +14878,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -13130,9 +14980,12 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "description": "页码",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "页码"
           },
           {
             "name": "page_size",
@@ -13140,9 +14993,13 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数",
               "default": 20,
               "title": "Page Size"
-            }
+            },
+            "description": "每页条数"
           }
         ],
         "responses": {
@@ -13188,6 +15045,16 @@
               "type": "integer",
               "title": "Invoice Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -13242,6 +15109,16 @@
               "type": "string",
               "title": "Reason"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -13307,7 +15184,8 @@
                   "type": "number"
                 },
                 {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
                 }
               ],
               "title": "Amount"
@@ -13321,6 +15199,16 @@
               "type": "string",
               "title": "Provider"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -13366,6 +15254,16 @@
               "type": "integer",
               "title": "Invoice Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -13464,6 +15362,16 @@
               "type": "integer",
               "title": "Invoice Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -13535,6 +15443,16 @@
               ],
               "title": "Note"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -13623,6 +15541,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -13687,6 +15615,16 @@
               "type": "integer",
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -13772,9 +15710,12 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "description": "页码",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "页码"
           },
           {
             "name": "page_size",
@@ -13782,9 +15723,13 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数",
               "default": 20,
               "title": "Page Size"
-            }
+            },
+            "description": "每页条数"
           }
         ],
         "responses": {
@@ -13830,6 +15775,16 @@
               "type": "integer",
               "title": "Deadline Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -13886,6 +15841,16 @@
               "type": "integer",
               "title": "Deadline Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -13940,6 +15905,16 @@
               "type": "integer",
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -14047,6 +16022,16 @@
               "type": "integer",
               "title": "Link Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -14088,6 +16073,16 @@
               "type": "string",
               "title": "Token"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -14138,6 +16133,16 @@
               "type": "string",
               "title": "Otp"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -14252,6 +16257,16 @@
               ],
               "title": "X-Portal-Session"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -14480,6 +16495,16 @@
               "type": "integer",
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -14561,6 +16586,16 @@
               "default": false,
               "title": "Revoke"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -14615,6 +16650,16 @@
               "type": "integer",
               "title": "Case Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -14700,9 +16745,12 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "description": "页码",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "页码"
           },
           {
             "name": "page_size",
@@ -14710,9 +16758,13 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数",
               "default": 20,
               "title": "Page Size"
-            }
+            },
+            "description": "每页条数"
           }
         ],
         "responses": {
@@ -14758,6 +16810,16 @@
               "type": "integer",
               "title": "Update Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -14819,6 +16881,16 @@
               ],
               "title": "Reason"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -14889,6 +16961,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -14997,9 +17079,12 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "description": "页码",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "页码"
           },
           {
             "name": "page_size",
@@ -15007,9 +17092,13 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数",
               "default": 20,
               "title": "Page Size"
-            }
+            },
+            "description": "每页条数"
           }
         ],
         "responses": {
@@ -15062,9 +17151,12 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "description": "页码",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "页码"
           },
           {
             "name": "page_size",
@@ -15072,9 +17164,13 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数",
               "default": 20,
               "title": "Page Size"
-            }
+            },
+            "description": "每页条数"
           }
         ],
         "responses": {
@@ -15165,6 +17261,16 @@
               "type": "integer",
               "title": "Contract Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -15273,6 +17379,16 @@
               "type": "integer",
               "title": "Version Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -15451,6 +17567,16 @@
               "type": "integer",
               "title": "Milestone Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -15496,6 +17622,16 @@
               "type": "integer",
               "title": "Contract Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -15604,6 +17740,16 @@
               "type": "integer",
               "title": "Review Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -15666,6 +17812,16 @@
               ],
               "title": "Note"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -15711,6 +17867,16 @@
               "type": "integer",
               "title": "Request Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -15767,6 +17933,16 @@
               ],
               "title": "X-Signature"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -15946,6 +18122,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -15958,6 +18144,419 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/cases/{case_id}/domain": {
+      "get": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "Case Domain",
+        "description": "案件级法律业务数据聚合（facts/evidences/claims/references/risk_items）。",
+        "operationId": "case_domain_api_legal_cases__case_id__domain_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/contract-reviews/{item_id}/risk-items": {
+      "get": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "List Risk Items",
+        "operationId": "list_risk_items_api_legal_contract_reviews__item_id__risk_items_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/contract-reviews/{item_id}/risk-items/{risk_id}/action": {
+      "post": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "Handle Risk Item",
+        "description": "律师处理风险项：accept / mitigate / dismiss。仅审核角色可执行。",
+        "operationId": "handle_risk_item_api_legal_contract_reviews__item_id__risk_items__risk_id__action_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "risk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Risk Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskActionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/contract-reviews/{item_id}/publish": {
+      "post": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "Publish Contract Review",
+        "description": "发布合同审查结论：须当前版本已审核通过且无未处理高/严重风险项。",
+        "operationId": "publish_contract_review_api_legal_contract_reviews__item_id__publish_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/drafts/{item_id}/mark-final": {
+      "post": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "Mark Draft Final",
+        "description": "文书定稿：须当前版本已审核通过。",
+        "operationId": "mark_draft_final_api_legal_drafts__item_id__mark_final_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/consultations/{item_id}/claims": {
+      "get": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "Consultation Claims",
+        "operationId": "consultation_claims_api_legal_consultations__item_id__claims_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/contract-reviews/{item_id}/claims": {
+      "get": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "Review Claims",
+        "operationId": "review_claims_api_legal_contract_reviews__item_id__claims_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/drafts/{item_id}/claims": {
+      "get": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "Draft Claims",
+        "operationId": "draft_claims_api_legal_drafts__item_id__claims_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -16001,6 +18600,16 @@
               "type": "integer",
               "title": "Org Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -16118,6 +18727,81 @@
               "default": 24,
               "title": "Transition Hours"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/developer/orgs/{org_id}/apps/{app_id}/webhook-secret/rotate": {
+      "post": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Rotate Webhook Secret",
+        "description": "Generate a new delivery-signing secret and reveal it exactly once.",
+        "operationId": "rotate_webhook_secret_api_developer_orgs__org_id__apps__app_id__webhook_secret_rotate_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "app_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "App Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -16172,6 +18856,16 @@
               "type": "integer",
               "title": "App Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -16362,9 +19056,12 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "description": "页码",
               "default": 1,
               "title": "Page"
-            }
+            },
+            "description": "页码"
           },
           {
             "name": "page_size",
@@ -16372,9 +19069,133 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页条数",
               "default": 20,
               "title": "Page Size"
+            },
+            "description": "每页条数"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/developer/orgs/{org_id}/async-jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Get Async Job",
+        "description": "异步任务详情（org admin，按组织隔离）。",
+        "operationId": "get_async_job_api_developer_orgs__org_id__async_jobs__job_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/developer/orgs/{org_id}/async-jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Cancel Async Job",
+        "description": "取消异步任务（org admin；幂等：已终态返回当前状态）。",
+        "operationId": "cancel_async_job_api_developer_orgs__org_id__async_jobs__job_id__cancel_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -16658,6 +19479,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "description": "已接受：任务已创建，通过 status_url 查询结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            }
           }
         }
       }
@@ -16668,7 +19499,7 @@
           "Developer Platform"
         ],
         "summary": "Audit Integrity Check",
-        "description": "管理员触发哈希链完整性校验。",
+        "description": "管理员触发哈希链完整性校验（断链/重复/时间异常检测）。",
         "operationId": "audit_integrity_check_api_developer_orgs__org_id__security_audit_integrity_check_get",
         "security": [
           {
@@ -16683,6 +19514,127 @@
             "schema": {
               "type": "integer",
               "title": "Org Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/developer/orgs/{org_id}/security-audit/exports": {
+      "get": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "List Audit Exports",
+        "description": "审计导出任务列表（org admin）。",
+        "operationId": "list_audit_exports_api_developer_orgs__org_id__security_audit_exports_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/developer/orgs/{org_id}/security-audit/exports/{job_id}/download": {
+      "get": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Download Audit Export",
+        "description": "下载审计导出文件（org admin）。每次下载均写入安全审计（重复下载可审计）。",
+        "operationId": "download_audit_export_api_developer_orgs__org_id__security_audit_exports__job_id__download_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "org_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Org Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
             }
           }
         ],
@@ -16751,6 +19703,16 @@
               "type": "string",
               "title": "Event Type"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -16847,6 +19809,16 @@
               ],
               "title": "Escalation User Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -16892,6 +19864,16 @@
               "type": "integer",
               "title": "Notification Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -16963,6 +19945,16 @@
               "type": "integer",
               "title": "Notification Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "responses": {
@@ -17008,6 +20000,18 @@
         "security": [
           {
             "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ]
       }
@@ -17075,6 +20079,18 @@
           {
             "OAuth2PasswordBearer": []
           }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
         ]
       }
     },
@@ -17094,6 +20110,16 @@
               "type": "string",
               "title": "X-Api-Key"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
           }
         ],
         "requestBody": {
@@ -17107,11 +20133,13 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Successful Response",
+          "202": {
+            "description": "已接受：任务已创建，通过 status_url 查询结果",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
               }
             }
           },
@@ -17125,7 +20153,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          }
+        ]
       }
     },
     "/api/open/v1/tasks/{task_id}": {
@@ -17174,7 +20207,77 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          }
+        ]
+      }
+    },
+    "/api/open/v1/tasks/{task_id}/cancel": {
+      "post": {
+        "tags": [
+          "Open API"
+        ],
+        "summary": "Open Cancel Task",
+        "description": "取消异步任务（幂等：已终态返回当前状态）。取消行为写安全审计。",
+        "operationId": "open_cancel_task_api_open_v1_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyHeader": []
+          }
+        ]
       }
     },
     "/": {
@@ -17480,6 +20583,7 @@
           "selected_skill": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -17511,6 +20615,7 @@
             "title": "Purpose"
           },
           "action_input_preview": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Action Input Preview"
           }
@@ -17592,10 +20697,12 @@
             "title": "Final Answer"
           },
           "artifacts": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Artifacts"
           },
           "supervisor_plan": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Supervisor Plan"
           },
@@ -17742,10 +20849,12 @@
             "title": "Final Answer"
           },
           "artifacts": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Artifacts"
           },
           "supervisor_plan": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Supervisor Plan"
           },
@@ -17830,6 +20939,19 @@
               }
             ],
             "title": "Webhook Url"
+          },
+          "webhook_secret": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Secret"
           }
         },
         "type": "object",
@@ -18087,7 +21209,8 @@
                 "minimum": 0.0
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -18102,7 +21225,8 @@
                 "minimum": 0.0
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               },
               {
                 "type": "null"
@@ -18368,6 +21492,20 @@
         ],
         "title": "Body_upload_document_api_documents_upload_post"
       },
+      "Body_upload_draft_attachment_api_outbound_drafts__draft_id__attachments_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_draft_attachment_api_outbound_drafts__draft_id__attachments_post"
+      },
       "CaseMemberCreate": {
         "properties": {
           "user_id": {
@@ -18509,6 +21647,7 @@
           "invoice_snapshot": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -18568,6 +21707,7 @@
           },
           "conflicts": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -18911,6 +22051,7 @@
           "review_policy_override": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -19907,6 +23048,7 @@
           },
           "dlp_findings": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -20241,7 +23383,8 @@
                 "minimum": 0.0
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               }
             ],
             "title": "Discount Amount",
@@ -20255,7 +23398,8 @@
                 "minimum": 0.0
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               }
             ],
             "title": "Tax Rate",
@@ -20670,6 +23814,7 @@
             "description": "MCP 工具名"
           },
           "arguments": {
+            "additionalProperties": true,
             "type": "object",
             "title": "Arguments",
             "description": "工具参数"
@@ -21145,7 +24290,8 @@
                 "exclusiveMinimum": 0.0
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               }
             ],
             "title": "Amount"
@@ -21287,6 +24433,7 @@
           },
           "items": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -21561,6 +24708,7 @@
           "rollout": {
             "anyOf": [
               {
+                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -21571,6 +24719,7 @@
           },
           "variables_schema": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -21651,6 +24800,7 @@
           },
           "variables_schema": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -21659,6 +24809,7 @@
           },
           "experiment_refs": {
             "items": {
+              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -21710,7 +24861,8 @@
                 "exclusiveMinimum": 0.0
               },
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
               }
             ],
             "title": "Amount"
@@ -21738,6 +24890,40 @@
           "reason"
         ],
         "title": "RefundCreate"
+      },
+      "RefundRequest": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Amount"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount"
+        ],
+        "title": "RefundRequest"
       },
       "RegisterWithCodeRequest": {
         "properties": {
@@ -21974,6 +25160,32 @@
           "name"
         ],
         "title": "ReviewPolicyCreate"
+      },
+      "RiskActionIn": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "description": "accept / mitigate / dismiss"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "RiskActionIn"
       },
       "RollbackVersionRequest": {
         "properties": {
@@ -23680,6 +26892,390 @@
           "state"
         ],
         "title": "WechatLoginUrlResponse"
+      },
+      "SuccessEnvelope": {
+        "properties": {
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data"
+          },
+          "error": {
+            "default": null,
+            "title": "Error",
+            "type": "null"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id",
+          "trace_id"
+        ],
+        "title": "SuccessEnvelope",
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "$defs": {
+          "ErrorDetail": {
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string"
+              },
+              "detail": {
+                "anyOf": [
+                  {},
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Detail"
+              },
+              "field_errors": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/components/schemas/ErrorField"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Field Errors"
+              }
+            },
+            "required": [
+              "code"
+            ],
+            "title": "ErrorDetail",
+            "type": "object"
+          },
+          "ErrorField": {
+            "properties": {
+              "field": {
+                "title": "Field",
+                "type": "string"
+              },
+              "code": {
+                "title": "Code",
+                "type": "string"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string"
+              }
+            },
+            "required": [
+              "field",
+              "code",
+              "message"
+            ],
+            "title": "ErrorField",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "success": {
+            "default": false,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Data"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id",
+          "trace_id"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "PagePayload": {
+        "properties": {
+          "items": {
+            "items": {},
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "has_next": {
+            "title": "Has Next",
+            "type": "boolean"
+          },
+          "has_previous": {
+            "title": "Has Previous",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "has_next",
+          "has_previous"
+        ],
+        "title": "PagePayload",
+        "type": "object"
+      },
+      "JobOut": {
+        "$defs": {
+          "JobError": {
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "title": "JobError",
+            "type": "object"
+          },
+          "JobStatus": {
+            "enum": [
+              "queued",
+              "processing",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "expired"
+            ],
+            "title": "JobStatus",
+            "type": "string"
+          }
+        },
+        "description": "统一异步任务响应：创建（202）与查询（200）共用。",
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Task Id"
+          },
+          "job_type": {
+            "title": "Job Type",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Progress"
+          },
+          "status_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Status Url"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ended At"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Summary"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "retry_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Retry Count"
+          },
+          "estimated_completion": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Estimated Completion"
+          }
+        },
+        "required": [
+          "job_id",
+          "job_type",
+          "status"
+        ],
+        "title": "JobOut",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -23691,7 +27287,39 @@
             "tokenUrl": "/api/auth/login"
           }
         }
+      },
+      "ApiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "开放平台 API Key（/api/open/* 必填）"
       }
     }
-  }
+  },
+  "x-error-codes": [
+    "API_KEY_INVALID",
+    "API_KEY_IP_DENIED",
+    "API_RATE_LIMIT_EXCEEDED",
+    "CONTRACT_VERSION_LOCKED",
+    "EXPORT_ASYNC_REQUIRED",
+    "IDEMPOTENCY_KEY_CONFLICT",
+    "IDEMPOTENCY_KEY_IN_PROGRESS",
+    "INVOICE_IMMUTABLE",
+    "JOB_NOT_CANCELLABLE",
+    "JOB_NOT_FOUND",
+    "LEGAL_CASE_ARCHIVED",
+    "LEGAL_RESOURCE_SCOPE_DENIED",
+    "NOT_FOUND",
+    "PORTAL_LINK_UNAVAILABLE",
+    "PORTAL_OTP_INVALID",
+    "PORTAL_OTP_LOCKED",
+    "QUOTA_EXCEEDED",
+    "REQUEST_TIMEOUT",
+    "SERVICE_UNAVAILABLE",
+    "SIGN_PROVIDER_UNAVAILABLE",
+    "TIME_ENTRY_ALREADY_RUNNING",
+    "UNAUTHORIZED",
+    "VALIDATION_ERROR",
+    "WEBHOOK_SIGNATURE_INVALID"
+  ]
 }

@@ -13,7 +13,7 @@ from app.main import app
 from app.models.legal import LegalApprovalChain, LegalApprovalStep
 from app.models.org import Organization, OrganizationMember
 from app.models.user import User
-from app.services.legal_approval_service import LegalApprovalService
+from app.services.legal.legal_approval_service import LegalApprovalService
 from fastapi.testclient import TestClient
 
 

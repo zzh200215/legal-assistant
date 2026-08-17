@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
+from app.core.database import SessionLocal
 from app.mcp.executor import tool_executor
 
 mcp = FastMCP(
@@ -36,9 +37,13 @@ async def task_create(
         args["assignee"] = assignee
     if due_date is not None:
         args["due_date"] = due_date
-    out, _ = await tool_executor.execute(
-        "task_create_tool", args, agent_type="workflow_agent", user_id=user_id, db=None,
-    )
+    db = SessionLocal()
+    try:
+        out, _ = await tool_executor.execute(
+            "task_create_tool", args, agent_type="workflow_agent", user_id=user_id, db=db,
+        )
+    finally:
+        db.close()
     return str(out)
 
 
@@ -49,9 +54,13 @@ async def task_query(user_id: int | None = None, status: str | None = None):
     args = {}
     if status is not None:
         args["status"] = status
-    out, _ = await tool_executor.execute(
-        "task_query_tool", args, agent_type="workflow_agent", user_id=user_id, db=None,
-    )
+    db = SessionLocal()
+    try:
+        out, _ = await tool_executor.execute(
+            "task_query_tool", args, agent_type="workflow_agent", user_id=user_id, db=db,
+        )
+    finally:
+        db.close()
     return str(out)
 
 

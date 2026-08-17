@@ -22,7 +22,8 @@ from app.core.model_policy import (
 from app.core.observability_sanitizer import sanitize_observability_error_message, sanitize_observability_excerpt
 from app.core.response_cache import build_response_cache
 from app.core.structured_output import build_repair_prompt, normalize_schema, parse_structured_output
-from app.services.llm_governance_service import llm_governance_service
+from app.services.llm.llm_governance_service import LLMGovernanceError, llm_governance_service
+from app.services.llm.llm_outbound_gate import BLOCK_CODE, OutboundGateResult, outbound_gate
 
 settings = get_settings()
 OPENAI_COMPATIBLE_EMBED_BATCH_SIZE = 10
@@ -263,6 +264,10 @@ class ModelGateway:
         texts: list[str] | None = None,
         estimated_input_tokens: int | None = None,
         estimated_output_tokens: int | None = None,
+        data_level: str | None = None,
+        pii_hit_codes: str | None = None,
+        pii_hit_count: int = 0,
+        redacted_count: int = 0,
     ) -> ModelRequest:
         request_id = trace_id or new_trace_id()
         return ModelRequest(
@@ -280,7 +285,118 @@ class ModelGateway:
             estimated_output_tokens=estimated_output_tokens,
             trace_id=request_id,
             request_id=request_id,
+            data_level=data_level,
+            pii_hit_codes=pii_hit_codes,
+            pii_hit_count=pii_hit_count,
+            redacted_count=redacted_count,
         )
+
+    # ── P0 出站数据保护：统一网关接入 ──────────────────────────────────────────
+    @staticmethod
+    def _gate_audit_fields(result: OutboundGateResult) -> dict:
+        """把网关结果转成 ModelRequest/审计可用的结构化字段（只含规则 code，无原始文本）。"""
+        return {
+            "data_level": result.data_level.value if result.data_level is not None else None,
+            "pii_hit_codes": json.dumps(list(result.pii_hit_codes), ensure_ascii=False) if result.pii_hit_codes else None,
+            "pii_hit_count": result.pii_hit_count,
+            "redacted_count": result.redacted_count,
+        }
+
+    def _apply_outbound_gate(
+        self,
+        *,
+        pieces: list[str | None],
+        action: str,
+        user_id: int | None,
+        request_id: str,
+        model_name: str,
+    ) -> tuple[list[str], OutboundGateResult]:
+        """统一出站保护：分级 + PII 检测/脱敏 + 极敏感拦截（全部出站请求必经）。
+
+        放行时返回 ``(safe_pieces, result)``（命中时已脱敏，未命中原样返回）；
+        拦截时先落审计（status=blocked，仅元数据），再抛出稳定业务错误。
+        """
+        from app.services.llm.llm_observability_service import llm_observability_service
+
+        safe_pieces, result = outbound_gate.guard(pieces=pieces, action=action)
+        if result.blocked:
+            if settings.LLM_OUTBOUND_AUDIT_ENABLED:
+                llm_observability_service.log_event(
+                    module_name=self._infer_module_name(action),
+                    action=action,
+                    model_name=model_name,
+                    status="blocked",
+                    user_id=user_id,
+                    error_message=f"{BLOCK_CODE}: {result.blocked_reason}",
+                    request_excerpt={
+                        "action": action,
+                        "data_level": result.data_level.value,
+                        "blocked_reason": result.blocked_reason,
+                        "detector_error": result.detector_error,
+                        "pii_hit_codes": list(result.pii_hit_codes),
+                        "pii_hit_count": result.pii_hit_count,
+                        "rules_version": settings.LLM_OUTBOUND_DLP_RULES_VERSION,
+                    },
+                    response_excerpt=None,
+                    provider=settings.LLM_PROVIDER,
+                    data_level=result.data_level.value,
+                    pii_hit_codes=json.dumps(list(result.pii_hit_codes), ensure_ascii=False) if result.pii_hit_codes else None,
+                    pii_hit_count=result.pii_hit_count,
+                    redacted_count=0,
+                    blocked_reason=result.blocked_reason,
+                )
+            raise LLMGovernanceError(
+                status_code=403,
+                code=BLOCK_CODE,
+                message="请求包含极敏感或受保护数据，已被出站保护网关拦截",
+                detail={
+                    "action": action,
+                    "data_level": result.data_level.value,
+                    "reason": result.blocked_reason,
+                    "detector_error": result.detector_error,
+                },
+            )
+        return safe_pieces, result
+
+    @staticmethod
+    def _extract_message_pieces(messages: list[dict]) -> list[str]:
+        """按固定顺序提取 messages 中的全部文本片段（str content 或 text 类型 part）。"""
+        pieces: list[str] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                pieces.append(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        pieces.append(str(item.get("text") or ""))
+        return pieces
+
+    @staticmethod
+    def _rebuild_messages(messages: list[dict], safe_pieces: list[str]) -> list[dict]:
+        """按 _extract_message_pieces 相同顺序回填脱敏后的文本片段（保持消息结构不变）。"""
+        iterator = iter(safe_pieces)
+        rebuilt: list[dict] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                rebuilt.append(message)
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                rebuilt.append({**message, "content": next(iterator)})
+            elif isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        parts.append({**item, "text": next(iterator)})
+                    else:
+                        parts.append(item)
+                rebuilt.append({**message, "content": parts})
+            else:
+                rebuilt.append(message)
+        return rebuilt
 
     async def _post_json_with_retry(
         self,
@@ -291,23 +407,30 @@ class ModelGateway:
         headers: dict[str, str],
         retries: int = DEFAULT_REQUEST_RETRIES,
     ) -> dict:
-        last_error: Exception | None = None
-        for attempt in range(1, retries + 1):
-            try:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                return resp.json()
-            except Exception as exc:
-                # 只对明确瞬态错误（超时/传输/5xx/429）重试；参数/鉴权/权限/内容拦截等直接抛出。
-                if not classify_error(exc).retryable:
-                    raise
-                last_error = exc
-                if attempt == retries:
-                    break
-                await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
-        if last_error is not None:
-            raise last_error
-        raise RuntimeError("Request failed without a captured exception")
+        # P1：LLM 供应商请求子 span（仅 model/provider 元数据，绝不记录 prompt/正文）。
+        from app.core.telemetry import observe_span
+
+        with observe_span("llm.http_request", attributes={
+            "model": getattr(self, "model", None) or "unknown",
+            "provider": getattr(self, "provider", None) or "unknown",
+        }):
+            last_error: Exception | None = None
+            for attempt in range(1, retries + 1):
+                try:
+                    resp = await client.post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    return resp.json()
+                except Exception as exc:
+                    # 只对明确瞬态错误（超时/传输/5xx/429）重试；参数/鉴权/权限/内容拦截等直接抛出。
+                    if not classify_error(exc).retryable:
+                        raise
+                    last_error = exc
+                    if attempt == retries:
+                        break
+                    await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("Request failed without a captured exception")
 
     def _extract_usage(self, data: dict, provider: str | None = None) -> tuple[int, int]:
         return provider_adapter(provider or self.provider).extract_usage(data)
@@ -345,12 +468,21 @@ class ModelGateway:
         budget_category: str | None = None,
         estimated_input_tokens: int | None = None,
         estimated_output_tokens: int | None = None,
+        data_level: str | None = None,
+        pii_hit_codes: str | None = None,
+        pii_hit_count: int = 0,
+        redacted_count: int = 0,
     ):
         try:
             from app.core.database import SessionLocal
             from app.models.llm_call_log import LLMCallLog
-            from app.services.prompt_service import prompt_service
-            from app.services.token_service import token_service
+            from app.services.llm.prompt_service import prompt_service
+            from app.services.billing.token_service import token_service
+
+            # P0 出站审计：请求级上下文（API/Celery headers 传播）补齐租户/链路标识。
+            from app.core.obs_context import get_context
+
+            obs_ctx = get_context()
 
             budget_category = budget_category or get_task_policy(action).budget_category
             prompt_tokens, completion_tokens = self._extract_usage(data, provider=provider)
@@ -391,11 +523,20 @@ class ModelGateway:
                         duration_ms=duration_ms,
                         status=status,
                         request_id=request_id,
+                        trace_id=obs_ctx.trace_id,
+                        task_id=obs_ctx.task_id,
+                        agent_run_id=obs_ctx.agent_run_id,
+                        organization_id=obs_ctx.org_id,
                         routing_role=routing_role,
                         routing_stage=routing_stage,
                         error_message=sanitize_observability_error_message(action, error_message),
                         request_excerpt=sanitize_observability_excerpt(action, request_excerpt, kind="request"),
                         response_excerpt=sanitize_observability_excerpt(action, response_excerpt, kind="response"),
+                        provider=provider,
+                        data_level=data_level,
+                        pii_hit_codes=pii_hit_codes,
+                        pii_hit_count=pii_hit_count,
+                        redacted_count=redacted_count,
                     )
                 )
                 db.commit()
@@ -528,9 +669,8 @@ class ModelGateway:
         user_id: int | None,
         **kwargs,
     ) -> None:
-        # 仅在备用目标的协议不同于主目标时显式传入 provider，保持既有测试桩兼容。
-        if target.provider != self.provider:
-            kwargs["provider"] = target.provider
+        # 审计要求"目标模型/提供方"：总是记录实际发送目标（主/小/备选模型）的提供方。
+        kwargs["provider"] = target.provider
         self._record_usage(data, target.model, action, duration_ms, user_id, **kwargs)
 
     async def _request_text_once(
@@ -572,6 +712,8 @@ class ModelGateway:
                 attempt_number=attempt_number,
                 estimated_input_tokens=request.estimated_input_tokens,
                 estimated_output_tokens=request.estimated_output_tokens,
+                data_level=request.data_level, pii_hit_codes=request.pii_hit_codes,
+                pii_hit_count=request.pii_hit_count, redacted_count=request.redacted_count,
             )
             raise
         self.circuit_breaker.record_success(circuit_key)
@@ -587,6 +729,8 @@ class ModelGateway:
             attempt_number=attempt_number,
             estimated_input_tokens=request.estimated_input_tokens,
             estimated_output_tokens=request.estimated_output_tokens,
+            data_level=request.data_level, pii_hit_codes=request.pii_hit_codes,
+            pii_hit_count=request.pii_hit_count, redacted_count=request.redacted_count,
         )
         return response_excerpt
 
@@ -627,25 +771,35 @@ class ModelGateway:
         permission_fingerprint: str | None = None,
     ) -> str:
         enforcement = llm_governance_service.enforce_chat_request(messages=messages, user_id=user_id, action=action)
+        # P0 出站保护：分级 + PII 检测/脱敏（拦截时内部审计并抛错）。
+        safe_pieces, gate_result = self._apply_outbound_gate(
+            pieces=self._extract_message_pieces(messages or []),
+            action=action,
+            user_id=user_id,
+            request_id=trace_id or new_trace_id(),
+            model_name=settings.LLM_MODEL,
+        )
+        safe_messages = self._rebuild_messages(messages, safe_pieces) if messages else messages
         request = self._build_request(
-            request_type="chat", messages=messages, temperature=temperature,
+            request_type="chat", messages=safe_messages, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
             estimated_input_tokens=enforcement.get("estimated_input_tokens"),
             estimated_output_tokens=enforcement.get("estimated_output_tokens"),
+            **self._gate_audit_fields(gate_result),
         )
         cache_key = None
         if cacheable and not stream and settings.LLM_RESPONSE_CACHE_ENABLED:
             policy = get_task_policy(action)
             cache_key = self._cache_key(
                 task=policy.task, request=request,
-                model=self._cache_model(self._messages_to_text(messages), action),
+                model=self._cache_model(self._messages_to_text(safe_messages), action),
                 permission_fingerprint=permission_fingerprint,
             )
             cached = self.response_cache.get(cache_key)
             if cached is not None:
                 return cached
-        raw = await self._request_text_with_routing(source_text=self._messages_to_text(messages), request=request)
+        raw = await self._request_text_with_routing(source_text=self._messages_to_text(safe_messages), request=request)
         if cache_key is not None:
             self.response_cache.put(cache_key, raw)
         return raw
@@ -663,25 +817,35 @@ class ModelGateway:
         permission_fingerprint: str | None = None,
     ) -> str:
         enforcement = llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
+        # P0 出站保护：分级 + PII 检测/脱敏（拦截时内部审计并抛错）。
+        safe_pieces, gate_result = self._apply_outbound_gate(
+            pieces=[prompt],
+            action=action,
+            user_id=user_id,
+            request_id=trace_id or new_trace_id(),
+            model_name=settings.LLM_MODEL,
+        )
+        safe_prompt = safe_pieces[0] if safe_pieces else (prompt or "")
         request = self._build_request(
-            request_type="generate", prompt=prompt, temperature=temperature,
+            request_type="generate", prompt=safe_prompt, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
             estimated_input_tokens=enforcement.get("estimated_input_tokens"),
             estimated_output_tokens=enforcement.get("estimated_output_tokens"),
+            **self._gate_audit_fields(gate_result),
         )
         cache_key = None
         if cacheable and settings.LLM_RESPONSE_CACHE_ENABLED:
             policy = get_task_policy(action)
             cache_key = self._cache_key(
                 task=policy.task, request=request,
-                model=self._cache_model(prompt, action),
+                model=self._cache_model(safe_prompt, action),
                 permission_fingerprint=permission_fingerprint,
             )
             cached = self.response_cache.get(cache_key)
             if cached is not None:
                 return cached
-        raw = await self._request_text_with_routing(source_text=prompt, request=request)
+        raw = await self._request_text_with_routing(source_text=safe_prompt, request=request)
         if cache_key is not None:
             self.response_cache.put(cache_key, raw)
         return raw
@@ -715,18 +879,28 @@ class ModelGateway:
         spec = normalize_schema(schema)
         enforcement = llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
         policy = get_task_policy(action)
+        # P0 出站保护：初始请求同样过统一网关（拦截时内部审计并抛错）。
+        safe_pieces, gate_result = self._apply_outbound_gate(
+            pieces=[prompt],
+            action=action,
+            user_id=user_id,
+            request_id=trace_id or new_trace_id(),
+            model_name=settings.LLM_MODEL,
+        )
+        safe_prompt = safe_pieces[0] if safe_pieces else (prompt or "")
         request = self._build_request(
-            request_type="generate", prompt=prompt, temperature=temperature,
+            request_type="generate", prompt=safe_prompt, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
             estimated_input_tokens=enforcement.get("estimated_input_tokens"),
             estimated_output_tokens=enforcement.get("estimated_output_tokens"),
+            **self._gate_audit_fields(gate_result),
         )
         cache_key = None
         if cacheable and settings.LLM_RESPONSE_CACHE_ENABLED:
             cache_key = self._cache_key(
                 task=policy.task, request=request,
-                model=self._cache_model(prompt, action),
+                model=self._cache_model(safe_prompt, action),
                 permission_fingerprint=permission_fingerprint,
                 schema=spec.json_schema,
             )
@@ -735,7 +909,7 @@ class ModelGateway:
                 cached_data, _ = parse_structured_output(cached, spec)
                 if cached_data is not None:
                     return cached_data
-        raw = await self._request_text_with_routing(source_text=prompt, request=request)
+        raw = await self._request_text_with_routing(source_text=safe_prompt, request=request)
         data, failure_kind = parse_structured_output(raw, spec)
         if data is not None:
             if cache_key is not None:
@@ -746,16 +920,26 @@ class ModelGateway:
             candidate_raw = raw
             for _ in range(max(1, policy.structured_repair_max_attempts)):
                 repair_prompt = build_repair_prompt(spec.json_schema, candidate_raw)
-                # 修复请求同样受权限/预算/限流约束（同一 action/user），不绕过治理。
+                # 修复请求同样受权限/预算/限流约束（同一 action/user），不绕过治理；
+                # P0 出站保护：修复载荷同样过统一网关（含脱敏，防止模型输出回显 PII）。
                 repair_enforcement = llm_governance_service.enforce_generate_request(prompt=repair_prompt, user_id=user_id, action=action)
+                safe_repair, repair_gate = self._apply_outbound_gate(
+                    pieces=[repair_prompt],
+                    action=action,
+                    user_id=user_id,
+                    request_id=request.trace_id,
+                    model_name=settings.LLM_MODEL,
+                )
+                safe_repair_prompt = safe_repair[0] if safe_repair else repair_prompt
                 repair_request = self._build_request(
-                    request_type="generate", prompt=repair_prompt, temperature=0.0,
+                    request_type="generate", prompt=safe_repair_prompt, temperature=0.0,
                     action=action, user_id=user_id, prompt_template=None, prompt_version=None,
                     trace_id=request.trace_id,
                     estimated_input_tokens=repair_enforcement.get("estimated_input_tokens"),
                     estimated_output_tokens=repair_enforcement.get("estimated_output_tokens"),
+                    **self._gate_audit_fields(repair_gate),
                 )
-                candidate_raw = await self._request_text_with_routing(source_text=repair_prompt, request=repair_request)
+                candidate_raw = await self._request_text_with_routing(source_text=safe_repair_prompt, request=repair_request)
                 repaired_data, sub_kind = parse_structured_output(candidate_raw, spec)
                 if repaired_data is not None:
                     if cache_key is not None:
@@ -789,12 +973,22 @@ class ModelGateway:
     ) -> str:
         enforcement = llm_governance_service.enforce_generate_request(prompt=prompt, user_id=user_id, action=action)
         policy = get_task_policy(action)
+        # P0 出站保护：分级 + PII 检测/脱敏（拦截时内部审计并抛错）。
+        safe_pieces, gate_result = self._apply_outbound_gate(
+            pieces=[prompt],
+            action=action,
+            user_id=user_id,
+            request_id=trace_id or new_trace_id(),
+            model_name=self.vision_model,
+        )
+        safe_prompt = safe_pieces[0] if safe_pieces else (prompt or "")
         request = self._build_request(
-            request_type="vision", prompt=prompt, image_urls=image_urls, temperature=temperature,
+            request_type="vision", prompt=safe_prompt, image_urls=image_urls, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
             estimated_input_tokens=enforcement.get("estimated_input_tokens"),
             estimated_output_tokens=enforcement.get("estimated_output_tokens"),
+            **self._gate_audit_fields(gate_result),
         )
         resolved_temperature = self._resolve_temperature(policy, request.temperature)
         circuit_key = self._circuit_key(self.primary_target, policy.task)
@@ -804,7 +998,7 @@ class ModelGateway:
             )
         url = self._generate_url()
         payload = self._build_multimodal_generate_payload(
-            prompt=prompt,
+            prompt=safe_prompt,
             image_urls=image_urls,
             temperature=resolved_temperature,
             max_tokens=policy.max_tokens,
@@ -812,7 +1006,7 @@ class ModelGateway:
         headers = self._build_headers()
         start = time.time()
         request_excerpt = json.dumps(
-            {"prompt": prompt[:500], "image_count": len(image_urls)},
+            {"prompt": safe_prompt[:500], "image_count": len(image_urls)},
             ensure_ascii=False,
         )
         retries = self._policy_retries(policy, self.primary_target)
@@ -839,6 +1033,8 @@ class ModelGateway:
                 attempt_number=1,
                 estimated_input_tokens=request.estimated_input_tokens,
                 estimated_output_tokens=request.estimated_output_tokens,
+                data_level=request.data_level, pii_hit_codes=request.pii_hit_codes,
+                pii_hit_count=request.pii_hit_count, redacted_count=request.redacted_count,
             )
             raise
         self.circuit_breaker.record_success(circuit_key)
@@ -858,6 +1054,8 @@ class ModelGateway:
             attempt_number=1,
             estimated_input_tokens=request.estimated_input_tokens,
             estimated_output_tokens=request.estimated_output_tokens,
+            data_level=request.data_level, pii_hit_codes=request.pii_hit_codes,
+            pii_hit_count=request.pii_hit_count, redacted_count=request.redacted_count,
         )
         return response_excerpt
 
@@ -873,17 +1071,27 @@ class ModelGateway:
     ):
         enforcement = llm_governance_service.enforce_chat_request(messages=messages, user_id=user_id, action=action)
         policy = get_task_policy(action)
+        # P0 出站保护：流式请求同样过统一网关（拦截时内部审计并抛错）。
+        safe_pieces, gate_result = self._apply_outbound_gate(
+            pieces=self._extract_message_pieces(messages or []),
+            action=action,
+            user_id=user_id,
+            request_id=trace_id or new_trace_id(),
+            model_name=settings.LLM_MODEL,
+        )
+        safe_messages = self._rebuild_messages(messages, safe_pieces) if messages else messages
         request = self._build_request(
-            request_type="chat_stream", messages=messages, temperature=temperature,
+            request_type="chat_stream", messages=safe_messages, temperature=temperature,
             action=action, user_id=user_id, prompt_template=prompt_template,
             prompt_version=prompt_version, trace_id=trace_id,
             estimated_input_tokens=enforcement.get("estimated_input_tokens"),
             estimated_output_tokens=enforcement.get("estimated_output_tokens"),
+            **self._gate_audit_fields(gate_result),
         )
         resolved_temperature = self._resolve_temperature(policy, request.temperature)
         max_tokens = policy.max_tokens
-        request_excerpt = json.dumps(messages, ensure_ascii=False)
-        targets = self._candidate_targets(self._messages_to_text(messages), action, policy=policy)
+        request_excerpt = json.dumps(safe_messages, ensure_ascii=False)
+        targets = self._candidate_targets(self._messages_to_text(safe_messages), action, policy=policy)
         if not targets:
             raise self._circuit_open_error(
                 task=policy.task, request_id=request.request_id, trace_id=request.trace_id,
@@ -903,7 +1111,7 @@ class ModelGateway:
                         async with client.stream(
                             "POST",
                             self._chat_url(target),
-                            json=self._build_chat_payload(messages, stream=True, temperature=resolved_temperature, target=target, max_tokens=max_tokens),
+                            json=self._build_chat_payload(safe_messages, stream=True, temperature=resolved_temperature, target=target, max_tokens=max_tokens),
                             headers=self._build_headers(target),
                         ) as resp:
                             resp.raise_for_status()
@@ -935,10 +1143,14 @@ class ModelGateway:
                                 attempt_number=attempt_number,
                                 estimated_input_tokens=request.estimated_input_tokens,
                                 estimated_output_tokens=request.estimated_output_tokens,
+                                data_level=request.data_level, pii_hit_codes=request.pii_hit_codes,
+                                pii_hit_count=request.pii_hit_count, redacted_count=request.redacted_count,
                             )
                             return
                     except Exception as exc:
-                        if not classify_error(exc).retryable or attempt == retries:
+                        # 已向客户端产出任何内容（full_response 非空）后禁止内部重试：
+                        # 重试会从头重放流，导致客户端收到重复内容。
+                        if not classify_error(exc).retryable or attempt == retries or full_response:
                             raise
                         await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
             except Exception as exc:
@@ -953,6 +1165,8 @@ class ModelGateway:
                     attempt_number=attempt_number,
                     estimated_input_tokens=request.estimated_input_tokens,
                     estimated_output_tokens=request.estimated_output_tokens,
+                    data_level=request.data_level, pii_hit_codes=request.pii_hit_codes,
+                    pii_hit_count=request.pii_hit_count, redacted_count=request.redacted_count,
                 )
                 raise
 
@@ -980,11 +1194,21 @@ class ModelGateway:
             return []
         enforcement = llm_governance_service.enforce_embedding_request(texts=texts, user_id=user_id, action=action)
         policy = get_task_policy(action)
+        # P0 出站保护：批量向量化文本同样过统一网关（拦截时内部审计并抛错）。
+        safe_pieces, gate_result = self._apply_outbound_gate(
+            pieces=texts,
+            action=action,
+            user_id=user_id,
+            request_id=trace_id or new_trace_id(),
+            model_name=self.embedding_model,
+        )
+        safe_texts = safe_pieces
         request = self._build_request(
-            request_type="embedding", texts=texts, action=action, user_id=user_id,
+            request_type="embedding", texts=safe_texts, action=action, user_id=user_id,
             prompt_template=None, prompt_version=None, trace_id=trace_id,
             estimated_input_tokens=enforcement.get("estimated_input_tokens"),
             estimated_output_tokens=enforcement.get("estimated_output_tokens"),
+            **self._gate_audit_fields(gate_result),
         )
         circuit_key = self._circuit_key(self.primary_target, policy.task)
         if not self.circuit_breaker.can_attempt(circuit_key):
@@ -994,10 +1218,10 @@ class ModelGateway:
 
         url = self._embedding_url()
         headers = self._build_headers()
-        batches = [texts]
+        batches = [safe_texts]
         adapter = provider_adapter(self.provider)
         if not adapter.uses_native_embedding_batch:
-            batches = self._chunk_texts(texts, OPENAI_COMPATIBLE_EMBED_BATCH_SIZE)
+            batches = self._chunk_texts(safe_texts, OPENAI_COMPATIBLE_EMBED_BATCH_SIZE)
 
         embeddings: list[list[float]] = []
         client = self._get_client(self.primary_target, timeout=self._policy_timeout(policy))
@@ -1018,6 +1242,7 @@ class ModelGateway:
                     self.embedding_model,
                     "embedding",
                     duration_ms,
+                    user_id,
                     request_excerpt=request_excerpt,
                     error_message=str(exc),
                     status="error",
@@ -1025,6 +1250,8 @@ class ModelGateway:
                     attempt_number=1,
                     estimated_input_tokens=request.estimated_input_tokens,
                     estimated_output_tokens=request.estimated_output_tokens,
+                    data_level=request.data_level, pii_hit_codes=request.pii_hit_codes,
+                    pii_hit_count=request.pii_hit_count, redacted_count=request.redacted_count,
                 )
                 raise
             self.circuit_breaker.record_success(circuit_key)
@@ -1036,12 +1263,15 @@ class ModelGateway:
                 self.embedding_model,
                 "embedding",
                 duration_ms,
+                user_id,
                 request_excerpt=request_excerpt,
                 response_excerpt=response_excerpt,
                 request_id=request.request_id,
                 attempt_number=1,
                 estimated_input_tokens=request.estimated_input_tokens,
                 estimated_output_tokens=request.estimated_output_tokens,
+                data_level=request.data_level, pii_hit_codes=request.pii_hit_codes,
+                pii_hit_count=request.pii_hit_count, redacted_count=request.redacted_count,
             )
             embeddings.extend(adapter.extract_embeddings(data))
         return embeddings

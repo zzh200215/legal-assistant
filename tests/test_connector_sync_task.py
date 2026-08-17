@@ -15,8 +15,8 @@ from app.core.database import Base
 from app.core.time import utc_now
 from app.models.connector import ExternalConnector
 from app.models.sync_run import SyncRun
-from app.services.connector_sync_framework import get_or_create_run, run_sync_run
-from app.services.mock_connector_client import MockConnectorClient, MockSink
+from app.services.integration.connector_sync_framework import get_or_create_run, run_sync_run
+from app.services.integration.mock_connector_client import MockConnectorClient, MockSink
 
 
 def _engine():

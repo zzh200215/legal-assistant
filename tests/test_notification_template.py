@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.legal_notifications import NotificationTemplate
-from app.services.notification_template_service import (
+from app.services.notification.notification_template_service import (
     TemplateValidationError, notification_template_service,
 )
 

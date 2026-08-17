@@ -61,6 +61,7 @@
     </aside>
 
     <div class="app-workspace">
+    <OfflineBanner />
     <section class="section-strip">
       <div>
         <span class="section-kicker">Workspace</span>
@@ -71,7 +72,11 @@
     </section>
 
     <main class="main-content">
-      <router-view v-slot="{ Component }">
+      <div v-if="routeAccess === 'loading'" class="route-loading" role="status">
+        <div class="route-loading-card">正在加载…</div>
+      </div>
+      <ForbiddenState v-else-if="routeAccess === 'deny'" :required="route.meta?.capability" />
+      <router-view v-else v-slot="{ Component }">
         <transition name="page-fade" mode="out-in">
           <component :is="Component" />
         </transition>
@@ -108,13 +113,26 @@ import {
   ScaleToOriginal,
 } from '@element-plus/icons-vue'
 import api from './api'
+import { setAccessToken, setRefreshToken } from './api/http'
+import { clearQueryCache } from './query/cache'
+import OfflineBanner from './components/OfflineBanner.vue'
+import ForbiddenState from './components/ForbiddenState.vue'
 import NotificationBell from './components/legal/NotificationBell.vue'
+import { useAuthStore } from './stores/auth'
 
+const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const user = ref(null)
-const isAdmin = computed(() => user.value?.role === 'admin')
 const isPublicRoute = computed(() => route.meta?.public === true)
+
+// 路由级 capability 门禁：权限未知（auth 未就绪）默认不放行，直接访问受保护路由显示 403 状态
+const routeAccess = computed(() => {
+  const required = route.meta?.capability
+  if (!required) return 'allow'
+  if (!authStore.ready) return 'loading'
+  return authStore.capabilities.includes(required) ? 'allow' : 'deny'
+})
 
 const ScaleIcon = ScaleToOriginal
 
@@ -129,6 +147,7 @@ const navGroups = [
   {
     label: '法律业务',
     items: [
+      // 导航入口沿用产品规则：仅管理员显示；路由级访问由 router meta.capability 守卫
       { path: '/tasks', label: '待办任务', caption: '执行项与协作推进', icon: Check, adminOnly: true },
       { path: '/agent', label: 'Agent配置', caption: '工具编排与执行观测', icon: Cpu, adminOnly: true },
     ],
@@ -159,7 +178,12 @@ const visibleNavGroups = computed(() =>
     .filter((group) => group.items.length)
 )
 
-const visibleNavItems = (items) => items.filter((item) => !item.adminOnly || isAdmin.value)
+// 导航可见性沿用产品规则（adminOnly）；路由级 capability 门禁独立于导航（router meta.capability）
+const canShow = (item) => {
+  if (!item.adminOnly) return true
+  return authStore.ready && authStore.isAdmin
+}
+const visibleNavItems = (items) => items.filter(canShow)
 const mobileNavItems = computed(() =>
   visibleNavItems([...navItems, ...navGroups.flatMap((group) => group.items)]),
 )
@@ -167,8 +191,11 @@ const isRouteActive = (path) => route.path === path
 const onMenuSelect = (path) => router.push(path)
 
 const logout = () => {
-  localStorage.removeItem('token')
+  setAccessToken(null)
+  setRefreshToken(null)
   localStorage.removeItem('user_role')
+  clearQueryCache()
+  authStore.clear()
   router.push('/login')
 }
 
@@ -177,9 +204,11 @@ onMounted(async () => {
   try {
     const { data } = await api.getMe()
     user.value = data
+    authStore.setUser(data)
     localStorage.setItem('user_role', data.role || 'user')
   } catch {
     user.value = null
+    authStore.clear()
     localStorage.removeItem('user_role')
   }
 })
@@ -453,6 +482,20 @@ onMounted(async () => {
   padding: var(--space-4) var(--space-8) var(--space-10);
   background: transparent;
   min-height: calc(100vh - 180px);
+}
+.route-loading {
+  display: grid;
+  place-items: start;
+  padding: var(--space-8) 0;
+}
+.route-loading-card {
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  box-shadow: var(--shadow-xs);
 }
 .app-workspace { min-width: 0; }
 

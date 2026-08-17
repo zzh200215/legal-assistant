@@ -314,7 +314,7 @@ class OpenApiRateLimitTests(unittest.TestCase):
                 json={"title": "配额测试", "content": "这是一份合同内容，需要审查风险条款。"},
                 headers=self.api_headers,
             )
-        self.assertIn(resp.status_code, (200, 201))
+        self.assertIn(resp.status_code, (200, 201, 202))
 
         year_month = datetime.utcnow().strftime("%Y-%m")
         usage = self.db.query(QuotaUsage).filter(
@@ -323,6 +323,26 @@ class OpenApiRateLimitTests(unittest.TestCase):
         ).first()
         self.assertIsNotNone(usage)
         self.assertEqual(usage.review_count, 1)
+
+    def test_quota_exhaustion_rejects_and_does_not_leave_a_job(self):
+        """配额不足时不能返回已受理，也不能留下永远不会执行的任务。"""
+        from app.models.legal_platform import LegalAsyncJob, LegalAsyncJobInput
+
+        mock_r = self._mock_redis_at_count(1)
+        with patch("redis.from_url", return_value=mock_r), patch(
+            "app.services.billing.subscription_service.subscription_service.try_consume_quota",
+            return_value={"ok": False, "error_code": "QUOTA_EXCEEDED"},
+        ):
+            response = self.client.post(
+                "/api/open/v1/contract-reviews",
+                json={"title": "额度不足", "content": "这是一份合同内容，需要审查风险条款。"},
+                headers=self.api_headers,
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("QUOTA_EXCEEDED", response.text)
+        self.assertEqual(self.db.query(LegalAsyncJob).count(), 0)
+        self.assertEqual(self.db.query(LegalAsyncJobInput).count(), 0)
 
     def _post_review(self, payload, mock_r):
         with patch("redis.from_url", return_value=mock_r):
@@ -335,18 +355,19 @@ class OpenApiRateLimitTests(unittest.TestCase):
         mock_r = self._mock_redis_at_count(1)
         payload = {"title": "幂等合同", "content": "这是一份合同内容，需要审查风险条款。", "idempotency_key": "ik-replay-1"}
         r1 = self._post_review(payload, mock_r)
-        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r1.status_code, 202)
         task_id1 = r1.json()["data"]["task_id"]
 
         r2 = self._post_review(payload, mock_r)
-        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.status_code, 202)
         data2 = r2.json()["data"]
         self.assertEqual(data2["task_id"], task_id1)
         self.assertTrue(data2["idempotent"])
         # 只创建了一个异步任务
+        from app.api.developer.legal_platform_api import _open_review_job_key
         from app.models.legal_platform import LegalAsyncJob
         jobs = self.db.query(LegalAsyncJob).filter(
-            LegalAsyncJob.idempotency_key == "ik-replay-1").all()
+            LegalAsyncJob.idempotency_key == _open_review_job_key(self.dev_app.id, "ik-replay-1")).all()
         self.assertEqual(len(jobs), 1)
 
     def test_idempotency_same_key_different_body_conflicts(self):
@@ -354,25 +375,72 @@ class OpenApiRateLimitTests(unittest.TestCase):
         mock_r = self._mock_redis_at_count(1)
         base = {"title": "幂等合同", "content": "这是一份合同内容，需要审查风险条款。", "idempotency_key": "ik-diff-1"}
         r1 = self._post_review(base, mock_r)
-        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r1.status_code, 202)
 
         changed = {**base, "content": "这是另一份完全不同的合同内容，用于测试冲突。"}
         r2 = self._post_review(changed, mock_r)
         self.assertEqual(r2.status_code, 409)
         self.assertIn("IDEMPOTENCY_KEY_CONFLICT", r2.text)
 
+    def test_idempotency_key_is_isolated_per_developer_app(self):
+        """不同应用可以独立使用同一个调用方幂等键。"""
+        second_raw_key = "lzj_op_" + secrets.token_urlsafe(32)
+        second_app = DeveloperApp(
+            organization_id=self.org_id,
+            name="SecondApp",
+            created_by=self.admin_user.id,
+        )
+        self.db.add(second_app)
+        self.db.flush()
+        self.db.add(DeveloperApiKey(
+            app_id=second_app.id,
+            organization_id=self.org_id,
+            key_hash=hashlib.sha256(second_raw_key.encode()).hexdigest(),
+            key_prefix=second_raw_key[:16],
+        ))
+        self.db.commit()
+
+        payload = {
+            "title": "应用隔离合同",
+            "content": "这是一份合同内容，需要审查风险条款。",
+            "idempotency_key": "shared-caller-key",
+        }
+        mock_r = self._mock_redis_at_count(1)
+        first = self._post_review(payload, mock_r)
+        with patch("redis.from_url", return_value=mock_r):
+            second = self.client.post(
+                "/api/open/v1/contract-reviews",
+                json=payload,
+                headers={"X-API-Key": second_raw_key},
+            )
+
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertNotEqual(first.json()["data"]["task_id"], second.json()["data"]["task_id"])
+
+    def test_public_app_payload_never_contains_webhook_secret_material(self):
+        from app.api.developer.legal_platform_api import _public_developer_app
+
+        self.dev_app.webhook_secret_hash = "hash-value"
+        self.dev_app.webhook_secret_ciphertext = "raw-secret-value"
+        payload = _public_developer_app(self.dev_app)
+
+        self.assertNotIn("webhook_secret_hash", payload)
+        self.assertNotIn("webhook_secret_ciphertext", payload)
+        self.assertTrue(payload["webhook_secret_configured"])
+
     def test_idempotency_in_progress_conflicts(self):
         """请求正在处理中（并发）：返回 409。"""
         import json
         import hashlib
-        from app.services.idempotency_service import idempotency_service
+        from app.services.jobs.idempotency_service import idempotency_service
         payload = {"title": "幂等合同", "content": "这是一份合同内容，需要审查风险条款。", "idempotency_key": "ik-inprog-1"}
         # 预置 in_progress 行，模拟并发中
         fingerprint = hashlib.sha256(json.dumps(
             {"title": "幂等合同", "content": "这是一份合同内容，需要审查风险条款。",
              "contract_type": None, "review_policy_id": None},
             sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
-        idempotency_service.begin(self.db, scope="open_api.contract_review",
+        idempotency_service.begin(self.db, scope=f"open_api.contract_review:{self.dev_app.id}",
                                   key="ik-inprog-1", request_hash=fingerprint)
 
         mock_r = self._mock_redis_at_count(1)

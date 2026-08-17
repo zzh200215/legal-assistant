@@ -55,6 +55,11 @@ from app.models.security_auth import (
     AuthorizationSnapshot, AuthDevice, MFACredential, MFAChallenge, MFARecoveryCode,
     RefreshToken, RevokedToken,
 )
+from app.models.ops_metric import (
+    OpsMetricDaily, OpsMetricHourly, OpsMetricSnapshot, OpsMetricWatermark,
+)
+from app.models.ws_event_log import WsEventLog
+from app.models.webhook_nonce import WebhookNonce
 
 __all__ = [
     "User",
@@ -162,4 +167,10 @@ __all__ = [
     "MFAChallenge",
     "MFARecoveryCode",
     "AuthorizationSnapshot",
+    "OpsMetricSnapshot",
+    "OpsMetricHourly",
+    "OpsMetricDaily",
+    "OpsMetricWatermark",
+    "WsEventLog",
+    "WebhookNonce",
 ]

@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.data_protection_service import data_protection_service
+from app.services.org.data_protection_service import data_protection_service
 
 
 class DataProtectionServiceTests(unittest.TestCase):

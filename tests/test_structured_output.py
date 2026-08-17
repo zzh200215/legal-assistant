@@ -14,7 +14,7 @@ from app.core.structured_output import (
     normalize_schema,
     parse_structured_output,
 )
-from app.services.llm_governance_service import LLMGovernanceError, llm_governance_service
+from app.services.llm.llm_governance_service import LLMGovernanceError, llm_governance_service
 
 _CONTRACT_SCHEMA = {
     "type": "object",

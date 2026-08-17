@@ -1,7 +1,7 @@
 """统一计费/订阅状态机测试：拒绝非法跳转。"""
 import unittest
 
-from app.services.billing_state_machines import (
+from app.services.billing.billing_state_machines import (
     BillingStateError, subscription_transition, platform_payment_transition,
     payment_record_transition, invoice_transition, refund_transition, reservation_transition,
 )

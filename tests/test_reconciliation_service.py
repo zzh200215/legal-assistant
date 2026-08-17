@@ -12,7 +12,7 @@ from app.core.time import utc_now
 from app.models.legal_billing import LegalInvoice
 from app.models.payment_event import PaymentEvent
 from app.models.reconciliation import ReconciliationDiscrepancy, ReconciliationRun
-from app.services.reconciliation_service import reconciliation_service
+from app.services.billing.reconciliation_service import reconciliation_service
 
 
 def _engine():

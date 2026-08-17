@@ -1,19 +1,33 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useQuery } from '../query/useQuery.js'
+import { useMutation } from '../query/useMutation.js'
+import { qk } from '../query/keys'
 
-// Owns legal-document template, draft-generation, and draft-history requests.
+// 文书草稿 tab 领域模块（查询层 + 幂等写）：模板/草稿列表走统一查询层，生成草稿经 useMutation。
+
 export function useLegalDrafts({ client, message, caseId }) {
-  const templates = ref([])
   const draftForm = ref({ document_type: '', fields: {} })
   const draftLoading = ref(false)
   const draftResult = ref(null)
-  const drafts = ref([])
   const draftFieldMap = ref({})
 
+  const templatesQuery = useQuery({
+    key: ['legal', 'templates'],
+    fetcher: () => client.listLegalTemplates(),
+    staleTime: 60 * 1000,
+  })
+
+  const draftsQuery = useQuery({
+    key: qk.legal.drafts(),
+    fetcher: () => client.listLegalDrafts(),
+    staleTime: 30 * 1000,
+  })
+
+  const templates = computed(() => templatesQuery.data.value || [])
+  const drafts = computed(() => draftsQuery.data.value || [])
+
   const loadTemplates = async () => {
-    try {
-      const { data } = await client.listLegalTemplates()
-      templates.value = data
-    } catch {}
+    await templatesQuery.refetch()
   }
 
   const setTemplateFields = (fields) => {
@@ -21,25 +35,31 @@ export function useLegalDrafts({ client, message, caseId }) {
   }
 
   const loadDrafts = async () => {
-    try {
-      const { data } = await client.listLegalDrafts()
-      drafts.value = data
-    } catch {}
+    await draftsQuery.refetch()
   }
+
+  const submitMutation = useMutation({
+    mutationFn: (payload, ctx) => client.createLegalDraft(payload.body, { idempotencyKey: ctx.idempotencyKey }),
+    invalidate: [qk.legal.drafts()],
+    onSuccess: (result) => {
+      draftResult.value = result.data
+    },
+    onError: (error) => {
+      message.error(error.message || '生成失败')
+    },
+  })
 
   const submitDraft = async () => {
     if (!draftForm.value.document_type) return message.warning('请选择文书类型')
     draftLoading.value = true
     try {
-      const { data } = await client.createLegalDraft({
-        document_type: draftForm.value.document_type,
-        fields: draftForm.value.fields,
-        case_id: caseId?.value || undefined,
+      await submitMutation.mutate({
+        body: {
+          document_type: draftForm.value.document_type,
+          fields: draftForm.value.fields,
+          case_id: caseId?.value || undefined,
+        },
       })
-      draftResult.value = data
-      await loadDrafts()
-    } catch (error) {
-      message.error(error.response?.data?.detail || '生成失败')
     } finally {
       draftLoading.value = false
     }

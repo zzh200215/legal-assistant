@@ -28,7 +28,7 @@ from app.core.database import SessionLocal  # noqa: E402
 from app.models.org import LegalMemberRole, Organization, OrganizationMember  # noqa: E402
 from app.models.subscription import PlanTier, SubscriptionPlan, SubscriptionStatus, UserSubscription  # noqa: E402
 from app.models.user import User  # noqa: E402
-from app.services.subscription_service import subscription_service  # noqa: E402
+from app.services.billing.subscription_service import subscription_service  # noqa: E402
 
 DEFAULT_PASSWORD = "Pilot@2026"
 

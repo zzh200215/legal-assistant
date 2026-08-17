@@ -13,7 +13,7 @@ from app.core.database import Base
 from app.models.agent import AgentAuditEvent, AgentRun, ToolCallLog
 from app.models.task import Task
 from app.models.user import User
-from app.services.agent_compensation import run_compensation
+from app.services.agent.agent_compensation import run_compensation
 
 
 class CompensationTests(unittest.TestCase):

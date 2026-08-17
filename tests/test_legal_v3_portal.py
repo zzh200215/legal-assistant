@@ -241,7 +241,7 @@ class PortalTokenAuthTests(unittest.TestCase):
         mock_redis.incr.return_value = 1  # first send in window, not rate-limited
         mock_redis.expire.return_value = True
         with patch("redis.from_url", return_value=mock_redis), \
-             patch("app.services.outbound_email_service.outbound_email_service.send_portal_otp") as send_otp:
+             patch("app.services.notification.outbound_email_service.outbound_email_service.send_portal_otp") as send_otp:
             resp = self.client.post(f"/api/legal/portal/{raw_token}/send-otp")
         self.assertEqual(resp.status_code, 200)
         send_otp.assert_called_once()
@@ -496,7 +496,7 @@ class PortalP003HardeningTests(unittest.TestCase):
 
     def test_admin_can_disable_verification_for_progress_only_links(self):
         mock_audit = MagicMock()
-        with patch("app.services.security_audit_service.write_event", mock_audit):
+        with patch("app.services.org.security_audit_service.write_event", mock_audit):
             resp = self._create_link_via_api(
                 {"client_email": "c@t.com", "expires_days": 7,
                  "require_email_verification": 0, "items": []},
@@ -515,7 +515,7 @@ class PortalP003HardeningTests(unittest.TestCase):
         mock_redis.incr.return_value = 4
         mock_redis.expire.return_value = True
         with patch("redis.from_url", return_value=mock_redis), \
-             patch("app.services.outbound_email_service.outbound_email_service.send_portal_otp"):
+             patch("app.services.notification.outbound_email_service.outbound_email_service.send_portal_otp"):
             resp = self.client.post(f"/api/legal/portal/{raw_token}/send-otp")
         self.assertEqual(resp.status_code, 429)
 
@@ -526,7 +526,7 @@ class PortalP003HardeningTests(unittest.TestCase):
         mock_redis.incr.return_value = 1
         mock_redis.expire.return_value = True
         with patch("redis.from_url", return_value=mock_redis), \
-             patch("app.services.outbound_email_service.outbound_email_service.send_portal_otp"):
+             patch("app.services.notification.outbound_email_service.outbound_email_service.send_portal_otp"):
             resp = self.client.post(f"/api/legal/portal/{raw_token}/send-otp")
         self.assertEqual(resp.status_code, 200)
 
@@ -540,7 +540,7 @@ class PortalP003HardeningTests(unittest.TestCase):
         mock_redis.incr.return_value = 1
         mock_redis.expire.return_value = True
         with patch("redis.from_url", return_value=mock_redis), \
-             patch("app.services.outbound_email_service.outbound_email_service.send_portal_otp"):
+             patch("app.services.notification.outbound_email_service.outbound_email_service.send_portal_otp"):
             resp = self.client.post(f"/api/legal/portal/{raw_token}/send-otp")
         self.assertEqual(resp.status_code, 200)
         log = self.db.query(LegalPortalAccessLog).filter(
@@ -598,7 +598,7 @@ class PortalP003HardeningTests(unittest.TestCase):
 
     def test_session_ttl_is_8_hours(self):
         """验证会话有效期为8小时（28800秒）"""
-        from app.api.legal_portal_api import _SESSION_TTL
+        from app.api.legal.legal_portal_api import _SESSION_TTL
         self.assertEqual(_SESSION_TTL, 28800)
 
     # ── Revoke cleans up Redis sessions ──────────────────────────────────────

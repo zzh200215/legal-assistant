@@ -29,6 +29,7 @@ LEGAL_RESOURCE_SCOPE_DENIED   = "LEGAL_RESOURCE_SCOPE_DENIED"
 API_KEY_INVALID               = "API_KEY_INVALID"
 API_KEY_IP_DENIED             = "API_KEY_IP_DENIED"
 API_RATE_LIMIT_EXCEEDED       = "API_RATE_LIMIT_EXCEEDED"
+QUOTA_EXCEEDED                = "QUOTA_EXCEEDED"
 
 # ── Webhook ───────────────────────────────────────────────────────────────────
 WEBHOOK_SIGNATURE_INVALID     = "WEBHOOK_SIGNATURE_INVALID"
@@ -40,10 +41,16 @@ EXPORT_ASYNC_REQUIRED         = "EXPORT_ASYNC_REQUIRED"
 IDEMPOTENCY_KEY_CONFLICT      = "IDEMPOTENCY_KEY_CONFLICT"
 IDEMPOTENCY_KEY_IN_PROGRESS   = "IDEMPOTENCY_KEY_IN_PROGRESS"
 
+# ── 异步 Job ──────────────────────────────────────────────────────────────────
+JOB_NOT_FOUND                 = "JOB_NOT_FOUND"
+JOB_NOT_CANCELLABLE           = "JOB_NOT_CANCELLABLE"
+
 # ── 通用 ──────────────────────────────────────────────────────────────────────
 VALIDATION_ERROR              = "VALIDATION_ERROR"
 UNAUTHORIZED                  = "UNAUTHORIZED"
 NOT_FOUND                     = "NOT_FOUND"
+SERVICE_UNAVAILABLE           = "SERVICE_UNAVAILABLE"
+REQUEST_TIMEOUT               = "REQUEST_TIMEOUT"
 
 
 _DEFAULT_MESSAGES: dict[str, str] = {
@@ -59,13 +66,18 @@ _DEFAULT_MESSAGES: dict[str, str] = {
     API_KEY_INVALID:             "API Key 无效、已撤销或已过期",
     API_KEY_IP_DENIED:           "请求 IP 不在该 API Key 的白名单范围内，请联系应用管理员",
     API_RATE_LIMIT_EXCEEDED:     "调用次数超出当前套餐限制",
+    QUOTA_EXCEEDED:              "当前套餐的合同审查配额已用完",
     WEBHOOK_SIGNATURE_INVALID:   "Webhook 签名校验失败",
     EXPORT_ASYNC_REQUIRED:       "导出数据量超出同步阈值，已创建异步任务，请通过任务 ID 查询结果",
     IDEMPOTENCY_KEY_CONFLICT:    "相同幂等键已存在但请求体不一致",
     IDEMPOTENCY_KEY_IN_PROGRESS: "该幂等键请求正在处理中，请稍后重试",
+    JOB_NOT_FOUND:               "任务不存在或无权访问",
+    JOB_NOT_CANCELLABLE:         "任务当前状态不可取消",
     VALIDATION_ERROR:            "参数校验失败",
     UNAUTHORIZED:                "未登录或登录已失效",
     NOT_FOUND:                   "资源不存在或无权访问",
+    SERVICE_UNAVAILABLE:         "服务暂不可用，请稍后重试",
+    REQUEST_TIMEOUT:             "请求处理超时，请稍后重试或查询任务状态",
 }
 
 

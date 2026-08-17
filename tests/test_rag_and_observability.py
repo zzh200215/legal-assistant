@@ -16,9 +16,9 @@ from app.models.document import DocumentQARecord
 from app.core.llm_client import LLMClient
 from app.models.llm_call_log import LLMCallLog
 from app.models.prompt import PromptTemplate, PromptTemplateVersion
-from app.services.analytics_service import analytics_service
-from app.services.llm_observability_service import LLMObservabilityService
-from app.services.rag_service import rag_service
+from app.services.observability.analytics_service import analytics_service
+from app.services.llm.llm_observability_service import LLMObservabilityService
+from app.services.rag.rag_service import rag_service
 
 
 class RagServiceTests(unittest.TestCase):
@@ -57,7 +57,7 @@ class RagServiceTests(unittest.TestCase):
         ] 
 
         with patch.object(rag_service, "search_async", new=AsyncMock(return_value=low_relevance_chunks)), patch(
-            "app.services.rag_service.llm_client.generate",
+            "app.services.rag.rag_service.llm_client.generate",
             new=AsyncMock(return_value="根据当前文档内容，无法确认该问题。"),
         ):
             result = asyncio.run(rag_service.answer_async("合同负责人是谁", document_id=1, user_id=1))
@@ -86,7 +86,7 @@ class RagServiceTests(unittest.TestCase):
         ]
 
         with patch.object(rag_service, "search_async", new=AsyncMock(return_value=relevant_chunks)), patch(
-            "app.services.rag_service.llm_client.generate",
+            "app.services.rag.rag_service.llm_client.generate",
             new=AsyncMock(return_value="首付款应于2026年7月1日前支付100万元。[片段 1]"),
         ):
             result = asyncio.run(rag_service.answer_async("首付款金额和时间是什么", document_id=2, user_id=1))
@@ -129,7 +129,7 @@ class RagServiceTests(unittest.TestCase):
         ]
 
         with patch.object(rag_service, "search_async", new=AsyncMock(return_value=relevant_chunks)), patch(
-            "app.services.rag_service.llm_client.generate",
+            "app.services.rag.rag_service.llm_client.generate",
             new=AsyncMock(return_value="项目团队由三名顾问和两名法务组成。"),
         ):
             result = asyncio.run(rag_service.answer_async("首付款金额和时间是什么", document_id=2, user_id=1))
@@ -265,7 +265,7 @@ class RagServiceTests(unittest.TestCase):
             }
 
         async def run_case():
-            with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
+            with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
                 rag_service.collection,
                 "query",
                 side_effect=fake_query,
@@ -292,7 +292,7 @@ class RagServiceTests(unittest.TestCase):
             captured["texts"] = texts
             return [[0.1, 0.2]]
 
-        with patch("app.services.rag_service.llm_client.embed", new=fake_embed), patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", new=fake_embed), patch.object(
             rag_service.collection,
             "delete",
             return_value=None,
@@ -334,7 +334,7 @@ class RagServiceTests(unittest.TestCase):
             "distances": [[0.2]],
         }
 
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service.collection, "query", return_value=fake_query,
         ):
             asyncio.run(rag_service._dense_multi_recall(["同一查询问题"], where=None, candidate_limit=3, user_id=7))
@@ -357,7 +357,7 @@ class RagServiceTests(unittest.TestCase):
         def fake_upsert(**kwargs):
             state.update({"ids": kwargs["ids"], "documents": kwargs["documents"], "metadatas": kwargs["metadatas"]})
 
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service.collection, "get", side_effect=fake_get,
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
             rag_service.collection, "upsert", side_effect=fake_upsert,
@@ -374,7 +374,7 @@ class RagServiceTests(unittest.TestCase):
         chunks = [{"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "不变的内容", "section_path": []}]
         existing = {"ids": ["doc5_chunk0"], "documents": ["不变的内容"], "metadatas": [{"document_id": 5}]}
         added = []
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service.collection, "get", return_value=existing,
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
             rag_service.collection, "upsert", side_effect=lambda **kw: added.append(kw),
@@ -391,7 +391,7 @@ class RagServiceTests(unittest.TestCase):
         new_chunk = {"embedding_id": "doc5_chunk0", "chunk_index": 0, "content": "新内容", "section_path": []}
         existing = {"ids": ["doc5_chunk0"], "documents": ["旧内容"], "metadatas": [{"document_id": 5}]}
         added = []
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service.collection, "get", return_value=existing,
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
             rag_service.collection, "upsert", side_effect=lambda **kw: added.append(kw),
@@ -413,7 +413,7 @@ class RagServiceTests(unittest.TestCase):
             "metadatas": [{"document_id": 5}, {"document_id": 5}],
         }
         deleted = []
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
             rag_service.collection, "get", return_value=existing,
         ), patch.object(rag_service.collection, "delete", side_effect=lambda **kw: deleted.append(kw)), patch.object(
             rag_service.collection, "upsert", return_value=None,
@@ -441,7 +441,7 @@ class RagServiceTests(unittest.TestCase):
                 added.update(kwargs)
 
         chunks = [{"embedding_id": "doc6_chunk0", "chunk_index": 0, "content": "内容", "section_path": []}]
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
             rag_service.collection, "get", return_value={"ids": [], "documents": []},
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
             rag_service.collection, "upsert", new=FakeAdd(),
@@ -465,7 +465,7 @@ class RagServiceTests(unittest.TestCase):
                 added.update(kwargs)
 
         chunks = [{"embedding_id": "doc6_chunk0", "chunk_index": 0, "content": "内容", "section_path": []}]
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed), patch.object(
             rag_service.collection, "get", return_value={"ids": [], "documents": []},
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
             rag_service.collection, "upsert", new=FakeUpsert(),
@@ -492,7 +492,7 @@ class RagServiceTests(unittest.TestCase):
             "metadatas": [{"document_id": 5, "embedding_model": "text-embedding-v2-legacy"}],
         }
         added = []
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service.collection, "get", return_value=existing,
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
             rag_service.collection, "upsert", side_effect=lambda **kw: added.append(kw),
@@ -524,7 +524,7 @@ class RagServiceTests(unittest.TestCase):
         }
         existing = {"ids": ["doc5_chunk0"], "documents": ["不变的内容"], "metadatas": [old_meta]}
         added = []
-        with patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+        with patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service.collection, "get", return_value=existing,
         ), patch.object(rag_service.collection, "delete", return_value=None), patch.object(
             rag_service.collection, "upsert", side_effect=lambda **kw: added.append(kw),
@@ -566,7 +566,7 @@ class RagServiceTests(unittest.TestCase):
             return None
 
         with patch.object(rag_service, "_build_where", side_effect=spy), patch(
-            "app.services.rag_service.llm_client.embed", side_effect=fake_embed,
+            "app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed,
         ), patch.object(rag_service.collection, "query", return_value={
             "ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]],
         }), patch.object(rag_service.collection, "get", return_value={
@@ -663,7 +663,7 @@ class RagServiceTests(unittest.TestCase):
             return None
 
         with patch.object(rag_service, "_build_where", side_effect=spy), patch(
-            "app.services.rag_service.llm_client.embed", side_effect=fake_embed,
+            "app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed,
         ), patch.object(rag_service.collection, "query", return_value={
             "ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]],
         }), patch.object(rag_service.collection, "get", return_value={
@@ -682,15 +682,15 @@ class RagServiceTests(unittest.TestCase):
         async def fake_generate(prompt, temperature=0.0, action="generate", user_id=None,
                                 prompt_template=None, prompt_version=None):
             return '{"search_query": "工资 劳动报酬 计算方式", "expand": ["薪资", "劳动报酬"]}'
-        with patch("app.services.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", True), patch(
-            "app.services.rag_service.llm_client.generate", new=fake_generate,
+        with patch("app.services.rag.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", True), patch(
+            "app.services.rag.rag_service.llm_client.generate", new=fake_generate,
         ):
             variants = asyncio.run(rag_service._rewrite_query_llm("员工工资怎么计算，公司拖欠怎么办", user_id=7))
         self.assertIn("工资 劳动报酬 计算方式", variants)
         self.assertTrue(any("薪资" in v for v in variants))
 
     def test_rewrite_query_llm_disabled_or_failure_returns_empty(self):
-        with patch("app.services.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", False):
+        with patch("app.services.rag.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", False):
             variants = asyncio.run(rag_service._rewrite_query_llm("员工工资怎么计算", user_id=7))
         self.assertEqual(variants, [])
 
@@ -704,9 +704,9 @@ class RagServiceTests(unittest.TestCase):
         def spy(**kwargs):
             captured.update(kwargs)
             return None
-        with patch("app.services.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", True), patch(
-            "app.services.rag_service.llm_client.generate", new=fake_generate,
-        ), patch("app.services.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
+        with patch("app.services.rag.rag_service.settings.RAG_QUERY_REWRITE_LLM_ENABLED", True), patch(
+            "app.services.rag.rag_service.llm_client.generate", new=fake_generate,
+        ), patch("app.services.rag.rag_service.llm_client.embed", side_effect=fake_embed) as mock_embed, patch.object(
             rag_service, "_build_where", side_effect=spy,
         ), patch.object(rag_service.collection, "query", return_value={
             "ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]],
@@ -1268,10 +1268,10 @@ class RagServiceTests(unittest.TestCase):
             "_expand_context_chunks",
             new=AsyncMock(return_value=expanded_chunks),
         ), patch(
-            "app.services.rag_service.prompt_service.render_by_name",
+            "app.services.rag.rag_service.prompt_service.render_by_name",
             side_effect=fake_render,
         ), patch(
-            "app.services.rag_service.llm_client.generate",
+            "app.services.rag.rag_service.llm_client.generate",
             new=AsyncMock(return_value="首付款应于2026年7月1日前支付100万元。"),
         ):
             result = asyncio.run(rag_service.answer_async("首付款金额和时间是什么", document_id=2, user_id=1))
@@ -1301,9 +1301,9 @@ class RagServiceTests(unittest.TestCase):
         with patch.object(rag_service, "search_async", new=AsyncMock(return_value=[chunk])), patch.object(
             rag_service, "_expand_context_chunks", new=AsyncMock(return_value=[chunk]),
         ), patch(
-            "app.services.rag_service.prompt_service.render_by_name", side_effect=fake_render,
+            "app.services.rag.rag_service.prompt_service.render_by_name", side_effect=fake_render,
         ), patch(
-            "app.services.rag_service.llm_client.generate",
+            "app.services.rag.rag_service.llm_client.generate",
             new=AsyncMock(return_value="经济补偿按工作年限计算。"),
         ):
             asyncio.run(rag_service.answer_async(
@@ -1700,10 +1700,10 @@ class AnalyticsObservabilityTests(unittest.TestCase):
         )
         self.db.commit()
 
-        with patch("app.services.analytics_service.settings.LLM_ROUTING_ALERT_MIN_REQUESTS", 4):
+        with patch("app.services.observability.analytics_service.settings.LLM_ROUTING_ALERT_MIN_REQUESTS", 4):
             insufficient = analytics_service.get_llm_routing_health(self.db)
-        with patch("app.services.analytics_service.settings.LLM_ROUTING_ALERT_MIN_REQUESTS", 3), patch(
-            "app.services.analytics_service.settings.LLM_ROUTING_ALERT_PRIMARY_FAILURE_RATE", 0.5
+        with patch("app.services.observability.analytics_service.settings.LLM_ROUTING_ALERT_MIN_REQUESTS", 3), patch(
+            "app.services.observability.analytics_service.settings.LLM_ROUTING_ALERT_PRIMARY_FAILURE_RATE", 0.5
         ):
             degraded = analytics_service.get_llm_routing_health(self.db)
 
@@ -1792,8 +1792,8 @@ class AnalyticsObservabilityTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
             baseline_path = output_dir / "baseline_snapshot.json"
-            with patch("app.services.analytics_service.DEFAULT_OUTPUT_DIR", output_dir), patch(
-                "app.services.analytics_service.DEFAULT_BASELINE_SNAPSHOT_PATH",
+            with patch("app.services.observability.prompt_eval.DEFAULT_OUTPUT_DIR", output_dir), patch(
+                "app.services.observability.prompt_eval.DEFAULT_BASELINE_SNAPSHOT_PATH",
                 baseline_path,
             ):
                 overview = analytics_service.get_experiment_overview(self.db, days=30)
@@ -1886,8 +1886,8 @@ class AnalyticsObservabilityTests(unittest.TestCase):
             baseline_path = output_dir / "baseline_snapshot.json"
             summary_path.write_text(json.dumps(summary_payload, ensure_ascii=False), encoding="utf-8")
             baseline_path.write_text(json.dumps(baseline_payload, ensure_ascii=False), encoding="utf-8")
-            with patch("app.services.analytics_service.DEFAULT_OUTPUT_DIR", output_dir), patch(
-                "app.services.analytics_service.DEFAULT_BASELINE_SNAPSHOT_PATH",
+            with patch("app.services.observability.prompt_eval.DEFAULT_OUTPUT_DIR", output_dir), patch(
+                "app.services.observability.prompt_eval.DEFAULT_BASELINE_SNAPSHOT_PATH",
                 baseline_path,
             ):
                 overview = analytics_service.get_experiment_overview(self.db, days=30)
@@ -1904,7 +1904,7 @@ class AnalyticsObservabilityTests(unittest.TestCase):
     def test_llm_observability_service_redacts_sensitive_request_response_and_error(self):
         service = LLMObservabilityService()
 
-        with patch("app.services.llm_observability_service.SessionLocal", self.SessionLocal):
+        with patch("app.services.llm.llm_observability_service.SessionLocal", self.SessionLocal):
             service.log_event(
                 module_name="chat",
                 action="chat",
@@ -1930,7 +1930,7 @@ class AnalyticsObservabilityTests(unittest.TestCase):
     def test_llm_observability_service_keeps_embedding_excerpt_readable(self):
         service = LLMObservabilityService()
 
-        with patch("app.services.llm_observability_service.SessionLocal", self.SessionLocal):
+        with patch("app.services.llm.llm_observability_service.SessionLocal", self.SessionLocal):
             service.log_event(
                 module_name="document",
                 action="embedding",
@@ -2001,10 +2001,10 @@ class EmbeddingObservabilityTests(unittest.IsolatedAsyncioTestCase):
             captured.update(kwargs)
 
         with patch.object(rag_service, "search_async", new=AsyncMock(return_value=relevant_chunks)), patch(
-            "app.services.rag_service.llm_client.generate",
+            "app.services.rag.rag_service.llm_client.generate",
             new=AsyncMock(return_value="The upfront payment is 1 million CNY before 2026-07-01."),
         ), patch(
-            "app.services.rag_service.llm_observability_service.log_event",
+            "app.services.rag.answer.llm_observability_service.log_event",
             side_effect=fake_log_event,
         ):
             result = await rag_service.answer_async("What is the upfront payment amount?", document_id=2, user_id=1)
@@ -2307,7 +2307,7 @@ class GovernanceAccessListTests(unittest.TestCase):
         )
 
     def test_list_accessible_document_ids_includes_shared_docs(self):
-        from app.services.document_governance_service import document_governance_service
+        from app.services.documents.document_governance_service import document_governance_service
 
         owner = self._make_user("owner", 10, 20)
         sharer = self._make_user("sharer", 10, 20)
@@ -2375,7 +2375,7 @@ class BM25IndexTests(unittest.TestCase):
         rag_service._bm25_stale = False
         rag_service._bm25_built_at = 0.0
         rag_service._bm25_index = object()  # 非 None 但已超龄
-        with patch("app.services.rag_service.settings.RAG_BM25_TTL_SECONDS", 10), patch.object(
+        with patch("app.services.rag.rag_service.settings.RAG_BM25_TTL_SECONDS", 10), patch.object(
             rag_service.collection, "get",
             return_value={"ids": [], "documents": [], "metadatas": []},
         ) as mock_get:

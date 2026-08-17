@@ -10,8 +10,8 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.database import Base
-from app.services.prompt_defaults import DEFAULT_PROMPT_TEMPLATES
-from app.services.prompt_service import PromptService
+from app.services.llm.prompt_defaults import DEFAULT_PROMPT_TEMPLATES
+from app.services.llm.prompt_service import PromptService
 
 
 class PromptServiceTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class PromptServiceTests(unittest.TestCase):
         Base.metadata.create_all(bind=engine)
         self.db = TestingSessionLocal()
         self.service = PromptService()
-        self.sessionlocal_patcher = patch("app.services.prompt_service.SessionLocal", TestingSessionLocal)
+        self.sessionlocal_patcher = patch("app.services.llm.prompt_service.SessionLocal", TestingSessionLocal)
         self.sessionlocal_patcher.start()
 
     def tearDown(self):
@@ -124,7 +124,7 @@ class PromptServiceTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("app.services.prompt_service.EVAL_OUTPUT_SUMMARY_PATH", summary_path):
+            with patch("app.services.llm.prompt_service.EVAL_OUTPUT_SUMMARY_PATH", summary_path):
                 payload = self.service.serialize_template(tmpl)
 
         self.assertEqual(payload["variables_schema"][0]["name"], "question")

@@ -23,9 +23,24 @@ class LLMCallLog(Base):
     duration_ms = Column(Integer, nullable=True)
     status = Column(String(32), nullable=False, default="success", index=True)
     request_id = Column(String(36), nullable=True, index=True)
+    # P1 链路关联：trace_id/task_id/agent_run_id/org 由统一上下文写入，缺失为 NULL。
+    trace_id = Column(String(64), nullable=True, index=True)
+    task_id = Column(String(128), nullable=True, index=True)
+    agent_run_id = Column(Integer, nullable=True, index=True)
+    organization_id = Column(Integer, nullable=True, index=True)
+    error_category = Column(String(32), nullable=True, index=True,
+                            comment="稳定错误类别（classify_error_category 枚举），供聚合标签")
     routing_role = Column(String(16), nullable=True, index=True)
     routing_stage = Column(String(16), nullable=True, index=True)
     error_message = Column(Text, nullable=True)
     request_excerpt = Column(Text, nullable=True)
     response_excerpt = Column(Text, nullable=True)
+    # P0 出站数据保护审计：目标提供方 / 数据等级 / PII 命中规则 / 命中与脱敏数量 / 拦截原因。
+    # 命中规则只存规则 code（JSON 数组字符串），绝不存原始 PII 或完整提示词。
+    provider = Column(String(64), nullable=True)
+    data_level = Column(String(32), nullable=True, index=True)
+    pii_hit_codes = Column(Text, nullable=True)
+    pii_hit_count = Column(Integer, nullable=False, default=0)
+    redacted_count = Column(Integer, nullable=False, default=0)
+    blocked_reason = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

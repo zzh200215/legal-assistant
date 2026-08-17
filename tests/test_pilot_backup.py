@@ -44,7 +44,7 @@ class PilotBackupTaskTests(unittest.TestCase):
         self.assertEqual(str(entry["schedule"]), "<crontab: 0 2 * * * (m/h/dM/MY/d)>")
 
     def test_backup_task_skips_sqlite_default_driver(self):
-        with patch("app.tasks.get_settings") as mock_settings:
+        with patch("app.tasks.integration_tasks.get_settings") as mock_settings:
             mock_settings.return_value.DATABASE_URL = "sqlite:///./data/app.db"
             mock_settings.return_value.BACKUP_OUTPUT_DIR = "data/backups"
             mock_settings.return_value.BACKUP_DATA_DIRS = ["data/uploads", "data/chroma_db"]
@@ -55,8 +55,8 @@ class PilotBackupTaskTests(unittest.TestCase):
         self.assertIn("sqlite", result["reason"])
 
     def test_backup_task_reports_subprocess_failure_as_error(self):
-        with patch("app.tasks.get_settings") as mock_settings, patch(
-            "app.tasks.subprocess.run", side_effect=OSError("mysqldump not found")
+        with patch("app.tasks.integration_tasks.get_settings") as mock_settings, patch(
+            "app.tasks.integration_tasks.subprocess.run", side_effect=OSError("mysqldump not found")
         ):
             mock_settings.return_value.DATABASE_URL = "mysql+pymysql://lawyer:secret@db.example:3306/legal"
             mock_settings.return_value.BACKUP_OUTPUT_DIR = "data/backups"
@@ -125,7 +125,7 @@ class PilotBackupTaskTests(unittest.TestCase):
             self.assertEqual(_prune_old_backups(root / "does-not-exist", retention_count=5), [])
 
     def test_retention_forwarded_by_beat_task(self):
-        with patch("app.tasks.get_settings") as mock_settings, patch("app.tasks.subprocess.run") as mock_run:
+        with patch("app.tasks.integration_tasks.get_settings") as mock_settings, patch("app.tasks.integration_tasks.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = '{"status":"ok","backup_dir":"/x"}'
             mock_settings.return_value.DATABASE_URL = "mysql+pymysql://lawyer:secret@db.example:3306/legal"

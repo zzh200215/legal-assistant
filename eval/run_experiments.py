@@ -7,7 +7,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from eval.common import ensure_eval_llm_ready
+from eval.common import ensure_eval_llm_ready, set_eval_seed
 from eval.bundle_utils import (
     DEFAULT_BASELINE_SNAPSHOT_PATH,
     DEFAULT_DATASET_PATH,
@@ -269,6 +269,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--user-id", type=int, default=9000, help="User id filter for RAG evaluation")
     parser.add_argument("--experiment", default=None, help="Optional single experiment name to run")
     parser.add_argument("--skip-index", action="store_true", help="Use existing Chroma index and skip re-indexing corpus")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible evaluation")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="Directory for summary and badcase artifacts")
     parser.add_argument(
         "--baseline-path",
@@ -283,6 +284,7 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
+    set_eval_seed(args.seed)  # 阶段 4：固定随机种子，保证同版本可复现
     ensure_eval_llm_ready()
     paths = resolve_eval_paths(
         bundle_dir=args.bundle_dir,

@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import hmac
+import time
 import unittest
 
 from fastapi.testclient import TestClient
@@ -117,7 +118,7 @@ class FeishuApiTests(unittest.TestCase):
     def test_callback_signature_verified_when_key_configured(self):
         import json
 
-        import app.api.feishu_api as feishu_api
+        import app.api.channels.feishu_api as feishu_api
 
         payload = json.dumps({"type": "message", "event": {"x": 1}}).encode("utf-8")
         with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
@@ -144,10 +145,11 @@ class FeishuApiTests(unittest.TestCase):
     def test_callback_signature_v2(self):
         import json
 
-        import app.api.feishu_api as feishu_api
+        import app.api.channels.feishu_api as feishu_api
 
         payload = json.dumps({"type": "message", "event": {"x": 1}}).encode("utf-8")
-        ts, nonce = "1720000000", "rand123"
+        # P1-C：v2 要求时间戳在有效窗口内（WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS，默认 300s）
+        ts, nonce = str(int(time.time())), "rand123"
         with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
             mock_settings.FEISHU_EVENT_ENCRYPT_KEY = "enc_key_test"
             mock_settings.FEISHU_CALLBACK_VERIFY = "auto"
@@ -172,7 +174,7 @@ class FeishuApiTests(unittest.TestCase):
     def test_callback_signature_v1(self):
         import json
 
-        import app.api.feishu_api as feishu_api
+        import app.api.channels.feishu_api as feishu_api
 
         payload = json.dumps({"type": "message", "event": {"x": 1}}).encode("utf-8")
         with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
@@ -193,7 +195,7 @@ class FeishuApiTests(unittest.TestCase):
     def test_callback_signature_v2_only_mode(self):
         import json
 
-        import app.api.feishu_api as feishu_api
+        import app.api.channels.feishu_api as feishu_api
 
         payload = json.dumps({"type": "message", "event": {"x": 1}}).encode("utf-8")
         with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:
@@ -212,7 +214,7 @@ class FeishuApiTests(unittest.TestCase):
     def test_callback_signature_off_mode_skips_verification(self):
         import json
 
-        import app.api.feishu_api as feishu_api
+        import app.api.channels.feishu_api as feishu_api
 
         payload = json.dumps({"type": "url_verification", "challenge": "abc"}).encode("utf-8")
         with __import__("unittest.mock").mock.patch.object(feishu_api, "settings") as mock_settings:

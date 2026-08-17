@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
+from app.core.database import SessionLocal
 from app.mcp.executor import tool_executor
 
 mcp = FastMCP(
@@ -27,9 +28,13 @@ async def document_search(query: str, document_id: int | None = None, user_id: i
     args = {"query": query}
     if document_id is not None:
         args["document_id"] = document_id
-    out, _ = await tool_executor.execute(
-        "document_search_tool", args, agent_type="knowledge_agent", user_id=user_id, db=None,
-    )
+    db = SessionLocal()
+    try:
+        out, _ = await tool_executor.execute(
+            "document_search_tool", args, agent_type="knowledge_agent", user_id=user_id, db=db,
+        )
+    finally:
+        db.close()
     return str(out)
 
 
@@ -37,10 +42,14 @@ async def document_search(query: str, document_id: int | None = None, user_id: i
 async def document_summary(document_id: int, user_id: int | None = None, max_length: int = 500):
     if user_id is None:
         return str({"success": False, "message": "缺少认证上下文，工具调用被拒绝", "error": "unauthorized"})
-    out, _ = await tool_executor.execute(
-        "document_summary_tool", {"document_id": document_id, "max_length": max_length},
-        agent_type="knowledge_agent", user_id=user_id, db=None,
-    )
+    db = SessionLocal()
+    try:
+        out, _ = await tool_executor.execute(
+            "document_summary_tool", {"document_id": document_id, "max_length": max_length},
+            agent_type="knowledge_agent", user_id=user_id, db=db,
+        )
+    finally:
+        db.close()
     return str(out)
 
 
@@ -48,10 +57,14 @@ async def document_summary(document_id: int, user_id: int | None = None, max_len
 async def document_extract_risks(document_id: int, user_id: int | None = None):
     if user_id is None:
         return str({"success": False, "message": "缺少认证上下文，工具调用被拒绝", "error": "unauthorized"})
-    out, _ = await tool_executor.execute(
-        "document_risk_tool", {"document_id": document_id},
-        agent_type="knowledge_agent", user_id=user_id, db=None,
-    )
+    db = SessionLocal()
+    try:
+        out, _ = await tool_executor.execute(
+            "document_risk_tool", {"document_id": document_id},
+            agent_type="knowledge_agent", user_id=user_id, db=db,
+        )
+    finally:
+        db.close()
     return str(out)
 
 

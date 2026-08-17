@@ -27,20 +27,20 @@ from app.core.config import get_settings
 from app.mcp.registry import mcp_registry
 from app.mcp.permission_guard import permission_guard
 from app.mcp.tool_contract import requires_approval_for, resolve_contract
-from app.services.agent_approval_service import agent_approval_service
-from app.services.agent_audit import (
+from app.services.agent.agent_approval_service import agent_approval_service
+from app.services.agent.agent_audit import (
     EVENT_APPROVAL_CREATED,
     EVENT_PERMISSION_DECISION,
     EVENT_TIMEOUT,
     EVENT_TOOL_EXECUTED,
     agent_audit_service,
 )
-from app.services.agent_run_state import (
+from app.services.agent.agent_run_state import (
     ERROR_CATEGORY_CANCELLED,
     RETRYABLE_CATEGORIES,
     classify_error,
 )
-from app.services.idempotency_service import IdempotencyConflictError, idempotency_service
+from app.services.jobs.idempotency_service import IdempotencyConflictError, idempotency_service
 
 logger = logging.getLogger("app.mcp.executor")
 
@@ -174,12 +174,30 @@ class AgentToolExecutor:
                 return result, serialized_input
 
         # ── 3. 审批闸 ─────────────────────────────────────────────
-        if (
+        approval_required = (
             not skip_approval
-            and db is not None
             and user_id is not None
             and requires_approval_for(tool_name, contract)
-        ):
+        )
+        if approval_required and db is None:
+            # fail-closed：需要人工审批的写工具在缺少数据库会话（无法创建审批记录）
+            # 时一律拒绝执行，绝不静默跳过审批闸。
+            result = {
+                "success": False,
+                "message": "该工具需要人工审批，但当前执行上下文缺少数据库会话，已拒绝执行。",
+                "data": {"tool_name": tool_name, "approval_required": True},
+                "error": "approval_context_missing",
+                "mcp_error_code": "APPROVAL_CONTEXT_REQUIRED",
+            }
+            self._audit(
+                db=db, run_id=agent_run_id, step=step_id, trace_id=trace_id,
+                user_id=user_id, organization_id=organization_id,
+                tool_name=tool_name, tool_version=contract.version,
+                event_type=EVENT_PERMISSION_DECISION, status="denied",
+                summary={"approval_context_missing": True}, duration_ms=duration_ms(),
+            )
+            return result, serialized_input
+        if approval_required:
             approval = agent_approval_service.create_request(
                 db=db,
                 user_id=user_id,
@@ -407,7 +425,8 @@ class AgentToolExecutor:
                 duration_ms=duration_ms,
             )
         except Exception:  # noqa: BLE001 - 审计失败不回滚业务结果
-            db.rollback()
+            if db is not None:
+                db.rollback()
 
 
 tool_executor = AgentToolExecutor()

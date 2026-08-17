@@ -32,7 +32,7 @@ from app.mcp.permissions import (
     allowed_tools_for,
 )
 from app.mcp.schema import tool_to_mcp_spec, trim_sensitive_args, validate_tool_args
-from app.services.agent_approval_service import agent_approval_service
+from app.services.agent.agent_approval_service import agent_approval_service
 from app.tools.base import BaseAgentTool
 from app.tools.document_tool import DocumentConflictTool, DocumentRiskTool, DocumentSearchTool, DocumentSummaryTool
 from app.tools.legal_tool import LegalConsultationTool, LegalContractReviewTool, LegalDraftTool

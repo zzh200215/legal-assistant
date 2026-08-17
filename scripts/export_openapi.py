@@ -31,11 +31,16 @@ from app.main import app  # noqa: E402
 
 
 def main() -> int:
-    dest = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "docs" / "openapi-snapshot.json"
+    # 忽略 --update 等开关参数，只取第一个位置参数作为目标路径
+    positional = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
+    dest = Path(positional[0]) if positional else ROOT / "docs" / "openapi-snapshot.json"
+    # x-error-codes / x-api-version / 统一组件由 app.main.custom_openapi 注入，
+    # 这里直接固化 app.openapi() 的完整产物。
     schema = app.openapi()
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(schema, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"openapi schema exported ({len(schema.get('paths', {}))} paths) -> {dest}")
+    print(f"openapi schema exported ({len(schema.get('paths', {}))} paths, "
+          f"{len(schema.get('x-error-codes', []))} error codes) -> {dest}")
     return 0
 
 

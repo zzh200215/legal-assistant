@@ -6,6 +6,14 @@ from app.core.database import Base
 
 
 class SecurityAuditEvent(Base):
+    """P1 通用不可篡改审计事件（原安全审计哈希链扩展）。
+
+    - 追加式写入：业务代码仅经 security_audit_service.write_event，无 UPDATE/DELETE 路径。
+    - hash chain：seq_no 全局有序（Redis INCR），prev_hash/current_hash 校验完整性。
+    - schema_version：1=旧公式（seq|type|actor|time|prev），2=纳入 action/resource/trace 等字段；
+      verify_chain 按版本分别重算，存量行零迁移成本。
+    """
+
     __tablename__ = "security_audit_events"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -26,6 +34,20 @@ class SecurityAuditEvent(Base):
                     comment="全局顺序号，写入后不可修改")
     prev_hash = Column(String(64), nullable=True, comment="前一条事件的current_hash")
     current_hash = Column(String(64), nullable=False, comment="本条事件哈希，校验完整性用")
+    # ── P1 扩展字段（schema_version=2 起参与哈希）─────────────────────────────
+    audit_id = Column(String(64), nullable=True, index=True, comment="审计记录唯一 ID（缺省为 seq_no 字符串）")
+    action = Column(String(64), nullable=True, comment="动作名（稳定枚举/event_name）")
+    resource_version = Column(String(64), nullable=True, comment="资源版本号/乐观锁版本")
+    request_id = Column(String(64), nullable=True, index=True)
+    trace_id = Column(String(64), nullable=True, index=True)
+    task_id = Column(String(128), nullable=True, index=True)
+    agent_run_id = Column(Integer, nullable=True, index=True)
+    decision = Column(String(16), nullable=True, comment="allow / deny / review / pending")
+    reason_code = Column(String(64), nullable=True, comment="稳定原因码（有限枚举）")
+    sanitized_metadata = Column(Text, nullable=True, comment="脱敏后的附加元数据（JSON），禁止正文")
+    schema_version = Column(Integer, nullable=False, default=1, comment="哈希公式版本")
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True,
+                         comment="归档时间（保留任务归档后标记，默认不物理删除）")
 
 
 class LegalNotificationPreference(Base):
@@ -107,6 +129,9 @@ class LegalNotificationEvent(Base):
     locale = Column(String(16), nullable=True)
     # 幂等键（UNIQUE 约束兜底重复创建/重放）
     idempotency_key = Column(String(128), nullable=True, index=True)
+    # P1 链路关联：由统一上下文写入（API/Celery headers 传播），缺失为 NULL
+    trace_id = Column(String(64), nullable=True, index=True)
+    request_id = Column(String(64), nullable=True, index=True)
 
 
 class NotificationTemplate(Base):

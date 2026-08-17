@@ -19,8 +19,8 @@ from app.mcp.tool_contract import ToolContract
 from app.models.agent import AgentAuditEvent, AgentRun
 from app.models.idempotency import IdempotencyKey
 from app.models.user import User
-from app.services.agent_approval_service import agent_approval_service
-from app.services.agent_service import AgentService
+from app.services.agent.agent_approval_service import agent_approval_service
+from app.services.agent.agent_service import AgentService
 from app.tools.base import BaseAgentTool, tool_error, tool_success
 
 
@@ -114,7 +114,7 @@ class ExecutorApprovalAndPermissionTests(ExecutorFixture):
             db=self.db, approval_id=approval.id, user_id=self.user.id, current_params={"title": "A"},
         )
         # 参数变化 → 抛 ApprovalStateError，不得执行
-        from app.services.agent_approval_service import ApprovalStateError
+        from app.services.agent.agent_approval_service import ApprovalStateError
 
         with self.assertRaises(ApprovalStateError):
             agent_approval_service.require_executable(

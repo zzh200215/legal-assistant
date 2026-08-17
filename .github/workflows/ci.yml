@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
       # conftest.py 已通过 os.environ.setdefault 注入测试所需配置（加密 key 等），
       # pydantic-settings 的 env 变量优先于 .env，故 CI 无需复制 .env。
       - name: Run backend test suite
@@ -35,7 +35,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
       - name: Run ruff gate
         run: python -m ruff check --select E9,F821,F823,F632,F706,F811 app scripts alembic tests eval
 
@@ -52,11 +52,60 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
       # 与本地一致：脚本自身 setdefault 注入环境变量；schema 变更需先
       # python scripts/check_openapi_contract.py --update 再提交。
+      # P1：breaking/non-breaking 分类 + operationId 唯一性 + 错误码注册表，
+      # breaking change 需 docs/openapi-breaking-approvals.json 显式批准。
       - name: Check OpenAPI contract against snapshot
         run: python scripts/check_openapi_contract.py
+
+  ws-protocol-check:
+    name: WebSocket protocol contract (P1)
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: test-secret-key-xxxxxxxxxxxxxxxxxxxxxxxx
+      LLM_API_KEY: test-llm-api-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+      # docs/websocket-protocol.md + docs/ws-events.schema.json 与实现常量一致；
+      # OpenAPI 无法表达 WebSocket，协议文档/schema 即契约基准。
+      - name: Check WS protocol contract
+        run: python -m pytest tests/test_ws_protocol_contract.py -q
+
+  frontend-build:
+    name: Frontend build + lint + unit + types + bundle (P1/P2)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests (node:test)
+        run: npm run test:unit
+      - name: Build
+        run: npm run build
+      # 生成文件与 docs/openapi-snapshot.json 一致性（快照本身由后端 contract-check 守护）
+      - name: API type generation freshness
+        run: npm run types:check
+      - name: Bundle budget
+        run: npm run bundle:check
+
 
   eval-regression:
     name: Frozen generation eval (no LLM)
@@ -71,7 +120,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
       - name: Run frozen eval regression
         run: |
           python eval/run_generation_eval.py --no-llm --output eval/outputs/generation_eval_report.json
@@ -95,6 +144,86 @@ jobs:
               if reg['pass_rate'] < threshold:
                   raise SystemExit(f"AI-2 回流回归通过率 {reg['pass_rate']} 低于门槛 {threshold}")
           PY
+
+  supply-chain:
+    name: Supply chain gate (P1-E)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+      - name: Lock file freshness（requirements.lock 与源码一致）
+        run: |
+          uv pip compile --no-header --python-platform linux --python-version 3.11 --generate-hashes --output-file /tmp/requirements.lock.check requirements.txt
+          diff -u requirements.lock /tmp/requirements.lock.check
+      - name: Vulnerability scan（pip-audit + 豁免门禁）
+        run: python -B scripts/dependency_scan.py
+      - name: SBOM + license + outdated report
+        run: python -B scripts/dependency_report.py
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom/backend-cyclonedx.json
+          if-no-files-found: error
+
+  # ── 阶段 5（P2）增量 job（不破坏既有 job）────────────────────────────────
+  # 1) 迁移链校验：离线静态校验（head 唯一 / 全链可逆 / 无未收敛分叉）。
+  #    迁移本体系 MySQL/PG 设计（batch_alter_table），SQLite 空库升级会因 ALTER 限制
+  #    失败——故用静态校验而非 SQLite upgrade；MySQL 环境可补跑 `alembic upgrade head --sql`。
+  migration-check:
+    name: Migration chain check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Check migration chain integrity
+        run: python -B scripts/check_migrations.py
+
+  # 2) 前端依赖漏洞门禁：npm audit。阈值 critical（high 级为既有存量告警：
+  #    vite->esbuild / postcss / nanoid，纳入升级清单，不阻断——避免新 job 误报）。
+  frontend-audit:
+    name: Frontend dependency audit (npm audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Audit (critical blocks; high/moderate reported)
+        run: npm audit --audit-level=critical
+
+  # 3) 性能烟测：3 组关键入口冒烟延迟断言（宽松阈值 3000ms，仅防明显回退）。
+  perf-smoke:
+    name: Performance smoke gate
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: test-secret-key-xxxxxxxxxxxxxxxxxxxxxxxx
+      LLM_API_KEY: test-llm-api-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+      - name: Run perf smoke (/, /api/health/live, /api/health/ready)
+        run: python -B scripts/perf_smoke.py --threshold-ms 3000
 
 
 

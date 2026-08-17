@@ -37,7 +37,17 @@ def set_db_correlation_id(value: str | None) -> None:
 
 
 def get_db_correlation_id() -> str | None:
-    return _correlation_id.get()
+    explicit = _correlation_id.get()
+    if explicit is not None:
+        return explicit
+    # P1：请求/任务上下文存在时自动带上关联 ID（慢 SQL 日志可追溯）。
+    try:
+        from app.core.obs_context import correlation_id as obs_correlation_id
+
+        value = obs_correlation_id()
+        return value if value and value != "unknown" else None
+    except Exception:  # noqa: BLE001 - 上下文缺失不影响监控
+        return None
 
 
 @dataclass

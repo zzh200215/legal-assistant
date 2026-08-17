@@ -86,6 +86,9 @@ class EmailSendRequest(Base):
     # 通知事件回链：邮件投递终态镜像回通知事件
     notification_event_id = Column(Integer, ForeignKey("legal_notification_events.id"),
                                    nullable=True, index=True)
+    # P1 链路关联：由统一上下文写入（API/Celery headers 传播），缺失为 NULL
+    trace_id = Column(String(64), nullable=True, index=True)
+    request_id = Column(String(64), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

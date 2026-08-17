@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.user import User
-from app.services.document_conflict_service import document_conflict_service
+from app.services.documents.document_conflict_service import document_conflict_service
 
 
 class DocumentConflictServiceTests(unittest.TestCase):

@@ -21,7 +21,7 @@ from app.models.user import User, UserStatus
 from app.models.org import Organization, OrganizationMember
 from app.models.legal import LegalCase, LegalApprovalChain
 from app.models.legal_contract import LegalContract, LegalContractVersion, LegalSignRequest, LegalSignParty
-from app.services.signing_provider_service import SigningDispatch
+from app.services.legal.signing_provider_service import SigningDispatch
 
 WEBHOOK_SECRET = "test-secret-key"
 
@@ -80,15 +80,27 @@ class SigningPreflightTests(unittest.TestCase):
         app.dependency_overrides[get_db] = _override_db
         self.client = TestClient(app, raise_server_exceptions=False)
         self.provider_patch = patch(
-            "app.services.signing_provider_service.signing_provider_service.create_and_send",
+            "app.services.legal.signing_provider_service.signing_provider_service.create_and_send",
             return_value=SigningDispatch(provider_request_id="SANDBOX-REQUEST-1"),
         )
         self.provider_patch.start()
+        # P1：审计写失败策略对 sign_callback 为 fail-closed（block），测试需提供可用的审计栈：
+        # Redis 不可用走 DB 降级，SessionLocal 每次调用新建会话（降级路径会 close 自己创建的会话，
+        # 不能指向共享的请求会话）。
+        self._audit_redis_patch = patch(
+            "app.services.org.security_audit_service.redis_lib.from_url",
+            side_effect=Exception("redis unavailable in tests"),
+        )
+        self._audit_session_patch = patch("app.services.org.security_audit_service.SessionLocal", Session)
+        self._audit_redis_patch.start()
+        self._audit_session_patch.start()
         self.editor_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(self.editor.id)})}"}
         self.admin_headers = {"Authorization": f"Bearer {create_access_token({'sub': str(self.admin.id)})}"}
 
     def tearDown(self):
         self.provider_patch.stop()
+        self._audit_redis_patch.stop()
+        self._audit_session_patch.stop()
         app.dependency_overrides.clear()
         self.db.close()
 
@@ -264,10 +276,10 @@ class SignCallbackHardeningTests(unittest.TestCase):
 
         # 回调路径会写安全审计（security_audit_service 用独立 SessionLocal）；
         # CI 无 data/ 目录时真实 SQLite 无法创建，需与测试库对齐。
-        self.audit_patch = patch("app.services.security_audit_service.SessionLocal", Session)
+        self.audit_patch = patch("app.services.org.security_audit_service.SessionLocal", Session)
         self.audit_patch.start()
 
-        self.settings_patch = patch("app.api.legal_contract_api.get_settings")
+        self.settings_patch = patch("app.api.legal.legal_contract_api.get_settings")
         mock_get_settings = self.settings_patch.start()
         mock_settings = MagicMock()
         mock_settings.SIGNING_WEBHOOK_SECRETS_JSON = json.dumps({"fadada": WEBHOOK_SECRET})

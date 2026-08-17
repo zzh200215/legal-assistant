@@ -32,7 +32,9 @@ def _routes() -> dict:
 
     add("document", "parse_document", "document_chunk", "document_index", "document_export",
         "recover_stale_document_jobs", "parse_contract_versions")
-    add("llm", "summarize_document", "analyze_document", "process_open_contract_review")
+    add("document", "snapshot_ops_metrics", "aggregate_ops_metrics", "run_audit_export")
+    add("llm", "summarize_document", "analyze_document", "process_open_contract_review",
+        "recover_queued_open_contract_reviews")
     add("connector", "connector_sync_task", "recover_stale_connector_syncs",
         "retry_failed_webhook_deliveries", "dispatch_feishu_reminders",
         "dispatch_operational_alerts", "run_database_archive", "create_pilot_backup")
@@ -124,6 +126,10 @@ celery_app.conf.update(
             "task": "retry_failed_webhook_deliveries",
             "schedule": 300.0,  # 每5分钟
         },
+        "recover-queued-open-contract-reviews": {
+            "task": "recover_queued_open_contract_reviews",
+            "schedule": 60.0,
+        },
         "parse-contract-versions": {
             "task": "parse_contract_versions",
             "schedule": 300.0,
@@ -148,17 +154,25 @@ celery_app.conf.update(
             "task": "recover_stale_document_jobs",
             "schedule": 300.0,  # 每5分钟：回收租约过期的文档处理任务并重新入队
         },
+        # P1 可观测性：进程内指标快照（窗口可配）+ 小时/天级预聚合
+        "snapshot-ops-metrics": {
+            "task": "snapshot_ops_metrics",
+            "schedule": float(settings.OBS_METRICS_SNAPSHOT_WINDOW_SECONDS),
+        },
+        "aggregate-ops-metrics": {
+            "task": "aggregate_ops_metrics",
+            "schedule": 3600.0,  # 每小时：幂等预聚合 + 水位线推进
+        },
     },
 )
 
 if settings.TASK_QUEUE_ROUTING_ENABLED:
     celery_app.conf.task_routes = _routes()
 
-# 自动发现 tasks 模块
-celery_app.autodiscover_tasks(["app.tasks"])
-
-# 确保任务在 worker 与应用进程中都能稳定注册。
-import app.tasks  # noqa: E402,F401
+# 任务注册解耦（打破 celery_app ↔ app.tasks 循环依赖）：
+# - worker 进程通过 conf.imports=("app.tasks",) 导入任务；
+# - 应用进程在 main.py 显式 import app.tasks；
+# - 此处不再模块级 import app.tasks，避免双向 import。
 
 # 连接器同步回收 beat：仅 CONNECTOR_SYNC_ENABLED 时注册（mock 连接器，默认关闭）。
 if settings.CONNECTOR_SYNC_ENABLED:
@@ -174,5 +188,5 @@ if settings.MAILBOX_SYNC_ENABLED:
         "schedule": 60.0,
     }
 
-# 任务运行台账信号：注册关键任务后自动写入 task_runs（未注册任务零开销）。
-import app.tasks.signals  # noqa: E402,F401
+# 任务运行台账信号在 app/tasks/__init__.py 末尾随包加载（worker 与应用进程均生效），
+# 此处不再 import，避免 celery_app → app.tasks 的模块级依赖。

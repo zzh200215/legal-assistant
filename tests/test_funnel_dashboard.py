@@ -14,7 +14,7 @@ from app.main import app
 from app.models.user import User, UserStatus
 from app.models.legal import LegalConsultation, ContractReview, LegalDraft
 from app.models.subscription import SubscriptionPlan, UserSubscription, SubscriptionStatus
-from app.services.subscription_service import subscription_service
+from app.services.billing.subscription_service import subscription_service
 
 
 def _utcnow() -> datetime:

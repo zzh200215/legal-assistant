@@ -15,7 +15,7 @@ from app.core.database import Base
 from app.models.email import EmailAttachment, EmailDraft
 from app.models.org import Organization
 from app.models.user import User, UserStatus
-from app.services.outbound_email_service import outbound_email_service
+from app.services.notification.outbound_email_service import outbound_email_service
 
 VALID_PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"
 
@@ -116,7 +116,7 @@ class OutboundAttachmentTests(unittest.TestCase):
                                                       db=self.db, user=self.user)
         outbound_email_service.decide_request(request.id, approved=True, note=None,
                                               db=self.db, user=self.approver)
-        with patch("app.services.outbound_email_service.smtplib.SMTP", FakeSMTP):
+        with patch("app.services.notification.outbound_email_service.smtplib.SMTP", FakeSMTP):
             outbound_email_service.execute_request(request.id, db=self.db, user=self.user)
         self.assertEqual(len(FakeSMTP.sent), 1)
         parts = list(FakeSMTP.sent[0].iter_attachments())

@@ -3,7 +3,7 @@
 import unittest
 
 from app.models.document import Document
-from app.services.document_state import (
+from app.services.documents.document_state import (
     DOCUMENT_STATUS_FAILED,
     DOCUMENT_STATUS_INDEXED,
     DOCUMENT_STATUS_INDEXING,
