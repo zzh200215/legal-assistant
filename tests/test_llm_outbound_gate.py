@@ -162,7 +162,9 @@ class OutboundGateGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_generate_redacts_pii_in_outgoing_request(self):
         captured = {}
 
-        async def fake_routing(*, source_text, request):
+        # 签名要跟着 _request_text_with_routing 走：入口会先算一次 route_plan（缓存键要用），
+        # 再原样传下去，所以替身必须接得住这个关键字参数。
+        async def fake_routing(*, source_text, request, route_plan=None):
             captured["request"] = request
             return "ok"
 
@@ -197,7 +199,7 @@ class OutboundGateGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_chat_benign_request_unchanged(self):
         captured = {}
 
-        async def fake_routing(*, source_text, request):
+        async def fake_routing(*, source_text, request, route_plan=None):
             captured["request"] = request
             return "ok"
 

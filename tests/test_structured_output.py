@@ -274,7 +274,8 @@ class StructuredGenerateTests(_GatewaySettingsMixin, unittest.IsolatedAsyncioTes
     async def test_repair_request_reuses_trace_id(self):
         seen = []
 
-        async def fake_routing(*, source_text, request):
+        # 签名要跟着 _request_text_with_routing 走：入口先算一次 route_plan 再原样传下去。
+        async def fake_routing(*, source_text, request, route_plan=None):
             seen.append(request.trace_id)
             return _CONTRACT_BAD_MISSING_AMOUNT if len(seen) == 1 else _CONTRACT_OK
 
@@ -286,7 +287,7 @@ class StructuredGenerateTests(_GatewaySettingsMixin, unittest.IsolatedAsyncioTes
     async def test_repair_request_uses_generate_request_type(self):
         seen = []
 
-        async def fake_routing(*, source_text, request):
+        async def fake_routing(*, source_text, request, route_plan=None):
             seen.append(request.request_type)
             return _CONTRACT_BAD_MISSING_AMOUNT if len(seen) == 1 else _CONTRACT_OK
 
