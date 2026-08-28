@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sqlite3
 from collections import defaultdict
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 START = "__start__"
@@ -71,6 +73,22 @@ def _state_reducers(state_type: Any) -> dict[str, Callable[[Any, Any], Any]]:
                 reducers[key] = meta
                 break
     return reducers
+
+
+def merge_keyed_slots(
+    left: dict[str, Any] | None,
+    right: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """``Send`` 扇出通道的默认 reducer：每个分支只写自己那个键。
+
+    并发分支是同一 superstep 内的独立任务，会同时写同一个通道；没有 reducer 的通道在一步
+    内被写两次会直接 ``InvalidUpdateError``。选「按键合并」而不是「列表追加」是因为它幂等
+    ——本项目的节点惯例是返回整份 state，reducer 通道会被后续节点反复写入同样的值，用
+    ``operator.add`` 会让结果成倍增长。
+    """
+    merged = dict(left or {})
+    merged.update(right or {})
+    return merged
 
 
 class _FallbackCompiledGraph:
@@ -369,3 +387,119 @@ def build_checkpointer() -> Any | None:
         return InMemorySaver()
     except Exception:
         return None
+
+
+def close_checkpointer(checkpointer: Any | None) -> None:
+    """关掉 checkpointer 自己持有的 sqlite 连接。
+
+    ``build_checkpointer()`` 每次调用都新开一条连接。长驻图持有的那个连接与进程同寿，
+    不该关；一次性用途（定期清理任务）用完必须关，否则每次 beat 泄漏一个 fd。
+    InMemorySaver / None 没有连接，直接跳过。
+    """
+    conn = getattr(checkpointer, "conn", None)
+    close = getattr(conn, "close", None)
+    if not callable(close):
+        return
+    with contextlib.suppress(Exception):  # 关连接失败不值得让调用方失败
+        close()
+
+
+def _parse_checkpoint_ts(raw: Any) -> datetime | None:
+    """解析 ``checkpoint["ts"]``（ISO 时间戳）；解析不出来返回 None。"""
+    if not isinstance(raw, str) or not raw:
+        return None
+    text = f"{raw[:-1]}+00:00" if raw.endswith("Z") else raw
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _checkpoint_thread_last_seen(checkpointer: Any) -> dict[str, datetime | None]:
+    """每个 thread 最新 checkpoint 的时间，只用 saver 的公开 API（不碰表结构）。
+
+    ``list(None)`` 枚举所有 thread 的所有 checkpoint。时间解析不出来的 thread 记为
+    ``None`` 并且**粘住**（后续再看到能解析的时间也不覆盖）：宁可留着不删，也不能因为
+    读不懂时间戳就删掉一份还可能有人要 resume 的状态。
+    """
+    last_seen: dict[str, datetime | None] = {}
+    for item in checkpointer.list(None):
+        config = getattr(item, "config", None) or {}
+        thread_id = (config.get("configurable") or {}).get("thread_id")
+        if not thread_id:
+            continue
+        thread_id = str(thread_id)
+        known = last_seen.get(thread_id)
+        if thread_id in last_seen and known is None:
+            continue
+        parsed = _parse_checkpoint_ts((getattr(item, "checkpoint", None) or {}).get("ts"))
+        if parsed is None or known is None or parsed > known:
+            last_seen[thread_id] = parsed
+    return last_seen
+
+
+def prune_checkpoint_threads(
+    checkpointer: Any | None,
+    *,
+    older_than_days: int,
+    keep_thread_ids: Iterable[str] = (),
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """删掉保留窗口之外的 checkpoint thread，返回一份可审计的计数。
+
+    一次问答（``rag-*``）、一次 Agent Run（``agent-run-*``）各占一个 thread，没人回收
+    则 sqlite 只增不减。按**时间窗口**清、而不是「Run 一结束就删」：已完成的 Run 仍要能
+    回放，tests/test_agent_graph_durability.py 就直接读完成 Run 的 checkpoint；窗口之外
+    的 thread 才是真的无人可用。
+
+    ``keep_thread_ids`` 保护还能被 resume 的 Run（running / awaiting_approval）——它们
+    可能长期停在人工审批的中断点上，时间戳早于窗口也不能删。
+
+    sqlite 的 DELETE 只把页归还自由列表供后续复用，不会缩小文件：这里的作用是让文件停止
+    无界增长，不是把它变小。
+    """
+    keep = {str(item) for item in keep_thread_ids if item}
+    report: dict[str, Any] = {
+        "available": False,
+        "threads": 0,
+        "expired": 0,
+        "candidates": 0,
+        "deleted": 0,
+        "protected": 0,
+        "failed": 0,
+        "dry_run": dry_run,
+        "cutoff": None,
+    }
+    # 回退引擎没有 checkpointer；InMemorySaver 随进程消失。缺任一 API 就退化为 no-op，
+    # 让调用方（定期任务）照常返回而不是抛错。
+    if checkpointer is None or not callable(getattr(checkpointer, "list", None)):
+        return report
+    if not callable(getattr(checkpointer, "delete_thread", None)):
+        return report
+
+    cutoff = datetime.now(UTC) - timedelta(days=int(older_than_days))
+    last_seen = _checkpoint_thread_last_seen(checkpointer)
+    expired = [thread_id for thread_id, ts in last_seen.items() if ts is not None and ts < cutoff]
+    targets = [thread_id for thread_id in expired if thread_id not in keep]
+    deleted = 0
+    failed = 0
+    if not dry_run:
+        for thread_id in targets:
+            try:
+                checkpointer.delete_thread(thread_id)
+            except Exception:  # noqa: BLE001 - 单个 thread 删失败不该拖垮整轮清理
+                failed += 1
+                continue
+            deleted += 1
+    report.update(
+        available=True,
+        threads=len(last_seen),
+        expired=len(expired),
+        candidates=len(targets),
+        deleted=deleted,
+        protected=len(expired) - len(targets),
+        failed=failed,
+        cutoff=cutoff.isoformat(),
+    )
+    return report

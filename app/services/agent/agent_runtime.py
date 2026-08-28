@@ -19,25 +19,13 @@ from sqlalchemy.orm import Session
 
 from app.models.agent import AgentRun
 from app.services.agent.agent_run_state import AgentRunState
-from app.workflows.langgraph_compat import RUNTIME_CONTEXT_KEY
+from app.workflows.langgraph_compat import RUNTIME_CONTEXT_KEY, merge_keyed_slots
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
-
-def merge_parallel_branches(
-    left: dict[str, Any] | None,
-    right: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """``parallel_results`` 的通道 reducer：按 worker 名合并各并行分支的结果。
-
-    并行分支是同一 superstep 内的并发任务，会同时写这一个通道；没有 reducer 的通道在
-    一步内被写两次会直接 ``InvalidUpdateError``。选「按键合并」而不是「列表追加」是因为
-    它幂等——本项目的节点惯例是返回整份 state，reducer 通道会被后续节点反复写入同样的
-    值，用 ``operator.add`` 会让结果成倍增长。
-    """
-    merged = dict(left or {})
-    merged.update(right or {})
-    return merged
+# ``parallel_results`` 的通道 reducer：按 worker 名合并各并行分支的结果。
+# 语义与取舍见 merge_keyed_slots；agentic-RAG 的子问题扇出用的是同一个 reducer。
+merge_parallel_branches = merge_keyed_slots
 
 
 @dataclass

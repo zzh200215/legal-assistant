@@ -62,3 +62,10 @@ class RAGSettings(BaseSettings):
     AGENTIC_RAG_ENABLED: bool = True
     AGENTIC_RAG_PLANNER_ENABLED: bool = True
     AGENTIC_RAG_MAX_RETRIEVAL_ROUNDS: int = Field(default=2, ge=1, le=3)
+    # 以下三项各自多一次 LLM 往返（分解 / 判分 / 校验），因此默认关闭、按需开启，
+    # 与 RAG_LLM_RERANK_ENABLED、RAG_QUERY_REWRITE_LLM_ENABLED 的取舍一致。
+    # 三者都 fail-open：判断器不可用时图按启发式规则继续，不影响问答可用性。
+    AGENTIC_RAG_MULTI_HOP_ENABLED: bool = False
+    AGENTIC_RAG_MAX_SUB_QUESTIONS: int = Field(default=3, ge=2, le=4)
+    AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED: bool = False
+    AGENTIC_RAG_FAITHFULNESS_CHECK_ENABLED: bool = False
