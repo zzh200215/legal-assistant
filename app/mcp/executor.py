@@ -5,8 +5,11 @@
 2. 取消检查：工具执行前若已请求取消则拒绝执行。
 3. 审批闸：写工具/敏感读工具需审批，审批绑定 run/step/参数摘要。
 4. 幂等：写工具按 (run, step, tool, input_hash) 去重，重放返回缓存快照。
-5. 超时：工具级超时（契约优先，回退 AGENT_TOOL_TIMEOUT_SECONDS）。
+5. 超时：工具级超时（契约优先，回退 AGENT_TOOL_TIMEOUT_SECONDS），再与调用方剩余的
+   墙钟预算取 min（``timeout_budget_seconds``）。
 6. 重试：仅暂时性错误 + 契约声明可重试才重试；不可重试写工具绝不盲目重试。
+   次数再受全局上限 AGENT_TOOL_MAX_RETRIES 约束（只能收紧）；退避与重试共享
+   调用方的墙钟预算，不会靠「超时 + 退避 + 再试」把预算翻倍。
 7. 结果标准化 / 错误映射 / 审计事件。
 
 底层复用 ``MCPRegistry``（discover / schema 校验 / context 注入 / invoke / 规范化 / hooks），
@@ -90,11 +93,25 @@ def _approval_required_result(
     }
 
 
-def _timeout_result(tool_name: str, timeout_seconds: int) -> dict[str, Any]:
+# 预算耗尽时给工具的最小等待时间：不给 0（等价于"立刻取消"，连结构化超时结果都拿不到），
+# 也不放宽成完整超时，保证调用方的墙钟预算真的是上限。
+_MIN_TOOL_TIMEOUT_SECONDS = 0.05
+
+
+def _readable_seconds(seconds: float) -> float | int:
+    """整数秒仍序列化为整数：既有日志/审计里的 45 不因为内部换成 float 而变成 45.0。"""
+    value = float(seconds)
+    return int(value) if value.is_integer() else round(value, 3)
+
+
+def _timeout_result(tool_name: str, timeout_seconds: float) -> dict[str, Any]:
     return {
         "success": False,
         "message": "工具执行超时，已停止等待该步骤。",
-        "data": {"tool_name": tool_name, "timeout_seconds": timeout_seconds},
+        "data": {
+            "tool_name": tool_name,
+            "timeout_seconds": _readable_seconds(timeout_seconds),
+        },
         "error": "agent_tool_timeout",
         "mcp_error_code": "AGENT_TOOL_TIMEOUT",
     }
@@ -122,17 +139,40 @@ class AgentToolExecutor:
         organization_id: int | None = None,
         cancel_check: CancelCheck | None = None,
         approve_context: dict[str, Any] | None = None,
+        timeout_budget_seconds: float | None = None,
     ) -> tuple[dict[str, Any], str]:
         """执行一次工具调用，返回 (标准化结果, 序列化输入)。不会抛业务异常。
 
         安全中断（权限/取消/审批/参数变化）以结构化结果返回；致命执行异常记录审计后
         映射为标准化失败结果。
+
+        ``timeout_budget_seconds``：调用方（Agent 步骤）剩余的墙钟预算。给了就与工具自己的
+        超时取 min——工具契约声明的是「这个工具最长能跑多久」，不是「调用方还能等多久」。
+        预算是**整个重试循环**的上限，不是单次尝试的上限：否则「超时 + 退避 + 再试一次」
+        会把调用方的预算翻倍。
         """
         settings = get_settings()
         started = time.time()
+        budget_deadline = (
+            time.monotonic() + float(timeout_budget_seconds)
+            if timeout_budget_seconds is not None
+            else None
+        )
         tool = self._registry.get_tool(tool_name)
         contract = resolve_contract(tool)
-        timeout_seconds = contract.timeout_seconds or settings.AGENT_TOOL_TIMEOUT_SECONDS
+        timeout_seconds = float(contract.timeout_seconds or settings.AGENT_TOOL_TIMEOUT_SECONDS)
+        if timeout_budget_seconds is not None:
+            # 下限 _MIN_TOOL_TIMEOUT_SECONDS：预算已耗尽时不是「不限时执行」，而是立刻走
+            # 既有超时路径（结构化 AGENT_TOOL_TIMEOUT 结果 + 审计），语义与真超时一致。
+            timeout_seconds = max(_MIN_TOOL_TIMEOUT_SECONDS, min(timeout_seconds, float(timeout_budget_seconds)))
+        # 重试次数取 min：运维可以全局降到 0（如故障期止损），但绝不能把契约声明
+        # 「不可重试」的写工具提上去。退避基数则是契约未声明时的全局默认值。
+        max_retries = min(int(contract.max_retries), int(settings.AGENT_TOOL_MAX_RETRIES))
+        backoff_base = (
+            float(contract.backoff_base_seconds)
+            if contract.backoff_base_seconds is not None
+            else float(settings.AGENT_TOOL_BACKOFF_BASE_SECONDS)
+        )
         serialized_input = _serialize_input(action_input)
 
         def duration_ms() -> int:
@@ -332,9 +372,10 @@ class AgentToolExecutor:
                 tool_name=tool_name,
                 action_input=action_input,
                 contract_retryable=contract.retryable,
-                contract_max_retries=contract.max_retries,
-                backoff_base=contract.backoff_base_seconds,
+                contract_max_retries=max_retries,
+                backoff_base=backoff_base,
                 timeout_seconds=timeout_seconds,
+                budget_deadline=budget_deadline,
                 agent_type=agent_type,
                 user_id=user_id,
                 db=db,
@@ -373,7 +414,12 @@ class AgentToolExecutor:
                 tool_name=tool_name,
                 tool_version=contract.version,
                 event_type=EVENT_TIMEOUT,
-                summary={"timeout_seconds": timeout_seconds},
+                # 取实际生效的那次超时（可能已被剩余预算进一步收紧），而不是 execute 起始值。
+                summary={
+                    "timeout_seconds": (result.get("data") or {}).get(
+                        "timeout_seconds", _readable_seconds(timeout_seconds)
+                    )
+                },
                 error_category=error_category,
                 status="timeout",
                 duration_ms=duration_ms(),
@@ -447,21 +493,33 @@ class AgentToolExecutor:
         contract_retryable: bool,
         contract_max_retries: int,
         backoff_base: float,
-        timeout_seconds: int,
+        timeout_seconds: float,
+        budget_deadline: float | None = None,
         agent_type: str,
         user_id: int,
         db: Session,
         agent_run_id: int | None,
         cancel_check: CancelCheck | None,
     ) -> dict[str, Any]:
+        """按契约执行「超时 + 有限重试」。
+
+        ``budget_deadline`` 是调用方墙钟预算的 monotonic 截止点，约束整个循环：
+        每次尝试的超时按剩余预算收紧，退避 + 下一次尝试放不进剩余预算时就不再重试。
+        """
         attempt = 0
         max_attempts = contract_max_retries + 1
         while True:
             attempt += 1
+            attempt_timeout = timeout_seconds
+            if budget_deadline is not None:
+                attempt_timeout = max(
+                    _MIN_TOOL_TIMEOUT_SECONDS,
+                    min(timeout_seconds, budget_deadline - time.monotonic()),
+                )
             result = await self._invoke_once(
                 tool_name=tool_name,
                 action_input=action_input,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=attempt_timeout,
                 agent_type=agent_type,
                 user_id=user_id,
                 db=db,
@@ -476,6 +534,13 @@ class AgentToolExecutor:
             )
             if not retryable:
                 return result
+            backoff = backoff_base * attempt
+            if budget_deadline is not None and (budget_deadline - time.monotonic()) <= (
+                backoff + _MIN_TOOL_TIMEOUT_SECONDS
+            ):
+                # 预算装不下「退避 + 一次有意义的尝试」：返回当前失败结果，
+                # 而不是拿调用方已经没有的时间去睡。
+                return result
             if cancel_check is not None and cancel_check():
                 result = {
                     "success": False,
@@ -485,14 +550,14 @@ class AgentToolExecutor:
                     "mcp_error_code": "AGENT_CANCELLED",
                 }
                 return result
-            await asyncio.sleep(backoff_base * attempt)
+            await asyncio.sleep(backoff)
 
     async def _invoke_once(
         self,
         *,
         tool_name: str,
         action_input: dict[str, Any],
-        timeout_seconds: int,
+        timeout_seconds: float,
         agent_type: str,
         user_id: int,
         db: Session,

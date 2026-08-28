@@ -25,10 +25,11 @@ class ToolContract:
     # 输入/输出 JSON Schema（由工具 parameters 派生，此处仅记录）。
     input_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
-    # 执行控制。
+    # 执行控制。全局开关（AGENT_TOOL_*）与契约的分工：契约声明「这个工具能承受什么」，
+    # 全局开关只能收紧、不能放宽——见 AgentToolExecutor.execute。
     timeout_seconds: int | None = None  # None → 使用 AGENT_TOOL_TIMEOUT_SECONDS
-    max_retries: int = 0  # 0 = 不重试
-    backoff_base_seconds: float = 2.0
+    max_retries: int = 0  # 0 = 不重试；实际值再受 AGENT_TOOL_MAX_RETRIES 上限约束
+    backoff_base_seconds: float | None = None  # None → 使用 AGENT_TOOL_BACKOFF_BASE_SECONDS
     retryable: bool = False  # 仅暂时性错误类别可重试
     # 幂等：写工具支持幂等键（由执行器按 run/step/tool/input_hash 维护）。
     idempotency_keyed: bool = False

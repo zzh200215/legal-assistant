@@ -12,7 +12,10 @@ class TaskSettings(BaseSettings):
     AGENT_TOOL_TIMEOUT_SECONDS: int = Field(default=45, ge=5, le=300)
     AGENT_PARALLEL_MAX_WORKERS: int = Field(default=2, ge=1, le=4)
 
-    # Agent Run 可靠性：run/step 超时、工具重试、审批过期、幂等
+    # Agent Run 可靠性：run/step 超时、工具重试、审批过期、幂等。
+    # RUN 级在步边界检查；STEP 级是单步墙钟预算，约束步内 LLM 与工具调用
+    # （见 AgentService._step_budget_seconds）。MAX_RETRIES 是全局上限，只能收紧
+    # 工具契约声明的重试次数；BACKOFF 是契约未声明时的退避基数。
     AGENT_RUN_DEADLINE_SECONDS: int = Field(default=600, ge=30, le=86400)
     AGENT_STEP_DEADLINE_SECONDS: int = Field(default=120, ge=10, le=3600)
     AGENT_TOOL_MAX_RETRIES: int = Field(default=1, ge=0, le=5)

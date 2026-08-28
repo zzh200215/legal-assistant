@@ -6,14 +6,16 @@
 """
 
 import asyncio
+import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
+from app.core.config import get_settings
 from app.core.database import Base
 from app.mcp.tool_contract import ToolContract
 from app.models.agent import AgentAuditEvent, AgentRun
@@ -204,7 +206,10 @@ class ExecutorIdempotencyAndRetryTests(ExecutorFixture):
             {"read_only": True, "requires_approval": False, "retryable": True, "max_retries": 2, "backoff_base_seconds": 0},
             handler=flaky,
         )
-        with self._patch_tools({"document_search_tool": read}):
+        # 契约声明 2 次重试，全局上限须放到 2 才可能用满（默认 1 = 只重试 1 次）。
+        with self._patch_tools({"document_search_tool": read}), patch.object(
+            get_settings(), "AGENT_TOOL_MAX_RETRIES", 2
+        ):
             from app.mcp.executor import tool_executor
 
             result, _ = await tool_executor.execute(
@@ -259,6 +264,145 @@ class ExecutorIdempotencyAndRetryTests(ExecutorFixture):
                 user_id=self.user.id, db=self.db,
             )
         self.assertEqual(result["mcp_error_code"], "AGENT_TOOL_TIMEOUT")
+
+
+class ExecutorBudgetAndGlobalCapTests(ExecutorFixture):
+    """全局开关（AGENT_TOOL_*）与契约的分工：只能收紧，不能放宽；预算约束整个重试循环。"""
+
+    async def test_global_cap_zero_suppresses_contract_retries(self):
+        attempts = []
+
+        def always_transient(**kw):
+            attempts.append(1)
+            raise RuntimeError("temporary infrastructure error")
+
+        read = _make_tool(
+            "document_search_tool",
+            {"read_only": True, "retryable": True, "max_retries": 3, "backoff_base_seconds": 0},
+            handler=always_transient,
+        )
+        with self._patch_tools({"document_search_tool": read}), patch.object(
+            get_settings(), "AGENT_TOOL_MAX_RETRIES", 0
+        ):
+            from app.mcp.executor import tool_executor
+
+            result, _ = await tool_executor.execute(
+                "document_search_tool", {"q": "x"}, agent_type="knowledge_agent",
+                user_id=self.user.id, db=self.db,
+            )
+        self.assertFalse(result["success"])
+        self.assertEqual(len(attempts), 1)  # 运维可全局止损：契约声明 3 次也被压到 0
+
+    async def test_global_cap_cannot_escalate_non_retryable_tool(self):
+        attempts = []
+        write = _make_tool(
+            "task_create_tool",
+            {"read_only": False, "requires_approval": True, "retryable": False, "max_retries": 0},
+            handler=lambda **kw: (attempts.append(1) or tool_error("boom", "boom")),
+        )
+        run = self._run_row()
+        with self._patch_tools({"task_create_tool": write}), patch.object(
+            get_settings(), "AGENT_TOOL_MAX_RETRIES", 5
+        ):
+            from app.mcp.executor import tool_executor
+
+            result, _ = await tool_executor.execute(
+                "task_create_tool", {"title": "t"}, agent_type="workflow_agent",
+                user_id=self.user.id, db=self.db, agent_run_id=run.id, step_id=1, skip_approval=True,
+            )
+        self.assertFalse(result["success"])
+        self.assertEqual(len(attempts), 1)  # 全局开关调高也不能让不可重试的写工具重试
+
+    async def test_backoff_base_falls_back_to_settings(self):
+        attempts = []
+
+        def always_transient(**kw):
+            attempts.append(1)
+            raise RuntimeError("temporary infrastructure error")
+
+        # 契约不声明 backoff_base_seconds → 用 AGENT_TOOL_BACKOFF_BASE_SECONDS。
+        read = _make_tool(
+            "document_search_tool",
+            {"read_only": True, "retryable": True, "max_retries": 1},
+            handler=always_transient,
+        )
+        sleeper = AsyncMock()
+        with self._patch_tools({"document_search_tool": read}), patch.object(
+            get_settings(), "AGENT_TOOL_BACKOFF_BASE_SECONDS", 7
+        ), patch("app.mcp.executor.asyncio.sleep", sleeper):
+            from app.mcp.executor import tool_executor
+
+            await tool_executor.execute(
+                "document_search_tool", {"q": "x"}, agent_type="knowledge_agent",
+                user_id=self.user.id, db=self.db,
+            )
+        self.assertEqual(len(attempts), 2)
+        sleeper.assert_awaited_once_with(7.0)  # backoff_base * attempt(=1)
+
+    async def test_caller_budget_tightens_tool_timeout(self):
+        async def never(**kw):
+            await asyncio.sleep(30)
+
+        # 契约允许跑 60s，但调用方只剩 0.2s → 以 0.2s 判超时。
+        slow = _make_tool("document_search_tool", {"read_only": True, "timeout_seconds": 60}, handler=never)
+        started = time.monotonic()
+        with self._patch_tools({"document_search_tool": slow}):
+            from app.mcp.executor import tool_executor
+
+            result, _ = await tool_executor.execute(
+                "document_search_tool", {"q": "x"}, agent_type="knowledge_agent",
+                user_id=self.user.id, db=self.db, timeout_budget_seconds=0.2,
+            )
+        elapsed = time.monotonic() - started
+        self.assertEqual(result["mcp_error_code"], "AGENT_TOOL_TIMEOUT")
+        self.assertLess(elapsed, 5)
+        self.assertLessEqual(result["data"]["timeout_seconds"], 0.2)
+
+    async def test_retry_backoff_never_exceeds_caller_budget(self):
+        attempts = []
+
+        def always_transient(**kw):
+            attempts.append(1)
+            raise RuntimeError("temporary infrastructure error")
+
+        read = _make_tool(
+            "document_search_tool",
+            {"read_only": True, "retryable": True, "max_retries": 1, "backoff_base_seconds": 30},
+            handler=always_transient,
+        )
+        started = time.monotonic()
+        with self._patch_tools({"document_search_tool": read}):
+            from app.mcp.executor import tool_executor
+
+            result, _ = await tool_executor.execute(
+                "document_search_tool", {"q": "x"}, agent_type="knowledge_agent",
+                user_id=self.user.id, db=self.db, timeout_budget_seconds=0.3,
+            )
+        elapsed = time.monotonic() - started
+        self.assertFalse(result["success"])
+        # 预算装不下「退避 30s + 再试一次」→ 不重试，也不睡
+        self.assertEqual(len(attempts), 1)
+        self.assertLess(elapsed, 5)
+
+    async def test_no_budget_keeps_contract_timeout(self):
+        """不传预算时行为不变：仍用契约声明的超时（回归保护）。"""
+        captured = {}
+
+        async def capture(**kwargs):
+            captured.update(kwargs)
+            return tool_success("ok", {})
+
+        read = _make_tool("document_search_tool", {"read_only": True, "timeout_seconds": 11})
+        with self._patch_tools({"document_search_tool": read}):
+            from app.mcp.executor import tool_executor
+
+            with patch.object(tool_executor, "_invoke_once", side_effect=capture) as invoke:
+                await tool_executor.execute(
+                    "document_search_tool", {"q": "x"}, agent_type="knowledge_agent",
+                    user_id=self.user.id, db=self.db,
+                )
+        invoke.assert_awaited_once()
+        self.assertEqual(captured["timeout_seconds"], 11.0)
 
 
 class ExecutorAuditTests(ExecutorFixture):

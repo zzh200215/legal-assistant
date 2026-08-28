@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core.time import utc_now
@@ -293,14 +293,40 @@ class AgentRunState:
     def mark_cancel_requested(self) -> None:
         self.cancel_requested = True
 
-    def is_expired(self, now: datetime | None = None) -> bool:
+    def _deadline_naive(self) -> datetime | None:
+        """解析 run 截止时间为 naive UTC；解析不出来返回 None（视为无截止时间）。
+
+        项目的 datetime 列是 naive UTC（见 app/core/time.py），但快照里的字符串可能
+        带偏移量（跨进程恢复、外部写入）。不归一化就直接比较会抛 TypeError，
+        而不是「没有截止时间」这个安全默认。
+        """
         if not self.run_deadline_at:
-            return False
+            return None
         try:
             deadline = datetime.fromisoformat(self.run_deadline_at)
-        except ValueError:
+        except (TypeError, ValueError):
+            return None
+        if deadline.tzinfo is not None:
+            deadline = deadline.astimezone(UTC).replace(tzinfo=None)
+        return deadline
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        deadline = self._deadline_naive()
+        if deadline is None:
             return False
         return (now or utc_now()) > deadline
+
+    def remaining_seconds(self, now: datetime | None = None) -> float | None:
+        """距 run 截止时间还剩多少秒；无截止时间返回 None，已超时返回 0.0。
+
+        run 截止时间此前只在步边界被 ``is_expired`` 检查过一次，单步内部（LLM 调用、
+        工具调用）没人看它，因此一个慢步骤可以把整个 run 拖到截止时间之后很远。
+        这里把它变成可用的预算数值，供 step 预算取 min。
+        """
+        deadline = self._deadline_naive()
+        if deadline is None:
+            return None
+        return max(0.0, (deadline - (now or utc_now())).total_seconds())
 
     def snapshot(self) -> dict[str, Any]:
         return {

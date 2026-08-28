@@ -593,6 +593,7 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin, Superviso
         trace_id: str | None = None,
         organization_id: int | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        timeout_budget_seconds: float | None = None,
     ) -> tuple[dict, str | None]:
         """统一执行入口：委托 ToolExecutor（权限/取消/审批/幂等/超时/重试/审计）。
 
@@ -610,8 +611,38 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin, Superviso
             trace_id=trace_id,
             organization_id=organization_id,
             cancel_check=cancel_check,
+            timeout_budget_seconds=timeout_budget_seconds,
         )
         return result, serialized_input
+
+    def _step_budget_seconds(
+        self,
+        runtime: AgentRuntime,
+        *,
+        step_started_at: float | None = None,
+    ) -> float | None:
+        """本步还能占用多少墙钟时间：min(单步上限, run 截止时间剩余)。
+
+        AGENT_STEP_DEADLINE_SECONDS 此前只是个声明——没有任何代码读它，单步内部的 LLM
+        调用与工具调用都不受约束；AGENT_RUN_DEADLINE_SECONDS 也只在步边界被检查一次，
+        所以「一步跑很久」既不会被单步上限拦住，也能把整个 run 拖到截止时间之后很远。
+
+        ``step_started_at`` 为 None 表示这一步刚开始（decide），给整份单步预算；给了
+        时间戳则扣掉已耗时。返回 None = 无预算约束（无截止时间且未配置单步上限）。
+        """
+        budgets: list[float] = []
+        step_limit = float(self.settings.AGENT_STEP_DEADLINE_SECONDS or 0)
+        if step_limit > 0:
+            elapsed = max(0.0, time.time() - step_started_at) if step_started_at else 0.0
+            budgets.append(step_limit - elapsed)
+        model = runtime.model
+        if isinstance(model, AgentRunState):
+            remaining_run = model.remaining_seconds()
+            if remaining_run is not None:
+                budgets.append(remaining_run)
+        if not budgets:
+            return None
+        return max(0.0, min(budgets))
 
     def _assert_run_snapshot(self, db: Session, *, agent_run_id: int, user_id: int) -> dict | None:
         """校验该 Agent run 的权限快照；有效返回 None，失效返回拒绝结果。"""

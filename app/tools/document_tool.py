@@ -14,6 +14,10 @@ class DocumentSearchTool(BaseAgentTool):
     contract = ToolContract(
         name="document_search_tool", read_only=True, requires_approval=False,
         side_effect="reads_knowledge_base", audit_level="summary",
+        # 只读检索、无外部副作用、自带会话：暂时性错误（向量库/DB 抖动、超时）可安全重
+        # 试一次。实际次数与退避再由 AGENT_TOOL_MAX_RETRIES / AGENT_TOOL_BACKOFF_BASE_SECONDS
+        # 收紧，且共享调用方的步骤墙钟预算。
+        retryable=True, max_retries=1,
     )
     parameters = {
         "type": "object",

@@ -5,6 +5,7 @@
 状态与运行时分离：节点只读写 ``AgentGraphState`` 的可序列化通道，Session / ORM /
 事件回调等活对象一律经 ``resolve_runtime(state)`` 从 LangGraph runtime context 取用。
 """
+import asyncio
 import json
 import time
 from typing import Any
@@ -85,7 +86,29 @@ class AgentWorkflowNodesMixin:
             return state
         step = int(state.get("step") or 0) + 1
         started = time.time()
-        raw = await self._chat(state["messages"], state["user_id"])
+        # 单步墙钟预算：AGENT_STEP_DEADLINE_SECONDS 与 run 剩余时间取 min。
+        # 不设上限时，一次挂死的 LLM 调用能让整个 run 停在这里——run 级截止时间只在
+        # 步边界检查，步内没人看它。超时按既有 timeout 决策收敛到 partial。
+        step_budget = self._step_budget_seconds(runtime)
+        try:
+            raw = await asyncio.wait_for(
+                self._chat(state["messages"], state["user_id"]),
+                timeout=step_budget,
+            )
+        except TimeoutError:
+            state.update(
+                {
+                    "step": step,
+                    "step_started_at": started,
+                    "current_decision": {
+                        "action_type": "timeout",
+                        "thought": "[supervisor_agent] 单步执行超出时间预算，已停止等待。",
+                    },
+                    "current_raw": "step_deadline_exceeded",
+                    "timed_out": True,
+                }
+            )
+            return state
         decision = _normalize_decision(raw)
         action_type = decision["action_type"]
         tool_name = decision["tool_name"] or action_type
@@ -694,6 +717,11 @@ class AgentWorkflowNodesMixin:
             trace_id=runtime.agent_run.trace_id,
             organization_id=runtime.agent_run.organization_id,
             cancel_check=lambda: self._is_cancel_requested(runtime),
+            # 本步已在 decide 里耗掉了 LLM 时间，工具只能用剩下的额度：
+            # 工具契约声明的是「这个工具最长能跑多久」，不是「本步还能等多久」。
+            timeout_budget_seconds=self._step_budget_seconds(
+                runtime, step_started_at=state.get("step_started_at")
+            ),
         )
         result.setdefault("data", {})
         if isinstance(result["data"], dict):
@@ -845,6 +873,9 @@ class AgentWorkflowNodesMixin:
             trace_id=runtime.agent_run.trace_id,
             organization_id=runtime.agent_run.organization_id,
             cancel_check=lambda: self._is_cancel_requested(runtime),
+            # 不传 timeout_budget_seconds：审批可能是几小时前挂起的，state 里的
+            # step_started_at 早已过期，按它算预算会得到 0 并立刻把已获批的写操作判超时。
+            # 这一步只受工具契约自身的超时约束。
         )
         result.setdefault("data", {})
         if isinstance(result["data"], dict):
@@ -915,7 +946,10 @@ class AgentWorkflowNodesMixin:
         runtime = resolve_runtime(state)
         if state.get("timed_out"):
             partial_answer = "执行已超时，任务未完成。"
-            failure_reason = "run_timeout"
+            # 区分是哪条截止线触发的：run 级（步边界检查）还是单步预算（步内 LLM 调用）。
+            failure_reason = (
+                "step_timeout" if state.get("current_raw") == "step_deadline_exceeded" else "run_timeout"
+            )
         else:
             partial_answer = "已达到最大执行步数，任务部分完成。"
             failure_reason = runtime.agent_run.failure_reason or "max_steps_reached"
