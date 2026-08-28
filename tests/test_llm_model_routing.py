@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from app.core.llm_client import LLMClient, settings
+from app.core.model_policy import ModelRequest, get_task_policy
 
 
 class LLMModelRoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -145,6 +146,53 @@ class LLMModelRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(chunks, ["备用回答"])
         self.assertEqual(requested_models, ["qwen-plus", "qwen-turbo"])
+
+
+class RouteTargetSecretTests(unittest.IsolatedAsyncioTestCase):
+    """路由目标的 repr 不能带 API key：它会被 mock call args、traceback、异常日志整份打印。"""
+
+    def setUp(self):
+        self.setting_patches = [
+            patch.object(settings, "LLM_PROVIDER", "openai_compatible"),
+            patch.object(settings, "LLM_API_BASE_URL", "https://primary.example/v1"),
+            patch.object(settings, "LLM_API_KEY", "sk-super-secret-key"),
+            patch.object(settings, "LLM_MODEL", "qwen-plus"),
+            patch.object(settings, "LLM_MODEL_ROUTING_ENABLED", False),
+        ]
+        for item in self.setting_patches:
+            item.start()
+        self.addCleanup(lambda: [item.stop() for item in reversed(self.setting_patches)])
+        self.client = LLMClient()
+
+    def test_target_repr_hides_the_key_but_keeps_the_diagnostics(self):
+        text = repr(self.client.primary_target)
+
+        self.assertNotIn("sk-super-secret-key", text)
+        self.assertIn("qwen-plus", text)
+        self.assertIn("https://primary.example/v1", text)
+
+    def test_route_plan_repr_hides_the_key(self):
+        """真实泄漏路径：plan 里嵌着 target，plan 一被打印，key 就跟着出来。"""
+        plan = self.client._build_route_plan(
+            source_text="你好",
+            request=ModelRequest(request_type="chat", messages=[{"role": "user", "content": "你好"}], action="chat"),
+            policy=get_task_policy("chat"),
+        )
+
+        self.assertNotIn("sk-super-secret-key", repr(plan))
+
+    async def test_mock_call_args_do_not_leak_the_key(self):
+        """替身失败时 unittest.mock 会把整个 call args 打进 traceback——这次就是这么漏的。"""
+        with patch.object(self.client, "_request_text_with_routing", new=AsyncMock(return_value="ok")) as mocked:
+            await self.client.chat([{"role": "user", "content": "你好"}], action="chat", user_id=None)
+
+        self.assertNotIn("sk-super-secret-key", repr(mocked.await_args))
+
+    def test_the_key_still_reaches_the_auth_header(self):
+        """遮 repr 不等于把字段清空：请求头还得带着真 key。"""
+        headers = self.client._build_headers(self.client.primary_target)
+
+        self.assertIn("sk-super-secret-key", " ".join(headers.values()))
 
 
 if __name__ == "__main__":

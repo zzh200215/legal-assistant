@@ -3,7 +3,7 @@ import hashlib
 import json
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -64,7 +64,10 @@ class _ModelTarget:
     model: str
     provider: str
     base_url: str
-    api_key: str
+    # 路由目标会被整个打印出来：mock 断言失败的 call args、pytest traceback、异常日志都带
+    # 它的 repr，默认 dataclass repr 会把 LLM_API_KEY 原文写进去。key 缺失有自己的报错
+    # （provider_adapter.headers），repr 里没有它不影响定位问题。
+    api_key: str = field(repr=False)
 
 
 @dataclass(frozen=True)
