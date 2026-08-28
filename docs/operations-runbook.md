@@ -22,7 +22,7 @@ Tasks route across **five dedicated queues** (`llm / document / connector / noti
 |---|---|---|
 | `document` | parse_document, document_chunk, document_index, document_export, recover_stale_document_jobs, parse_contract_versions | 600 / 540 |
 | `llm` | summarize_document, analyze_document, process_open_contract_review | 300 / 270 |
-| `connector` | connector_sync_task, retry_failed_webhook_deliveries, dispatch_feishu_reminders, dispatch_operational_alerts, run_database_archive, create_pilot_backup | 240 / 210 |
+| `connector` | connector_sync_task, retry_failed_webhook_deliveries, dispatch_feishu_reminders, dispatch_operational_alerts, run_database_archive, create_pilot_backup, prune_graph_checkpoints | 240 / 210 |
 | `notification` | dispatch_notification_events, check_legal_deadline_reminders, scan_expired_portal_links, scan_contract_expiry_alerts, check_legal_approval_timeouts, confirm_account_deletions | 120 / 100 |
 | `billing` | scan_overdue_invoices, scan_expired_subscriptions | 300 / 270 |
 
@@ -43,6 +43,8 @@ celery -A app.core.celery_app.celery_app inspect active_queues
 ```
 
 `connector_sync_task` is registered only when `CONNECTOR_SYNC_ENABLED=true` (mock mode by default; sync runs are ledger-backed with cursor/checkpoint breakpoint recovery).
+
+`prune_graph_checkpoints` (daily) bounds the LangGraph checkpoint store: one thread per Q&A (`rag-*`, never resumed) and one per Agent Run (`agent-run-*`, resumed after human approval) accumulate in `LANGGRAPH_CHECKPOINT_DB` (default `data/langgraph_checkpoints.sqlite`), so nothing shrinks it without a sweep. Threads whose newest checkpoint is older than `GRAPH_CHECKPOINT_RETENTION_DAYS` are deleted; runs still in `running` / `awaiting_approval` / `cancelling` are whitelisted by thread id and survive regardless of age. Disable with `GRAPH_CHECKPOINT_PRUNE_ENABLED=false`. The file is **local disk**, so this task must run on a worker that shares the API host's volume, and sqlite `DELETE` frees pages for reuse rather than shrinking the file (`VACUUM` manually if size matters).
 
 ## External-Call Resilience
 

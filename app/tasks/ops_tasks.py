@@ -234,3 +234,51 @@ def run_database_archive_task():
             return result
     finally:
         set_db_correlation_id(None)
+
+
+@celery_app.task(name="prune_graph_checkpoints")
+@beat_lock(task_name="prune_graph_checkpoints", ttl_seconds=86400)
+def prune_graph_checkpoints_task() -> dict:
+    """清理保留窗口之外的 LangGraph checkpoint thread。
+
+    一次问答一个 thread（``rag-*``，从不 resume）、一次 Agent Run 一个 thread
+    （``agent-run-*``，人工审批中断后要 resume）：谁都不回收，本地 sqlite 就只增不减。
+
+    仍可能被 resume 的 Run（running / awaiting_approval / cancelling）按 thread_id 白名单
+    保护，不受窗口约束——它们可能长期停在审批断点上。已 error 的 Run 理论上还能重跑，但不
+    在保护范围内：窗口外重跑会从传入 state 重新开始，而不是接着断点跑。
+    """
+    record_beat_heartbeat()
+    settings = get_settings()
+    if not settings.GRAPH_CHECKPOINT_PRUNE_ENABLED:
+        return {"enabled": False}
+
+    from app.models.agent import AgentRun
+    from app.services.agent.agent_run_state import RUN_ACTIVE_STATUSES
+    from app.services.agent.agent_service import agent_run_thread_id
+    from app.workflows.langgraph_compat import build_checkpointer, close_checkpointer, prune_checkpoint_threads
+
+    db = SessionLocal()
+    try:
+        active = db.query(AgentRun).filter(AgentRun.status.in_(tuple(RUN_ACTIVE_STATUSES))).all()
+        keep = [agent_run_thread_id(run) for run in active]
+    except Exception:  # noqa: BLE001 - 查不到活跃 Run 就不清理，宁可不删也不误删
+        logger.warning("graph checkpoint prune skipped: active run lookup failed", exc_info=True)
+        return {"enabled": True, "error": True}
+    finally:
+        db.close()
+
+    # 这里自己开一条连接（长驻图那条不能借用也不能关），用完立刻关掉。
+    checkpointer = build_checkpointer()
+    try:
+        result = prune_checkpoint_threads(
+            checkpointer,
+            older_than_days=settings.GRAPH_CHECKPOINT_RETENTION_DAYS,
+            keep_thread_ids=keep,
+        )
+    except Exception:  # noqa: BLE001 - 清理失败不影响其他任务
+        logger.warning("graph checkpoint prune failed", exc_info=True)
+        return {"enabled": True, "error": True}
+    finally:
+        close_checkpointer(checkpointer)
+    return {"enabled": True, **result}

@@ -82,6 +82,19 @@ from app.workflows.langgraph_compat import (
 )
 
 
+def agent_run_thread_id(agent_run: AgentRun) -> str:
+    """一次 Run 对应的 checkpoint thread_id。
+
+    单独抽出来是给「定期清理 checkpoint」用的：清理任务要按同一套公式算出还能 resume 的
+    Run（running / awaiting_approval）的 thread_id 来保护它们，公式若两处各写一份就会漂移
+    ——漂了以后被误删的是正停在人工审批断点上的 Run。
+    """
+    thread_id = f"agent-run-{agent_run.id}"
+    if agent_run.trace_id:
+        thread_id = f"{thread_id}-{agent_run.trace_id}"
+    return thread_id
+
+
 class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin, SupervisorPlanningMixin, RunQueriesMixin):
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -865,11 +878,8 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin, Superviso
         ``max_concurrency`` 限制同一 superstep 内并发执行的任务数，即并行只读分支的并发
         上限（LangGraph 用它给任务提交加信号量），取代节点内手写的 semaphore。
         """
-        thread_id = f"agent-run-{agent_run.id}"
-        if agent_run.trace_id:
-            thread_id = f"{thread_id}-{agent_run.trace_id}"
         return {
-            "configurable": {"thread_id": thread_id},
+            "configurable": {"thread_id": agent_run_thread_id(agent_run)},
             "max_concurrency": get_settings().AGENT_PARALLEL_MAX_WORKERS,
         }
 

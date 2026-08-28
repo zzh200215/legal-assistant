@@ -22,6 +22,11 @@ class TaskSettings(BaseSettings):
     # 内部 A2A 控制面：防止 Agent 递归委派放大资源与权限风险。
     A2A_MAX_DELEGATION_DEPTH: int = Field(default=3, ge=1, le=10)
 
+    # 图 checkpoint 保留：一次问答/一次 Run 一个 thread，不清理则 sqlite 只增不减。
+    # 窗口内保留是为了回放与断点续跑，窗口外的 thread 已无人可用。
+    GRAPH_CHECKPOINT_PRUNE_ENABLED: bool = Field(default=True)
+    GRAPH_CHECKPOINT_RETENTION_DAYS: int = Field(default=7, ge=1, le=365)
+
     # 文档处理任务：重试策略与 lease（租约）回收
     DOCUMENT_TASK_MAX_RETRIES: int = Field(default=2, ge=0, le=10)
     DOCUMENT_TASK_BACKOFF_BASE_SECONDS: int = Field(default=5, ge=1, le=3600)

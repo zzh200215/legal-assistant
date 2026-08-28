@@ -37,7 +37,8 @@ def _routes() -> dict:
         "recover_queued_open_contract_reviews")
     add("connector", "connector_sync_task", "recover_stale_connector_syncs",
         "retry_failed_webhook_deliveries", "dispatch_feishu_reminders",
-        "dispatch_operational_alerts", "run_database_archive", "create_pilot_backup")
+        "dispatch_operational_alerts", "run_database_archive", "create_pilot_backup",
+        "prune_graph_checkpoints")
     add("notification", "dispatch_notification_events", "check_legal_deadline_reminders",
         "scan_expired_portal_links", "scan_contract_expiry_alerts",
         "check_legal_approval_timeouts", "confirm_account_deletions",
@@ -149,6 +150,12 @@ celery_app.conf.update(
         "run-database-archive": {
             "task": "run_database_archive",
             "schedule": 86400.0,  # 每天：按保留策略清理过期日志/用量记录（默认 dry-run）
+        },
+        # 每天：清理保留窗口外的图 checkpoint thread（一次问答/一次 Run 一个 thread，
+        # 不清理则本地 sqlite 只增不减）。checkpoint 文件在本地磁盘，需与 app 同主机的 worker 执行。
+        "prune-graph-checkpoints": {
+            "task": "prune_graph_checkpoints",
+            "schedule": 86400.0,
         },
         "recover-stale-document-jobs": {
             "task": "recover_stale_document_jobs",
