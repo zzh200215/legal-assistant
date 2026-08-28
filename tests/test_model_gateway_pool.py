@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.core.llm_client import LLMClient, ModelGateway, llm_client, model_gateway, settings
+from app.core.llm_client import LLMClient, ModelGateway, _ModelTarget, llm_client, model_gateway, settings
 from app.core.ollama_client import OllamaClient, ollama_client
 
 
@@ -245,6 +245,74 @@ class ModelGatewayPoolTests(unittest.IsolatedAsyncioTestCase):
             await self.gateway.generate_with_images("再看一张", ["https://example.com/b.png"])
 
         self.assertEqual(len(constructed), 1)
+        await self.gateway.close()
+
+
+class PoolKeySecretTests(unittest.IsolatedAsyncioTestCase):
+    """连接池的 dict key 不能带 api_key 原文：dict 一被打印（日志、断言失败、traceback），key 就跟着出来。"""
+
+    def setUp(self):
+        self.setting_patches = [
+            patch.object(settings, "LLM_PROVIDER", "openai_compatible"),
+            patch.object(settings, "LLM_API_BASE_URL", "https://primary.example/v1"),
+            patch.object(settings, "LLM_API_KEY", "sk-super-secret-key"),
+            patch.object(settings, "LLM_MODEL", "qwen-plus"),
+            patch.object(settings, "LLM_MODEL_ROUTING_ENABLED", False),
+        ]
+        for item in self.setting_patches:
+            item.start()
+        self.addCleanup(lambda: [item.stop() for item in reversed(self.setting_patches)])
+        self.gateway = ModelGateway()
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aclose(self):
+            pass
+
+    def _target(self, *, role: str, api_key: str) -> _ModelTarget:
+        return _ModelTarget(
+            role=role,
+            model="qwen-plus",
+            provider="openai_compatible",
+            base_url="https://primary.example/v1",
+            api_key=api_key,
+        )
+
+    async def test_pool_keys_do_not_contain_the_raw_key(self):
+        with patch("app.core.llm_client.httpx.AsyncClient", self._FakeClient):
+            self.gateway._get_client(self.gateway.primary_target, timeout=60)
+
+        self.assertNotIn("sk-super-secret-key", repr(self.gateway._clients))
+        self.assertIn("https://primary.example/v1", repr(self.gateway._clients))
+        await self.gateway.close()
+
+    async def test_different_keys_still_get_isolated_clients(self):
+        """指纹不能把隔离语义弄丢：同一个 base_url、不同 key 仍然是两条连接。"""
+        with patch("app.core.llm_client.httpx.AsyncClient", self._FakeClient):
+            first = self.gateway._get_client(self._target(role="primary", api_key="key-a"), timeout=60)
+            second = self.gateway._get_client(self._target(role="primary", api_key="key-b"), timeout=60)
+
+        self.assertIsNot(first, second)
+        self.assertEqual(len(self.gateway._clients), 2)
+        await self.gateway.close()
+
+    async def test_same_key_still_reuses_one_client(self):
+        with patch("app.core.llm_client.httpx.AsyncClient", self._FakeClient):
+            first = self.gateway._get_client(self._target(role="primary", api_key="key-a"), timeout=60)
+            second = self.gateway._get_client(self._target(role="small", api_key="key-a"), timeout=60)
+
+        self.assertIs(first, second)
+        self.assertEqual(len(self.gateway._clients), 1)
+        await self.gateway.close()
+
+    async def test_missing_key_does_not_collide_with_a_real_key(self):
+        with patch("app.core.llm_client.httpx.AsyncClient", self._FakeClient):
+            self.gateway._get_client(self._target(role="primary", api_key=""), timeout=60)
+            self.gateway._get_client(self._target(role="primary", api_key="key-a"), timeout=60)
+
+        self.assertEqual(len(self.gateway._clients), 2)
         await self.gateway.close()
 
 

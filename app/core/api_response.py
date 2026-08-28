@@ -184,6 +184,11 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError) 
     field_errors: list[dict[str, Any]] = []
     for item in exc.errors():
         normalized = dict(item)
+        # pydantic 会把被拒绝的原值放进 input；missing 类错误里的 input 更是整个请求体。
+        # 一旦回显，登录/注册/改密的密码就跟着 422 一起回到客户端，再被前端 Sentry、
+        # 网关访问日志、浏览器控制台各留一份。客户端定位靠 loc/type/msg 与 field_errors，
+        # 原值本来就是它自己发的，没有回显的必要。ctx 只做字符串化（内容由校验器决定）。
+        normalized.pop("input", None)
         if "ctx" in normalized and normalized["ctx"] is not None:
             normalized["ctx"] = {key: str(value) for key, value in normalized["ctx"].items()}
         details.append(normalized)

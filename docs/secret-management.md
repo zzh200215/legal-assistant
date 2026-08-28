@@ -53,6 +53,26 @@
 - 密钥不硬编码、不写日志、不返回客户端：配置脱敏沿用 `SENSITIVE_FIELDS` +
   `redacted_dict()`；审计只存元数据；异常消息不含密钥。
 
+### 5. 口令 / 令牌不进"打印路径"
+
+密钥不进日志的前提是它不在任何会被**整份打印**的容器里：容器的 repr 会随 mock 断言失败的
+call args、pytest traceback、`logger.exception` 的局部变量快照（Sentry 默认上传 locals）一起
+外泄。已封的三条链路（`tests/test_llm_model_routing.py`、`tests/test_model_gateway_pool.py`、
+`tests/test_secret_field_exposure.py`）：
+
+- 路由目标 `_ModelTarget.api_key` 用 `field(repr=False)`；`_RoutePlan` 内嵌 target，
+  一并不再带 key。诊断字段（role / model / base_url）保留。
+- 连接池 dict key 用 `LLM_API_KEY` 的 sha256 前 16 位指纹替代原文，"不同 key 不复用同一条
+  连接"的隔离语义不变。
+- 口令 / 令牌类 pydantic 字段统一 `Field(repr=False)`：登录 / 注册 / 改密口令、SMTP 口令、
+  access/refresh token、Agent 审批令牌。只挡 repr，不影响赋值、校验与 `model_dump()`。
+- 422 校验错误不再回显 pydantic 的 `input`：`missing` 类错误的 `input` 是**整个请求体**，
+  刚提交的密码会跟着 422 回到客户端并被前端 Sentry / 访问日志各留一份。定位信息保留
+  `loc` / `type` / `msg` / `ctx` 与 `field_errors`（`app/core/api_response.py`）。
+
+真 key 仍然抵达该到的地方：Authorization 请求头照常携带原文（`_build_headers`），
+遮 repr 不等于清空字段。
+
 ## 部署方需确认
 
 以下为运行环境责任，**尚未在代码中启用或无法由代码保证**，接入/上线前必须确认：

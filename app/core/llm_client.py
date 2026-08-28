@@ -70,6 +70,14 @@ class _ModelTarget:
     api_key: str = field(repr=False)
 
 
+def _key_fingerprint(api_key: str) -> str:
+    """api_key 的短指纹，用于连接池 key：dict 的 key 会跟着容器 repr 一起被打印出来，
+    而池化只需要"不同 key 不复用同一条连接"这一个语义，原文没有必要留在里面。"""
+    if not api_key:
+        return ""
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+
+
 @dataclass(frozen=True)
 class _RoutePlan:
     """Serving route plus an optional fire-and-forget shadow comparison target."""
@@ -129,7 +137,7 @@ class ModelGateway:
             api_key=self.api_key,
         )
         self.small_target = self._build_small_target()
-        # 连接池：key=(provider, base_url, api_key, timeout)，按供应商目标隔离复用。
+        # 连接池：key=(provider, base_url, api_key 指纹, timeout)，按供应商目标隔离复用。
         self._clients: dict[tuple[str, str, str, float], httpx.AsyncClient] = {}
         self._started = False
         self.circuit_breaker = build_circuit_breaker()
@@ -159,7 +167,7 @@ class ModelGateway:
         await self.close()
 
     def _get_client(self, target: _ModelTarget, *, timeout: float) -> httpx.AsyncClient:
-        key = (target.provider, target.base_url, target.api_key, timeout)
+        key = (target.provider, target.base_url, _key_fingerprint(target.api_key), timeout)
         client = self._clients.get(key)
         if client is None:
             client = httpx.AsyncClient(timeout=timeout)

@@ -8,7 +8,8 @@ class SmtpConnectorCreateRequest(BaseModel):
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(default=587, ge=1, le=65535)
     username: str = Field(min_length=1, max_length=255)
-    password: str = Field(min_length=1, max_length=512)
+    # repr=False：SMTP 口令不进异常局部变量快照 / 日志 / 断言 call args（见 app/schemas/user.py）
+    password: str = Field(min_length=1, max_length=512, repr=False)
     from_address: str = Field(min_length=3, max_length=255)
     use_starttls: bool = True
 

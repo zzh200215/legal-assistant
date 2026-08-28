@@ -126,7 +126,8 @@ class AgentApprovalRequestOut(BaseModel):
     policy_version: str | None = None
     data_scope: str | None = None
     status: str
-    approval_token: str
+    # repr=False：审批令牌等价于一次高危工具放行凭证，不该跟着模型 repr 进日志（见 app/schemas/user.py）
+    approval_token: str = Field(repr=False)
     decision_note: str | None = None
     created_at: datetime
     decided_at: datetime | None = None

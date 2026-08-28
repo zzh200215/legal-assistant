@@ -1,6 +1,10 @@
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from datetime import datetime
 from typing import Optional
+
+# 口令 / 令牌字段统一 repr=False：模型实例的 repr 会进异常局部变量快照（Sentry 默认上传
+# locals）、日志里的 %s、以及测试断言失败时打印的 call args。repr=False 只挡打印，
+# 不影响赋值、校验与取值。
 
 
 class UserRole:
@@ -27,7 +31,7 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str
+    password: str = Field(repr=False)
 
 
 class UserUpdate(BaseModel):
@@ -40,7 +44,7 @@ class UserUpdate(BaseModel):
 
 class UserLogin(BaseModel):
     username: str
-    password: str
+    password: str = Field(repr=False)
 
 
 class OAuthLoginRequest(BaseModel):
@@ -50,7 +54,7 @@ class OAuthLoginRequest(BaseModel):
 
 class LDAPLoginRequest(BaseModel):
     username: str
-    password: str
+    password: str = Field(repr=False)
 
 
 class UserOut(UserBase):
@@ -95,7 +99,7 @@ class UserStatusUpdate(BaseModel):
 
 
 class UserPasswordReset(BaseModel):
-    new_password: str
+    new_password: str = Field(repr=False)
 
 
 class LoginLogOut(BaseModel):
@@ -126,9 +130,9 @@ class AuditLogOut(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
+    access_token: str = Field(repr=False)
     token_type: str = "bearer"
-    refresh_token: Optional[str] = None
+    refresh_token: Optional[str] = Field(default=None, repr=False)
     user: UserOut
 
 
@@ -154,7 +158,7 @@ class RegisterWithCodeRequest(BaseModel):
     """注册时同时带验证码，一步完成注册 + 验证"""
     username: str
     email: EmailStr
-    password: str
+    password: str = Field(repr=False)
     code: str
     full_name: Optional[str] = None
 
@@ -164,8 +168,8 @@ class ForgotPasswordRequest(BaseModel):
 
 
 class ResetPasswordConfirmRequest(BaseModel):
-    token: str
-    new_password: str
+    token: str = Field(repr=False)
+    new_password: str = Field(repr=False)
 
 
 class WechatLoginUrlResponse(BaseModel):
