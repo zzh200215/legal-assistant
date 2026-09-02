@@ -160,6 +160,147 @@ class AgentGraphDurabilityTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class AgentTimeTravelTests(unittest.IsolatedAsyncioTestCase):
+    """checkpoint 时间旅行：历史 superstep 可枚举、可按 id 回放、输出经脱敏收口。
+
+    在此之前 checkpoint 只服务「从最后一个断点恢复」，历史步一直存在却没有读取入口。
+    """
+
+    def setUp(self):
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=engine)
+        self.Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        self.db = self.Session()
+        self.user = User(username="tt", email="tt@example.com", hashed_password="secret")
+        self.other = User(username="tt2", email="tt2@example.com", hashed_password="secret")
+        self.db.add_all([self.user, self.other])
+        self.db.commit()
+        self.db.refresh(self.user)
+        self.db.refresh(self.other)
+        self.service = AgentService()
+
+    def tearDown(self):
+        self.db.close()
+
+    async def _run_once(self):
+        calls = [
+            '{"thought":"查询任务","action_type":"tool_call","tool_name":"task_query_tool","action_input":{}}',
+            '{"thought":"完成","action_type":"finish","answer":"已查询到 0 个未完成任务。"}',
+        ]
+
+        async def fake_chat(messages, stream=False, temperature=0.7):
+            return calls.pop(0)
+
+        fake_tools = {
+            "task_query_tool": FakeTool(
+                "task_query_tool",
+                "查询任务",
+                auto_context_fields=("user_id", "db"),
+                parameters={
+                    "type": "object",
+                    "properties": {"user_id": {"type": "integer"}},
+                    "required": ["user_id"],
+                },
+                handler=lambda **kwargs: tool_success("查询完成", {"tasks": []}),
+            ),
+        }
+        with (
+            patch("app.services.agent.agent_service.llm_service.generate", new=AsyncMock(return_value="{}")),
+            patch("app.services.agent.agent_service.llm_service.chat", side_effect=fake_chat),
+            patch.dict("app.mcp.registry._TOOL_INSTANCES", fake_tools, clear=True),
+        ):
+            return await self.service.run("查询我未完成的任务", self.user.id, self.db, max_steps=4)
+
+    def _skip_without_checkpointer(self):
+        if not hasattr(self.service._workflow, "get_state_history"):
+            self.skipTest("fallback workflow engine has no checkpointer")
+
+    async def test_history_lists_supersteps_newest_first(self):
+        run = await self._run_once()
+        self._skip_without_checkpointer()
+        payload = self.service.get_run_checkpoints(run.id, self.db, user_id=self.user.id)
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["run_id"], run.id)
+        history = payload["checkpoints"]
+        self.assertGreater(len(history), 1)
+        # 最新在前：第一条是终态（没有下一个节点），最后一条是输入步（graph_step = -1）
+        self.assertEqual(history[0]["next_nodes"], [])
+        self.assertEqual(history[-1]["graph_step"], -1)
+        steps = [item["graph_step"] for item in history if item["graph_step"] is not None]
+        self.assertEqual(steps, sorted(steps, reverse=True))
+        self.assertTrue(all(item["checkpoint_id"] for item in history))
+        # 中间步能看出是哪个节点写的，这正是历史 checkpoint 的用处
+        self.assertTrue(any("decide" in item["wrote_nodes"] for item in history))
+
+    async def test_history_state_is_a_digest_not_the_raw_checkpoint(self):
+        """checkpoint 里有完整对话与工具入参，不能原样外传。"""
+        run = await self._run_once()
+        self._skip_without_checkpointer()
+        history = self.service.get_run_checkpoints(run.id, self.db, user_id=self.user.id)["checkpoints"]
+        digests = [item["state"] for item in history]
+        for banned in ("messages", "goal", "memory_context", "current_safe_input", "last_observation"):
+            for digest in digests:
+                self.assertNotIn(banned, digest)
+        # 但控制流事实要看得见
+        self.assertTrue(any("messages_count" in digest for digest in digests))
+        self.assertTrue(any(digest.get("current_action_type") for digest in digests))
+
+    def test_sensitive_tool_input_is_masked_by_contract(self):
+        from app.services.agent.agent_time_travel import state_digest
+
+        digest = state_digest(
+            {
+                "step": 1,
+                "current_tool_name": "sql_query_tool",
+                "current_safe_input": {"sql": "SELECT id_card FROM users WHERE id = 1"},
+            }
+        )
+        serialized = json.dumps(digest, ensure_ascii=False, default=str)
+        # 契约把 sql 列为 sensitive_fields，回放不能成为绕过审计脱敏的旁路
+        self.assertNotIn("id_card", serialized)
+        self.assertEqual(digest["tool_input"]["sql"], "****redacted****")
+
+    async def test_replay_one_checkpoint_by_id(self):
+        run = await self._run_once()
+        self._skip_without_checkpointer()
+        history = self.service.get_run_checkpoints(run.id, self.db, user_id=self.user.id)["checkpoints"]
+        target = history[len(history) // 2]
+        entry = self.service.get_run_checkpoint(run.id, target["checkpoint_id"], self.db, user_id=self.user.id)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["checkpoint_id"], target["checkpoint_id"])
+        self.assertEqual(entry["graph_step"], target["graph_step"])
+        self.assertEqual(entry["state"], target["state"])
+
+    async def test_unknown_checkpoint_id_is_not_found(self):
+        run = await self._run_once()
+        self._skip_without_checkpointer()
+        self.assertIsNone(
+            self.service.get_run_checkpoint(run.id, "1f000000-0000-0000-0000-000000000000", self.db, user_id=self.user.id)
+        )
+        self.assertIsNone(self.service.get_run_checkpoint(run.id, "", self.db, user_id=self.user.id))
+
+    async def test_other_users_run_is_not_readable(self):
+        run = await self._run_once()
+        with self.assertRaises(ValueError):
+            self.service.get_run_checkpoints(run.id, self.db, user_id=self.other.id)
+        with self.assertRaises(ValueError):
+            self.service.get_run_checkpoint(run.id, "any", self.db, user_id=self.other.id)
+
+    async def test_engine_without_checkpointer_reports_unavailable(self):
+        """回退引擎没有历史：如实报 available=false，而不是装作这次 Run 没跑过。"""
+        run = await self._run_once()
+        with patch.object(self.service, "_workflow", object()):
+            payload = self.service.get_run_checkpoints(run.id, self.db, user_id=self.user.id)
+            self.assertFalse(payload["available"])
+            self.assertEqual(payload["checkpoints"], [])
+            self.assertIsNone(self.service.get_run_checkpoint(run.id, "x", self.db, user_id=self.user.id))
+
+
 class AgentApprovalInterruptTests(unittest.IsolatedAsyncioTestCase):
     """审批暂停走图原生断点：state 从 checkpoint 恢复，不再依赖 DB 快照重建。"""
 

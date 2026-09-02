@@ -17,11 +17,54 @@ from app.services.agent.agent_audit import (
 from app.services.agent.agent_json import json_loads_dict as _json_loads_dict
 from app.services.agent.agent_prompts import sanitize_agent_error_message as _sanitize_agent_error_message
 from app.services.agent.agent_run_state import RunStateMachine
+from app.services.agent.agent_time_travel import (
+    CHECKPOINT_HISTORY_LIMIT,
+    checkpoint_history,
+    checkpoint_state,
+    supports_time_travel,
+)
 
 
 class RunQueriesMixin:
     def get_run(self, run_id: int, db: Session, user_id: int | None = None) -> AgentRun | None:
         return self._repo.get_run(db, run_id, user_id=user_id)
+
+    def get_run_checkpoints(
+        self,
+        run_id: int,
+        db: Session,
+        *,
+        user_id: int | None = None,
+        limit: int = CHECKPOINT_HISTORY_LIMIT,
+    ) -> dict[str, Any]:
+        """该 Run 的图 checkpoint 历史（最新在前），用于回放每一个 superstep。
+
+        ``get_run`` 已按 user_id 过滤，别人的 Run 直接查不到，checkpoint 也就取不到——
+        thread_id 是从 Run 拼出来的，越权读被 Run 归属和 thread 隔离双重挡住。
+        """
+        run = self.get_run(run_id, db, user_id=user_id)
+        if not run:
+            raise ValueError("Agent run not found")
+        return {
+            "run_id": run.id,
+            # 回退引擎无 checkpoint：如实报「不支持」，而不是返回空历史让调用方以为没跑过。
+            "available": supports_time_travel(self._workflow),
+            "checkpoints": checkpoint_history(self._workflow, self._graph_config(run), limit=limit),
+        }
+
+    def get_run_checkpoint(
+        self,
+        run_id: int,
+        checkpoint_id: str,
+        db: Session,
+        *,
+        user_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """回放单个 checkpoint 当时的图状态；不存在/已过保留窗口返回 None。"""
+        run = self.get_run(run_id, db, user_id=user_id)
+        if not run:
+            raise ValueError("Agent run not found")
+        return checkpoint_state(self._workflow, self._graph_config(run), checkpoint_id)
 
     def request_cancel(self, run_id: int, *, db: Session, user_id: int, reason: str | None = None) -> AgentRun:
         run = self.get_run(run_id, db, user_id=user_id)

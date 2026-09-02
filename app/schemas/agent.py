@@ -177,3 +177,28 @@ class A2AAuditEventOut(BaseModel):
 class A2AAuditReplayOut(BaseModel):
     delegations: list[A2ADelegationOut] = Field(default_factory=list)
     events: list[A2AAuditEventOut] = Field(default_factory=list)
+
+
+class AgentCheckpointOut(BaseModel):
+    """一个图 superstep 的 checkpoint 记录（时间旅行用）。
+
+    ``graph_step`` 是 LangGraph 的 superstep 序号（-1 = 输入步），与业务 ``state.step``
+    不是一回事；``state`` 是白名单摘要，不是完整 checkpoint。
+    """
+
+    checkpoint_id: str | None = None
+    parent_checkpoint_id: str | None = None
+    created_at: str | None = None
+    graph_step: int | None = None
+    source: str | None = None
+    wrote_nodes: list[str] = Field(default_factory=list)
+    next_nodes: list[str] = Field(default_factory=list)
+    interrupted: bool = False
+    state: dict = Field(default_factory=dict)
+
+
+class AgentCheckpointHistoryOut(BaseModel):
+    run_id: int
+    # false = 当前引擎无 checkpoint 能力（回退引擎），不是「这次 Run 没有历史」
+    available: bool = False
+    checkpoints: list[AgentCheckpointOut] = Field(default_factory=list)

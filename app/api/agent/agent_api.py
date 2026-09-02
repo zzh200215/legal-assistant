@@ -16,6 +16,8 @@ from app.schemas.agent import (
     AgentApprovalDecisionRequest,
     AgentApprovalRequestOut,
     AgentApprovalResumeRequest,
+    AgentCheckpointHistoryOut,
+    AgentCheckpointOut,
     AgentPlanPreviewRequest,
     AgentPlanPreviewResponse,
     AgentRunCancelRequest,
@@ -41,6 +43,7 @@ from app.services.agent.agent_skill_registry import (
     list_agent_skills,
     resolve_agent_skill,
 )
+from app.services.agent.agent_time_travel import CHECKPOINT_HISTORY_LIMIT
 from app.services.observability.oplog_service import oplog_service
 
 router = APIRouter()
@@ -353,6 +356,40 @@ def get_a2a_audit_replay(
         delegations=[_serialize_delegation(item) for item in delegations],
         events=[_serialize_a2a_audit_event(item) for item in events],
     )
+
+
+@router.get("/runs/{run_id}/checkpoints", response_model=AgentCheckpointHistoryOut)
+def get_run_checkpoints(
+    run_id: int,
+    limit: int = Query(default=CHECKPOINT_HISTORY_LIMIT, ge=1, le=CHECKPOINT_HISTORY_LIMIT),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """图 checkpoint 历史：一次 Run 的每个 superstep 及当时的状态摘要（最新在前）。
+
+    只读回放，不重跑：从历史 checkpoint 重新执行会把该点之后的工具调用再跑一遍。
+    """
+    run = agent_service.get_run(run_id, db, user_id=current_user.id)
+    if not run:
+        raise api_error(404, "运行记录不存在", code="AGENT_RUN_NOT_FOUND")
+    payload = agent_service.get_run_checkpoints(run_id, db, user_id=current_user.id, limit=limit)
+    return AgentCheckpointHistoryOut(**payload)
+
+
+@router.get("/runs/{run_id}/checkpoints/{checkpoint_id}", response_model=AgentCheckpointOut)
+def get_run_checkpoint(
+    run_id: int,
+    checkpoint_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    run = agent_service.get_run(run_id, db, user_id=current_user.id)
+    if not run:
+        raise api_error(404, "运行记录不存在", code="AGENT_RUN_NOT_FOUND")
+    entry = agent_service.get_run_checkpoint(run_id, checkpoint_id, db, user_id=current_user.id)
+    if entry is None:
+        raise api_error(404, "checkpoint 不存在或已超出保留窗口", code="AGENT_CHECKPOINT_NOT_FOUND")
+    return AgentCheckpointOut(**entry)
 
 
 @router.get("/runs/{run_id}", response_model=AgentRunDetailOut)
