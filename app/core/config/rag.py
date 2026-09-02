@@ -66,6 +66,15 @@ class RAGSettings(BaseSettings):
     # 以下三项各自多一次 LLM 往返（分解 / 判分 / 校验），因此默认关闭、按需开启，
     # 与 RAG_LLM_RERANK_ENABLED、RAG_QUERY_REWRITE_LLM_ENABLED 的取舍一致。
     # 三者都 fail-open：判断器不可用时图按启发式规则继续，不影响问答可用性。
+    #
+    # 默认值有实测依据（27 题多跳法规问答 / 6 部法规 84 片段，
+    # eval/run_agentic_rag_eval.py --corpus-kind statutes，结论见 eval/results.md）：
+    # - MULTI_HOP：分解本身在 top_k=5 能把证据覆盖率 0.963→1.000，但前置门槛
+    #   _looks_multi_hop 只放行 3.7% 的自然提问（要「以及/并且/同时」这类连接词），
+    #   照现状打开等于不生效；且 top_k=8 时子问题结果会把必需证据挤出
+    #   RAG_CONTEXT_MAX_CHUNKS 预算，覆盖率反降 16.7pt。要开先改门槛与预算分配。
+    # - EVIDENCE_JUDGE：top_k=5/8 零收益，只在 top_k=3 提 5.6pt，恒定 2 次 LLM 往返。
+    # - FAITHFULNESS_CHECK：离线评测测不了（要真实生成），无数据支撑改默认。
     AGENTIC_RAG_MULTI_HOP_ENABLED: bool = False
     AGENTIC_RAG_MAX_SUB_QUESTIONS: int = Field(default=3, ge=2, le=4)
     AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED: bool = False

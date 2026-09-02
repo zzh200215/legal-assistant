@@ -394,7 +394,13 @@ class FaithfulnessTests(_DepthTestCase):
 
 class DefaultsTests(unittest.TestCase):
     def test_the_three_extra_llm_round_trips_are_opt_in(self):
-        """默认关闭是刻意的成本取舍，与 RAG_LLM_RERANK_ENABLED 一致；改默认值请连带改文档。"""
+        """默认关闭是刻意的成本取舍，且有实测依据；改默认值请连带改文档。
+
+        27 题法规多跳消融（eval/run_agentic_rag_eval.py --corpus-kind statutes）在生产
+        默认 top_k=5 上的结论：判分补检索零收益、恒定多 2 次 LLM 往返；多跳分解本身有
+        收益，但 _looks_multi_hop 只放行 3.7% 的自然提问，且 top_k=8 时反降 16.7pt。
+        数字见 eval/results.md。
+        """
         fields = RAGSettings.model_fields
         self.assertFalse(fields["AGENTIC_RAG_MULTI_HOP_ENABLED"].default)
         self.assertFalse(fields["AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED"].default)

@@ -17,6 +17,10 @@
 用法：
     python -B eval/run_agentic_rag_eval.py --pretty
     python -B eval/run_agentic_rag_eval.py --top-k 1 --output eval/outputs/agentic_rag_ablation.json
+
+真实法规语料（6 部法规 / 84 个片段，比 4 篇短文档的默认语料大一个量级，基线不会在
+top_k=3 就饱和），用于决定这几个开关的默认值：
+    python -B eval/run_agentic_rag_eval.py --corpus-kind statutes --top-k 3 5 8 --pretty
 """
 
 from __future__ import annotations
@@ -47,13 +51,58 @@ from run_document_rag_eval import _embed, load_json
 
 DEFAULT_CASES_PATH = EVAL_DIR / "agentic_rag_cases.json"
 DEFAULT_CORPUS_PATH = EVAL_DIR / "document_rag_corpus.json"
+LEGAL_CASES_PATH = EVAL_DIR / "agentic_rag_legal_cases.json"
+STATUTE_CORPUS_DIR = ROOT_DIR / "scripts" / "legal_corpus"
+CHUNK_SIZE = 120
+CHUNK_OVERLAP = 20
+
+
+def load_statute_corpus() -> list[dict]:
+    """把 scripts/legal_corpus/*.json 拼成 {id,title,content} 文档。
+
+    document_id 按文件名排序固定（1 公司法 / 2 劳动合同法 / 3 民法典合同编 /
+    4 民间借贷司法解释 / 5 消费者权益保护法 / 6 著作权法），案例里的 document_id 依赖这个顺序。
+    """
+    docs: list[dict] = []
+    for doc_id, path in enumerate(sorted(STATUTE_CORPUS_DIR.glob("*.json")), start=1):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        body = "\n".join(
+            f"{article.get('article_number')} {article.get('content')}"
+            for article in (data.get("articles") or [])
+        )
+        docs.append({"id": doc_id, "title": data.get("citation") or data.get("title"), "content": body})
+    return docs
+
+
+def validate_cases(cases: list[dict], corpus: list[dict]) -> list[dict]:
+    """必需证据必须真的落在某个切片里，否则覆盖率恒为 0，评测会自欺。"""
+    chunked = {
+        doc["id"]: [c["content"] for c in _split_text(doc["content"], chunk_size=CHUNK_SIZE,
+                                                     chunk_overlap=CHUNK_OVERLAP)]
+        for doc in corpus
+    }
+    problems: list[dict] = []
+    for case in cases:
+        for item in case["must_include"]:
+            chunks = chunked.get(item["document_id"])
+            if chunks is None:
+                problems.append({"case": case["name"], "match": item["match"], "reason": "unknown_document_id"})
+            elif not any(item["match"] in chunk for chunk in chunks):
+                problems.append({"case": case["name"], "match": item["match"], "reason": "match_not_in_any_chunk"})
+    return problems
+
 
 # 每条臂只改这几个开关，其余保持默认；planner 与忠实性校验全程关闭（都要真 LLM）。
+# multi_hop_forced 与 multi_hop 的开关相同，只是绕开 _looks_multi_hop 前置门槛：
+# 门槛（要求「以及/并且/同时/…」这类连接词或两个问号）和分解本身是两件事，
+# 合在一条臂里会把「门槛没放行」误读成「分解没用」。
 ARM_SETTINGS: dict[str, dict[str, bool]] = {
     "single_hop": {"AGENTIC_RAG_MULTI_HOP_ENABLED": False, "AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED": False},
     "multi_hop": {"AGENTIC_RAG_MULTI_HOP_ENABLED": True, "AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED": False},
+    "multi_hop_forced": {"AGENTIC_RAG_MULTI_HOP_ENABLED": True, "AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED": False},
     "single_hop_judge_refine": {"AGENTIC_RAG_MULTI_HOP_ENABLED": False, "AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED": True},
 }
+FORCED_GATE_ARMS = frozenset({"multi_hop_forced"})
 
 
 def build_pipeline(corpus: list[dict], searched: list[str]) -> Any:
@@ -69,7 +118,7 @@ def build_pipeline(corpus: list[dict], searched: list[str]) -> Any:
     rag._bm25_stale = True
     rag._reranker = None
     for doc in corpus:
-        chunks = _split_text(doc["content"], chunk_size=120, chunk_overlap=20)
+        chunks = _split_text(doc["content"], chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
         for chunk in chunks:
             chunk["id"] = None
             chunk["embedding_id"] = f"doc{doc['id']}_chunk{chunk['chunk_index']}"
@@ -122,16 +171,38 @@ def arm_settings(service: AgenticRAGService, arm: str):
 
 
 @contextmanager
-def stubbed_judges(case: dict):
-    """脚本桩替掉两次 LLM 往返：分解按数据集给定，判分第一轮判不足并给出 missing。"""
+def forced_multi_hop_gate(enabled: bool):
+    """绕开 _looks_multi_hop 前置门槛，单独测「分解本身」的收益。"""
+    if not enabled:
+        yield
+        return
+    # 取回的是描述符解包后的普通函数，还原时必须重新包成 staticmethod，
+    # 否则下一条臂调用 self._looks_multi_hop(q) 会多传一个 self。
+    real = AgenticRAGService._looks_multi_hop
+    AgenticRAGService._looks_multi_hop = staticmethod(lambda question: True)
+    try:
+        yield
+    finally:
+        AgenticRAGService._looks_multi_hop = staticmethod(real)
+
+
+@contextmanager
+def stubbed_judges(case: dict, calls: dict[str, int]):
+    """脚本桩替掉两次 LLM 往返：分解按数据集给定，判分第一轮判不足并给出 missing。
+
+    ``calls`` 累计真实实现下会发生的 LLM 往返次数（分解 1 次 + 判分每轮 1 次），
+    作为成本列——只看覆盖率会让「多查一轮」显得免费。
+    """
     real = (agentic_module.decompose_question, agentic_module.judge_evidence)
     rounds = {"judge": 0}
 
     async def decompose(question: str, *, max_sub_questions: int, user_id: int | None = None) -> dict:
+        calls["decompose"] = calls.get("decompose", 0) + 1
         return {"available": True, "sub_questions": list(case["sub_questions"])[:max_sub_questions]}
 
     async def judge(question: str, chunks: list[dict], *, user_id: int | None = None) -> dict:
         rounds["judge"] += 1
+        calls["judge"] = calls.get("judge", 0) + 1
         first_round = rounds["judge"] == 1
         return {
             "available": True,
@@ -172,11 +243,12 @@ async def run_arm(
     captured: dict[str, list[dict]],
 ) -> dict:
     case_reports = []
-    with arm_settings(service, arm):
+    with arm_settings(service, arm), forced_multi_hop_gate(arm in FORCED_GATE_ARMS):
         for case in cases:
             searched.clear()
             captured.clear()
-            with stubbed_judges(case):
+            calls: dict[str, int] = {}
+            with stubbed_judges(case, calls):
                 result = await service.answer_async(case["question"], user_id=1, top_k=top_k)
             matched = coverage(captured.get("chunks") or [], case["must_include"])
             case_reports.append(
@@ -188,6 +260,7 @@ async def run_arm(
                     ],
                     "evidence_chunks": len(captured.get("chunks") or []),
                     "retrieval_calls": len(searched),
+                    "llm_calls": calls.get("decompose", 0) + calls.get("judge", 0),
                     "rounds": result["agentic_rag"]["retrieval_rounds"],
                     "nodes": [step["node"] for step in result["agentic_rag"]["steps"]],
                 }
@@ -197,12 +270,17 @@ async def run_arm(
         "evidence_coverage": round(sum(item["coverage"] for item in case_reports) / total, 4),
         "full_coverage_rate": round(sum(item["coverage"] == 1.0 for item in case_reports) / total, 4),
         "avg_retrieval_calls": round(sum(item["retrieval_calls"] for item in case_reports) / total, 4),
+        "avg_llm_calls": round(sum(item["llm_calls"] for item in case_reports) / total, 4),
+        "avg_evidence_chunks": round(sum(item["evidence_chunks"] for item in case_reports) / total, 4),
         "avg_rounds": round(sum(item["rounds"] for item in case_reports) / total, 4),
         "cases": case_reports,
     }
 
 
 async def run_eval(cases: list[dict], corpus: list[dict], *, top_ks: list[int]) -> dict:
+    problems = validate_cases(cases, corpus)
+    if problems:
+        raise SystemExit(f"案例的必需证据在语料里找不到，评测无意义：{json.dumps(problems, ensure_ascii=False)}")
     searched: list[str] = []
     _, captured = build_pipeline(corpus, searched)
     service = AgenticRAGService()
@@ -220,33 +298,51 @@ async def run_eval(cases: list[dict], corpus: list[dict], *, top_ks: list[int]) 
                 for arm, report in arms.items()
                 if arm != "single_hop"
             },
-            # 语料只有 4 篇文档：top_k 一放宽，单跳基线就已经覆盖全部必需证据，
-            # 消融在该点上无区分度。扫一遍 top_k 而不是只报一个点，就是为了让这件事看得见。
+            # 语料偏小时 top_k 一放宽，单跳基线就已经覆盖全部必需证据，消融在该点上无区分度。
+            # 扫一遍 top_k 而不是只报一个点，就是为了让这件事看得见。
             "baseline_saturated": baseline >= 1.0,
         }
+    chunk_counts = [
+        len(_split_text(doc["content"], chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP))
+        for doc in corpus
+    ]
     return {
         "eval": "agentic_rag_ablation",
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "mode": "offline_deterministic_embedding_with_stubbed_judges",
         "total_cases": len(cases),
+        # 前置门槛的放行率：多跳默认开也只对这部分问题生效，是「开关值不值得开」的另一半。
+        "multi_hop_gate_hit_rate": round(
+            sum(AgenticRAGService._looks_multi_hop(case["question"]) for case in cases) / (len(cases) or 1), 4
+        ),
+        "corpus": {"documents": len(corpus), "chunks": sum(chunk_counts),
+                   "titles": [doc["title"] for doc in corpus]},
         "top_k_sweep": top_ks,
         "sweep": sweep,
-        "limitations": "只衡量送进生成节点的证据覆盖率；分解与判分为脚本桩，真实实现各多一次 LLM 往返。",
+        "limitations": "只衡量送进生成节点的证据覆盖率；分解与判分为脚本桩（真实实现各多一次 LLM 往返，"
+                       "见 avg_llm_calls），桩总能给出正确的子问题与 missing，因此是收益上界。",
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Agentic RAG 多跳/判分补检索消融评测（离线确定性）")
-    parser.add_argument("--cases-path", default=str(DEFAULT_CASES_PATH))
-    parser.add_argument("--corpus-path", default=str(DEFAULT_CORPUS_PATH))
+    parser.add_argument("--corpus-kind", choices=["documents", "statutes"], default="documents",
+                        help="documents=4 篇短文档默认语料；statutes=scripts/legal_corpus 真实法规语料")
+    parser.add_argument("--cases-path", default=None)
+    parser.add_argument("--corpus-path", default=None)
     parser.add_argument("--top-k", type=int, nargs="+", default=[1, 2, 3])
     parser.add_argument("--output", default=None)
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
 
-    cases = load_json(Path(args.cases_path))
-    corpus = load_json(Path(args.corpus_path))
+    if args.corpus_kind == "statutes":
+        cases = load_json(Path(args.cases_path or LEGAL_CASES_PATH))
+        corpus = load_statute_corpus() if args.corpus_path is None else load_json(Path(args.corpus_path))
+    else:
+        cases = load_json(Path(args.cases_path or DEFAULT_CASES_PATH))
+        corpus = load_json(Path(args.corpus_path or DEFAULT_CORPUS_PATH))
     report = asyncio.run(run_eval(cases, corpus, top_ks=list(args.top_k)))
+    report["corpus_kind"] = args.corpus_kind
     text = json.dumps(report, ensure_ascii=False, indent=2 if args.pretty else None)
     if args.output:
         output = Path(args.output)
