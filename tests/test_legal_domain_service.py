@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.auth import hash_password
+from app.core.config import get_settings
 from app.core.database import Base
 from app.models.legal import (
     ContractReview,
@@ -147,6 +148,27 @@ class LegalDomainServiceTests(unittest.TestCase):
         refs = self.db.query(LegalReference).filter(LegalReference.source_id == self.source.id).all()
         self.assertEqual(len(refs), 1)
         self.assertEqual(refs[0].applicable, 1)
+
+    def test_review_severity_gate_follows_config(self):
+        """审核门禁严重度来自 LEGAL_RISK_REVIEW_SEVERITIES；创建侧与发布门禁读同一处。"""
+        review = self._create_review()
+        with patch.object(get_settings(), "LEGAL_RISK_REVIEW_SEVERITIES", "low"):
+            persist_review_artifacts(self.db, review, risks=[HIGH_RISK, LOW_RISK], refs=[self.ref])
+            by_sev = {
+                item.severity: item
+                for item in self.db.query(ContractRiskItem)
+                .filter(ContractRiskItem.review_id == review.id).all()
+            }
+            self.assertEqual(by_sev["low"].status, "needs_review")
+            self.assertEqual(by_sev["high"].status, "open")
+            # 发布门禁按同一集合统计未处理项：改配置后 low 未处理即挡住发布
+            self.read_module.apply_review_action(
+                self.db, self.user, target_type="contract_review", target_id=review.id,
+                action="approve", note="ok",
+            )
+            verdict = assert_publishable(self.db, self.user, "contract_review", review.id)
+            self.assertFalse(verdict["ok"])
+            self.assertTrue(any("风险项" in r for r in verdict["reasons"]))
 
     # ── 验收2：三类 claim 被正确区分 ───────────────────────────────────────────
 

@@ -59,10 +59,3 @@ class StorageSettings(BaseSettings):
     # 版面分析最多处理的页数，避免超大扫描合同阻塞请求；0 表示不限制。
     MULTIMODAL_MAX_PAGES: int = Field(default=80, ge=0, le=10000)
     MULTIMODAL_USE_VISION_MODEL: bool = True
-
-    # 会议录音转写（faster-whisper）
-    MEETING_ASR_ENABLED: bool = True
-    MEETING_ASR_MODEL: str = "small"
-    MEETING_ASR_DEVICE: str = "cpu"
-    MEETING_ASR_COMPUTE_TYPE: str = "int8"
-    MEETING_ASR_DOWNLOAD_ROOT: str = ""

@@ -16,6 +16,7 @@ import json
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.time import utc_now
 from app.models.legal import (
     ContractReview,
@@ -35,7 +36,15 @@ from app.models.legal_domain import (
 from app.services.legal.legal_reference_service import check_applicability
 
 SEVERITIES = ("low", "medium", "high", "critical")
-REVIEW_SEVERITIES = ("high", "critical")
+
+
+def review_severities() -> tuple[str, ...]:
+    """需强制进入审核队列的严重度（LEGAL_RISK_REVIEW_SEVERITIES，默认 high/critical）。
+
+    创建侧（needs_review 初始状态）与发布门禁侧（未处理项统计）读同一处，
+    避免改了配置只有一半生效。
+    """
+    return tuple(sorted(get_settings().legal_review_severity_set))
 
 # claim 生命周期：draft -> pending_review -> approved / changes_requested / rejected / unsupported / superseded
 CLAIM_STATUS_OPEN = ("draft", "pending_review", "needs_review")
@@ -205,7 +214,7 @@ def persist_review_artifacts(
         severity = item.get("risk_level")
         if severity not in SEVERITIES:
             severity = "medium"
-        needs_review = severity in REVIEW_SEVERITIES
+        needs_review = severity in review_severities()
         status = "needs_review" if needs_review else "open"
         loc = item.get("source_location") or {}
         snippet = loc.get("snippet")
@@ -478,7 +487,7 @@ def assert_publishable(db: Session, user, target_type: str, target_id: int) -> d
             db.query(ContractRiskItem)
             .filter(
                 ContractRiskItem.review_id == target_id,
-                ContractRiskItem.severity.in_(REVIEW_SEVERITIES),
+                ContractRiskItem.severity.in_(review_severities()),
                 ContractRiskItem.status.in_(("open", "needs_review")),
             )
             .count()

@@ -42,7 +42,8 @@ class RAGSettings(BaseSettings):
     RAG_EMBED_CACHE_TTL_SECONDS: int = 86400
     RAG_EMBED_CACHE_REDIS_PREFIX: str = "aibg:rag:embed"
     RAG_BM25_ENABLED: bool = True
-    RAG_BM25_TOP_N: int = 100
+    # BM25 召回条数不单独配置：与 dense 召回共用同一个候选上限
+    # max(RAG_TOP_K × RAG_RECALL_MULTIPLIER, RAG_MIN_RECALL_CANDIDATES)。
     RAG_BM25_TTL_SECONDS: int = 300
     RAG_LLM_RERANK_ENABLED: bool = False
     RAG_LLM_RERANK_TOP_N: int = 5

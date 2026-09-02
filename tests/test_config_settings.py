@@ -99,12 +99,23 @@ def test_production_validation_raises_only_in_production():
 def test_required_for_production_flags_external_service_config():
     s = Settings(
         **_valid_settings_kwargs(),
-        STRIPE_SECRET_KEY="sk_test_xxx",
+        PAYMENT_CHECKOUT_BASE_URL="https://pay.example.com",
         SMTP_HOST="smtp.example.com",
     )
     issues = s.validate_required_for_production()
-    assert any("PAYMENT_CHECKOUT_BASE_URL" in i for i in issues)
+    # 接了支付网关但没有验签密钥：验签 fail-closed 会拒绝全部回调，启动期必须暴露
+    assert any("PAYMENT_WEBHOOK_SECRET" in i for i in issues)
     assert any("SMTP_USERNAME" in i for i in issues)
+
+
+def test_legal_review_severities_rejects_unknown_and_empty():
+    """审核门禁严重度拼错/留空会静默放行高风险项，必须在配置加载期失败。"""
+    with pytest.raises(ValueError):
+        Settings(**_valid_settings_kwargs(), LEGAL_RISK_REVIEW_SEVERITIES="hgih,critical")
+    with pytest.raises(ValueError):
+        Settings(**_valid_settings_kwargs(), LEGAL_RISK_REVIEW_SEVERITIES=" , ")
+    s = Settings(**_valid_settings_kwargs(), LEGAL_RISK_REVIEW_SEVERITIES="medium, critical")
+    assert s.legal_review_severity_set == frozenset({"medium", "critical"})
 
 
 def test_get_settings_singleton():
@@ -159,8 +170,7 @@ def test_reliability_settings_defaults_are_finite():
     assert 1 <= s.SYNC_DEFAULT_BATCH_SIZE <= 1000
     assert 60 <= s.SYNC_RUN_LEASE_TTL_SECONDS <= 86400
     assert 10 <= s.TASK_LOCK_DEFAULT_TTL_SECONDS <= 86400
-    # 连接器同步默认关闭（mock 连接器，不产生真实外部调用）
+    # 连接器同步默认关闭（仅 mock 连接器，不产生真实外部调用）
     assert s.CONNECTOR_SYNC_ENABLED is False
-    assert s.CONNECTOR_SYNC_MOCK_MODE is True
     # 邮件确定性幂等默认开
     assert s.EMAIL_SEND_DETERMINISTIC_IDEMPOTENCY is True

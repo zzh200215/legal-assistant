@@ -1,4 +1,9 @@
-"""Payment (Stripe) and free-tier plan quota settings."""
+"""支付网关与免费档配额配置。
+
+没有 Stripe API 客户端：本项目只做回调侧（``PAYMENT_WEBHOOK_SECRET`` 按 Stripe
+兼容的 ``t=<ts>,v1=<hmac>`` 格式验签），下单跳转由 ``PAYMENT_CHECKOUT_BASE_URL``
+拼接外部页面。因此不保留 STRIPE_SECRET_KEY 这类"看起来能调用 Stripe"的配置。
+"""
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -9,7 +14,7 @@ from app.core.config.base import ENV_FILE_CONFIG
 class PaymentSettings(BaseSettings):
     model_config = ENV_FILE_CONFIG
 
-    STRIPE_SECRET_KEY: str = ""
+    # 留空表示未接支付网关：/checkout 返回 configured=false，不伪造下单链接。
     PAYMENT_CHECKOUT_BASE_URL: str = ""
     # Stripe webhook 验签密钥（t=<ts>,v1=<hmac>）；留空则跳过验签（仅开发/测试）
     PAYMENT_WEBHOOK_SECRET: str = ""

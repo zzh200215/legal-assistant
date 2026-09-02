@@ -36,18 +36,8 @@ class ReliabilitySettings(BaseSettings):
     EXTERNAL_CIRCUIT_HALF_OPEN_MAX_CONCURRENCY: int = Field(default=1, ge=1, le=10)
 
     # ── 任务运行台账 ────────────────────────────────────────────────
-    TASK_RUNS_RECORD_TASKS: list[str] = Field(default_factory=lambda: [
-        "parse_document",
-        "document_chunk",
-        "document_index",
-        "summarize_document",
-        "analyze_document",
-        "process_open_contract_review",
-        "parse_contract_versions",
-        "connector_sync_task",
-        "run_database_archive",
-        "create_pilot_backup",
-    ])
+    # 记账哪些任务不由配置决定：由 app/tasks/task_run_registry.py 的 TaskRunSpec
+    # 注册表 opt-in（信号层 get_spec 命中才记），未登记的任务零开销跳过。
     TASK_RUNS_RETENTION_DAYS: int = Field(default=30, ge=1, le=365)
 
     # ── 连接器同步台账 ──────────────────────────────────────────────
@@ -55,20 +45,19 @@ class ReliabilitySettings(BaseSettings):
     SYNC_MAX_ATTEMPTS: int = Field(default=3, ge=1, le=10)
     SYNC_BACKOFF_BASE_SECONDS: int = Field(default=30, ge=5, le=3600)
     SYNC_RUN_LEASE_TTL_SECONDS: int = Field(default=900, ge=60, le=86400)
-    # 默认关闭：同步框架仅以 mock 连接器接入，不产生真实外部调用。
+    # 默认关闭：同步框架仅以 mock 连接器接入（app/services/integration/mock_connector_client.py），
+    # 不存在真实连接器实现，因此没有"mock / 真实"模式可选。
     CONNECTOR_SYNC_ENABLED: bool = Field(default=False)
-    CONNECTOR_SYNC_MOCK_MODE: bool = Field(default=True)
 
     # ── 幂等 ────────────────────────────────────────────────────────
     EMAIL_SEND_DETERMINISTIC_IDEMPOTENCY: bool = Field(default=True)
 
     # ── 通知/外发投递（Outbox 领取、租约、重试、死信）──────────────────
-    # 站内低风险通知自动批准（分级审批策略的一部分）。
-    AUTO_APPROVE_SITE_NOTIFICATION: bool = Field(default=True)
+    # 分级审批的另外两档不在这里配置：站内通知没有审批环节（notification_service.
+    # _dispatch_site 直接置 delivered）；对外邮件是否需审批由 OutboundEmailPolicy.
+    # require_approval 决定，且 update_policy 硬写 True——不允许自动 SMTP 外发。
     # 发往内部用户本人邮箱的通知自动批准（可信渠道）；对外收件人走审批。
     AUTO_APPROVE_EMAIL_NOTIFICATION_TO_OWNER: bool = Field(default=True)
-    # 对外邮件通知是否需要审批。默认偏安全：无法判定时不得自动外发。
-    EMAIL_NOTIFICATION_REQUIRE_APPROVAL: bool = Field(default=True)
     # 通知事件领取批次与租约 TTL（worker 崩溃后按 TTL 回收重领）。
     NOTIFICATION_CLAIM_BATCH_SIZE: int = Field(default=50, ge=1, le=500)
     NOTIFICATION_CLAIM_TTL_SECONDS: int = Field(default=300, ge=60, le=86400)

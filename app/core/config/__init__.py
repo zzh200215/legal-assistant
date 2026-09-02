@@ -41,7 +41,6 @@ SENSITIVE_FIELDS = frozenset(
         "DINGTALK_APP_SECRET",
         "WECHAT_APP_SECRET",
         "SMTP_PASSWORD",
-        "STRIPE_SECRET_KEY",
         "PAYMENT_WEBHOOK_SECRET",
         "FEISHU_EVENT_ENCRYPT_KEY",
         "FEISHU_APP_SECRET",
@@ -108,8 +107,14 @@ class Settings(
             issues.append("试点/生产环境必须配置独立的LEGAL_DATA_ENCRYPTION_KEY或版本化密钥环")
 
         # 启用了外部服务但其关键配置缺失时，启动必须失败（服务未启用则不强制）。
-        if self.STRIPE_SECRET_KEY and not self.PAYMENT_CHECKOUT_BASE_URL:
-            issues.append("启用了Stripe支付但PAYMENT_CHECKOUT_BASE_URL未配置")
+        # 支付：配置了下单跳转地址即视为已接网关；验签 fail-closed，缺密钥会拒绝全部回调，
+        # 表现为付款成功但订阅永不生效，必须在启动期暴露。
+        if (
+            self.PAYMENT_CHECKOUT_BASE_URL
+            and self.PAYMENT_WEBHOOK_REQUIRE_SIGNATURE
+            and not self.PAYMENT_WEBHOOK_SECRET
+        ):
+            issues.append("配置了支付网关但PAYMENT_WEBHOOK_SECRET未配置（验签fail-closed会拒绝全部回调）")
         if self.SMTP_HOST and not (self.SMTP_USERNAME and self.SMTP_PASSWORD):
             issues.append("启用了SMTP但SMTP_USERNAME/SMTP_PASSWORD未配置")
 
