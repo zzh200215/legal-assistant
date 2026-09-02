@@ -33,6 +33,10 @@ chroma_db/
 # Firecrawl CLI 输出（求职/检索等临时数据，勿混入仓库）
 .firecrawl/
 
+# 求职面试材料（个人讲稿与讲解图，勿混入仓库）
+/面试准备.md
+/docs/interview/
+
 # Env
 .env
 .env.*
