@@ -1,5 +1,6 @@
 """补齐企业认证 Provider：WeCom/DingTalk OAuth + LDAP 登录在演示模式（无凭据）下可端到端跑通。"""
 import unittest
+from datetime import timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -9,6 +10,7 @@ from unittest.mock import patch
 import app.models  # noqa: F401
 from app.core.config import get_settings
 from app.core.database import Base
+from app.core.time import utc_now
 from app.models.org import Organization
 from app.models.user import User
 
@@ -112,6 +114,84 @@ class EnterpriseAuthTests(unittest.TestCase):
         self.assertIsNotNone(user.hashed_password)
         other, token = self.service.local_login(self.db, user.username, "any-password", None, None)
         self.assertIsNone(token)
+
+
+class LoginLockoutPolicyTests(unittest.TestCase):
+    """锁定阈值/时长必须来自 LOGIN_MAX_FAIL_COUNT / LOGIN_LOCK_DURATION_MINUTES。
+
+    这两个配置此前被同名的类常量（写死 5 / 30）盖住：运维把 .env 改成 3 次，
+    仍要到第 5 次失败才锁。
+    """
+
+    def setUp(self):
+        from app.core.auth import hash_password
+
+        self.engine = _make_engine()
+        Session = sessionmaker(bind=self.engine, autoflush=False, autocommit=False)
+        Base.metadata.create_all(bind=self.engine)
+        self.db = Session()
+        self.user = User(
+            username="locktester", email="lock@example.com",
+            hashed_password=hash_password("right-password"),
+            role="user", status="active",
+        )
+        self.db.add(self.user)
+        self.db.commit()
+        self.service = _demo_service()
+
+    def tearDown(self):
+        self.db.close()
+
+    def _fail_login(self):
+        return self.service.local_login(self.db, "locktester", "wrong-password", "127.0.0.1", "ua")
+
+    def test_lock_threshold_follows_setting(self):
+        with patch.object(get_settings(), "LOGIN_MAX_FAIL_COUNT", 2):
+            self._fail_login()
+            self.db.refresh(self.user)
+            self.assertEqual(self.user.status, "active")  # 第 1 次未达阈值
+            self._fail_login()
+            self.db.refresh(self.user)
+            self.assertEqual(self.user.status, "locked")  # 第 2 次即锁定
+        self.assertIsNotNone(self.user.locked_until)
+
+    def test_lock_duration_follows_setting(self):
+        with patch.object(get_settings(), "LOGIN_MAX_FAIL_COUNT", 1), patch.object(
+            get_settings(), "LOGIN_LOCK_DURATION_MINUTES", 90
+        ):
+            self._fail_login()
+        self.db.refresh(self.user)
+        locked_until = self.user.locked_until
+        if locked_until.tzinfo is not None:  # MySQL 读回带偏移，统一按 naive UTC 比较
+            locked_until = locked_until.replace(tzinfo=None)
+        minutes = (locked_until - utc_now()).total_seconds() / 60
+        self.assertGreater(minutes, 85)
+        self.assertLess(minutes, 91)
+
+    def test_locked_account_rejected_then_unlocked_after_expiry(self):
+        with patch.object(get_settings(), "LOGIN_MAX_FAIL_COUNT", 1):
+            self._fail_login()
+        self.db.refresh(self.user)
+        # 锁定期内即使密码正确也拒绝
+        user, token = self.service.local_login(self.db, "locktester", "right-password", None, None)
+        self.assertIsNone(token)
+        # 锁定到期后自动解锁并放行
+        self.user.locked_until = utc_now() - timedelta(seconds=1)
+        self.db.add(self.user)
+        self.db.commit()
+        user, token = self.service.local_login(self.db, "locktester", "right-password", None, None)
+        self.assertIsNotNone(token)
+        self.db.refresh(self.user)
+        self.assertEqual(self.user.login_fail_count, 0)
+
+    def test_settings_change_takes_effect_without_restart(self):
+        """服务是模块级单例：阈值必须每次读配置，不能在构造期快照。"""
+        from app.services.auth.enterprise_auth_service import enterprise_auth_service
+
+        with patch.object(get_settings(), "LOGIN_MAX_FAIL_COUNT", 7):
+            self.assertEqual(enterprise_auth_service.MAX_LOGIN_FAIL_COUNT, 7)
+        with patch.object(get_settings(), "LOGIN_MAX_FAIL_COUNT", 3):
+            self.assertEqual(enterprise_auth_service.MAX_LOGIN_FAIL_COUNT, 3)
 
 
 if __name__ == "__main__":

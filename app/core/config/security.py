@@ -38,9 +38,10 @@ class SecuritySettings(BaseSettings):
     LDAP_BIND_DN: str = ""
     LDAP_BIND_PASSWORD: str = ""
 
-    # 登录安全配置
-    LOGIN_MAX_FAIL_COUNT: int = 5
-    LOGIN_LOCK_DURATION_MINUTES: int = 30
+    # 登录安全配置：连续失败次数达到阈值即锁定账号，锁定时长内拒绝密码登录
+    # （见 EnterpriseAuthService._handle_login_failure；到期由下次登录尝试自动解锁）。
+    LOGIN_MAX_FAIL_COUNT: int = Field(default=5, ge=1, le=100)
+    LOGIN_LOCK_DURATION_MINUTES: int = Field(default=30, ge=1, le=10080)
 
     # 微信公众号扫码登录
     WECHAT_APP_ID: str = ""

@@ -284,8 +284,20 @@ class LDAPAuthProvider(EnterpriseAuthProvider):
 class EnterpriseAuthService:
     """企业统一登录服务"""
 
-    MAX_LOGIN_FAIL_COUNT = 5
-    LOCK_DURATION_MINUTES = 30
+    @property
+    def MAX_LOGIN_FAIL_COUNT(self) -> int:
+        """锁定阈值取运行时配置。
+
+        这两个值此前是写死的类常量，与 LOGIN_MAX_FAIL_COUNT /
+        LOGIN_LOCK_DURATION_MINUTES 同名同默认值却各管一份——运维把 .env 里的阈值改成 3，
+        锁定仍在第 5 次失败才触发。做成 property 而不是 __init__ 读取，是因为服务是模块级
+        单例（import 时就实例化），构造期快照会让配置改动只在重启后生效。
+        """
+        return int(settings.LOGIN_MAX_FAIL_COUNT)
+
+    @property
+    def LOCK_DURATION_MINUTES(self) -> int:
+        return int(settings.LOGIN_LOCK_DURATION_MINUTES)
 
     def __init__(self):
         # 三个 Provider 全量注册：配置了凭据走真实 API，未配置走演示模拟模式
