@@ -66,6 +66,9 @@ class ReliabilitySettings(BaseSettings):
     # 邮件投递（EmailSendRequest 作为 Outbox）的重试与租约。
     EMAIL_DELIVERY_MAX_ATTEMPTS: int = Field(default=5, ge=1, le=20)
     EMAIL_DELIVERY_CLAIM_TTL_SECONDS: int = Field(default=300, ge=60, le=86400)
+    # 死信台账保留天数：由 run_database_archive 执行
+    # （archive_service._cleanup_email_dead_letters，受 DATABASE_ARCHIVE_ENABLED/DRY_RUN 约束）。
+    # 仍被通知事件引用的死信会跳过，等事件本身过期后再删。
     EMAIL_DEAD_LETTER_RETENTION_DAYS: int = Field(default=90, ge=7, le=3650)
 
     # ── DLP 发送前硬门禁 ──────────────────────────────────────────────

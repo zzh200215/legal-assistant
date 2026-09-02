@@ -42,9 +42,18 @@ All beat tasks run under a **distributed lock** (`aibg:tasklock:{task}:{scope}:{
 celery -A app.core.celery_app.celery_app inspect active_queues
 ```
 
-`connector_sync_task` is registered only when `CONNECTOR_SYNC_ENABLED=true` (mock mode by default; sync runs are ledger-backed with cursor/checkpoint breakpoint recovery).
+`connector_sync_task` is registered only when `CONNECTOR_SYNC_ENABLED=true` (the only connector client is the mock one — no real IMAP/API client exists; sync runs are ledger-backed with cursor/checkpoint breakpoint recovery).
 
 `prune_graph_checkpoints` (daily) bounds the LangGraph checkpoint store: one thread per Q&A (`rag-*`, never resumed) and one per Agent Run (`agent-run-*`, resumed after human approval) accumulate in `LANGGRAPH_CHECKPOINT_DB` (default `data/langgraph_checkpoints.sqlite`), so nothing shrinks it without a sweep. Threads whose newest checkpoint is older than `GRAPH_CHECKPOINT_RETENTION_DAYS` are deleted; runs still in `running` / `awaiting_approval` / `cancelling` are whitelisted by thread id and survive regardless of age. Disable with `GRAPH_CHECKPOINT_PRUNE_ENABLED=false`. The file is **local disk**, so this task must run on a worker that shares the API host's volume, and sqlite `DELETE` frees pages for reuse rather than shrinking the file (`VACUUM` manually if size matters).
+
+## Retention (`run_database_archive`)
+
+One daily pass enforces every retention setting: per-table log/usage purges from `DATABASE_ARCHIVE_RETENTION_DAYS_JSON`, tiered audit retention (archive first, purge only with `OBS_AUDIT_PURGE_AFTER_ARCHIVE=true`), pre-aggregate/snapshot cleanup, and content retention — the mailbox mirror (`MAILBOX_RETENTION_DAYS`: `mailbox_messages` + `mailbox_attachments` rows **and** their object-storage blobs) and delivery dead letters (`EMAIL_DEAD_LETTER_RETENTION_DAYS`). Nothing is deleted unless `DATABASE_ARCHIVE_ENABLED=true` **and** `DATABASE_ARCHIVE_DRY_RUN=false`; a dry run only counts. Every table gets a `database_archive_runs` ledger row plus an OperationLog entry per pass, and each pass is idempotent — interrupt it and the next run continues from the id cursor.
+
+Two boundaries worth knowing before someone asks why a row survived:
+
+- Attachment blobs are content-hash deduplicated, so several rows can share one `storage_key`. A blob is deleted only once no surviving row references it, and blob deletion runs **before** the row delete — a storage outage leaves the row in place to retry next pass instead of orphaning the object (`blob_failures` in the result counts these).
+- Dead letters still referenced by `legal_notification_events.email_send_request_id` are skipped (`skipped_referenced`); they go once the event itself expires, so the event keeps its failure trail. Their attachment rows are only unlinked (`send_request_id → NULL`), never deleted — the draft still owns the file.
 
 ## External-Call Resilience
 

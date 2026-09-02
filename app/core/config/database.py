@@ -29,7 +29,9 @@ class DatabaseSettings(BaseSettings):
 
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # 邮件留存（imap_mailbox 连接器）；与数据库归档保留策略同域管理。
+    # 邮箱镜像保留天数（mailbox_messages + mailbox_attachments，含对象存储 blob）。
+    # 由 run_database_archive 每日任务执行（archive_service._cleanup_mailbox），
+    # 因此同样受 DATABASE_ARCHIVE_ENABLED / DATABASE_ARCHIVE_DRY_RUN 约束。
     MAILBOX_RETENTION_DAYS: int = Field(default=90, ge=7, le=3650)
 
     # —— 大表归档 / 保留策略（见 app/services/archive_service.py）——

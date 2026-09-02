@@ -212,8 +212,10 @@ def dispatch_operational_alerts_task():
 @celery_app.task(name="run_database_archive")
 @beat_lock(task_name="run_database_archive", ttl_seconds=86400)
 def run_database_archive_task():
-    """按表保留策略批量清理过期日志/用量记录。
+    """按保留策略批量清理过期数据。
 
+    覆盖：按表配置的日志/用量记录、审计分级保留、预聚合快照，以及内容类保留
+    （邮箱镜像 mailbox_* 含对象存储附件、邮件死信 email_send_requests）。
     默认关闭且 dry-run；DATABASE_ARCHIVE_ENABLED=true 且 DRY_RUN=false 才真实删除。
     使用统一事务上下文 session_scope；慢 SQL 日志通过 correlation id 关联到本任务。
     """

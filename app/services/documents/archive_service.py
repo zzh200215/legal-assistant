@@ -20,6 +20,11 @@ P1 审计保留（安全策略）：
   仅 OBS_AUDIT_PURGE_AFTER_ARCHIVE=true 时才删除已归档行；归档行为本身入审计。
 - 预聚合表 ops_metric_* 按 OBS_METRICS_SNAPSHOT_RETENTION_DAYS /
   OBS_AGGREGATION_*_RETENTION_DAYS 物理清理（可重建数据，允许直接删除）。
+
+内容类保留（各有专属配置，不走 DATABASE_ARCHIVE_RETENTION_DAYS_JSON）：
+- 邮箱镜像 mailbox_messages / mailbox_attachments 按 MAILBOX_RETENTION_DAYS 清理，
+  含对象存储 blob（附件按内容哈希去重，多行可共享一个 key，仅无引用时才删 blob）。
+- 邮件死信 email_send_requests(status=dead_letter) 按 EMAIL_DEAD_LETTER_RETENTION_DAYS 清理。
 """
 
 from __future__ import annotations
@@ -27,20 +32,23 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import inspect
+from sqlalchemy import func, inspect
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.observability_sanitizer import sanitize_background_error_message
 from app.models.archive import DatabaseArchiveRun
 from app.models.auth_log import AdminAuditLog, LoginLog
+from app.models.email import EmailAttachment, EmailSendRequest
 from app.models.legal_notifications import LegalNotificationEvent, SecurityAuditEvent
 from app.models.legal_platform import WebhookDelivery
 from app.models.llm_call_log import LLMCallLog
+from app.models.mailbox import MailboxAttachment, MailboxMessage
 from app.models.operation_log import OperationLog
 from app.models.ops_metric import OpsMetricDaily, OpsMetricHourly, OpsMetricSnapshot
 from app.models.token_usage import TokenUsage
@@ -48,6 +56,10 @@ from app.models.ws_event_log import WsEventLog
 from app.services.observability.oplog_service import oplog_service
 
 logger = logging.getLogger(__name__)
+
+# = outbound_email_service.EMAIL_REQ_DEAD_LETTER；此处复制字面量，
+# 避免 archive -> notification 的模块依赖。
+_EMAIL_DEAD_LETTER_STATUS = "dead_letter"
 
 
 def _utcnow() -> datetime:
@@ -108,6 +120,9 @@ class ArchiveService:
         results: dict[str, dict] = {}
         # 预聚合表保留（独立配置，物理清理可重建数据）。
         results["ops_metrics"] = self._cleanup_ops_metrics(db, dry_run=effective_dry_run)
+        # 内容类保留（独立配置：邮箱镜像 / 邮件死信）。
+        results["mailbox"] = self._cleanup_mailbox(db, dry_run=effective_dry_run)
+        results["email_dead_letters"] = self._cleanup_email_dead_letters(db, dry_run=effective_dry_run)
         for table, days in retention.items():
             if table not in ARCHIVE_TABLES:
                 logger.warning("archive: 表 %s 不在归档白名单，跳过", table)
@@ -295,6 +310,184 @@ class ArchiveService:
         result["ws_event_logs"] = {"retention_days": ws_days, "expired": ws_count,
                                    "deleted": ws_count if not dry_run else 0}
         return result
+
+    def _cleanup_mailbox(self, db: Session, *, dry_run: bool) -> dict:
+        """邮箱镜像保留（MAILBOX_RETENTION_DAYS）：过期邮件连同附件行与对象存储 blob 一并清理。
+
+        - 时间基准 coalesce(received_at, created_at)：收件时间缺失时退回落库时间。
+        - 先删 blob 再删行：中途失败时行还在，下一轮按同一 key 重试，不留无主对象。
+        - 附件按内容哈希去重，多行可共享一个 storage_key：仅当批外再无引用时才删 blob。
+        - 先删附件行再删邮件行（mailbox_attachments.message_id 外键）。
+        """
+        days = int(get_settings().MAILBOX_RETENTION_DAYS)
+        cutoff = _utcnow() - timedelta(days=days)
+        table = MailboxMessage.__tablename__
+        run = self._start_run(db, table, cutoff, dry_run)
+        if run is None:
+            return {"status": "skipped_locked", "table": table}
+        batch_size = run.batch_size
+        received = func.coalesce(MailboxMessage.received_at, MailboxMessage.created_at)
+        processed = deleted = attachments = blobs = blob_failures = 0
+        last_id = 0
+        try:
+            while True:
+                ids = [
+                    row[0]
+                    for row in db.query(MailboxMessage.id)
+                    .filter(received < cutoff, MailboxMessage.id > last_id)
+                    .order_by(MailboxMessage.id)
+                    .limit(batch_size)
+                    .all()
+                ]
+                if not ids:
+                    break
+                last_id = ids[-1]
+                processed += len(ids)
+                if dry_run:
+                    continue
+                purged, failed = self._purge_blobs(self._orphan_blob_keys(
+                    db, MailboxAttachment, MailboxAttachment.message_id, ids))
+                blobs += purged
+                blob_failures += failed
+                attachments += (
+                    db.query(MailboxAttachment)
+                    .filter(MailboxAttachment.message_id.in_(ids))
+                    .delete(synchronize_session=False)
+                )
+                deleted += (
+                    db.query(MailboxMessage)
+                    .filter(MailboxMessage.id.in_(ids))
+                    .delete(synchronize_session=False)
+                )
+                db.commit()
+        except Exception as exc:  # noqa: BLE001 - 清理失败不阻断其他表/主流程
+            return self._fail_run(db, run.id, table, exc)
+        self._finish_run(db, table, run, processed=processed, deleted=deleted)
+        return {"status": "completed", "table": table, "retention_days": days,
+                "processed": processed, "deleted": deleted,
+                "attachments_deleted": attachments, "blobs_deleted": blobs,
+                "blob_failures": blob_failures, "dry_run": dry_run}
+
+    def _cleanup_email_dead_letters(self, db: Session, *, dry_run: bool) -> dict:
+        """邮件死信保留（EMAIL_DEAD_LETTER_RETENTION_DAYS）：清理过期的投递死信台账行。
+
+        边界（有意为之，不在这条策略内）：
+        - 仍被通知事件引用（legal_notification_events.email_send_request_id）的死信跳过，
+          等事件按自身保留策略清理后的下一轮再删——否则会丢掉事件失败原因的追溯链。
+        - 附件与草稿正文属用户内容（email_drafts / email_attachments），只解除
+          send_request_id 引用，不删除行、不删 blob。
+        """
+        days = int(get_settings().EMAIL_DEAD_LETTER_RETENTION_DAYS)
+        cutoff = _utcnow() - timedelta(days=days)
+        table = EmailSendRequest.__tablename__
+        run = self._start_run(db, table, cutoff, dry_run)
+        if run is None:
+            return {"status": "skipped_locked", "table": table}
+        batch_size = run.batch_size
+        failed_at = func.coalesce(EmailSendRequest.dead_letter_at, EmailSendRequest.updated_at,
+                                  EmailSendRequest.created_at)
+        processed = deleted = skipped = unlinked = 0
+        last_id = 0
+        try:
+            while True:
+                ids = [
+                    row[0]
+                    for row in db.query(EmailSendRequest.id)
+                    .filter(EmailSendRequest.status == _EMAIL_DEAD_LETTER_STATUS,
+                            failed_at < cutoff, EmailSendRequest.id > last_id)
+                    .order_by(EmailSendRequest.id)
+                    .limit(batch_size)
+                    .all()
+                ]
+                if not ids:
+                    break
+                last_id = ids[-1]
+                processed += len(ids)
+                referenced = {
+                    row[0]
+                    for row in db.query(LegalNotificationEvent.email_send_request_id)
+                    .filter(LegalNotificationEvent.email_send_request_id.in_(ids))
+                    .all()
+                }
+                removable = [rid for rid in ids if rid not in referenced]
+                skipped += len(ids) - len(removable)
+                if dry_run or not removable:
+                    continue
+                unlinked += (
+                    db.query(EmailAttachment)
+                    .filter(EmailAttachment.send_request_id.in_(removable))
+                    .update({EmailAttachment.send_request_id: None}, synchronize_session=False)
+                )
+                deleted += (
+                    db.query(EmailSendRequest)
+                    .filter(EmailSendRequest.id.in_(removable))
+                    .delete(synchronize_session=False)
+                )
+                db.commit()
+        except Exception as exc:  # noqa: BLE001 - 清理失败不阻断其他表/主流程
+            return self._fail_run(db, run.id, table, exc)
+        self._finish_run(db, table, run, processed=processed, deleted=deleted)
+        return {"status": "completed", "table": table, "retention_days": days,
+                "processed": processed, "deleted": deleted,
+                "skipped_referenced": skipped, "attachments_unlinked": unlinked,
+                "dry_run": dry_run}
+
+    @staticmethod
+    def _orphan_blob_keys(db: Session, model, owner_col, owner_ids: list[int]) -> set[str]:
+        """批内附件的 storage_key 里，批外已无任何行引用的那些（删 blob 才安全）。"""
+        keys = {
+            row[0]
+            for row in db.query(model.storage_key)
+            .filter(owner_col.in_(owner_ids), model.storage_key.isnot(None))
+            .all()
+            if row[0]
+        }
+        if not keys:
+            return set()
+        shared = {
+            row[0]
+            for row in db.query(model.storage_key)
+            .filter(model.storage_key.in_(list(keys)), owner_col.notin_(owner_ids))
+            .all()
+            if row[0]
+        }
+        return keys - shared
+
+    @staticmethod
+    def _purge_blobs(keys: Iterable[str]) -> tuple[int, int]:
+        """删除对象存储 blob；单个失败只计数不抛（行未删，下一轮重试同一 key）。"""
+        from app.services.storage.storage_service import storage_service
+
+        purged = failures = 0
+        for key in keys:
+            try:
+                storage_service.delete(key)
+                purged += 1
+            except Exception as exc:  # noqa: BLE001 - 单个对象删除失败不阻断整轮清理
+                failures += 1
+                logger.warning("archive: 附件对象删除失败 (%s)", type(exc).__name__)
+        return purged, failures
+
+    def _finish_run(self, db: Session, table: str, run: DatabaseArchiveRun, *,
+                    processed: int, deleted: int) -> None:
+        run.status = "completed"
+        run.processed_count = processed
+        run.deleted_count = deleted
+        run.finished_at = _utcnow()
+        db.commit()
+        self._audit_log(db, table, run)
+
+    def _fail_run(self, db: Session, run_id: int, table: str, exc: Exception) -> dict:
+        db.rollback()
+        run = db.query(DatabaseArchiveRun).filter(DatabaseArchiveRun.id == run_id).first()
+        if run is not None:
+            run.status = "failed"
+            run.error_message = sanitize_background_error_message(str(exc))
+            run.finished_at = _utcnow()
+            db.commit()
+        logger.warning("archive: %s 清理失败: %s", table, type(exc).__name__)
+        return {"status": "failed", "table": table,
+                "error": sanitize_background_error_message(str(exc))}
 
     def _start_run(self, db: Session, table: str, cutoff: datetime, dry_run: bool) -> DatabaseArchiveRun | None:
         """台账行即运行锁；返回 None 表示表被并发运行锁定。"""
