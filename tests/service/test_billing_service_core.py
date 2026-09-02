@@ -10,7 +10,7 @@
 """
 
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -184,14 +184,28 @@ class BillingServiceCoreTests(unittest.TestCase):
         )
         e1.billable = 1
         e1.billed_amount = Decimal("100.00")
-        e1.started_at = utc_now()
+        started = utc_now()
+        e1.started_at = started
         self.db.commit()
+        # 期间锚定到条目自身的日期：原来写死 2026-08-01~08-31 配 utc_now() 的条目，
+        # 只在「今天恰好落在这个窗口」时通过，月份翻页后必然失败（本用例即如此失效）。
+        # period_end 是开区间（started_at < period_end），所以上界取次日。
+        day = started.date()
         rows = billing_service.calculate_amounts(
             db=self.db, organization_id=1, case_id=1,
-            period_start=date(2026, 8, 1), period_end=date(2026, 8, 31),
+            period_start=day, period_end=day + timedelta(days=1),
         )
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["billed_amount"], "100.00")
+        # 期间外不返回（用例名里的 filters）
+        past = day - timedelta(days=30)
+        self.assertEqual(
+            billing_service.calculate_amounts(
+                db=self.db, organization_id=1, case_id=1,
+                period_start=past, period_end=past + timedelta(days=1),
+            ),
+            [],
+        )
 
     # ── 发票创建 ────────────────────────────────────────────────────────────
     def _confirmed_entry(self, *, minutes=60, amount="500.00") -> LegalTimeEntry:
