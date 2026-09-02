@@ -9,6 +9,9 @@ from app.core.config.base import ENV_FILE_CONFIG
 class SQLSettings(BaseSettings):
     model_config = ENV_FILE_CONFIG
 
+    # 查询超时下推为数据库端语句超时（MySQL MAX_EXECUTION_TIME / MariaDB
+    # max_statement_time / PostgreSQL statement_timeout）：工具跑在不可取消的线程里，
+    # Agent 侧超时只是停止等待，数据库不会停下来。行数/字符数上限只约束读回多少。
     SQL_QUERY_TIMEOUT_SECONDS: int = Field(default=10, ge=1, le=300)
     SQL_QUERY_MAX_ROWS: int = Field(default=200, ge=1, le=10000)
     SQL_RESULT_MAX_CHARS: int = Field(default=100_000, ge=1000, le=5_000_000)
