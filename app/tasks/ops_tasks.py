@@ -171,6 +171,9 @@ def _broker_backlog_rows() -> list[dict]:
 @beat_lock(task_name="aggregate_ops_metrics", ttl_seconds=3300)
 def aggregate_ops_metrics() -> dict:
     """小时 + 天级幂等预聚合（逐桶先删后插，水位线断点恢复）。"""
+    if not get_settings().OBS_AGGREGATION_ENABLED:
+        # 此前没有任何代码读这个开关：关掉它，聚合照跑。
+        return {"skipped": True, "reason": "aggregation_disabled"}
     db = SessionLocal()
     try:
         hourly = ops_aggregation_service.aggregate_all(db, "hour")

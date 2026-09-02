@@ -432,24 +432,51 @@ def _watermark_or_backfill_start(db: Session, granularity: str, metric_name: str
     return floor_bucket(now - timedelta(days=days), granularity)
 
 
-def aggregate_metric(db: Session, granularity: str, metric_name: str, *, now: datetime | None = None) -> dict:
-    """从水位线推进到最近完整桶（含），逐桶幂等聚合；失败只影响单指标，可断点恢复。"""
+def aggregate_metric(
+    db: Session,
+    granularity: str,
+    metric_name: str,
+    *,
+    now: datetime | None = None,
+    max_buckets: int | None = None,
+) -> dict:
+    """从水位线推进到最近完整桶（含），逐桶幂等聚合；失败只影响单指标，可断点恢复。
+
+    单次最多推进 ``max_buckets`` 个桶（默认 OBS_AGGREGATION_BATCH_SIZE，此前没有任何
+    代码读它）。没有上限时，追赶量等于「距上次成功聚合的时间」——聚合停了一个月再拉起来，
+    一次调用要跑几千个桶的聚合查询，把 beat 任务拖过它自己的锁 TTL(3300s)，锁被别的实例
+    抢走后两边同时聚合。每桶都单独提交水位线，所以截断后剩下的桶由下一次运行接着推进。
+    """
     now = now or _utcnow()
+    limit = int(max_buckets if max_buckets is not None else get_settings().OBS_AGGREGATION_BATCH_SIZE)
     cursor = _watermark_or_backfill_start(db, granularity, metric_name, now)
     latest_complete = floor_bucket(now, granularity)
     buckets = 0
+    truncated = False
     while cursor < latest_complete:
+        if buckets >= limit:
+            truncated = True
+            break
         end = bucket_end(cursor, granularity)
         rows = _compute_rows(db, metric_name, cursor, end)
         _upsert_bucket(db, granularity, metric_name, cursor, rows)
         _advance_watermark(db, granularity, metric_name, cursor)
         buckets += 1
         cursor = end
-    return {"granularity": granularity, "metric_name": metric_name, "buckets": buckets}
+    return {
+        "granularity": granularity,
+        "metric_name": metric_name,
+        "buckets": buckets,
+        "truncated": truncated,
+    }
 
 
 def aggregate_all(db: Session, granularity: str, *, now: datetime | None = None) -> dict:
-    """聚合全部 SLO 指标（单指标异常不影响其他指标）。"""
+    """聚合全部 SLO 指标（单指标异常不影响其他指标）。
+
+    每个指标各自受 OBS_AGGREGATION_BATCH_SIZE 约束，而不是共享一份总预算：共享预算下
+    指标顺序固定，靠前的会把额度吃光，靠后的永远排不上。
+    """
     now = now or _utcnow()
     results: dict[str, dict] = {}
     metrics = sorted(_SNAPSHOT_SOURCE_METRICS | {

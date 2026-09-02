@@ -546,6 +546,36 @@ class TestSloMetrics(unittest.TestCase):
         ).first()
         self.assertIsNotNone(wm)
 
+    def test_aggregation_batch_size_bounds_catch_up(self):
+        """OBS_AGGREGATION_BATCH_SIZE 必须真的限制单次推进的桶数。
+
+        回填起点是 now - 保留天数（小时粒度 = 168 个桶），聚合停一段时间再拉起来，
+        追赶量等于停机时长；没有上限时一次调用会把 beat 任务拖过它自己的锁 TTL。
+        此前没有任何代码读这个配置。
+        """
+        from app.services.observability.ops_aggregation_service import ops_aggregation_service
+
+        first = ops_aggregation_service.aggregate_metric(
+            self.db, "hour", "llm_calls", now=self.NOW, max_buckets=2
+        )
+        self.assertEqual(first["buckets"], 2)
+        self.assertTrue(first["truncated"])
+        # 水位线已提交，下一次从断点继续，不重头再来
+        second = ops_aggregation_service.aggregate_metric(
+            self.db, "hour", "llm_calls", now=self.NOW, max_buckets=2
+        )
+        self.assertEqual(second["buckets"], 2)
+        self.assertTrue(second["truncated"])
+
+    def test_aggregation_batch_size_defaults_to_setting(self):
+        from app.core.config import get_settings
+        from app.services.observability.ops_aggregation_service import ops_aggregation_service
+
+        with patch.object(get_settings(), "OBS_AGGREGATION_BATCH_SIZE", 1):
+            result = ops_aggregation_service.aggregate_metric(self.db, "hour", "llm_calls", now=self.NOW)
+        self.assertEqual(result["buckets"], 1)
+        self.assertTrue(result["truncated"])
+
     def test_slo_rates_read_aggregates_only(self):
         from app.services.observability.ops_aggregation_service import ops_aggregation_service
 

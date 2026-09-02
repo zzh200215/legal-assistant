@@ -39,6 +39,8 @@ class ObservabilitySettings(BaseSettings):
     OBS_METRICS_SNAPSHOT_WINDOW_SECONDS: int = Field(default=300, ge=60, le=3600)
 
     # 预聚合（ops_metric_hourly/daily）：增量聚合窗口与保留天数。
+    # BATCH_SIZE 是单次运行「每个指标」最多推进的桶数：追赶量等于距上次成功聚合的时长，
+    # 不设上限时一次调用可能跑过 beat 锁 TTL；截断后由水位线在下一次运行继续。
     OBS_AGGREGATION_ENABLED: bool = True
     OBS_AGGREGATION_BATCH_SIZE: int = Field(default=500, ge=50, le=5000)
     # 小时/天预聚合保留天数（天级覆盖 SLO 与运营报表；小时级覆盖近 7 天）。

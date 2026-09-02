@@ -142,6 +142,16 @@ class OpsTasksTests(unittest.TestCase):
             result = ops_tasks.aggregate_ops_metrics()
         self.assertEqual(result, {"error": True})
 
+    def test_aggregate_metrics_skipped_when_disabled(self):
+        """OBS_AGGREGATION_ENABLED=false 必须真的不聚合（此前没有代码读这个开关）。"""
+        with patch.object(ops_tasks, "get_settings") as settings, patch.object(
+            ops_tasks, "ops_aggregation_service"
+        ) as svc:
+            settings.return_value.OBS_AGGREGATION_ENABLED = False
+            result = ops_tasks.aggregate_ops_metrics()
+        self.assertEqual(result, {"skipped": True, "reason": "aggregation_disabled"})
+        svc.aggregate_all.assert_not_called()
+
     def test_run_audit_export_success(self):
         with patch.object(ops_tasks, "audit_export_service") as svc:
             svc.run_export_job.return_value = {"status": "succeeded", "rows": 10}
