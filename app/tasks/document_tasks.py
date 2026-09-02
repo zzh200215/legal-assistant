@@ -5,6 +5,9 @@
 """
 
 import asyncio
+import logging
+import threading
+import time
 
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
@@ -33,6 +36,8 @@ from app.tasks.runtime import (
 )
 from app.tasks.task_retry import retry_task as _retry_task_impl
 
+logger = logging.getLogger("app.tasks.document_tasks")
+
 
 def _retry_task(self, exc: Exception, **kwargs):
     return _retry_task_impl(
@@ -45,21 +50,72 @@ def _retry_task(self, exc: Exception, **kwargs):
     )
 
 
-def _lease_refresher(job_id: int, owner: str):
-    """心跳：用独立短会话续约，避免把主事务的未提交变更一起 flush。"""
-    settings = get_settings()
+class _LeaseHeartbeat:
+    """后台租约心跳：每 DOCUMENT_JOB_LEASE_RENEW_INTERVAL_SECONDS 续约一次。
 
-    def refresh() -> None:
+    此前只在阶段边界续约，而「单个阶段跑很久」恰恰就是租约会过期的那种情况——扫描件
+    OCR、上万切片入库都能超过 TTL(300s)，租约一过期 recover_stale_document_jobs 就把
+    任务当失联重新排队，同一份文档被处理两遍。阶段边界的 refresh() 管不到阶段内部，
+    所以 DOCUMENT_JOB_LEASE_RENEW_INTERVAL_SECONDS 描述的这条心跳必须真的存在
+    （在此之前没有任何代码读这个配置）。
+
+    续约用独立短会话，避免把主事务的未提交变更一起 flush；心跳线程是 daemon，
+    worker 异常退出不会被它吊住。
+    """
+
+    def __init__(self, job_id: int, owner: str):
+        settings = get_settings()
+        self._job_id = job_id
+        self._owner = owner
+        self._ttl = int(settings.DOCUMENT_JOB_LEASE_TTL_SECONDS)
+        # 下限 0.05s 只防「间隔配成 0 → 线程忙等」；生产由配置的 ge=10 约束。
+        self._interval = max(0.05, float(settings.DOCUMENT_JOB_LEASE_RENEW_INTERVAL_SECONDS))
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._last_renewed = 0.0
+
+    def renew(self) -> None:
+        """阶段边界的显式续约：距上次不足一个间隔就跳过，不做无谓写库。"""
+        with self._lock:
+            now = time.monotonic()
+            if self._last_renewed and now - self._last_renewed < self._interval:
+                return
+            self._last_renewed = now
+        self._renew_now()
+
+    def _renew_now(self) -> None:
         try:
             db = SessionLocal()
             try:
-                document_job_service.renew_lease(job_id, owner, settings.DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
+                document_job_service.renew_lease(self._job_id, self._owner, self._ttl, db)
             finally:
                 db.close()
         except Exception:  # noqa: BLE001 - 续约失败不阻断处理（TTL 内由回收兜底）
-            pass
+            logger.debug("lease renew failed for job %s", self._job_id, exc_info=True)
 
-    return refresh
+    def _loop(self) -> None:
+        while not self._stop.wait(self._interval):
+            with self._lock:
+                self._last_renewed = time.monotonic()
+            self._renew_now()
+
+    def start(self) -> "_LeaseHeartbeat":
+        thread = threading.Thread(target=self._loop, name=f"doc-lease-{self._job_id}", daemon=True)
+        self._thread = thread
+        thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=2)
+
+
+def _lease_refresher(job_id: int, owner: str) -> _LeaseHeartbeat:
+    """启动心跳并返回句柄：``.renew`` 交给流水线，``.stop()`` 必须在 finally 调用。"""
+    return _LeaseHeartbeat(job_id, owner).start()
 
 
 def _job_summary_chunks(result: dict) -> int | None:
@@ -80,6 +136,7 @@ def parse_document_task(self, document_id: int, version_number: int, file_type: 
     db = SessionLocal()
     owner = self.request.id
     job = None
+    heartbeat = None
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
@@ -110,7 +167,8 @@ def parse_document_task(self, document_id: int, version_number: int, file_type: 
             target_id=document_id,
             detail=f"task_id={owner}; version={version_number}",
         )
-        refresh = _lease_refresher(job.id, owner)
+        heartbeat = _lease_refresher(job.id, owner)
+        refresh = heartbeat.renew
 
         # 阶段 1：parse（文本提取 → 产物存档）
         parse_result = run_parse(db, document_id, expected_version=version_number, user_id=doc.user_id, lease_refresh=refresh)
@@ -199,6 +257,9 @@ def parse_document_task(self, document_id: int, version_number: int, file_type: 
             )
         raise
     finally:
+        # 先停心跳再释放租约：否则心跳可能在释放之后又把租约续回去。
+        if heartbeat:
+            heartbeat.stop()
         if job:
             document_job_service.release_lease(job.id, owner, db)
         _release_document_lock(document_id)
@@ -211,6 +272,7 @@ def document_chunk_task(self, document_id: int, version_number: int, snapshot_id
     db = SessionLocal()
     owner = self.request.id
     job = None
+    heartbeat = None
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
@@ -225,7 +287,8 @@ def document_chunk_task(self, document_id: int, version_number: int, snapshot_id
             document_id=document_id, user_id=doc.user_id, job_type="document_chunk", db=db, task_id=owner
         )
         document_job_service.claim_job(job.id, owner, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
-        refresh = _lease_refresher(job.id, owner)
+        heartbeat = _lease_refresher(job.id, owner)
+        refresh = heartbeat.renew
         result = run_chunk(db, document_id, expected_version=version_number, lease_refresh=refresh)
         if result["status"] in ("success", "replayed"):
             document_index_task.delay(document_id, version_number, headers=obs_enqueue_headers())
@@ -245,6 +308,9 @@ def document_chunk_task(self, document_id: int, version_number: int, snapshot_id
             )
         raise
     finally:
+        # 先停心跳再释放租约：否则心跳可能在释放之后又把租约续回去。
+        if heartbeat:
+            heartbeat.stop()
         if job:
             document_job_service.release_lease(job.id, owner, db)
         _release_document_lock(document_id)
@@ -257,6 +323,7 @@ def document_index_task(self, document_id: int, version_number: int):
     db = SessionLocal()
     owner = self.request.id
     job = None
+    heartbeat = None
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
@@ -267,7 +334,8 @@ def document_index_task(self, document_id: int, version_number: int):
             document_id=document_id, user_id=doc.user_id, job_type="document_index", db=db, task_id=owner
         )
         document_job_service.claim_job(job.id, owner, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
-        refresh = _lease_refresher(job.id, owner)
+        heartbeat = _lease_refresher(job.id, owner)
+        refresh = heartbeat.renew
         result = run_index(
             db,
             document_id,
@@ -294,6 +362,9 @@ def document_index_task(self, document_id: int, version_number: int):
             )
         raise
     finally:
+        # 先停心跳再释放租约：否则心跳可能在释放之后又把租约续回去。
+        if heartbeat:
+            heartbeat.stop()
         if job:
             document_job_service.release_lease(job.id, owner, db)
         _release_document_lock(document_id)

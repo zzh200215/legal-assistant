@@ -5,6 +5,7 @@ import hashlib
 import io
 import shutil
 import tempfile
+import time
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -283,6 +284,102 @@ class LeaseAndRecoveryTests(PipelineTestCase):
         self.assertEqual(document_job_service._recovery_task_for_job_type("document_chunk"), "chunk")
         self.assertEqual(document_job_service._recovery_task_for_job_type("document_index"), "index")
         self.assertEqual(document_job_service._recovery_task_for_job_type(None), "parse")
+
+
+class LeaseHeartbeatTests(unittest.TestCase):
+    """租约心跳：DOCUMENT_JOB_LEASE_RENEW_INTERVAL_SECONDS 必须真的驱动续约。
+
+    此前只在阶段边界续约，而「单个阶段跑很久」正是租约过期的那种场景（扫描件 OCR、
+    上万切片入库都能超过 TTL=300s），过期后 recover_stale_document_jobs 会把任务当失联
+    重新排队，同一份文档处理两遍。这个配置在此之前没有任何代码读它。
+    """
+
+    def setUp(self):
+        from app.tasks import document_tasks
+
+        self.module = document_tasks
+        self.renewals: list[tuple] = []
+        self.closed: list[int] = []
+
+        class _FakeSession:
+            def close(inner):
+                self.closed.append(1)
+
+        def _renew_lease(job_id, owner, ttl_seconds, db):
+            self.renewals.append((job_id, owner, ttl_seconds))
+            return True
+
+        self._patches = [
+            patch.object(document_tasks, "SessionLocal", lambda: _FakeSession()),
+            patch.object(document_tasks.document_job_service, "renew_lease", _renew_lease),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+
+    def _heartbeat(self, interval: float):
+        from app.core.config import get_settings
+
+        with patch.object(get_settings(), "DOCUMENT_JOB_LEASE_RENEW_INTERVAL_SECONDS", interval):
+            return self.module._LeaseHeartbeat(job_id=7, owner="worker-1")
+
+    def test_interval_and_ttl_come_from_settings(self):
+        from app.core.config import get_settings
+
+        with patch.object(get_settings(), "DOCUMENT_JOB_LEASE_RENEW_INTERVAL_SECONDS", 12), patch.object(
+            get_settings(), "DOCUMENT_JOB_LEASE_TTL_SECONDS", 600
+        ):
+            hb = self.module._LeaseHeartbeat(job_id=7, owner="w")
+        self.assertEqual(hb._interval, 12.0)
+        self.assertEqual(hb._ttl, 600)
+
+    def test_renews_while_a_single_stage_runs(self):
+        """全程不调用 refresh()，模拟一个长阶段：心跳必须自己把租约续下去。"""
+        hb = self._heartbeat(0.1).start()
+        try:
+            time.sleep(0.35)
+        finally:
+            hb.stop()
+        self.assertGreaterEqual(len(self.renewals), 2)
+        self.assertEqual(self.renewals[0][:2], (7, "worker-1"))
+
+    def test_stop_ends_renewals(self):
+        hb = self._heartbeat(0.1).start()
+        time.sleep(0.25)
+        hb.stop()
+        count = len(self.renewals)
+        self.assertGreaterEqual(count, 1)
+        time.sleep(0.3)
+        self.assertEqual(len(self.renewals), count)  # 停了就不再续约
+
+    def test_explicit_renew_is_rate_limited(self):
+        hb = self._heartbeat(0.2)  # 不启动后台线程，只测显式续约
+        hb.renew()
+        hb.renew()
+        hb.renew()
+        self.assertEqual(len(self.renewals), 1)  # 间隔内的重复调用不重复写库
+        time.sleep(0.25)
+        hb.renew()
+        self.assertEqual(len(self.renewals), 2)
+
+    def test_each_renewal_closes_its_own_session(self):
+        hb = self._heartbeat(0.2)
+        hb.renew()
+        self.assertEqual(len(self.closed), 1)  # 独立短会话，用完即关
+
+    def test_lease_refresher_returns_started_heartbeat(self):
+        hb = self._heartbeat(0.1)
+        with patch.object(self.module, "_LeaseHeartbeat", return_value=hb):
+            returned = self.module._lease_refresher(7, "worker-1")
+        try:
+            self.assertIs(returned, hb)
+            self.assertTrue(callable(returned.renew))
+            self.assertTrue(returned._thread.is_alive())
+        finally:
+            returned.stop()
 
 
 if __name__ == "__main__":
