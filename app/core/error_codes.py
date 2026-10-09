@@ -52,6 +52,10 @@ NOT_FOUND                     = "NOT_FOUND"
 SERVICE_UNAVAILABLE           = "SERVICE_UNAVAILABLE"
 REQUEST_TIMEOUT               = "REQUEST_TIMEOUT"
 
+# ── 登录失败三态（ux-audit M-7：锁定/禁用不再与密码错误混为一句） ──────────────
+ACCOUNT_LOCKED                = "ACCOUNT_LOCKED"
+ACCOUNT_DISABLED              = "ACCOUNT_DISABLED"
+
 
 _DEFAULT_MESSAGES: dict[str, str] = {
     TIME_ENTRY_ALREADY_RUNNING:  "您已有一条运行中的计时，请先结束或暂停后再开始新计时",
@@ -76,8 +80,10 @@ _DEFAULT_MESSAGES: dict[str, str] = {
     VALIDATION_ERROR:            "参数校验失败",
     UNAUTHORIZED:                "未登录或登录已失效",
     NOT_FOUND:                   "资源不存在或无权访问",
-    SERVICE_UNAVAILABLE:         "服务暂不可用，请稍后重试",
-    REQUEST_TIMEOUT:             "请求处理超时，请稍后重试或查询任务状态",
+    SERVICE_UNAVAILABLE:         "服务暂不可用，请稍后再试",
+    REQUEST_TIMEOUT:             "请求处理超时，请稍后再试或查询任务状态",
+    ACCOUNT_LOCKED:              "登录失败次数过多，账号已临时锁定，请稍后再试",
+    ACCOUNT_DISABLED:            "账号已被禁用，请联系管理员",
 }
 
 

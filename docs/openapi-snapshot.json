@@ -31639,6 +31639,8 @@
     }
   },
   "x-error-codes": [
+    "ACCOUNT_DISABLED",
+    "ACCOUNT_LOCKED",
     "API_KEY_INVALID",
     "API_KEY_IP_DENIED",
     "API_RATE_LIMIT_EXCEEDED",

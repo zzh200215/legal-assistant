@@ -45,9 +45,33 @@
           <el-form-item>
             <el-input v-model="loginForm.password" type="password" placeholder="密码" show-password :prefix-icon="LockIcon" size="large" />
           </el-form-item>
+          <div class="form-auxiliary">
+            <button type="button" class="text-link" @click="tab = 'forgot'">忘记密码？</button>
+          </div>
           <el-button type="primary" :loading="loading" @click="handleLogin" class="submit-btn" size="large">
             {{ loading ? '登录中...' : '登录' }}
           </el-button>
+        </el-form>
+
+        <el-form v-show="tab === 'forgot'" @submit.prevent="handleForgotPassword" class="login-form">
+          <el-form-item>
+            <el-input v-model="forgotForm.email" placeholder="注册时使用的邮箱" :prefix-icon="MessageIcon" size="large" />
+          </el-form-item>
+          <el-alert
+            v-if="forgotSent"
+            type="success"
+            :closable="false"
+            show-icon
+            title="如果该邮箱已注册，您将收到密码重置邮件"
+            description="请查收邮件并按链接指引完成重置；链接有效期为 30 分钟。"
+            class="forgot-alert"
+          />
+          <el-button type="primary" :loading="loading" @click="handleForgotPassword" class="submit-btn" size="large">
+            {{ loading ? '发送中...' : '发送重置邮件' }}
+          </el-button>
+          <div class="form-auxiliary">
+            <button type="button" class="text-link" @click="tab = 'login'">返回登录</button>
+          </div>
         </el-form>
 
         <el-form v-show="tab === 'register'" @submit.prevent="handleRegister" class="login-form">
@@ -76,17 +100,19 @@
 
 <script setup>
 import { h, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElTabs, ElTabPane } from 'element-plus/es/components/tabs/index'
+import { ElAlert } from 'element-plus/es/components/alert/index'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/tab-pane/style/css'
 import 'element-plus/es/components/tabs/style/css'
+import 'element-plus/es/components/alert/style/css'
 import api from '../api'
 import { setAccessToken, setRefreshToken } from '../api/http'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -94,11 +120,28 @@ import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
 const router = useRouter()
-const tab = ref('login')
+const route = useRoute()
+const tab = ref(route.query.tab === 'forgot' ? 'forgot' : 'login')
 const loading = ref(false)
 
 const loginForm = ref({ username: '', password: '' })
 const regForm = ref({ username: '', email: '', password: '', full_name: '' })
+const forgotForm = ref({ email: '' })
+const forgotSent = ref(false)
+
+const handleForgotPassword = async () => {
+  const email = forgotForm.value.email.trim()
+  if (!email) return ElMessage.warning('请输入注册时使用的邮箱')
+  loading.value = true
+  try {
+    await api.forgotPassword({ email })
+    forgotSent.value = true
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '发送失败，请稍后再试')
+  } finally {
+    loading.value = false
+  }
+}
 
 const UserIcon = h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, width: 18, height: 18 }, [
   h('path', { d: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2' }),
@@ -345,6 +388,31 @@ const handleRegister = async () => {
   text-align: center;
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+}
+
+.form-auxiliary {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 4px;
+}
+
+.text-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.text-link:hover {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
+}
+
+.forgot-alert {
+  margin-bottom: 14px;
 }
 
 @media (max-width: 900px) {

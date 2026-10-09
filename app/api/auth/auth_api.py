@@ -3,6 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import datetime, timezone
+import math
 import secrets
 
 from app.core.database import get_db
@@ -122,7 +124,7 @@ def login(req: UserLogin, request: Request, db: Session = Depends(get_db)):
     ip = get_client_ip(request)
     ua = request.headers.get("User-Agent")
 
-    user, token = enterprise_auth_service.local_login(
+    user, token, failure = enterprise_auth_service.local_login(
         db=db, username=req.username, password=req.password,
         ip_address=ip, user_agent=ua
     )
@@ -133,7 +135,19 @@ def login(req: UserLogin, request: Request, db: Session = Depends(get_db)):
             actor_id=req.username[:32], result="failure",
             db=db,
         )
-        raise api_error(401, "用户名或密码错误，或账号已被锁定/禁用", code="INVALID_CREDENTIALS")
+        # 登录失败三态（ux-audit M-7）：锁定/禁用不再与密码错误混为一句
+        if failure and failure.get("reason") == "account_locked":
+            locked_until = failure.get("locked_until")
+            minutes = None
+            if locked_until:
+                if locked_until.tzinfo is None:
+                    locked_until = locked_until.replace(tzinfo=timezone.utc)
+                minutes = max(1, math.ceil((locked_until - datetime.now(timezone.utc)).total_seconds() / 60))
+            detail = f"登录失败次数过多，账号已临时锁定，请约 {minutes} 分钟后再试" if minutes else "登录失败次数过多，账号已临时锁定，请稍后再试"
+            raise api_error(401, detail, code="ACCOUNT_LOCKED")
+        if failure and failure.get("reason") == "account_disabled":
+            raise api_error(403, "账号已被禁用，请联系管理员", code="ACCOUNT_DISABLED")
+        raise api_error(401, "用户名或密码错误", code="INVALID_CREDENTIALS")
 
     write_event(
         event_type="login", actor_type="user",

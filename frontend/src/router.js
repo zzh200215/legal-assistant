@@ -9,6 +9,7 @@ const Tasks = () => import('./views/Tasks.vue')
 const Agent = () => import('./views/Agent.vue')
 const System = () => import('./views/System.vue')
 const Login = () => import('./views/Login.vue')
+const ResetPassword = () => import('./views/ResetPassword.vue')
 const LegalDeveloper = () => import('./views/LegalDeveloper.vue')
 const LegalOnboarding = () => import('./views/LegalOnboarding.vue')
 const Pricing = () => import('./views/Pricing.vue')
@@ -21,6 +22,8 @@ const Notifications = () => import('./views/Notifications.vue')
 // 直接路由访问保持既有可用行为。前端权限仅用于 UX 控制；后端接口仍做服务端校验。
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
+  // 密码重置落地页（承接重置邮件链接 {前端地址}/reset-password?token=xxx）
+  { path: '/reset-password', component: ResetPassword, meta: { public: true } },
   { path: '/', redirect: '/legal-workspace' },
   { path: '/workbench', redirect: '/legal-workspace' },
   { path: '/cases', redirect: '/legal-workspace?view=cases' },

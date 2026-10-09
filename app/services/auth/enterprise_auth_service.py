@@ -420,8 +420,14 @@ class EnterpriseAuthService:
         password: str,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
-    ) -> tuple[Optional[User], Optional[str]]:
-        """本地密码登录"""
+    ) -> tuple[Optional[User], Optional[str], Optional[dict]]:
+        """本地密码登录。
+
+        失败时第三个返回值携带原因（ux-audit M-7 三态拆分）：
+        - None：用户不存在或密码错误（不区分，避免账号枚举）
+        - {"reason": "account_locked", "locked_until": ...}：临时锁定中
+        - {"reason": "account_disabled"}：账号已禁用
+        """
         from app.core.auth import verify_password
 
         user = db.query(User).filter(User.username == username).first()
@@ -431,7 +437,7 @@ class EnterpriseAuthService:
                 db, None, username, LoginEventType.login_failed,
                 ip_address, user_agent, "User not found"
             )
-            return None, None
+            return None, None, None
 
         # 检查是否锁定
         if user.status == UserStatus.locked.value:
@@ -444,7 +450,7 @@ class EnterpriseAuthService:
                     db, user.id, user.username, LoginEventType.login_failed,
                     ip_address, user_agent, "Account locked"
                 )
-                return None, None
+                return None, None, {"reason": "account_locked", "locked_until": locked_until}
             else:
                 # 锁定已过期，解锁
                 user.status = UserStatus.active.value
@@ -457,12 +463,12 @@ class EnterpriseAuthService:
                 db, user.id, user.username, LoginEventType.login_failed,
                 ip_address, user_agent, "Account disabled"
             )
-            return None, None
+            return None, None, {"reason": "account_disabled"}
 
         # 验证密码
         if not user.hashed_password or not verify_password(password, user.hashed_password):
             self._handle_login_failure(db, user, ip_address, user_agent)
-            return None, None
+            return None, None, None
 
         # 登录成功
         self._record_login_event(
@@ -479,7 +485,7 @@ class EnterpriseAuthService:
         # 本方法只负责凭据验证；真实会话（access+refresh+设备记录）由 API 层
         # _issue_login_response → auth_token_service.issue_session 统一签发，
         # 此处不再铸造无法撤销的孤儿 access token。
-        return user, "ok"
+        return user, "ok", None
 
     def _handle_login_failure(self, db: Session, user: User, ip: Optional[str], ua: Optional[str]):
         """处理登录失败"""
