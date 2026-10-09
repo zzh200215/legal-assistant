@@ -7,6 +7,7 @@
 - 新表 notification_templates：channel+template_key+locale+version 唯一，版本不可覆盖。
 - 新表 email_attachments：附件 DLP/安全台账。
 - 新表 mailbox_sync_accounts / mailbox_messages / mailbox_attachments：UID 幂等 + 附件安全。
+- 旧 connector 邮件索引表改名保留，避免与新的邮箱同步镜像表冲突。
 - 回填：既有通知事件补 legacy 幂等键与默认计数（幂等，不臆造数据）。
 
 Revision ID: 20260813_0076
@@ -146,6 +147,15 @@ def _create_email_attachments() -> None:
 # ── mailbox 三表 ───────────────────────────────────────────────────────────────
 
 def _create_mailbox_tables() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if inspector.has_table("mailbox_messages"):
+        columns = {column["name"] for column in inspector.get_columns("mailbox_messages")}
+        if "account_id" not in columns:
+            if inspector.has_table("legacy_mailbox_messages"):
+                raise RuntimeError("legacy_mailbox_messages already exists; refusing to overwrite legacy mail data")
+            op.rename_table("mailbox_messages", "legacy_mailbox_messages")
+
     op.create_table(
         "mailbox_sync_accounts",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
@@ -280,6 +290,9 @@ def downgrade() -> None:
     op.drop_table("mailbox_attachments")
     op.drop_table("mailbox_messages")
     op.drop_table("mailbox_sync_accounts")
+    inspector = sa.inspect(op.get_bind())
+    if inspector.has_table("legacy_mailbox_messages"):
+        op.rename_table("legacy_mailbox_messages", "mailbox_messages")
     op.drop_table("email_attachments")
     op.drop_table("notification_templates")
     with op.batch_alter_table("email_send_requests") as batch_op:

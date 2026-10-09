@@ -8,17 +8,25 @@ from pathlib import Path
 from datetime import datetime, date
 
 import jieba
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.api_response import api_error, should_passthrough_exception
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, verify_case_access
 from app.core.database import get_db
 from app.core.config import get_settings
 from app.core.time import utc_now
-from app.models.legal import ContractReview, LegalArticle, LegalConsultation, LegalDraft, LegalSource
+from app.models.legal import (
+    ContractReview,
+    LegalArticle,
+    LegalCaseSource,
+    LegalConsultation,
+    LegalDraft,
+    LegalSource,
+    LegalSourceFavorite,
+)
 from app.models.user import User
 from app.services.legal.legal_service import (
     DISCLAIMER,
@@ -70,10 +78,57 @@ class ContractReviewIn(BaseModel):
 class DraftIn(BaseModel):
     document_type: str
     fields: dict[str, str] = {}
+    content: str | None = Field(default=None, max_length=50000)
     case_id: int | None = None
 
 
+class DraftEditIn(BaseModel):
+    document_type: str
+    fields: dict[str, str] = {}
+    content: str = Field(default="", max_length=50000)
+    base_row_version: int | None = Field(default=None, ge=1)
+    version_note: str | None = Field(default=None, max_length=512)
+
+
+class DraftRestoreIn(BaseModel):
+    base_row_version: int | None = Field(default=None, ge=1)
+
+
+class DraftCommentIn(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+    version: int | None = Field(default=None, ge=1)
+    line_start: int | None = Field(default=None, ge=1)
+    line_end: int | None = Field(default=None, ge=1)
+    mentions: list[int] = Field(default_factory=list, max_length=20)
+
+
+class DraftCommentStatusIn(BaseModel):
+    status: str
+
+
 class ReviewActionIn(BaseModel):
+    action: str
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class ReviewAssignmentIn(BaseModel):
+    reviewer_id: int | None = None
+    due_at: datetime | None = None
+
+
+class ReviewQueueBulkItem(BaseModel):
+    target_type: str
+    target_id: int = Field(ge=1)
+
+
+class ReviewBulkAssignmentIn(BaseModel):
+    items: list[ReviewQueueBulkItem] = Field(min_length=1, max_length=100)
+    reviewer_id: int | None = None
+    due_at: datetime | None = None
+
+
+class ReviewBulkActionIn(BaseModel):
+    items: list[ReviewQueueBulkItem] = Field(min_length=1, max_length=100)
     action: str
     note: str | None = Field(default=None, max_length=2000)
 
@@ -97,15 +152,31 @@ def legal_metrics(db: Session = Depends(get_db), current_user: User = Depends(ge
 
 
 @router.get("/sources")
-def list_sources(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def list_sources(
+    case_id: int | None = Query(None, ge=1),
+    favorites_only: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     ensure_demo_sources(db, current_user.id)
-    rows = (
-        db.query(LegalSource)
-        .filter(LegalSource.user_id == current_user.id)
-        .order_by(LegalSource.updated_at.desc(), LegalSource.id.desc())
-        .all()
-    )
-    return [_serialize_source(source) for source in rows]
+    favorite_ids = {
+        row.source_id for row in db.query(LegalSourceFavorite).filter(LegalSourceFavorite.user_id == current_user.id).all()
+    }
+    query = db.query(LegalSource).filter(LegalSource.user_id == current_user.id)
+    linked_ids: set[int] = set()
+    if case_id is not None:
+        verify_case_access(case_id, current_user.id, db)
+        linked_ids = {
+            row.source_id for row in db.query(LegalCaseSource).filter(LegalCaseSource.case_id == case_id).all()
+        }
+        query = query.filter(LegalSource.id.in_(linked_ids)) if linked_ids else query.filter(LegalSource.id == -1)
+    if favorites_only:
+        query = query.filter(LegalSource.id.in_(favorite_ids)) if favorite_ids else query.filter(LegalSource.id == -1)
+    rows = query.order_by(LegalSource.updated_at.desc(), LegalSource.id.desc()).all()
+    return [
+        _serialize_source(source, is_favorite=source.id in favorite_ids, is_linked=source.id in linked_ids)
+        for source in rows
+    ]
 
 
 @router.post("/sources/import")
@@ -343,7 +414,12 @@ class SourceUpdateIn(BaseModel):
     amended_by: list[int] = Field(default_factory=list, description="修订当前法源的法源 ID")
 
 
-def _serialize_source(source: LegalSource) -> dict:
+def _serialize_source(
+    source: LegalSource,
+    *,
+    is_favorite: bool = False,
+    is_linked: bool = False,
+) -> dict:
     return {
         "id": source.id,
         "title": source.title,
@@ -351,6 +427,9 @@ def _serialize_source(source: LegalSource) -> dict:
         "citation": source.citation,
         "jurisdiction": source.jurisdiction,
         "effective_date": source.effective_date,
+        "expiration_date": source.expiration_date,
+        "applicability_scope": source.applicability_scope,
+        "canonical_identifier": source.canonical_identifier,
         "version": source.version,
         "status": source.status,
         "content": source.content,
@@ -365,7 +444,86 @@ def _serialize_source(source: LegalSource) -> dict:
         "keywords": json.loads(source.keywords_json) if source.keywords_json else [],
         "amended_by": json.loads(source.amended_by_json) if source.amended_by_json else [],
         "amends": json.loads(source.amends_json) if source.amends_json else [],
+        "is_favorite": is_favorite,
+        "is_linked": is_linked,
     }
+
+
+@router.post("/sources/{source_id}/favorite")
+def favorite_source(
+    source_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    source = db.query(LegalSource).filter(LegalSource.id == source_id, LegalSource.user_id == current_user.id).first()
+    if not source:
+        raise api_error(404, "法源不存在", code="LEGAL_SOURCE_NOT_FOUND")
+    row = db.query(LegalSourceFavorite).filter(
+        LegalSourceFavorite.user_id == current_user.id,
+        LegalSourceFavorite.source_id == source_id,
+    ).first()
+    if not row:
+        db.add(LegalSourceFavorite(user_id=current_user.id, source_id=source_id))
+        db.commit()
+    return {"source_id": source_id, "is_favorite": True}
+
+
+@router.delete("/sources/{source_id}/favorite")
+def unfavorite_source(
+    source_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    source = db.query(LegalSource).filter(LegalSource.id == source_id, LegalSource.user_id == current_user.id).first()
+    if not source:
+        raise api_error(404, "法源不存在", code="LEGAL_SOURCE_NOT_FOUND")
+    db.query(LegalSourceFavorite).filter(
+        LegalSourceFavorite.user_id == current_user.id,
+        LegalSourceFavorite.source_id == source_id,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"source_id": source_id, "is_favorite": False}
+
+
+@router.post("/sources/{source_id}/cases/{case_id}")
+def link_source_to_case(
+    source_id: int,
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    verify_case_access(case_id, current_user.id, db)
+    source = db.query(LegalSource).filter(LegalSource.id == source_id, LegalSource.user_id == current_user.id).first()
+    if not source:
+        raise api_error(404, "法源不存在", code="LEGAL_SOURCE_NOT_FOUND")
+    row = db.query(LegalCaseSource).filter(
+        LegalCaseSource.case_id == case_id,
+        LegalCaseSource.source_id == source_id,
+    ).first()
+    if not row:
+        db.add(LegalCaseSource(case_id=case_id, source_id=source_id, user_id=current_user.id))
+        db.commit()
+    return {"source_id": source_id, "case_id": case_id, "is_linked": True}
+
+
+@router.delete("/sources/{source_id}/cases/{case_id}")
+def unlink_source_from_case(
+    source_id: int,
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    verify_case_access(case_id, current_user.id, db)
+    source = db.query(LegalSource).filter(LegalSource.id == source_id, LegalSource.user_id == current_user.id).first()
+    if not source:
+        raise api_error(404, "法源不存在", code="LEGAL_SOURCE_NOT_FOUND")
+    db.query(LegalCaseSource).filter(
+        LegalCaseSource.case_id == case_id,
+        LegalCaseSource.source_id == source_id,
+        LegalCaseSource.user_id == current_user.id,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"source_id": source_id, "case_id": case_id, "is_linked": False}
 
 
 @router.post("/sources")
@@ -685,8 +843,8 @@ def followup_consultation(item_id: int, req: FollowupIn, db: Session = Depends(g
 
 
 @router.get("/consultations")
-def list_consultations(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return legal_workspace_read_module.list_rows(db, current_user, "consultation")
+def list_consultations(case_id: int | None = Query(default=None), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return legal_workspace_read_module.list_rows(db, current_user, "consultation", case_id=case_id)
 
 
 @router.get("/consultations/{item_id}")
@@ -722,8 +880,8 @@ def create_contract_review(req: ContractReviewIn, db: Session = Depends(get_db),
 
 
 @router.get("/contract-reviews")
-def list_contract_reviews(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return legal_workspace_read_module.list_rows(db, current_user, "contract_review")
+def list_contract_reviews(case_id: int | None = Query(default=None), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return legal_workspace_read_module.list_rows(db, current_user, "contract_review", case_id=case_id)
 
 
 @router.get("/contract-reviews/{item_id}")
@@ -876,8 +1034,8 @@ def create_draft(req: DraftIn, db: Session = Depends(get_db), current_user: User
 
 
 @router.get("/drafts")
-def list_drafts(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return legal_workspace_read_module.list_rows(db, current_user, "draft")
+def list_drafts(case_id: int | None = Query(default=None), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return legal_workspace_read_module.list_rows(db, current_user, "draft", case_id=case_id)
 
 
 @router.get("/drafts/{item_id}")
@@ -917,13 +1075,130 @@ def list_draft_versions(item_id: int, db: Session = Depends(get_db), current_use
         raise api_error(404, "法律文书草稿不存在", code="LEGAL_DRAFT_NOT_FOUND")
 
 
+@router.patch("/drafts/{item_id}/autosave")
+def autosave_draft(item_id: int, req: DraftEditIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """保存文书工作区的当前编辑内容，不创建业务版本，支持乐观锁冲突提示。"""
+    try:
+        row = legal_workspace_module.autosave_draft(
+            db, current_user, draft_id=item_id, document_type=req.document_type,
+            fields=req.fields, content=req.content, base_row_version=req.base_row_version,
+        )
+    except LookupError:
+        raise api_error(404, "法律文书草稿不存在", code="LEGAL_DRAFT_NOT_FOUND")
+    except ValueError as exc:
+        code = str(exc)
+        if code == "LEGAL_DRAFT_EDIT_CONFLICT":
+            raise api_error(409, "文书已被其他更新覆盖，请刷新后确认差异", code="LEGAL_DRAFT_EDIT_CONFLICT")
+        if code == "LEGAL_DRAFT_EDIT_LOCKED":
+            raise api_error(409, "已定稿文书不可直接编辑，请创建新版本", code="LEGAL_DRAFT_EDIT_LOCKED")
+        raise
+    except KeyError:
+        raise api_error(400, "暂不支持该文书类型", code="LEGAL_DRAFT_TYPE_INVALID")
+    return serialize(row)
+
+
+@router.post("/drafts/{item_id}/versions")
+def save_draft_version(item_id: int, req: DraftEditIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """将当前正文固化为一个可回溯的业务版本。"""
+    try:
+        row = legal_workspace_module.save_draft_version(
+            db, current_user, draft_id=item_id, document_type=req.document_type,
+            fields=req.fields, content=req.content, base_row_version=req.base_row_version,
+            version_note=req.version_note,
+        )
+    except LookupError:
+        raise api_error(404, "法律文书草稿不存在", code="LEGAL_DRAFT_NOT_FOUND")
+    except ValueError as exc:
+        code = str(exc)
+        if code == "LEGAL_DRAFT_EDIT_CONFLICT":
+            raise api_error(409, "文书已被其他更新覆盖，请刷新后确认差异", code="LEGAL_DRAFT_EDIT_CONFLICT")
+        if code == "LEGAL_DRAFT_EDIT_LOCKED":
+            raise api_error(409, "已定稿文书不可直接编辑，请创建新版本", code="LEGAL_DRAFT_EDIT_LOCKED")
+        raise
+    except KeyError:
+        raise api_error(400, "暂不支持该文书类型", code="LEGAL_DRAFT_TYPE_INVALID")
+    return serialize(row)
+
+
+@router.get("/drafts/{item_id}/collaboration")
+def draft_collaboration(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        return legal_workspace_module.draft_collaboration(db, current_user, draft_id=item_id)
+    except LookupError:
+        raise api_error(404, "法律文书草稿不存在", code="LEGAL_DRAFT_NOT_FOUND")
+    except PermissionError:
+        raise api_error(404, "法律文书草稿不存在或无权访问", code="LEGAL_DRAFT_NOT_FOUND")
+
+
+@router.get("/drafts/{item_id}/comments")
+def list_draft_comments(item_id: int, status: str | None = Query(default=None), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        return legal_workspace_module.list_draft_comments(db, current_user, draft_id=item_id, status=status)
+    except (LookupError, PermissionError):
+        raise api_error(404, "法律文书草稿不存在或无权访问", code="LEGAL_DRAFT_NOT_FOUND")
+
+
+@router.post("/drafts/{item_id}/comments")
+def add_draft_comment(item_id: int, req: DraftCommentIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        return legal_workspace_module.add_draft_comment(
+            db, current_user, draft_id=item_id, body=req.body, version=req.version,
+            line_start=req.line_start, line_end=req.line_end, mentions=req.mentions,
+        )
+    except (LookupError, PermissionError):
+        raise api_error(404, "法律文书草稿不存在或无权访问", code="LEGAL_DRAFT_NOT_FOUND")
+    except ValueError as exc:
+        raise api_error(400, "批注定位或内容无效", code=str(exc))
+
+
+@router.patch("/drafts/{item_id}/comments/{comment_id}")
+def update_draft_comment(item_id: int, comment_id: int, req: DraftCommentStatusIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        return legal_workspace_module.resolve_draft_comment(db, current_user, draft_id=item_id, comment_id=comment_id, status=req.status)
+    except (LookupError, PermissionError):
+        raise api_error(404, "批注不存在或无权访问", code="LEGAL_DRAFT_COMMENT_NOT_FOUND")
+    except ValueError as exc:
+        raise api_error(400, "批注状态无效", code=str(exc))
+
+
+@router.get("/drafts/{item_id}/versions/diff")
+def diff_draft_versions(item_id: int, from_id: int = Query(..., ge=1), to_id: int = Query(..., ge=1), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        return legal_workspace_module.diff_draft_versions(db, current_user, draft_id=item_id, from_id=from_id, to_id=to_id)
+    except (LookupError, PermissionError):
+        raise api_error(404, "文书版本不存在或无权访问", code="LEGAL_DRAFT_VERSION_NOT_FOUND")
+
+
+@router.post("/drafts/{item_id}/versions/{version_id}/restore")
+def restore_draft_version(item_id: int, version_id: int, req: DraftRestoreIn | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """恢复历史正文，并把恢复前的正文留作 restore 快照。"""
+    try:
+        row = legal_workspace_module.restore_draft_version(
+            db, current_user, draft_id=item_id, version_id=version_id,
+            base_row_version=req.base_row_version if req else None,
+        )
+    except LookupError as exc:
+        if str(exc) == "LEGAL_DRAFT_VERSION_NOT_FOUND":
+            raise api_error(404, "文书版本不存在", code="LEGAL_DRAFT_VERSION_NOT_FOUND")
+        raise api_error(404, "法律文书草稿不存在", code="LEGAL_DRAFT_NOT_FOUND")
+    except ValueError as exc:
+        code = str(exc)
+        if code == "LEGAL_DRAFT_EDIT_CONFLICT":
+            raise api_error(409, "文书已被其他更新覆盖，请刷新后确认差异", code="LEGAL_DRAFT_EDIT_CONFLICT")
+        if code == "LEGAL_DRAFT_EDIT_LOCKED":
+            raise api_error(409, "已定稿文书不可直接恢复，请创建新版本", code="LEGAL_DRAFT_EDIT_LOCKED")
+        raise
+    return serialize(row)
+
+
 @router.post("/drafts/{item_id}/resubmit")
 def resubmit_draft(item_id: int, req: DraftIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """针对被退回补充事实的文书草稿修改字段后重新提交，旧版本自动存档。"""
     try:
         row, missing_required = _run_async(
             legal_workspace_module.resubmit_draft(
-                db, current_user, draft_id=item_id, document_type=req.document_type, fields=req.fields
+                db, current_user, draft_id=item_id, document_type=req.document_type, fields=req.fields,
+                content_override=req.content,
             )
         )
     except LookupError as exc:
@@ -945,8 +1220,62 @@ def resubmit_draft(item_id: int, req: DraftIn, db: Session = Depends(get_db), cu
 
 
 @router.get("/review-queue")
-def review_queue(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return legal_workspace_read_module.review_queue(db, current_user)
+def review_queue(case_id: int | None = Query(default=None), assigned_to: int | None = Query(default=None), status: str | None = Query(default=None), overdue: bool | None = Query(default=None), search: str | None = Query(default=None, max_length=120), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return legal_workspace_read_module.review_queue(db, current_user, case_id=case_id, assigned_to=assigned_to, status=status, overdue=overdue, search=search)
+
+
+@router.get("/review-queue/reviewers")
+def review_queue_reviewers(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from app.models.org import LegalMemberRole, OrganizationMember
+    rows = db.query(OrganizationMember, User).join(User, User.id == OrganizationMember.user_id).filter(
+        OrganizationMember.organization_id == current_user.organization_id,
+        OrganizationMember.legal_role.in_([LegalMemberRole.admin.value, LegalMemberRole.reviewer.value]),
+    ).order_by(User.full_name.asc(), User.username.asc()).all()
+    return [{"user_id": member.user_id, "name": user.full_name or user.username, "role": member.legal_role} for member, user in rows]
+
+
+@router.patch("/review-queue/{target_type}/{target_id}/assignment")
+def assign_review(target_type: str, target_id: int, req: ReviewAssignmentIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        return legal_workspace_read_module.assign_reviewer(
+            db, current_user, target_type=target_type, target_id=target_id,
+            reviewer_id=req.reviewer_id, due_at=req.due_at,
+        )
+    except LookupError:
+        raise api_error(404, "待审核记录不存在", code="LEGAL_REVIEW_TARGET_NOT_FOUND")
+    except PermissionError:
+        raise api_error(403, "无权分配审核任务", code="LEGAL_REVIEW_ASSIGN_FORBIDDEN")
+    except ValueError:
+        raise api_error(400, "审核人必须是本组织审核律师或管理员", code="LEGAL_REVIEW_ASSIGNEE_INVALID")
+
+
+@router.post("/review-queue/bulk-assignment")
+def bulk_assign_review(req: ReviewBulkAssignmentIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        return legal_workspace_read_module.bulk_assign_reviewers(
+            db, current_user, items=[item.model_dump() for item in req.items],
+            reviewer_id=req.reviewer_id, due_at=req.due_at,
+        )
+    except LookupError:
+        raise api_error(404, "待审核记录不存在", code="LEGAL_REVIEW_TARGET_NOT_FOUND")
+    except PermissionError:
+        raise api_error(403, "无权分配审核任务", code="LEGAL_REVIEW_ASSIGN_FORBIDDEN")
+    except ValueError:
+        raise api_error(400, "审核人必须是本组织审核律师或管理员", code="LEGAL_REVIEW_ASSIGNEE_INVALID")
+
+
+@router.post("/review-queue/bulk-action")
+def bulk_review_action(req: ReviewBulkActionIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    try:
+        return legal_workspace_read_module.bulk_review_action(
+            db, current_user, items=[item.model_dump() for item in req.items], action=req.action, note=req.note,
+        )
+    except LookupError:
+        raise api_error(404, "待审核记录不存在", code="LEGAL_REVIEW_TARGET_NOT_FOUND")
+    except PermissionError:
+        raise api_error(403, "仅审核律师或管理员可执行审核动作", code="LEGAL_REVIEW_FORBIDDEN")
+    except ValueError:
+        raise api_error(400, "批量审核包含不支持的状态或动作", code="LEGAL_REVIEW_ACTION_INVALID")
 
 
 @router.post("/review-queue/{target_type}/{target_id}/actions")

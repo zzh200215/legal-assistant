@@ -1,40 +1,28 @@
 <template>
   <div class="task-page">
-    <div class="task-overview">
-      <div class="overview-tile">
-        <span>任务总数</span>
-        <strong>{{ taskTotal || tasks.length }}</strong>
-        <p>当前筛选范围内可见任务</p>
+    <header class="task-heading">
+      <div>
+        <p class="section-eyebrow">案件协作</p>
+        <h1>任务</h1>
+        <p>跟进案件中的待办、负责人和截止日期。</p>
       </div>
-      <div class="overview-tile">
-        <span>进行中</span>
-        <strong>{{ inProgressCount }}</strong>
-        <p>正在推进的执行项</p>
-      </div>
-      <div class="overview-tile">
-        <span>已逾期</span>
-        <strong>{{ overdueCount }}</strong>
-        <p>已过截止日期的任务</p>
-      </div>
-      <div class="overview-tile">
-        <span>共享任务</span>
-        <strong>{{ sharedTaskCount }}</strong>
-        <p>部门或组织共享可见任务</p>
-      </div>
+      <el-button type="primary" @click="createDialogs.openCreate()">新建任务</el-button>
+    </header>
+
+    <div class="task-brief" aria-label="任务摘要">
+      <span><strong>{{ taskTotal || tasks.length }}</strong> 项任务</span>
+      <span><strong>{{ inProgressCount }}</strong> 项进行中</span>
+      <span :class="{ 'brief-alert': overdueCount }"><strong>{{ overdueCount }}</strong> 项逾期</span>
+      <span><strong>{{ sharedTaskCount }}</strong> 项共享</span>
     </div>
 
     <el-card class="toolbar-card">
       <template #header>
         <div class="section-header">
-          <div>
-            <span>任务操作台</span>
-          </div>
+          <div><span>任务清单</span><small>按状态推进案件协作事项</small></div>
         </div>
       </template>
       <el-space wrap class="toolbar-actions">
-        <el-button type="primary" @click="createDialogs.openCreate()">新建任务</el-button>
-        <el-button type="warning" @click="createDialogs.openDocExtract()">从文档提取</el-button>
-        <el-button type="info" @click="createDialogs.openChatExtract()">从聊天提取</el-button>
         <el-select v-model="scopeFilter" style="width: 140px" @change="handleScopeChange">
           <el-option v-for="item in scopeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -42,12 +30,28 @@
           <el-radio-button value="kanban">看板</el-radio-button>
           <el-radio-button value="table">表格</el-radio-button>
         </el-radio-group>
+        <details class="task-more-actions">
+          <summary>更多创建方式</summary>
+          <div class="task-more-menu">
+            <button type="button" @click="createDialogs.openDocExtract()">从文档整理待办</button>
+            <button type="button" @click="createDialogs.openChatExtract()">从对话整理待办</button>
+          </div>
+        </details>
       </el-space>
       <div v-if="sourceFilterMeta" class="source-filter-row">
         <el-tag size="small" type="warning">来源筛选：{{ sourceFilterMeta.label }} #{{ sourceFilterMeta.sourceId }}</el-tag>
         <el-button size="small" text type="info" @click="clearSourceFilter">清除来源筛选</el-button>
       </div>
     </el-card>
+
+    <WorkflowRunsPanel
+      :case-id="workflowCaseId"
+      :workflow-id="route.query.workflow_id"
+      title="案件工作流"
+      :description="workflowCaseId ? '当前案件的异步处理进度。' : '最近案件动作的异步处理进度。'"
+      :limit="6"
+      :compact="true"
+    />
 
     <div v-if="viewMode === 'kanban'" class="kanban-board">
       <el-card v-for="col in columns" :key="col.status" class="kanban-column">
@@ -90,9 +94,8 @@
 
     <el-card v-else class="table-card">
       <el-table :data="tasks" v-loading="loading" border :empty-text="taskEmptyText">
-        <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="title" label="标题" />
-        <el-table-column prop="description" label="描述" show-overflow-tooltip />
+        <el-table-column prop="description" label="事项说明" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <StatusTag kind="task" :status="row.status" size="small" />
@@ -123,9 +126,6 @@
             </el-tag>
             <span v-else>-</span>
           </template>
-        </el-table-column>
-        <el-table-column prop="parent_id" label="父任务" width="80">
-          <template #default="{ row }">{{ row.parent_id || '-' }}</template>
         </el-table-column>
         <el-table-column label="操作" width="200">
           <template #default="{ row }">
@@ -198,6 +198,7 @@ import StatusTag from '../components/StatusTag.vue'
 import { useAuthStore } from '../stores/auth'
 import TaskCreateDialogs from '../components/tasks/TaskCreateDialogs.vue'
 import TaskDetailDialog from '../components/tasks/TaskDetailDialog.vue'
+import WorkflowRunsPanel from '../components/legal/WorkflowRunsPanel.vue'
 
 const authStore = useAuthStore()
 const createDialogs = ref(null)
@@ -214,6 +215,10 @@ const viewMode = ref('kanban')
 const scopeFilter = ref('all')
 const detailVisible = ref(false)
 const selectedTask = ref(null)
+const workflowCaseId = computed(() => {
+  const value = Number(route.query.case_id)
+  return Number.isFinite(value) && value > 0 ? value : null
+})
 
 const priorityLabelMap = {
   high: '高',
@@ -469,50 +474,20 @@ watch(detailVisible, (visible) => {
   gap: var(--space-6);
 }
 
-
 .section-eyebrow {
   margin-bottom: 4px;
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--color-text-muted);
 }
-
-.task-overview {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-4);
-}
-
-.overview-tile {
-  padding: var(--space-5) var(--space-5);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-light);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-xs);
-  display: grid;
-  gap: var(--space-1);
-  transition: all var(--transition-fast);
-}
-.overview-tile:hover {
-  box-shadow: var(--shadow-card-hover);
-  border-color: var(--color-border-hover);
-}
-.overview-tile span {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-.overview-tile strong {
-  color: var(--color-text);
-  font-size: var(--text-3xl);
-  line-height: var(--text-3xl-lh);
-  font-weight: 600;
-}
-.overview-tile p {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
-  line-height: 1.6;
-}
+.task-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--color-border); }
+.task-heading h1 { margin: 0; color: var(--color-text); font-size: 30px; font-weight: 620; letter-spacing: 0; }
+.task-heading p:last-child { margin: 7px 0 0; color: var(--color-text-secondary); font-size: 14px; }
+.task-brief { display: flex; align-items: center; gap: 24px; min-height: 42px; padding: 0 4px; border-bottom: 1px solid var(--color-border); color: var(--color-text-secondary); font-size: var(--text-sm); }
+.task-brief span { padding-right: 24px; border-right: 1px solid var(--color-border-light); }
+.task-brief span:last-child { border-right: 0; }
+.task-brief strong { margin-right: 4px; color: var(--color-text); font-size: var(--text-lg); font-weight: 600; }
+.task-brief .brief-alert strong { color: var(--color-danger); }
 
 .toolbar-card,
 .table-card {
@@ -525,6 +500,7 @@ watch(detailVisible, (visible) => {
   align-items: center;
   gap: var(--space-3);
 }
+.section-header small { margin-left: 10px; color: var(--color-text-muted); font-size: var(--text-xs); }
 
 .toolbar-actions {
   width: 100%;
@@ -537,6 +513,12 @@ watch(detailVisible, (visible) => {
   align-items: center;
   flex-wrap: wrap;
 }
+.task-more-actions { position: relative; margin-left: auto; color: var(--color-primary); font-size: 12px; }
+.task-more-actions summary { cursor: pointer; list-style: none; }
+.task-more-actions summary::-webkit-details-marker { display: none; }
+.task-more-menu { position: absolute; right: 0; top: 24px; z-index: 3; display: grid; min-width: 160px; padding: 6px; border: 1px solid var(--color-border); background: var(--color-surface); box-shadow: var(--shadow-sm); }
+.task-more-menu button { padding: 8px 10px; border: 0; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.task-more-menu button:hover { background: var(--color-bg-alt); color: var(--color-primary); }
 
 /* ─── Kanban ─── */
 .kanban-board {
@@ -678,14 +660,11 @@ watch(detailVisible, (visible) => {
 }
 
 @media (max-width: 1100px) {
-  .task-overview {
-    grid-template-columns: 1fr 1fr;
-  }
+  .task-heading { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 760px) {
-  .task-overview {
-    grid-template-columns: 1fr;
-  }
+  .task-brief { align-items: flex-start; flex-wrap: wrap; gap: 10px 16px; padding: 8px 4px; }
+  .task-brief span { padding-right: 16px; }
   .detail-metrics {
     grid-template-columns: 1fr;
   }

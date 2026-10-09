@@ -3,6 +3,42 @@
  * 数据源：docs/openapi-snapshot.json（后端 OpenAPI 快照）。
  * 用途：为 JS 业务代码提供请求/响应结构契约（JSDoc @typedef），
  *       页面 view model 应基于生成类型派生，不要反改生成文件。
+ * @typedef {Object} A2AAuditEventOut
+ * @property {string | null}= created_at
+ * @property {Object}= decision
+ * @property {string | null}= error_category
+ * @property {string} event_type
+ * @property {number} id
+ * @property {number | null}= run_id
+ * @property {string | null}= status
+ * @property {number | null}= step
+ * @property {Object}= summary
+ * @property {string | null}= trace_id
+ * @typedef {Object} A2AAuditReplayOut
+ * @property {Array<A2ADelegationOut>}= delegations
+ * @property {Array<A2AAuditEventOut>}= events
+ * @typedef {Object} A2ADelegationOut
+ * @property {string | null}= accepted_at
+ * @property {boolean}= authorization_snapshot_bound
+ * @property {number | null}= child_run_id
+ * @property {string | null}= completed_at
+ * @property {string | null}= created_at
+ * @property {string} delegation_id
+ * @property {string | null}= error_code
+ * @property {string} from_agent_type
+ * @property {string} input_hash
+ * @property {number} parent_run_id
+ * @property {Object}= result_summary
+ * @property {string} status
+ * @property {Object}= task_summary
+ * @property {string} task_type
+ * @property {string} to_agent_type
+ * @property {string | null}= trace_id
+ * @typedef {Object} A2ADelegationRequest
+ * @property {string | null}= idempotency_key
+ * @property {string} task
+ * @property {string}= task_type
+ * @property {string} to_agent_type
  * @typedef {Object} APIKeyCreate
  * @property {number | null}= expires_days
  * @property {string} name
@@ -16,16 +52,38 @@
  * @property {string | null}= agent_type
  * @property {string} approval_token
  * @property {string} created_at
+ * @property {string | null}= data_scope
  * @property {string | null}= decided_at
  * @property {string | null}= decision_note
  * @property {number} id
  * @property {string | null}= input_params
+ * @property {string | null}= policy_version
  * @property {string} risk_level
  * @property {string} status
  * @property {string} tool_name
  * @property {number} user_id
  * @typedef {Object} AgentApprovalResumeRequest
  * @property {string | null}= decision_note
+ * @typedef {Object} AgentCheckpointHistoryOut
+ * @property {boolean}= available
+ * @property {Array<AgentCheckpointOut>}= checkpoints
+ * @property {number} run_id
+ * @typedef {Object} AgentCheckpointOut
+ * @property {string | null}= checkpoint_id
+ * @property {string | null}= created_at
+ * @property {number | null}= graph_step
+ * @property {boolean}= interrupted
+ * @property {Array<string>}= next_nodes
+ * @property {string | null}= parent_checkpoint_id
+ * @property {string | null}= source
+ * @property {Object}= state
+ * @property {Array<string>}= wrote_nodes
+ * @typedef {Object} AgentEvalRejectRequest
+ * @property {string | null}= review_note
+ * @typedef {Object} AgentEvalReviewRequest
+ * @property {Object} evaluation_input
+ * @property {Object} expected_outcome
+ * @property {string | null}= review_note
  * @typedef {Object} AgentPlanPreviewRequest
  * @property {string} goal
  * @property {number}= max_steps
@@ -44,9 +102,11 @@
  * @typedef {Object} AgentRunCancelRequest
  * @property {string | null}= reason
  * @typedef {Object} AgentRunDetailOut
+ * @property {string | null}= agent_type
  * @property {Object}= artifacts
  * @property {string | null}= completed_at
  * @property {string} created_at
+ * @property {string | null}= delegation_id
  * @property {string | null}= error
  * @property {string | null}= failure_reason
  * @property {string | null}= final_answer
@@ -54,6 +114,7 @@
  * @property {number} id
  * @property {string | null}= last_observation
  * @property {Array<ToolCallLogOut>}= logs
+ * @property {number | null}= parent_run_id
  * @property {string | null}= result
  * @property {number | null}= session_id
  * @property {string} status
@@ -252,6 +313,36 @@
  * @typedef {Object} DocumentDownloadPolicyRequest
  * @property {boolean | null}= download_enabled
  * @property {boolean | null}= watermark_required
+ * @typedef {Object} DocumentEvidenceLocateOut
+ * @property {boolean} analysis_available
+ * @property {number} document_id
+ * @property {Array<Object>}= matches
+ * @property {string | null}= message
+ * @property {number | null}= ocr_confidence
+ * @property {string} query
+ * @property {boolean}= review_required
+ * @typedef {Object} DocumentEvidenceLocateRequest
+ * @property {number}= limit
+ * @property {string} query
+ * @typedef {Object} DocumentMultimodalAnalyzeOut
+ * @property {Array<Object>}= clauses
+ * @property {number} document_id
+ * @property {number} ocr_confidence
+ * @property {number} page_count
+ * @property {Array<Object>}= pages
+ * @property {string} parser_version
+ * @property {Array<Object>}= regions
+ * @property {boolean | null}= replayed
+ * @property {boolean} review_required
+ * @property {Array<Object>}= tables
+ * @property {number} version_number
+ * @property {string | null}= vision_model
+ * @property {Array<Object>}= warnings
+ * @typedef {Object} DocumentMultimodalAnalyzeRequest
+ * @property {boolean}= force
+ * @property {number | null}= page_end
+ * @property {number | null}= page_start
+ * @property {boolean | null}= use_vision_model
  * @typedef {Object} DocumentOut
  * @property {string | null}= classification
  * @property {string | null}= content_hash
@@ -311,10 +402,27 @@
  * @property {string} title
  * @typedef {Object} DocumentVisualAnalyzeRequest
  * @property {string}= prompt
- * @typedef {Object} DraftIn
- * @property {number | null}= case_id
+ * @typedef {Object} DraftCommentIn
+ * @property {string} body
+ * @property {number | null}= line_end
+ * @property {number | null}= line_start
+ * @property {Array<number>}= mentions
+ * @property {number | null}= version
+ * @typedef {Object} DraftCommentStatusIn
+ * @property {string} status
+ * @typedef {Object} DraftEditIn
+ * @property {number | null}= base_row_version
+ * @property {string}= content
  * @property {string} document_type
  * @property {Object}= fields
+ * @property {string | null}= version_note
+ * @typedef {Object} DraftIn
+ * @property {number | null}= case_id
+ * @property {string | null}= content
+ * @property {string} document_type
+ * @property {Object}= fields
+ * @typedef {Object} DraftRestoreIn
+ * @property {number | null}= base_row_version
  * @typedef {Object} EmailSendRequestCreate
  * @property {number} smtp_connector_id
  * @typedef {Object} EmailSendRequestDecision
@@ -352,6 +460,11 @@
  * @property {string} request_id
  * @property {boolean}= success
  * @property {string} trace_id
+ * @typedef {Object} EvaluationGateRequest
+ * @property {number} baseline_score
+ * @property {number} candidate_score
+ * @property {number}= max_regression
+ * @property {string} report_ref
  * @typedef {Object} ExitSurveyRequest
  * @property {string | null}= feature_requests
  * @property {number | null}= nps_score
@@ -376,6 +489,8 @@
  * @property {string} question
  * @typedef {Object} ForgotPasswordRequest
  * @property {string} email
+ * @typedef {Object} GuardrailRequest
+ * @property {boolean}= auto_rollback
  * @typedef {Object} HTTPValidationError
  * @property {Array<ValidationError>}= detail
  * @typedef {Object} InvoiceCreate
@@ -445,15 +560,35 @@
  * @property {string | null} username
  * @typedef {Object} LogoutRequest
  * @property {string | null}= refresh_token
+ * @typedef {Object} MCPPolicyDraftRequest
+ * @property {Object} policy
  * @typedef {Object} MCPToolCallRequest
  * @property {string}= agent_type
  * @property {Object}= arguments
+ * @property {Array<string> | null}= data_scopes
+ * @property {string | null}= risk_threshold
  * @property {string} tool_name
  * @typedef {Object} MemberInviteIn
  * @property {string}= legal_role
  * @property {number} user_id
  * @typedef {Object} MemberRoleUpdate
  * @property {string} legal_role
+ * @typedef {Object} ModelReleaseDraftRequest
+ * @property {string}= action
+ * @property {string | null}= candidate_base_url
+ * @property {string} candidate_model
+ * @property {string | null}= candidate_provider
+ * @property {Object | null}= evaluation_gate
+ * @property {number | null}= expected_latency_ms
+ * @property {string}= max_complexity
+ * @property {number}= max_cost_ratio
+ * @property {number}= max_error_rate
+ * @property {number | null}= max_p95_latency_ms
+ * @property {string}= max_risk_level
+ * @property {number}= min_sample_size
+ * @property {number}= rollout_percentage
+ * @property {number}= shadow_percentage
+ * @property {string} version
  * @typedef {Object} NotificationPrefUpdate
  * @property {string | null}= channels_json
  * @property {number | null}= delegate_user_id
@@ -614,6 +749,17 @@
  * @typedef {Object} ReviewActionIn
  * @property {string} action
  * @property {string | null}= note
+ * @typedef {Object} ReviewAssignmentIn
+ * @property {string | null}= due_at
+ * @property {number | null}= reviewer_id
+ * @typedef {Object} ReviewBulkActionIn
+ * @property {string} action
+ * @property {Array<ReviewQueueBulkItem>} items
+ * @property {string | null}= note
+ * @typedef {Object} ReviewBulkAssignmentIn
+ * @property {string | null}= due_at
+ * @property {Array<ReviewQueueBulkItem>} items
+ * @property {number | null}= reviewer_id
  * @typedef {Object} ReviewCommentIn
  * @property {string} note
  * @typedef {Object} ReviewPolicyCreate
@@ -624,6 +770,9 @@
  * @property {string | null}= required_clauses_json
  * @property {string}= risk_preference
  * @property {string | null}= scenario
+ * @typedef {Object} ReviewQueueBulkItem
+ * @property {number} target_id
+ * @property {string} target_type
  * @typedef {Object} RiskActionIn
  * @property {string} action
  * @property {string | null}= note
@@ -791,6 +940,7 @@
  * @property {string | null}= job_title
  * @property {string | null}= last_login_at
  * @property {string | null}= last_login_ip
+ * @property {string | null}= legal_role
  * @property {string | null}= locked_until
  * @property {number}= login_fail_count
  * @property {number | null}= organization_id

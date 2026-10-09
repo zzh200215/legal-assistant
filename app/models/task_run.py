@@ -24,7 +24,7 @@ class TaskRun(Base):
     idempotency_key = Column(String(128), nullable=True, index=True)
     tenant_id = Column(Integer, nullable=True, index=True, comment="organization_id")
     status = Column(String(16), nullable=False, default="running", index=True,
-                    comment="running / retrying / succeeded / failed")
+                    comment="running / retrying / succeeded / failed / cancelled")
     error_code = Column(String(64), nullable=True, comment="稳定业务错误码")
     error_message = Column(Text, nullable=True, comment="脱敏后的错误文本")
     attempt = Column(Integer, nullable=False, default=0)

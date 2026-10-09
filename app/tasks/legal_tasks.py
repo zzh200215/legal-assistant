@@ -8,6 +8,8 @@ from app.tasks.runtime import (
     beat_lock as _beat_lock,
     record_beat_heartbeat as _record_beat_heartbeat,
 )
+from app.services.workflows.workflow_service import WorkflowCancelled, workflow_service
+from app.models.user import User
 
 import json
 
@@ -279,12 +281,15 @@ def process_open_contract_review_task(job_id: int):
     from app.models.legal_platform import LegalAsyncJob, LegalAsyncJobInput
 
     db = SessionLocal()
+    task_id = getattr(process_open_contract_review_task.request, "id", None)
     try:
         job = db.query(LegalAsyncJob).filter(
             LegalAsyncJob.id == job_id, LegalAsyncJob.job_type == "open_contract_review"
         ).first()
         if not job or job.status in ("succeeded", "processing"):
             return {"skipped": True}
+        if task_id:
+            workflow_service.ensure_not_cancelled(db, task_id=task_id)
         if job.cancel_requested:
             # 取消优先：已请求取消的任务不再执行（幂等取消语义）。
             job.status = "cancelled"
@@ -307,11 +312,22 @@ def process_open_contract_review_task(job_id: int):
         # 可预测的最小审查摘要；实际模型审查可替换该消费者，不改变状态契约。
         flags = [word for word in ("违约", "赔偿", "争议", "保密", "期限") if word in content]
         job.result_summary = json.dumps({"title": source.title, "risk_keywords": flags, "content_length": len(content)}, ensure_ascii=False)
+        if task_id:
+            workflow_service.ensure_not_cancelled(db, task_id=task_id)
         job.status = "succeeded"
         job.progress = 100
         job.ended_at = utc_now()
         db.commit()
         return {"succeeded": True}
+    except WorkflowCancelled:
+        db.rollback()
+        job = db.query(LegalAsyncJob).filter(LegalAsyncJob.id == job_id).first()
+        if job:
+            job.status = "cancelled"
+            job.error_summary = "任务已被取消"
+            job.ended_at = utc_now()
+            db.commit()
+        raise
     except Exception:
         db.rollback()
         job = db.query(LegalAsyncJob).filter(LegalAsyncJob.id == job_id).first()
@@ -431,12 +447,39 @@ def check_legal_approval_timeouts_task():
     """Beat 任务：扫描超时审批步骤并标记为 timeout，推进审批链状态。"""
     _record_beat_heartbeat()
     from app.models.legal import LegalApprovalChain, LegalApprovalStep
+    from app.models.legal import LegalConsultation, ContractReview, LegalDraft
+    from app.models.legal_notifications import LegalNotificationEvent
+    from app.services.notification.notification_service import notification_service, CHANNEL_SITE
 
     db = SessionLocal()
     now = utc_now()
     timed_out_steps = 0
     timed_out_chains = 0
     try:
+        review_due_notifications = 0
+        now_naive = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) else now
+        for model, kind in ((LegalConsultation, "consultation"), (ContractReview, "contract_review"), (LegalDraft, "draft")):
+            overdue_rows = db.query(model).filter(
+                model.status.in_(("pending_review", "needs_lawyer_review", "needs_facts")),
+                model.reviewer_id.isnot(None), model.review_due_at.isnot(None), model.review_due_at < now_naive,
+            ).all()
+            for row in overdue_rows:
+                dedupe = notification_service._idempotency_key(
+                    getattr(row, "organization_id", None) or db.query(User.organization_id).filter(User.id == row.user_id).scalar(),
+                    row.reviewer_id, CHANNEL_SITE, "approval", "review_due", row.id, 1,
+                )
+                if db.query(LegalNotificationEvent.id).filter(
+                    LegalNotificationEvent.idempotency_key == dedupe,
+                ).first():
+                    continue
+                notification_service.create_notification(
+                    db=db, organization_id=getattr(row, "organization_id", None) or db.query(User.organization_id).filter(User.id == row.user_id).scalar(),
+                    user_id=row.reviewer_id, event_type="approval", title="审核任务已逾期",
+                    body="分配给你的审核任务已超过截止时间，请尽快处理。", channel=CHANNEL_SITE, case_id=row.case_id,
+                    reference_type="review_due", reference_id=row.id,
+                    business_version=1,
+                )
+                review_due_notifications += 1
         overdue = (
             db.query(LegalApprovalStep)
             .filter(
@@ -477,6 +520,6 @@ def check_legal_approval_timeouts_task():
                 timed_out_chains += 1
 
         db.commit()
-        return {"timed_out_steps": timed_out_steps, "timed_out_chains": timed_out_chains}
+        return {"timed_out_steps": timed_out_steps, "timed_out_chains": timed_out_chains, "review_due_notifications": review_due_notifications}
     finally:
         db.close()

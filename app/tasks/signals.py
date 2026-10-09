@@ -8,15 +8,46 @@
 from __future__ import annotations
 
 import logging
+import json
 
 from celery import signals
 
 from app.core.database import SessionLocal
 from app.core.obs_context import build_context, context_from_headers, reset_context, set_context
 from app.services.jobs.task_run_service import task_run_service
+from app.services.workflows.workflow_service import workflow_service
+from app.services.workflows.workflow_service import WorkflowCancelled
 from app.tasks.task_run_registry import get_spec
 
 logger = logging.getLogger(__name__)
+
+
+def _workflow_context(db, task, args, context_fields):
+    """Resolve safe product context without reading document contents."""
+    case_id = None
+    user_id = context_fields.get("user_id")
+    task_name = getattr(task, "name", "")
+    first_arg = args[0] if args else None
+    try:
+        if task_name == "process_open_contract_review" and first_arg is not None:
+            from app.models.legal_platform import LegalAsyncJob
+            job = db.query(LegalAsyncJob).filter(LegalAsyncJob.id == int(first_arg)).first()
+            if job:
+                case_id = job.case_id
+                user_id = user_id or job.created_by
+        elif first_arg is not None and task_name in {
+            "parse_document", "document_chunk", "document_index", "summarize_document", "analyze_document",
+        }:
+            from app.models.document import Document
+            document = db.query(Document).filter(Document.id == int(first_arg)).first()
+            if document:
+                user_id = user_id or document.user_id
+                if document.metadata_json:
+                    metadata = json.loads(document.metadata_json)
+                    case_id = metadata.get("case_id")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return {"case_id": case_id, "user_id": user_id}
 
 
 def _error_fields(exc: Exception | None) -> tuple[str | None, str | None]:
@@ -44,6 +75,38 @@ def _record_task_outcome(task, outcome: str, exc: Exception | None) -> None:
         )
     except Exception:  # noqa: BLE001 - 指标失败不影响任务
         pass
+
+
+def _notify_workflow_terminal(db, workflow) -> None:
+    """Create a terse in-app notification for a workflow terminal state."""
+    if workflow is None or workflow.status not in {"succeeded", "failed", "cancelled"}:
+        return
+    if not getattr(workflow, "organization_id", None) or not getattr(workflow, "user_id", None):
+        return
+    labels = {
+        "succeeded": ("案件动作已完成", "相关案件工作流已完成。"),
+        "failed": ("案件动作失败", "相关案件工作流执行失败，请查看任务详情。"),
+        "cancelled": ("案件动作已取消", "相关案件工作流已被取消。"),
+    }
+    title, body = labels[workflow.status]
+    try:
+        from app.services.notification.notification_service import CHANNEL_SITE, notification_service
+
+        notification_service.create_notification(
+            db=db,
+            organization_id=workflow.organization_id,
+            user_id=workflow.user_id,
+            event_type="workflow",
+            title=title,
+            body=body,
+            channel=CHANNEL_SITE,
+            case_id=workflow.case_id,
+            reference_type="workflow_run",
+            reference_id=workflow.id,
+            business_version=workflow.attempt or 1,
+        )
+    except Exception:  # noqa: BLE001 - notification failure cannot affect task outcome
+        logger.warning("workflow notification failed for workflow=%s", getattr(workflow, "id", None), exc_info=True)
 
 
 @signals.task_prerun.connect
@@ -76,6 +139,14 @@ def _on_task_prerun(task_id=None, task=None, args=None, kwargs=None, **kw):  # n
             request_id=context.request_id,
             agent_run_id=context.agent_run_id,
         )
+        workflow_context = _workflow_context(db, task, call_args, context_fields)
+        workflow_service.start(
+            db, task_id=task_id, workflow_type=task.name,
+            organization_id=context_fields.get("tenant_id"), user_id=workflow_context.get("user_id"),
+            case_id=workflow_context.get("case_id"), business_key=spec.business_key_fn(*call_args),
+            idempotency_key=spec.idempotency_key_fn(*call_args) if spec.idempotency_key_fn else None,
+            trace_id=context.trace_id, request_id=context.request_id,
+        )
     except Exception:  # noqa: BLE001 - 台账失败不阻断任务
         logger.warning("task_run start failed for %s", task.name, exc_info=True)
     finally:
@@ -95,7 +166,16 @@ def _on_task_success(task_id=None, task=None, **kw):  # noqa: ANN001
         return
     db = SessionLocal()
     try:
-        task_run_service.mark_succeeded(db, task_id=task_id)
+        try:
+            workflow = workflow_service.transition(db, task_id=task_id, status="succeeded", step="completed", progress=100)
+            _notify_workflow_terminal(db, workflow)
+        except Exception:  # noqa: BLE001 - workflow ledger failure must not lose task outcome
+            task_run_service.mark_succeeded(db, task_id=task_id)
+            raise
+        if workflow and workflow.status == "cancelled":
+            task_run_service.mark_cancelled(db, task_id=task_id)
+        else:
+            task_run_service.mark_succeeded(db, task_id=task_id)
     except Exception:  # noqa: BLE001
         logger.warning("task_run success failed for %s", task.name, exc_info=True)
     finally:
@@ -111,7 +191,17 @@ def _on_task_failure(task_id=None, task=None, exception=None, einfo=None, **kw):
     db = SessionLocal()
     try:
         code, message = _error_fields(exc)
-        task_run_service.mark_failed(db, task_id=task_id, error_code=code, error_message=message)
+        if isinstance(exc, WorkflowCancelled):
+            task_run_service.mark_cancelled(db, task_id=task_id)
+            workflow = workflow_service.transition(
+                db, task_id=task_id, status="cancelled", step="cancelled",
+                error_code=WorkflowCancelled.error_code, error_message="任务已被取消",
+            )
+            _notify_workflow_terminal(db, workflow)
+        else:
+            task_run_service.mark_failed(db, task_id=task_id, error_code=code, error_message=message)
+            workflow = workflow_service.transition(db, task_id=task_id, status="failed", step="failed", error_code=code, error_message=message)
+            _notify_workflow_terminal(db, workflow)
     except Exception:  # noqa: BLE001
         logger.warning("task_run failure failed for %s", task.name, exc_info=True)
     finally:
@@ -137,6 +227,7 @@ def _on_task_retry(task_id=None, task=None, request=None, einfo=None, **kw):  # 
             attempt=retries + 1,
             next_retry_at=eta,
         )
+        workflow_service.transition(db, task_id=task_id, status="retrying", step="retrying", error_code=code, error_message=message)
     except Exception:  # noqa: BLE001
         logger.warning("task_run retry failed for %s", task.name, exc_info=True)
     finally:

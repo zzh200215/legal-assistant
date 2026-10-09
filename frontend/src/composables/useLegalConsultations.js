@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { useQuery } from '../query/useQuery.js'
 import { useMutation } from '../query/useMutation.js'
-import { qk } from '../query/keys'
+import { qk, qkPrefix } from '../query/keys'
 
 // 法律咨询 tab 领域模块（查询层 + 幂等写）：
 // 列表走统一查询层（同 key 去重/缓存/取消），提交/追问经 useMutation（Idempotency-Key 防连点重复）。
@@ -15,12 +15,16 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
   const followupLoading = ref(false)
 
   const consultationsQuery = useQuery({
-    key: qk.legal.consultations(),
-    fetcher: () => client.listLegalConsultations(),
+    key: () => qk.legal.consultations(caseId?.value || null),
+    fetcher: () => client.listLegalConsultations({ params: caseId?.value ? { case_id: caseId.value } : undefined }),
     staleTime: 30 * 1000,
   })
 
-  const consultationsList = computed(() => consultationsQuery.data.value || [])
+  const consultationsList = computed(() => {
+    const rows = consultationsQuery.data.value || []
+    const activeCaseId = caseId?.value
+    return activeCaseId ? rows.filter((row) => Number(row.case_id) === Number(activeCaseId)) : rows
+  })
 
   const loadConsultations = async () => {
     await consultationsQuery.refetch()
@@ -29,7 +33,7 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
 
   const submitMutation = useMutation({
     mutationFn: (payload, ctx) => client.createLegalConsultation(payload.body, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qk.legal.consultations()],
+    invalidate: [qkPrefix('legal', 'consultations')],
     onSuccess: (result) => {
       consultResult.value = result.data
       consultForm.value.question = ''
@@ -56,7 +60,7 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
 
   const followupMutation = useMutation({
     mutationFn: (payload, ctx) => client.followupConsultation(payload.id, payload.question, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qk.legal.consultations()],
+    invalidate: [qkPrefix('legal', 'consultations')],
     onSuccess: (result) => {
       consultResult.value = result.data
       followupQuestion.value = ''
@@ -78,7 +82,7 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
 
   const submitReviewMutation = useMutation({
     mutationFn: (payload, ctx) => client.submitLegalReviewAction(payload.type, payload.id, payload.body, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qk.legal.consultations()],
+    invalidate: [qkPrefix('legal', 'consultations')],
     onSuccess: () => {
       consultResult.value.status = 'needs_lawyer_review'
       message.success('已提交律师审核队列')

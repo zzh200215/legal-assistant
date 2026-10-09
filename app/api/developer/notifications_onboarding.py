@@ -2,7 +2,7 @@
 import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -152,17 +152,37 @@ def acknowledge_notification(
 
 @router.get("/notifications/me")
 def get_my_notifications(
+    status: str | None = Query(default=None, description="all / unread / read"),
+    event_type: str | None = Query(default=None, max_length=64),
+    case_id: int | None = Query(default=None, ge=1),
+    page: int = Query(default=1, ge=1, le=10000),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """当前用户最近 50 条站内通知 + 未读数（delivered/sent 计为未读）。"""
+    """当前用户站内通知，支持状态、案件、类型筛选和分页。"""
     from app.services.notification.notification_service import notification_service
+    if status == "unread":
+        status_filter = "unread"
+    elif status in {None, "all"}:
+        status_filter = None
+    elif status == "read":
+        status_filter = "read"
+    else:
+        raise HTTPException(status_code=422, detail="通知状态不支持")
+    offset = (page - 1) * page_size
     events = notification_service.get_user_notifications(
-        db=db, user_id=current_user.id, limit=50,
+        db=db, user_id=current_user.id, status=status_filter,
+        event_type=event_type, case_id=case_id, limit=page_size, offset=offset,
+    )
+    total = notification_service.count_user_notifications(
+        db=db, user_id=current_user.id,
+        status=status_filter,
+        event_type=event_type, case_id=case_id,
     )
     items = [notification_service.serialize_event(e) for e in events if e.status != "failed"]
     unread = notification_service.get_unread_count(db=db, user_id=current_user.id)
-    return {"items": items, "unread": unread}
+    return {"items": items, "unread": unread, "total": total, "page": page, "page_size": page_size}
 
 
 @router.post("/notifications/{notification_id}/read")

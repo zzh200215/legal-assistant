@@ -4,6 +4,8 @@
     <span>按来源和状态查看后台任务，支持进入目标对象、查看详情和重试失败任务。</span>
   </div>
 
+  <WorkflowOperationsPanel />
+
   <el-card class="system-panel-card">
     <div class="app-toolbar">
       <span>统计周期：</span>
@@ -200,6 +202,7 @@ import { getStatusLabel } from '../../utils/status'
 import { useSystemTaskMonitor } from '../../composables/useSystemTaskMonitor'
 import { useSystemActivity } from '../../composables/useSystemActivity'
 import { useAuthStore } from '../../stores/auth'
+import WorkflowOperationsPanel from './WorkflowOperationsPanel.vue'
 
 const route = useRoute()
 const router = useRouter()

@@ -67,6 +67,7 @@ class QueriesMixin:
         classification: str | None = None,
         sensitivity_level: str | None = None,
         connector_id: int | None = None,
+        case_id: int | None = None,
         query: str | None = None,
         page: int | None = None,
         page_size: int | None = None,
@@ -101,6 +102,16 @@ class QueriesMixin:
                 Document.metadata_json.like(f'%"connector_id": {connector_id},%'),
                 Document.metadata_json.like(f'%"connector_id": {connector_id}}}%'),
                 Document.metadata_json.like(f'%"connector_id": "{connector_id}"%'),
+            ))
+        if case_id is not None:
+            # Matter links are stored in the document metadata for backwards
+            # compatibility. Match both compact and pretty JSON encodings.
+            q = q.filter(or_(
+                Document.metadata_json.like(f'%"case_id": {case_id},%'),
+                Document.metadata_json.like(f'%"case_id": {case_id}}}%'),
+                Document.metadata_json.like(f'%"case_id":{case_id},%'),
+                Document.metadata_json.like(f'%"case_id":{case_id}}}%'),
+                Document.metadata_json.like(f'%"case_id": "{case_id}"%'),
             ))
         if query:
             escaped = (query or "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

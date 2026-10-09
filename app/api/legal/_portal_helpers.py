@@ -115,13 +115,13 @@ def _require_portal_session(link: LegalPortalLink, session_token: str | None) ->
 
 
 def _portal_billing_snapshot(db: Session, link: LegalPortalLink) -> dict | None:
-    """按案件维度取最近一张非草稿发票，供客户门户对账展示（P3）。
+    """按案件维度返回客户可见的非草稿发票对账摘要（P3）。
 
-    字段命名与前端 LegalPortal.vue 账单占位卡一致（invoice_number / total_amount /
-    status / period_start / period_end），invoice_no 与 billing_period_* 为 DB 列名。
+    不返回客户联系方式、支付流水号、内部备注或操作人；只保留客户核对账单所需的
+    发票明细、已确认收款和应收余额。调用方仍可把 ``latest`` 映射为旧版 ``invoice`` 字段。
     """
     from app.models.legal_billing import LegalInvoice, LegalInvoiceItem, LegalPaymentRecord
-    invoice = (
+    invoices = (
         db.query(LegalInvoice)
         .filter(
             LegalInvoice.organization_id == link.organization_id,
@@ -129,29 +129,64 @@ def _portal_billing_snapshot(db: Session, link: LegalPortalLink) -> dict | None:
             LegalInvoice.status != "draft",
         )
         .order_by(LegalInvoice.issue_date.desc(), LegalInvoice.id.desc())
-        .first()
+        .all()
     )
-    if not invoice:
+    if not invoices:
         return None
-    items = db.query(LegalInvoiceItem).filter(LegalInvoiceItem.invoice_id == invoice.id).all()
-    payments = db.query(LegalPaymentRecord).filter(
-        LegalPaymentRecord.invoice_id == invoice.id,
-        LegalPaymentRecord.status != "refunded",
-    ).all()
-    paid_total = sum(float(p.amount or 0) for p in payments)
+
+    def serialize_invoice(invoice: LegalInvoice) -> dict:
+        items = db.query(LegalInvoiceItem).filter(LegalInvoiceItem.invoice_id == invoice.id).all()
+        payments = db.query(LegalPaymentRecord).filter(
+            LegalPaymentRecord.invoice_id == invoice.id,
+            LegalPaymentRecord.status == "confirmed",
+        ).order_by(LegalPaymentRecord.recorded_at.desc(), LegalPaymentRecord.id.desc()).all()
+        paid_total = sum(float(payment.amount or 0) for payment in payments)
+        total_amount = float(invoice.total_amount or 0)
+        return {
+            "id": invoice.id,
+            "invoice_number": invoice.invoice_no,
+            "currency": invoice.currency or "CNY",
+            "subtotal": float(invoice.subtotal or 0),
+            "tax_amount": float(invoice.tax_amount or 0),
+            "discount_amount": float(invoice.discount_amount or 0),
+            "total_amount": total_amount,
+            "status": invoice.status,
+            "payment_progress": invoice.payment_progress,
+            "issue_date": invoice.issue_date.isoformat() if invoice.issue_date else None,
+            "period_start": invoice.billing_period_start.isoformat() if invoice.billing_period_start else None,
+            "period_end": invoice.billing_period_end.isoformat() if invoice.billing_period_end else None,
+            "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+            "paid_amount": round(paid_total, 2),
+            "outstanding_amount": round(max(total_amount - paid_total, 0), 2),
+            "items": [
+                {
+                    "title": item.title,
+                    "description": item.description,
+                    "quantity": float(item.quantity or 0),
+                    "unit_price": float(item.unit_price or 0),
+                    "amount": float(item.amount or 0),
+                }
+                for item in items
+            ],
+            "payments": [
+                {
+                    "amount": float(payment.amount or 0),
+                    "currency": payment.currency or invoice.currency or "CNY",
+                    "payment_method": payment.payment_method,
+                    "recorded_at": payment.recorded_at,
+                }
+                for payment in payments
+            ],
+        }
+
+    serialized = [serialize_invoice(invoice) for invoice in invoices]
     return {
-        "invoice_number": invoice.invoice_no,
-        "total_amount": float(invoice.total_amount or 0),
-        "status": invoice.status,
-        "payment_progress": invoice.payment_progress,
-        "period_start": invoice.billing_period_start.isoformat() if invoice.billing_period_start else None,
-        "period_end": invoice.billing_period_end.isoformat() if invoice.billing_period_end else None,
-        "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
-        "paid_amount": round(paid_total, 2),
-        "items": [
-            {"title": it.title, "amount": float(it.amount or 0)}
-            for it in items
-        ],
+        "currency": invoices[0].currency or "CNY",
+        "total_invoiced": round(sum(item["total_amount"] for item in serialized), 2),
+        "total_paid": round(sum(item["paid_amount"] for item in serialized), 2),
+        "total_outstanding": round(sum(item["outstanding_amount"] for item in serialized), 2),
+        "latest": serialized[0],
+        "invoices": serialized,
     }
 
 

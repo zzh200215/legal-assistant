@@ -33,10 +33,14 @@ from app.models.legal import (
     LegalCase,
     LegalConsultation,
     LegalDocumentVersion,
+    LegalDocumentComment,
     LegalDraft,
     LegalReviewAction,
+    LegalCaseSource,
     LegalSource,
+    LegalSourceFavorite,
 )
+from app.models.matter_activity import MatterActivity
 from app.models.legal_billing import (
     LegalBillingRule,
     LegalCollectionReminder,
@@ -117,6 +121,7 @@ from app.models.usage_reservation import UsageReservation
 from app.models.user import User, UserRole, UserStatus
 from app.models.webhook_nonce import WebhookNonce
 from app.models.ws_event_log import WsEventLog
+from app.models.workflow import WorkflowEvent, WorkflowOutboxEvent, WorkflowRun
 
 __all__ = [
     "User",
@@ -129,6 +134,9 @@ __all__ = [
     "ExternalConnector",
     "ConnectorSyncItem",
     "TaskRun",
+    "WorkflowRun",
+    "WorkflowEvent",
+    "WorkflowOutboxEvent",
     "SyncRun",
     "Document",
     "DocumentAccessRule",
@@ -170,12 +178,15 @@ __all__ = [
     "LLMCallLog",
     "ModelRelease",
     "LegalSource",
+    "LegalSourceFavorite",
+    "LegalCaseSource",
     "LegalArticle",
     "LegalConsultation",
     "ContractReview",
     "LegalDraft",
     "LegalReviewAction",
     "LegalCase",
+    "MatterActivity",
     "LegalApprovalChain",
     "LegalApprovalStep",
     "LegalDocumentVersion",

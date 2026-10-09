@@ -238,6 +238,20 @@ class PaginationTests(BaseApiCase):
             ids.extend(i["id"] for i in items)
         self.assertEqual(len(set(ids)), 5)
 
+    def test_document_list_can_scope_to_matter_metadata(self):
+        self.db.add_all([
+            Document(user_id=self.user.id, organization_id=self.org.id, title="案件一材料", file_type="txt", status="ready", metadata_json='{"case_id": 101, "document_kind": "evidence"}'),
+            Document(user_id=self.user.id, organization_id=self.org.id, title="案件二材料", file_type="txt", status="ready", metadata_json='{"case_id": 202, "document_kind": "contract"}'),
+        ])
+        self.db.commit()
+        response = self.client.get("/api/documents/?case_id=101&page=1&page_size=20", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(data["items"][0]["title"], "案件一材料")
+        self.assertEqual(data["items"][0]["case_id"], 101)
+        self.assertEqual(data["items"][0]["document_kind"], "evidence")
+
     def test_task_list_uses_db_pagination(self):
         for i in range(3):
             self.db.add(Task(user_id=self.user.id, title=f"任务 {i}", status="todo"))

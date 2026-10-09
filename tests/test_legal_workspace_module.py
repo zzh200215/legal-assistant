@@ -45,6 +45,7 @@ class ComputeConfidenceTests(unittest.TestCase):
         payload = serialize_workspace_row(row)
         self.assertIn("confidence", payload)
         self.assertEqual(payload["feedback_score"], 1)
+        self.assertIn("created_at", payload)
 
 
 class LegalWorkspaceReadModuleTests(unittest.TestCase):

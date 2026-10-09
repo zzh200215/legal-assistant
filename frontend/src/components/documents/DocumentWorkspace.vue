@@ -4,13 +4,13 @@
       <template #header>
         <div class="card-header-inline">
           <div>
-            <span>单文档分析工作区</span>
+            <span>{{ docMeta?.title || '文档工作区' }}</span>
           </div>
           <el-space>
             <el-button type="primary" plain :disabled="!docId" @click="openAgentDemo">
-              发送到 Agent 演示
+              继续处理
             </el-button>
-            <el-button :disabled="!docId" :loading="loading" @click="runAnalysis">重新分析</el-button>
+            <el-button :disabled="!docId" :loading="loading" @click="runAnalysis">重新处理</el-button>
             <el-button type="warning" :disabled="!docId" :loading="creatingTasks" @click="createTasks">
               提取待办并创建任务
             </el-button>
@@ -18,8 +18,8 @@
         </div>
       </template>
       <div class="toolbar-meta">
-        <span v-if="docId">当前文档 ID: {{ docId }}</span>
-        <span v-else>先上传或选择一份文档</span>
+        <span v-if="docId">{{ docMeta?.file_type || '法律资料' }} · {{ docMeta?.status || '处理中' }}</span>
+        <span v-else>从左侧选择一份资料开始</span>
       </div>
       <div v-if="analysisTask.taskId" class="async-status app-state-banner">
         <StatusTag kind="async" :status="analysisTask.state" />
@@ -34,22 +34,22 @@
         <p>{{ docMeta?.classification || '未分类' }} · {{ docMeta?.permission_scope || '未设权限' }}</p>
       </div>
       <div class="workspace-tile">
-        <span>问答与引用</span>
+          <span>引用记录</span>
         <strong>{{ qaRecords.length }}</strong>
-        <p>累计问答记录，支持引用溯源与反馈闭环</p>
+          <p>保留资料引用和反馈记录</p>
       </div>
       <div class="workspace-tile">
-        <span>解析与版本</span>
+          <span>版本与处理</span>
         <strong>{{ parseJobs.length }} / {{ versions.length }}</strong>
-        <p>后台任务数 / 当前版本记录</p>
+          <p>处理记录 / 当前版本</p>
       </div>
     </div>
 
     <el-card v-if="docId" class="panel-card">
       <template #header>
         <div class="card-header-inline">
-          <span>文档问答</span>
-          <el-tag size="small" type="info">带引用回答</el-tag>
+          <span>文档助手</span>
+          <el-tag size="small" type="info">回答附原文引用</el-tag>
         </div>
       </template>
       <div class="qa-compose">
@@ -139,14 +139,9 @@
       </div>
     </el-card>
 
-    <el-card v-if="docId" class="panel-card">
-      <template #header>
-        <div class="card-header-inline">
-          <span>关联 Agent 执行</span>
-          <el-tag type="warning" size="small">{{ relatedAgentRuns.length }}</el-tag>
-        </div>
-      </template>
-      <div v-if="relatedAgentRuns.length" class="stack-list">
+    <details v-if="docId && relatedAgentRuns.length" class="processing-history">
+      <summary class="processing-history-summary">处理记录 <span>{{ relatedAgentRuns.length }} 条</span></summary>
+      <div class="stack-list">
         <div v-for="item in relatedAgentRuns" :key="`doc-agent-${item.id}`" class="stack-item">
           <div class="stack-top">
             <strong>#{{ item.id }} {{ item.goal }}</strong>
@@ -159,8 +154,7 @@
           <el-button size="small" text type="primary" @click="openAgentRun(item.id)">查看执行</el-button>
         </div>
       </div>
-      <el-empty v-else description="暂无关联 Agent 执行记录" />
-    </el-card>
+    </details>
 
     <DocumentJobsPanel :parse-jobs="parseJobs" @retry="retryParse" @refresh="fetchParseJobs" />
 
@@ -464,6 +458,10 @@ const {
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
 }
+.processing-history { border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); padding: 12px 4px; }
+.processing-history-summary { color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer; list-style-position: inside; }
+.processing-history-summary span { margin-left: 8px; color: var(--color-text-muted); font-size: var(--text-xs); }
+.processing-history .stack-list { margin-top: 12px; }
 .qa-compose,
 .qa-result,
 .qa-feedback-form,

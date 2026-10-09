@@ -24,6 +24,12 @@
           <el-button size="small" type="primary" @click="showPortalDialog = true">创建门户链接</el-button>
         </div>
       </template>
+      <div class="portal-operations-summary" aria-label="门户运营摘要">
+        <div><span>生效中</span><strong>{{ portalSummary.active }}</strong></div>
+        <div><span>3 天内到期</span><strong>{{ portalSummary.expiring }}</strong></div>
+        <div><span>累计访问</span><strong>{{ portalSummary.accesses }}</strong></div>
+        <div><span>最近访问</span><strong>{{ portalSummary.lastAccess }}</strong></div>
+      </div>
       <el-table :data="portalLinks" stripe size="small">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="token_prefix" label="令牌前缀" width="120" />
@@ -40,6 +46,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="access_count" label="访问次数" width="100" />
+        <el-table-column label="最近访问" width="150">
+          <template #default="{ row }">{{ formatDate(row.last_accessed_at) || '尚未访问' }}</template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="portalStatus(row).type" size="small">{{ portalStatus(row).label }}</el-tag>
@@ -53,6 +62,34 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <section class="portal-analytics" aria-label="门户访问分析">
+      <header class="portal-analytics-heading">
+        <div><h3>访问分析</h3><span>仅显示当前案件的聚合访问数据</span></div>
+        <select v-model="analyticsDays" aria-label="访问分析周期" :disabled="analyticsLoading" @change="loadPortalAnalytics">
+          <option :value="7">近 7 天</option>
+          <option :value="30">近 30 天</option>
+          <option :value="90">近 90 天</option>
+        </select>
+      </header>
+      <div v-if="analyticsLoading" class="portal-analytics-empty">正在加载访问数据…</div>
+      <template v-else>
+        <div class="analytics-metrics">
+          <div><span>成功访问</span><strong>{{ portalAnalytics.summary?.visits || 0 }}</strong></div>
+          <div><span>去重访客</span><strong>{{ portalAnalytics.summary?.unique_visitors || 0 }}</strong></div>
+          <div><span>活跃链接</span><strong>{{ portalAnalytics.summary?.active_links || 0 }}</strong></div>
+          <div><span>被拒访问</span><strong>{{ portalAnalytics.summary?.denied || 0 }}</strong></div>
+        </div>
+        <div v-if="portalAnalytics.daily?.length" class="analytics-chart" aria-label="每日访问趋势">
+          <div v-for="point in portalAnalytics.daily" :key="point.date" class="analytics-day">
+            <span class="analytics-bar-wrap"><i :style="{ height: `${barHeight(point.visits)}%` }"></i></span>
+            <strong>{{ point.visits }}</strong>
+            <time>{{ point.date.slice(5) }}</time>
+          </div>
+        </div>
+        <div v-else class="portal-analytics-empty">当前周期暂无访问记录。</div>
+      </template>
+    </section>
 
     <el-card shadow="never" style="margin-top:20px">
       <template #header><span class="card-title">案件进度更新</span></template>
@@ -186,6 +223,9 @@ const {
 
 const branding = reactive({ portal_logo_url: '', portal_welcome_message: '' })
 const brandingSaving = ref(false)
+const portalAnalytics = ref({ summary: {}, daily: [] })
+const analyticsDays = ref(30)
+const analyticsLoading = ref(false)
 
 async function loadBranding() {
   if (!props.organizationId) return
@@ -214,6 +254,19 @@ async function saveBranding() {
   }
 }
 
+async function loadPortalAnalytics() {
+  if (!props.organizationId || !props.caseId) return
+  analyticsLoading.value = true
+  try {
+    const { data } = await legalWorkspace.getPortalAnalytics(props.organizationId, props.caseId, analyticsDays.value)
+    portalAnalytics.value = data || { summary: {}, daily: [] }
+  } catch {
+    portalAnalytics.value = { summary: {}, daily: [] }
+  } finally {
+    analyticsLoading.value = false
+  }
+}
+
 const portalStatus = (row) => {
   if (row.status !== 'active') {
     const labels = { expired: '已过期', revoked: '已撤销', access_limited: '已达访问上限' }
@@ -226,11 +279,27 @@ const portalStatus = (row) => {
   return { type: 'success', label: '生效中' }
 }
 
+const portalSummary = computed(() => {
+  const active = portalLinks.value.filter((row) => row.status === 'active')
+  const expiring = active.filter((row) => {
+    if (!row.expires_at) return false
+    const remaining = (new Date(String(row.expires_at)).getTime() - Date.now()) / 86400000
+    return !Number.isNaN(remaining) && remaining <= 3
+  }).length
+  const accesses = portalLinks.value.reduce((sum, row) => sum + Number(row.access_count || 0), 0)
+  const latest = portalLinks.value
+    .map((row) => row.last_accessed_at)
+    .filter(Boolean)
+    .sort((a, b) => new Date(String(b)).getTime() - new Date(String(a)).getTime())[0]
+  return { active: active.length, expiring, accesses, lastAccess: latest ? formatDate(latest) : '尚未访问' }
+})
+
 onMounted(() => {
   loadPortalLinks()
   loadProgressUpdates()
   loadCaseMembers()
   loadBranding()
+  loadPortalAnalytics()
 })
 watch(
   () => [props.organizationId, props.caseId],
@@ -239,8 +308,14 @@ watch(
     loadProgressUpdates()
     loadCaseMembers()
     loadBranding()
+    loadPortalAnalytics()
   },
 )
+
+const barHeight = (value) => {
+  const max = Math.max(...(portalAnalytics.value.daily || []).map((point) => Number(point.visits || 0)), 1)
+  return Math.max(8, Math.round((Number(value || 0) / max) * 100))
+}
 </script>
 
 <style scoped>
@@ -258,10 +333,31 @@ watch(
   display: grid;
   gap: 20px;
 }
+.portal-operations-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin: 0 0 14px; padding: 12px 0 14px; border-bottom: 1px solid var(--color-border-light); }
+.portal-operations-summary div { display: grid; gap: 4px; }
+.portal-operations-summary span { color: var(--color-text-muted); font-size: 11px; }
+.portal-operations-summary strong { color: var(--color-text); font-size: 18px; font-weight: 600; }
+.portal-analytics { display: grid; gap: 16px; margin-top: 20px; padding: 18px 0 4px; border-top: 1px solid var(--color-border); }
+.portal-analytics-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.portal-analytics-heading h3 { margin: 0; color: var(--color-text); font-size: 14px; font-weight: 600; }
+.portal-analytics-heading span { display: block; margin-top: 4px; color: var(--color-text-muted); font-size: 11px; }
+.portal-analytics-heading select { min-height: 30px; padding: 4px 8px; border: 1px solid var(--color-border); background: #fff; color: var(--color-text-secondary); font-size: 12px; }
+.analytics-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.analytics-metrics div { display: grid; gap: 4px; }
+.analytics-metrics span { color: var(--color-text-muted); font-size: 11px; }
+.analytics-metrics strong { color: var(--color-text); font-size: 18px; font-weight: 600; }
+.analytics-chart { display: flex; align-items: end; gap: 5px; min-height: 150px; padding: 12px 4px 0; border-bottom: 1px solid var(--color-border); overflow-x: auto; }
+.analytics-day { display: grid; flex: 1 0 22px; align-items: end; justify-items: center; gap: 4px; min-width: 22px; height: 128px; }
+.analytics-day strong { color: var(--color-text-secondary); font-size: 10px; font-weight: 500; }
+.analytics-day time { color: var(--color-text-muted); font-family: var(--font-mono); font-size: 9px; white-space: nowrap; }
+.analytics-bar-wrap { display: flex; align-items: end; width: 10px; height: 82px; background: var(--color-surface-hover); }
+.analytics-bar-wrap i { display: block; width: 100%; min-height: 3px; background: var(--color-primary); }
+.portal-analytics-empty { padding: 24px 0; color: var(--color-text-muted); font-size: 12px; }
 .aggregate-hint {
   font-size: 12px;
   color: var(--color-text-muted);
   line-height: 1.5;
   margin-top: 4px;
 }
+@media (max-width: 720px) { .portal-operations-summary, .analytics-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .portal-analytics-heading { flex-direction: column; } }
 </style>

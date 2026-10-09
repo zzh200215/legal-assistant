@@ -17,8 +17,41 @@ export default {
   listCaseItems(orgId, caseId, config = {}) {
     return http.get(`/legal/orgs/${orgId}/cases/${caseId}/items`, config)
   },
+  getMatterSummary(caseId, config = {}) {
+    return http.get(`/legal/matters/${caseId}/summary`, config)
+  },
+  listMatterArtifacts(caseId, config = {}) {
+    return http.get(`/legal/matters/${caseId}/artifacts`, config)
+  },
+  listMatterActivity(caseId, config = {}) {
+    return http.get(`/legal/matters/${caseId}/activity`, config)
+  },
+  listWorkflowRuns(config = {}) {
+    return http.get('/tasks/workflows', config)
+  },
+  getWorkflowRun(workflowId, config = {}) {
+    return http.get(`/tasks/workflows/${workflowId}`, config)
+  },
+  cancelWorkflowRun(workflowId, options = {}) {
+    return http.post(`/tasks/workflows/${workflowId}/cancel`, null, { headers: idempotencyHeaders(options) })
+  },
+  retryWorkflowRun(workflowId, options = {}) {
+    return http.post(`/tasks/workflows/${workflowId}/retry`, null, { headers: idempotencyHeaders(options) })
+  },
   listLegalSources(config = {}) {
     return http.get('/legal/sources', config)
+  },
+  favoriteSource(sourceId, options = {}) {
+    return http.post(`/legal/sources/${sourceId}/favorite`, null, { headers: idempotencyHeaders(options) })
+  },
+  unfavoriteSource(sourceId, options = {}) {
+    return http.delete(`/legal/sources/${sourceId}/favorite`, { headers: idempotencyHeaders(options) })
+  },
+  linkSourceToCase(sourceId, caseId, options = {}) {
+    return http.post(`/legal/sources/${sourceId}/cases/${caseId}`, null, { headers: idempotencyHeaders(options) })
+  },
+  unlinkSourceFromCase(sourceId, caseId, options = {}) {
+    return http.delete(`/legal/sources/${sourceId}/cases/${caseId}`, { headers: idempotencyHeaders(options) })
   },
   importLegalSources(file, options = {}) {
     const form = new FormData()
@@ -73,6 +106,12 @@ export default {
   resubmitContractReview(id, payload, options = {}) {
     return http.post(`/legal/contract-reviews/${id}/resubmit`, payload, { headers: idempotencyHeaders(options) })
   },
+  listContractRiskItems(id, config = {}) {
+    return http.get(`/legal/contract-reviews/${id}/risk-items`, config)
+  },
+  updateContractRiskItem(id, riskId, payload, options = {}) {
+    return http.post(`/legal/contract-reviews/${id}/risk-items/${riskId}/action`, payload, { headers: idempotencyHeaders(options) })
+  },
 
   listLegalTemplates(config = {}) {
     return http.get('/legal/document-templates', config)
@@ -89,6 +128,30 @@ export default {
   listDraftVersions(id, config = {}) {
     return http.get(`/legal/drafts/${id}/versions`, config)
   },
+  autosaveDraft(id, payload, options = {}) {
+    return http.patch(`/legal/drafts/${id}/autosave`, payload, { headers: idempotencyHeaders(options) })
+  },
+  saveDraftVersion(id, payload, options = {}) {
+    return http.post(`/legal/drafts/${id}/versions`, payload, { headers: idempotencyHeaders(options) })
+  },
+  restoreDraftVersion(id, versionId, payload = {}, options = {}) {
+    return http.post(`/legal/drafts/${id}/versions/${versionId}/restore`, payload, { headers: idempotencyHeaders(options) })
+  },
+  diffDraftVersions(id, fromId, toId, config = {}) {
+    return http.get(`/legal/drafts/${id}/versions/diff`, { ...config, params: { ...(config.params || {}), from_id: fromId, to_id: toId } })
+  },
+  getDraftCollaboration(id, config = {}) {
+    return http.get(`/legal/drafts/${id}/collaboration`, config)
+  },
+  listDraftComments(id, config = {}) {
+    return http.get(`/legal/drafts/${id}/comments`, config)
+  },
+  addDraftComment(id, payload, options = {}) {
+    return http.post(`/legal/drafts/${id}/comments`, payload, { headers: idempotencyHeaders(options) })
+  },
+  updateDraftComment(id, commentId, payload, options = {}) {
+    return http.patch(`/legal/drafts/${id}/comments/${commentId}`, payload, { headers: idempotencyHeaders(options) })
+  },
   resubmitDraft(id, payload, options = {}) {
     return http.post(`/legal/drafts/${id}/resubmit`, payload, { headers: idempotencyHeaders(options) })
   },
@@ -98,6 +161,18 @@ export default {
   },
   listLegalReviewQueue(config = {}) {
     return http.get('/legal/review-queue', config)
+  },
+  listReviewers(config = {}) {
+    return http.get('/legal/review-queue/reviewers', config)
+  },
+  assignReview(targetType, targetId, payload, options = {}) {
+    return http.patch(`/legal/review-queue/${targetType}/${targetId}/assignment`, payload, { headers: idempotencyHeaders(options) })
+  },
+  bulkAssignReview(payload, options = {}) {
+    return http.post('/legal/review-queue/bulk-assignment', payload, { headers: idempotencyHeaders(options) })
+  },
+  bulkReviewAction(payload, options = {}) {
+    return http.post('/legal/review-queue/bulk-action', payload, { headers: idempotencyHeaders(options) })
   },
   submitLegalReviewAction(targetType, targetId, payload, options = {}) {
     return http.post(`/legal/review-queue/${targetType}/${targetId}/actions`, payload, { headers: idempotencyHeaders(options) })
@@ -130,6 +205,9 @@ export default {
   },
   listPortalLinks(orgId, caseId, config = {}) {
     return http.get(`/legal/orgs/${orgId}/cases/${caseId}/portal-links`, config)
+  },
+  getPortalAnalytics(orgId, caseId, days = 30, config = {}) {
+    return http.get(`/legal/orgs/${orgId}/cases/${caseId}/portal-analytics`, { ...config, params: { ...config.params, days } })
   },
   revokePortalLink(linkId, options = {}) {
     return http.post(`/legal/portal-links/${linkId}/revoke`, null, { headers: idempotencyHeaders(options) })

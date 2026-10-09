@@ -18,9 +18,9 @@ export function useLegalSources({ client, message, confirm }) {
   const sourceSaving = ref(false)
   const sourceForm = ref(emptySource())
 
-  const loadLegalSources = async () => {
+  const loadLegalSources = async (config = {}) => {
     try {
-      const { data } = await client.listLegalSources()
+      const { data } = await client.listLegalSources(config)
       legalSources.value = data
     } catch { /* 静默忽略 */ }
   }

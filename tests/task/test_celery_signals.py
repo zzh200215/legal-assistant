@@ -8,9 +8,10 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from app.tasks import signals
+from app.services.workflows.workflow_service import WorkflowCancelled
 
 
 def _fake_task(name="connector_sync_task", retries=1, headers=None, queue=None):
@@ -69,10 +70,55 @@ class CelerySignalHandlersTests(unittest.TestCase):
 
     def test_success_marks_succeeded(self):
         task = _fake_task()
-        with patch("app.tasks.signals.task_run_service") as svc:
+        with (
+            patch("app.tasks.signals.task_run_service") as svc,
+            patch("app.tasks.signals.workflow_service") as workflows,
+        ):
+            workflows.transition.return_value = SimpleNamespace(status="succeeded")
             signals._on_task_success(task_id="task-1", task=task)
         svc.mark_succeeded.assert_called_once()
         self.assertEqual(svc.mark_succeeded.call_args.kwargs["task_id"], "task-1")
+
+    def test_success_does_not_overwrite_cancelled_workflow(self):
+        task = _fake_task()
+        with (
+            patch("app.tasks.signals.task_run_service") as svc,
+            patch("app.tasks.signals.workflow_service") as workflows,
+        ):
+            workflows.transition.return_value = SimpleNamespace(status="cancelled")
+            signals._on_task_success(task_id="task-cancelled", task=task)
+        svc.mark_succeeded.assert_not_called()
+        svc.mark_cancelled.assert_called_once_with(ANY, task_id="task-cancelled")
+
+    def test_terminal_workflow_creates_case_notification(self):
+        task = _fake_task()
+        workflow = SimpleNamespace(
+            id=12, status="succeeded", organization_id=7, user_id=9, case_id=11, attempt=1,
+        )
+        with (
+            patch("app.tasks.signals.task_run_service") as svc,
+            patch("app.tasks.signals.workflow_service") as workflows,
+            patch("app.services.notification.notification_service.notification_service") as notifications,
+        ):
+            workflows.transition.return_value = workflow
+            signals._on_task_success(task_id="task-finished", task=task)
+        svc.mark_succeeded.assert_called_once()
+        notifications.create_notification.assert_called_once()
+        self.assertEqual(notifications.create_notification.call_args.kwargs["event_type"], "workflow")
+        self.assertEqual(notifications.create_notification.call_args.kwargs["case_id"], 11)
+
+    def test_failure_from_cooperative_cancel_marks_cancelled(self):
+        task = _fake_task()
+        with (
+            patch("app.tasks.signals.task_run_service") as svc,
+            patch("app.tasks.signals.workflow_service") as workflows,
+        ):
+            signals._on_task_failure(
+                task_id="task-cancelled", task=task, exception=WorkflowCancelled("cancelled"),
+            )
+        svc.mark_failed.assert_not_called()
+        svc.mark_cancelled.assert_called_once_with(ANY, task_id="task-cancelled")
+        workflows.transition.assert_called_once()
 
     def test_failure_marks_failed_with_type_name_only(self):
         task = _fake_task()

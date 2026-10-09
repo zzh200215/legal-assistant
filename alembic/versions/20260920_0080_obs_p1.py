@@ -24,94 +24,132 @@ branch_labels = None
 depends_on = None
 
 
+def _inspector():
+    return sa.inspect(op.get_bind())
+
+
+def _has_column(table: str, column: str) -> bool:
+    inspector = _inspector()
+    return inspector.has_table(table) and column in {
+        item["name"] for item in inspector.get_columns(table)
+    }
+
+
+def _has_index(table: str, name: str) -> bool:
+    inspector = _inspector()
+    return inspector.has_table(table) and any(
+        item.get("name") == name for item in inspector.get_indexes(table)
+    )
+
+
+def _add_column_if_missing(table: str, column: sa.Column) -> None:
+    if not _has_column(table, column.name):
+        op.add_column(table, column)
+
+
+def _add_index_if_missing(table: str, name: str, columns: list[str]) -> None:
+    if not _has_index(table, name):
+        op.create_index(name, table, columns)
+
+
 def _extend_task_runs() -> None:
-    with op.batch_alter_table("task_runs") as batch_op:
-        batch_op.add_column(sa.Column("request_id", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("agent_run_id", sa.Integer(), nullable=True))
-        batch_op.create_index("ix_task_runs_request_id", ["request_id"])
-        batch_op.create_index("ix_task_runs_agent_run_id", ["agent_run_id"])
+    _add_column_if_missing("task_runs", sa.Column("request_id", sa.String(64), nullable=True))
+    _add_column_if_missing("task_runs", sa.Column("agent_run_id", sa.Integer(), nullable=True))
+    _add_index_if_missing("task_runs", "ix_task_runs_request_id", ["request_id"])
+    _add_index_if_missing("task_runs", "ix_task_runs_agent_run_id", ["agent_run_id"])
 
 
 def _extend_llm_call_logs() -> None:
-    with op.batch_alter_table("llm_call_logs") as batch_op:
-        batch_op.add_column(sa.Column("trace_id", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("task_id", sa.String(128), nullable=True))
-        batch_op.add_column(sa.Column("agent_run_id", sa.Integer(), nullable=True))
-        batch_op.add_column(sa.Column("organization_id", sa.Integer(), nullable=True))
-        batch_op.add_column(sa.Column("error_category", sa.String(32), nullable=True))
-        batch_op.create_index("ix_llm_call_logs_trace_id", ["trace_id"])
-        batch_op.create_index("ix_llm_call_logs_task_id", ["task_id"])
-        batch_op.create_index("ix_llm_call_logs_agent_run_id", ["agent_run_id"])
-        batch_op.create_index("ix_llm_call_logs_organization_id", ["organization_id"])
-        batch_op.create_index("ix_llm_call_logs_error_category", ["error_category"])
+    for column in (
+        sa.Column("trace_id", sa.String(64), nullable=True),
+        sa.Column("task_id", sa.String(128), nullable=True),
+        sa.Column("agent_run_id", sa.Integer(), nullable=True),
+        sa.Column("organization_id", sa.Integer(), nullable=True),
+        sa.Column("error_category", sa.String(32), nullable=True),
+    ):
+        _add_column_if_missing("llm_call_logs", column)
+    for name, column in (
+        ("ix_llm_call_logs_trace_id", "trace_id"),
+        ("ix_llm_call_logs_task_id", "task_id"),
+        ("ix_llm_call_logs_agent_run_id", "agent_run_id"),
+        ("ix_llm_call_logs_organization_id", "organization_id"),
+        ("ix_llm_call_logs_error_category", "error_category"),
+    ):
+        _add_index_if_missing("llm_call_logs", name, [column])
 
 
 def _extend_notification_events() -> None:
-    with op.batch_alter_table("legal_notification_events") as batch_op:
-        batch_op.add_column(sa.Column("trace_id", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("request_id", sa.String(64), nullable=True))
-        batch_op.create_index("ix_legal_notification_events_trace_id", ["trace_id"])
-        batch_op.create_index("ix_legal_notification_events_request_id", ["request_id"])
+    _add_column_if_missing("legal_notification_events", sa.Column("trace_id", sa.String(64), nullable=True))
+    _add_column_if_missing("legal_notification_events", sa.Column("request_id", sa.String(64), nullable=True))
+    _add_index_if_missing("legal_notification_events", "ix_legal_notification_events_trace_id", ["trace_id"])
+    _add_index_if_missing("legal_notification_events", "ix_legal_notification_events_request_id", ["request_id"])
 
 
 def _extend_email_send_requests() -> None:
-    with op.batch_alter_table("email_send_requests") as batch_op:
-        batch_op.add_column(sa.Column("trace_id", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("request_id", sa.String(64), nullable=True))
-        batch_op.create_index("ix_email_send_requests_trace_id", ["trace_id"])
-        batch_op.create_index("ix_email_send_requests_request_id", ["request_id"])
+    _add_column_if_missing("email_send_requests", sa.Column("trace_id", sa.String(64), nullable=True))
+    _add_column_if_missing("email_send_requests", sa.Column("request_id", sa.String(64), nullable=True))
+    _add_index_if_missing("email_send_requests", "ix_email_send_requests_trace_id", ["trace_id"])
+    _add_index_if_missing("email_send_requests", "ix_email_send_requests_request_id", ["request_id"])
 
 
 def _extend_connector_sync_jobs() -> None:
-    with op.batch_alter_table("connector_sync_jobs") as batch_op:
-        batch_op.add_column(sa.Column("trace_id", sa.String(64), nullable=True))
-        batch_op.create_index("ix_connector_sync_jobs_trace_id", ["trace_id"])
+    _add_column_if_missing("connector_sync_jobs", sa.Column("trace_id", sa.String(64), nullable=True))
+    _add_index_if_missing("connector_sync_jobs", "ix_connector_sync_jobs_trace_id", ["trace_id"])
 
 
 def _extend_security_audit_events() -> None:
-    with op.batch_alter_table("security_audit_events") as batch_op:
-        batch_op.add_column(sa.Column("audit_id", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("action", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("resource_version", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("request_id", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("trace_id", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("task_id", sa.String(128), nullable=True))
-        batch_op.add_column(sa.Column("agent_run_id", sa.Integer(), nullable=True))
-        batch_op.add_column(sa.Column("decision", sa.String(16), nullable=True))
-        batch_op.add_column(sa.Column("reason_code", sa.String(64), nullable=True))
-        batch_op.add_column(sa.Column("sanitized_metadata", sa.Text(), nullable=True))
-        batch_op.add_column(sa.Column("schema_version", sa.Integer(), nullable=False, server_default="1"))
-        batch_op.add_column(sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True))
-        batch_op.create_index("ix_security_audit_events_audit_id", ["audit_id"])
-        batch_op.create_index("ix_security_audit_events_trace_id", ["trace_id"])
-        batch_op.create_index("ix_security_audit_events_request_id", ["request_id"])
-        batch_op.create_index("ix_security_audit_events_task_id", ["task_id"])
-        batch_op.create_index("ix_security_audit_events_agent_run_id", ["agent_run_id"])
-        batch_op.create_index("ix_security_audit_events_archived_at", ["archived_at"])
+    for column in (
+        sa.Column("audit_id", sa.String(64), nullable=True),
+        sa.Column("action", sa.String(64), nullable=True),
+        sa.Column("resource_version", sa.String(64), nullable=True),
+        sa.Column("request_id", sa.String(64), nullable=True),
+        sa.Column("trace_id", sa.String(64), nullable=True),
+        sa.Column("task_id", sa.String(128), nullable=True),
+        sa.Column("agent_run_id", sa.Integer(), nullable=True),
+        sa.Column("decision", sa.String(16), nullable=True),
+        sa.Column("reason_code", sa.String(64), nullable=True),
+        sa.Column("sanitized_metadata", sa.Text(), nullable=True),
+        sa.Column("schema_version", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
+    ):
+        _add_column_if_missing("security_audit_events", column)
+    for name, column in (
+        ("ix_security_audit_events_audit_id", "audit_id"),
+        ("ix_security_audit_events_trace_id", "trace_id"),
+        ("ix_security_audit_events_request_id", "request_id"),
+        ("ix_security_audit_events_task_id", "task_id"),
+        ("ix_security_audit_events_agent_run_id", "agent_run_id"),
+        ("ix_security_audit_events_archived_at", "archived_at"),
+    ):
+        _add_index_if_missing("security_audit_events", name, [column])
 
 
 def _extend_audit_archive_marks() -> None:
     for table in ("login_logs", "admin_audit_logs"):
-        with op.batch_alter_table(table) as batch_op:
-            batch_op.add_column(sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True))
-            batch_op.create_index(f"ix_{table}_archived_at", ["archived_at"])
+        _add_column_if_missing(table, sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True))
+        _add_index_if_missing(table, f"ix_{table}_archived_at", ["archived_at"])
 
 
 def _extend_legal_async_jobs() -> None:
-    with op.batch_alter_table("legal_async_jobs") as batch_op:
-        batch_op.add_column(sa.Column("input_json", sa.Text(), nullable=True))
-        batch_op.add_column(sa.Column("output_json", sa.Text(), nullable=True))
+    _add_column_if_missing("legal_async_jobs", sa.Column("input_json", sa.Text(), nullable=True))
+    _add_column_if_missing("legal_async_jobs", sa.Column("output_json", sa.Text(), nullable=True))
 
 
 def _create_ops_metric_tables() -> None:
-    op.create_table(
+    # MySQL cannot index an unbounded TEXT column. Labels are generated from a
+    # bounded set of enum values, so cap the physical key to 1024 characters
+    # while retaining TEXT on dialects that support it in unique keys.
+    labels_type = sa.Text().with_variant(sa.String(256), "mysql")
+
+    if not _inspector().has_table("ops_metric_snapshots"):
+        op.create_table(
         "ops_metric_snapshots",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("bucket_start", sa.DateTime(timezone=True), nullable=False),
         sa.Column("metric_name", sa.String(128), nullable=False),
         sa.Column("org_id", sa.Integer(), nullable=True),
         sa.Column("kind", sa.String(16), nullable=False, server_default="counter"),
-        sa.Column("labels_json", sa.Text(), nullable=True),
+        sa.Column("labels_json", labels_type, nullable=True),
         sa.Column("count", sa.Numeric(20, 6), nullable=False, server_default="0"),
         sa.Column("sum_value", sa.Numeric(20, 6), nullable=True),
         sa.Column("p95_value", sa.Numeric(20, 6), nullable=True),
@@ -122,18 +160,19 @@ def _create_ops_metric_tables() -> None:
             "bucket_start", "metric_name", "org_id", "kind", "labels_json",
             name="uq_ops_metric_snapshots_bucket",
         ),
-    )
-    op.create_index("ix_ops_metric_snapshots_bucket_start", "ops_metric_snapshots", ["bucket_start"])
-    op.create_index("ix_ops_metric_snapshots_metric_name", "ops_metric_snapshots", ["metric_name"])
-    op.create_index("ix_ops_metric_snapshots_org_id", "ops_metric_snapshots", ["org_id"])
+        )
+        op.create_index("ix_ops_metric_snapshots_bucket_start", "ops_metric_snapshots", ["bucket_start"])
+        op.create_index("ix_ops_metric_snapshots_metric_name", "ops_metric_snapshots", ["metric_name"])
+        op.create_index("ix_ops_metric_snapshots_org_id", "ops_metric_snapshots", ["org_id"])
 
-    op.create_table(
+    if not _inspector().has_table("ops_metric_hourly"):
+        op.create_table(
         "ops_metric_hourly",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("bucket_start", sa.DateTime(timezone=True), nullable=False),
         sa.Column("metric_name", sa.String(128), nullable=False),
         sa.Column("org_id", sa.Integer(), nullable=True),
-        sa.Column("labels_json", sa.Text(), nullable=True),
+        sa.Column("labels_json", labels_type, nullable=True),
         sa.Column("count", sa.Numeric(20, 6), nullable=False, server_default="0"),
         sa.Column("sum_value", sa.Numeric(20, 6), nullable=True),
         sa.Column("max_value", sa.Numeric(20, 6), nullable=True),
@@ -149,18 +188,19 @@ def _create_ops_metric_tables() -> None:
             "bucket_start", "metric_name", "org_id", "labels_json",
             name="uq_ops_metric_hourly_bucket",
         ),
-    )
-    op.create_index("ix_ops_metric_hourly_bucket_start", "ops_metric_hourly", ["bucket_start"])
-    op.create_index("ix_ops_metric_hourly_metric_name", "ops_metric_hourly", ["metric_name"])
-    op.create_index("ix_ops_metric_hourly_org_id", "ops_metric_hourly", ["org_id"])
+        )
+        op.create_index("ix_ops_metric_hourly_bucket_start", "ops_metric_hourly", ["bucket_start"])
+        op.create_index("ix_ops_metric_hourly_metric_name", "ops_metric_hourly", ["metric_name"])
+        op.create_index("ix_ops_metric_hourly_org_id", "ops_metric_hourly", ["org_id"])
 
-    op.create_table(
+    if not _inspector().has_table("ops_metric_daily"):
+        op.create_table(
         "ops_metric_daily",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("bucket_start", sa.DateTime(timezone=True), nullable=False),
         sa.Column("metric_name", sa.String(128), nullable=False),
         sa.Column("org_id", sa.Integer(), nullable=True),
-        sa.Column("labels_json", sa.Text(), nullable=True),
+        sa.Column("labels_json", labels_type, nullable=True),
         sa.Column("count", sa.Numeric(20, 6), nullable=False, server_default="0"),
         sa.Column("sum_value", sa.Numeric(20, 6), nullable=True),
         sa.Column("max_value", sa.Numeric(20, 6), nullable=True),
@@ -176,12 +216,13 @@ def _create_ops_metric_tables() -> None:
             "bucket_start", "metric_name", "org_id", "labels_json",
             name="uq_ops_metric_daily_bucket",
         ),
-    )
-    op.create_index("ix_ops_metric_daily_bucket_start", "ops_metric_daily", ["bucket_start"])
-    op.create_index("ix_ops_metric_daily_metric_name", "ops_metric_daily", ["metric_name"])
-    op.create_index("ix_ops_metric_daily_org_id", "ops_metric_daily", ["org_id"])
+        )
+        op.create_index("ix_ops_metric_daily_bucket_start", "ops_metric_daily", ["bucket_start"])
+        op.create_index("ix_ops_metric_daily_metric_name", "ops_metric_daily", ["metric_name"])
+        op.create_index("ix_ops_metric_daily_org_id", "ops_metric_daily", ["org_id"])
 
-    op.create_table(
+    if not _inspector().has_table("ops_metric_watermarks"):
+        op.create_table(
         "ops_metric_watermarks",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("granularity", sa.String(8), nullable=False),
@@ -189,7 +230,7 @@ def _create_ops_metric_tables() -> None:
         sa.Column("last_bucket", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
         sa.UniqueConstraint("granularity", "metric_name", name="uq_ops_metric_watermarks_key"),
-    )
+        )
 
 
 def upgrade() -> None:

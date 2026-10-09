@@ -13,6 +13,7 @@ const ROUTES = [
   '/tasks',
   '/agent',
   '/system',
+  '/management',
   '/legal-developer',
 ]
 

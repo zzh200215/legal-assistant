@@ -135,6 +135,20 @@ class TaskRunService:
         db.commit()
         return row
 
+    def mark_cancelled(self, db: Session, *, task_id: str, reason: str = "任务已被取消") -> TaskRun | None:
+        row = self._by_task_id(db, task_id)
+        if row is None:
+            return None
+        now = _utcnow()
+        row.status = "cancelled"
+        row.error_code = "WORKFLOW_CANCELLED"
+        row.error_message = _sanitized(reason)
+        row.finished_at = now
+        if row.started_at:
+            row.duration_ms = int((now - row.started_at).total_seconds() * 1000)
+        db.commit()
+        return row
+
     def mark_retrying(
         self,
         db: Session,

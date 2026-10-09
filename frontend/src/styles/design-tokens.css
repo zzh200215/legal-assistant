@@ -6,11 +6,11 @@
 :root {
   /* ─── Color Palette ─── */
   /* 主色仅用于选中态、链接与主按钮；面板、文字、边框一律走中性灰。 */
-  --color-primary:          #3B5BDB;
-  --color-primary-hover:    #3450C4;
-  --color-primary-active:   #2C44A8;
-  --color-primary-light:    #EEF1FB;
-  --color-primary-subtle:   rgba(59, 91, 219, 0.10);
+  --color-primary:          #315F91;
+  --color-primary-hover:    #284F79;
+  --color-primary-active:   #214264;
+  --color-primary-light:    #EAF1F7;
+  --color-primary-subtle:   rgba(49, 95, 145, 0.10);
 
   --color-accent:           #0E7490;
   --color-accent-hover:     #0B5F76;
@@ -42,23 +42,23 @@
   --color-cat-custom:       #6D28D9;
 
   /* ─── Surface & Background ─── */
-  --color-bg:               #F7F8FA;
-  --color-bg-alt:           #F1F2F4;
+  --color-bg:               #F5F7F9;
+  --color-bg-alt:           #EEF1F4;
   --color-surface:          #FFFFFF;
   --color-surface-subtle:   #FAFAFB;
   --color-surface-hover:    #F7F8FA;
   --color-surface-soft:     #FFFFFF;
 
   /* ─── Text ─── */
-  --color-text:             #17181C;
-  --color-text-secondary:   #4B4F58;
-  --color-text-muted:       #767A85;
+  --color-text:             #202A35;
+  --color-text-secondary:   #4B5968;
+  --color-text-muted:       #687787;
   --color-text-inverse:     #FFFFFF;
 
   /* ─── Border ─── */
-  --color-border:           #E3E5E9;
-  --color-border-light:     #EDEEF1;
-  --color-border-hover:     #CFD2D8;
+  --color-border:           #DCE2E8;
+  --color-border-light:     #E8EDF1;
+  --color-border-hover:     #C5CFD8;
 
   /* ─── Shadow：中性、紧实。层级靠 1px 边框表达，阴影只做贴合感，不做光晕 ─── */
   --shadow-xs:              0 1px 2px rgba(16, 24, 40, 0.05);

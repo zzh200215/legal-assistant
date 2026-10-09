@@ -75,16 +75,30 @@
         </el-table>
       </el-card>
 
-      <el-card v-if="portalContent.invoice" shadow="never" style="margin-top:20px">
-        <template #header><span class="card-title">账单摘要</span></template>
-        <el-descriptions :column="2" border size="small" class="invoice-desc">
-          <el-descriptions-item label="账单号">{{ portalContent.invoice.invoice_number }}</el-descriptions-item>
-          <el-descriptions-item label="金额">¥{{ portalContent.invoice.total_amount }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ invoiceStatusLabel(portalContent.invoice.status) }}</el-descriptions-item>
-          <el-descriptions-item label="账期">{{ portalContent.invoice.period_start }} ~ {{ portalContent.invoice.period_end }}</el-descriptions-item>
-          <el-descriptions-item v-if="portalContent.invoice.paid_amount != null" label="已收">¥{{ portalContent.invoice.paid_amount }}</el-descriptions-item>
-          <el-descriptions-item v-if="portalContent.invoice.due_date" label="应付款日">{{ portalContent.invoice.due_date }}</el-descriptions-item>
-        </el-descriptions>
+      <el-card v-if="portalContent.billing || portalContent.invoice" shadow="never" style="margin-top:20px">
+        <template #header><span class="card-title">账单与收款</span></template>
+        <div v-if="billingSummary" class="billing-summary">
+          <div><span>账单总额</span><strong>{{ money(billingSummary.total_invoiced) }}</strong></div>
+          <div><span>已收金额</span><strong class="billing-paid">{{ money(billingSummary.total_paid) }}</strong></div>
+          <div><span>待收金额</span><strong class="billing-outstanding">{{ money(billingSummary.total_outstanding) }}</strong></div>
+        </div>
+        <div v-for="invoice in billingInvoices" :key="invoice.id || invoice.invoice_number" class="portal-invoice">
+          <div class="portal-invoice-heading">
+            <div><strong>{{ invoice.invoice_number }}</strong><span>{{ invoice.issue_date || '开具日期未记录' }}</span></div>
+            <div><el-tag size="small" :type="invoiceStatusType(invoice.status)">{{ invoiceStatusLabel(invoice.status) }}</el-tag><span v-if="invoice.due_date">应付款日 {{ invoice.due_date }}</span></div>
+          </div>
+          <dl class="portal-invoice-facts">
+            <div><dt>账期</dt><dd>{{ invoice.period_start || '-' }} ~ {{ invoice.period_end || '-' }}</dd></div>
+            <div><dt>含税金额</dt><dd>{{ money(invoice.total_amount, invoice.currency) }}</dd></div>
+            <div><dt>已收</dt><dd>{{ money(invoice.paid_amount, invoice.currency) }}</dd></div>
+            <div><dt>待收</dt><dd>{{ money(invoice.outstanding_amount, invoice.currency) }}</dd></div>
+          </dl>
+          <table v-if="invoice.items?.length" class="portal-invoice-items">
+            <thead><tr><th>项目</th><th>数量</th><th>单价</th><th>金额</th></tr></thead>
+            <tbody><tr v-for="item in invoice.items" :key="`${invoice.id}-${item.title}-${item.amount}`"><td>{{ item.title }}</td><td>{{ item.quantity }}</td><td>{{ money(item.unit_price, invoice.currency) }}</td><td>{{ money(item.amount, invoice.currency) }}</td></tr></tbody>
+          </table>
+          <div v-if="invoice.payments?.length" class="portal-payment-list"><span class="billing-subheading">收款记录</span><div v-for="payment in invoice.payments" :key="`${invoice.id}-${payment.recorded_at}-${payment.amount}`"><span>{{ payment.recorded_at || '时间未记录' }}</span><strong>{{ money(payment.amount, payment.currency) }}</strong></div></div>
+        </div>
       </el-card>
 
       <el-card shadow="never" style="margin-top:20px">
@@ -132,7 +146,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ElCard } from 'element-plus/es/components/card/index'
@@ -291,6 +305,14 @@ const openSignLink = (req) => {
 }
 
 const invoiceStatusLabel = (s) => ({ draft: '草稿', sent: '已发送', paid: '已支付', overdue: '逾期', voided: '已作废' }[s] || s)
+const invoiceStatusType = (s) => ({ paid: 'success', sent: 'warning', overdue: 'danger', voided: 'info' }[s] || 'info')
+const money = (value, currency = 'CNY') => `${currency === 'CNY' ? '¥' : currency + ' '}${Number(value || 0).toFixed(2)}`
+const billingSummary = computed(() => portalContent.value.billing || (portalContent.value.invoice ? {
+  total_invoiced: portalContent.value.invoice.total_amount,
+  total_paid: portalContent.value.invoice.paid_amount,
+  total_outstanding: portalContent.value.invoice.outstanding_amount,
+} : null))
+const billingInvoices = computed(() => portalContent.value.billing?.invoices || (portalContent.value.invoice ? [portalContent.value.invoice] : []))
 const formatDate = (v) => {
   if (!v) return ''
   return String(v).replace('T', ' ').slice(0, 16)
@@ -373,6 +395,22 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--color-text-muted);
 }
+
+.billing-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--el-border-color-lighter); }
+.billing-summary div { display: grid; gap: 4px; }
+.billing-summary span, .portal-invoice-facts dt, .billing-subheading { color: var(--color-text-muted); font-size: 11px; }
+.billing-summary strong { color: var(--color-text); font-size: 18px; font-weight: 600; }
+.billing-summary .billing-paid { color: var(--color-success); }.billing-summary .billing-outstanding { color: var(--color-warning); }
+.portal-invoice { padding: 14px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
+.portal-invoice:last-child { border-bottom: 0; padding-bottom: 0; }
+.portal-invoice-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.portal-invoice-heading > div { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.portal-invoice-heading strong { color: var(--color-text); font-size: 13px; }.portal-invoice-heading span { color: var(--color-text-muted); font-size: 11px; }
+.portal-invoice-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.portal-invoice-facts div { display: grid; gap: 4px; min-width: 0; }.portal-invoice-facts dd { margin: 0; color: var(--color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.portal-invoice-items { width: 100%; border-collapse: collapse; color: var(--color-text-secondary); font-size: 12px; table-layout: fixed; }
+.portal-invoice-items th, .portal-invoice-items td { padding: 7px 8px; border-bottom: 1px solid var(--el-border-color-lighter); text-align: left; overflow-wrap: anywhere; }.portal-invoice-items th { color: var(--color-text-muted); font-size: 11px; font-weight: 500; }.portal-invoice-items th:nth-child(n+2), .portal-invoice-items td:nth-child(n+2) { width: 18%; text-align: right; }
+.portal-payment-list { display: grid; gap: 6px; margin-top: 14px; }.billing-subheading { font-weight: 600; }.portal-payment-list > div { display: flex; justify-content: space-between; gap: 12px; color: var(--color-text-secondary); font-size: 11px; }
 
 .otp-actions {
   display: flex;
@@ -491,6 +529,9 @@ onUnmounted(() => {
   .otp-input {
     width: 100%;
   }
+
+  .billing-summary, .portal-invoice-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .portal-invoice-heading { flex-direction: column; gap: 8px; }
 
   .invoice-desc :deep(.el-descriptions__table) {
     table-layout: fixed;

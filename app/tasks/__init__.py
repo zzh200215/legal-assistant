@@ -5,6 +5,7 @@ worker 经 conf.imports=("app.tasks",) 导入本包，进而导入各域任务�
 保持 ``from app.tasks import <task>`` 的既有接口不变。
 """
 from app.tasks import ops_tasks as _ops_tasks  # noqa: E402,F401
+from app.tasks.workflow_tasks import dispatch_workflow_outbox_task, recover_stale_workflow_outbox_task
 
 from app.tasks.document_tasks import (
     analyze_document_task,

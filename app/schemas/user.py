@@ -64,6 +64,7 @@ class UserOut(UserBase):
     external_provider: Optional[str] = None
     last_login_at: Optional[datetime] = None
     created_at: datetime
+    legal_role: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

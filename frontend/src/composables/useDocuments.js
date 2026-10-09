@@ -145,8 +145,10 @@ function createDocuments() {
     }
   }
 
-  const initialize = async (rawDocumentId) => {
+  const initialize = async (rawDocumentId, rawCaseId) => {
     analysis.reset()
+    const caseId = Number(rawCaseId)
+    list.filters.value.case_id = Number.isFinite(caseId) && caseId > 0 ? caseId : null
     await list.fetchKnowledgeBases()
     await list.fetchDocuments()
     await loadDocumentFromRoute(rawDocumentId)

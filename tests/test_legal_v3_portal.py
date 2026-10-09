@@ -16,7 +16,7 @@ from app.main import app
 from app.models.user import User, UserStatus
 from app.models.org import Organization, OrganizationMember
 from app.models.legal import LegalCase
-from app.models.legal_portal import LegalPortalLink
+from app.models.legal_portal import LegalPortalAccessLog, LegalPortalLink
 from fastapi.testclient import TestClient
 
 
@@ -127,6 +127,44 @@ class PortalTokenAuthTests(unittest.TestCase):
         # portal content requires no auth — should not return 401/403
         resp = self.client.get(f"/api/legal/portal/{raw_token}/content")
         self.assertNotIn(resp.status_code, (401, 403))
+
+    def test_portal_analytics_aggregates_current_case_only(self):
+        _, link = self._make_link()
+        now = datetime.now(timezone.utc)
+        self.db.add_all([
+            LegalPortalAccessLog(
+                portal_link_id=link.id, organization_id=self.org_id,
+                accessed_at=now - timedelta(days=1), ip_hash="visitor-a",
+                action="view", result="success",
+            ),
+            LegalPortalAccessLog(
+                portal_link_id=link.id, organization_id=self.org_id,
+                accessed_at=now - timedelta(days=1), ip_hash="visitor-a",
+                action="download", result="denied",
+            ),
+        ])
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/legal/orgs/{self.org_id}/cases/{self.case.id}/portal-analytics?days=7",
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()["data"]
+        self.assertIn("summary", body, body)
+        self.assertEqual(body["summary"]["visits"], 1)
+        self.assertEqual(body["summary"]["denied"], 1)
+        self.assertEqual(body["summary"]["unique_visitors"], 1)
+        self.assertEqual(body["summary"]["active_links"], 1)
+        self.assertEqual(len(body["daily"]), 7)
+        self.assertEqual(body["links"][0]["visits"], 1)
+
+    def test_portal_analytics_rejects_unsupported_period(self):
+        response = self.client.get(
+            f"/api/legal/orgs/{self.org_id}/cases/{self.case.id}/portal-analytics?days=14",
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 422)
 
     def test_error_message_does_not_reveal_reason(self):
         """失效原因不能出现在响应中（统一显示 PORTAL_LINK_UNAVAILABLE）"""
@@ -755,7 +793,7 @@ class PortalP3FeedbackBillingTests(unittest.TestCase):
 
     def test_content_returns_billing_snapshot_for_sent_invoice(self):
         from datetime import date
-        from app.models.legal_billing import LegalInvoice
+        from app.models.legal_billing import LegalInvoice, LegalInvoiceItem, LegalPaymentRecord
         self.db.add(LegalInvoice(
             organization_id=self.org_id,
             case_id=self.case.id,
@@ -770,6 +808,17 @@ class PortalP3FeedbackBillingTests(unittest.TestCase):
             status="sent",
             created_by=self.admin.id,
         ))
+        self.db.flush()
+        self.db.add(LegalInvoiceItem(
+            invoice_id=self.db.query(LegalInvoice).filter_by(invoice_no="INV-P3-001").one().id,
+            title="案件法律服务", description="阶段性法律服务费", unit_price=10600,
+            quantity=1, amount=10600,
+        ))
+        self.db.add(LegalPaymentRecord(
+            invoice_id=self.db.query(LegalInvoice).filter_by(invoice_no="INV-P3-001").one().id,
+            organization_id=self.org_id, amount=2600, payment_method="bank_transfer",
+            status="confirmed", recorded_by=self.admin.id,
+        ))
         self.db.commit()
 
         raw, _ = self._make_link()
@@ -782,7 +831,13 @@ class PortalP3FeedbackBillingTests(unittest.TestCase):
         self.assertEqual(inv["status"], "sent")
         self.assertEqual(inv["period_start"], "2026-07-01")
         self.assertEqual(inv["period_end"], "2026-07-31")
-        self.assertEqual(inv["paid_amount"], 0.0)
+        self.assertEqual(inv["paid_amount"], 2600.0)
+        self.assertEqual(inv["outstanding_amount"], 8000.0)
+        self.assertEqual(inv["items"][0]["title"], "案件法律服务")
+        self.assertEqual(inv["payments"][0]["amount"], 2600.0)
+        billing = resp.json()["data"]["billing"]
+        self.assertEqual(billing["total_invoiced"], 10600.0)
+        self.assertEqual(billing["total_outstanding"], 8000.0)
 
     def test_content_omits_billing_for_draft_invoice(self):
         from datetime import date

@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { useQuery } from '../query/useQuery.js'
 import { useMutation } from '../query/useMutation.js'
-import { qk } from '../query/keys'
+import { qk, qkPrefix } from '../query/keys'
 
 // 合同审查 tab 领域模块（查询层 + 幂等写）：
 // 审查列表走统一查询层；提交审查/文件审查/重新提交经 useMutation（Idempotency-Key 防连点重复）。
@@ -16,12 +16,16 @@ export function useContractReviews({ client, message, caseId }) {
   const resubmitLoading = ref({})
 
   const reviewsQuery = useQuery({
-    key: qk.legal.contractReviews(),
-    fetcher: () => client.listContractReviews(),
+    key: () => qk.legal.contractReviews(caseId?.value || null),
+    fetcher: () => client.listContractReviews({ params: caseId?.value ? { case_id: caseId.value } : undefined }),
     staleTime: 30 * 1000,
   })
 
-  const contractReviews = computed(() => reviewsQuery.data.value || [])
+  const contractReviews = computed(() => {
+    const rows = reviewsQuery.data.value || []
+    const activeCaseId = caseId?.value
+    return activeCaseId ? rows.filter((row) => Number(row.case_id) === Number(activeCaseId)) : rows
+  })
 
   const loadContractReviews = async () => {
     await reviewsQuery.refetch()
@@ -29,7 +33,7 @@ export function useContractReviews({ client, message, caseId }) {
 
   const submitMutation = useMutation({
     mutationFn: (payload, ctx) => client.createContractReview(payload.body, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qk.legal.contractReviews()],
+    invalidate: [qkPrefix('legal', 'contract-reviews')],
     onSuccess: (result, variables) => {
       contractResult.value = result.data
       if (variables.onResult) variables.onResult()
@@ -57,7 +61,7 @@ export function useContractReviews({ client, message, caseId }) {
 
   const uploadMutation = useMutation({
     mutationFn: (payload, ctx) => client.uploadContractReview(payload.file, payload.title, payload.caseId, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qk.legal.contractReviews()],
+    invalidate: [qkPrefix('legal', 'contract-reviews')],
     onSuccess: (result, variables) => {
       contractResult.value = result.data
       contractForm.value.title = result.data.title || contractForm.value.title
@@ -96,7 +100,7 @@ export function useContractReviews({ client, message, caseId }) {
 
   const resubmitMutation = useMutation({
     mutationFn: (payload, ctx) => client.resubmitContractReview(payload.id, payload.body, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qk.legal.contractReviews()],
+    invalidate: [qkPrefix('legal', 'contract-reviews')],
     onSuccess: (result, variables) => {
       message.success(`已重新提交，版本升级为 v${result.data.version}`)
       resubmitDraftForm.value = { ...resubmitDraftForm.value, [variables.id]: '' }

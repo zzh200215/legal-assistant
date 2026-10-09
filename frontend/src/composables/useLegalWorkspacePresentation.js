@@ -56,10 +56,9 @@ export function useContractRiskPresentation({ contractForm, contractResult, cont
   const resetRiskFilter = () => { riskFilter.value = { clauseType: '', level: '', sortBy: '' } }
   const jumpToRisk = (risk) => {
     const paragraph = risk.source_location?.paragraph
+    highlightedParagraph.value = paragraph || null
     if (!paragraph) return
-    highlightedParagraph.value = paragraph
     document.getElementById(`para-${paragraph}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    setTimeout(() => { highlightedParagraph.value = null }, 3000)
   }
   return {
     reviewFilter, riskFilter, highlightedParagraph, contractContentRef, contractParagraphs,

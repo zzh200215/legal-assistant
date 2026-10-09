@@ -52,9 +52,17 @@ def _load_owned_row(db: Session, user: User, model, item_id: int, kind: str):
     row = db.query(model).filter(model.id == item_id).first()
     if not row:
         raise api_error(404, "记录不存在", code=f"LEGAL_{kind.upper()}_NOT_FOUND")
-    if row.user_id != user.id and user.role not in {"admin", "dept_admin"}:
+    member = None
+    if user.organization_id:
+        from app.models.org import OrganizationMember
+        member = db.query(OrganizationMember).filter(
+            OrganizationMember.organization_id == user.organization_id,
+            OrganizationMember.user_id == user.id,
+        ).first()
+    legal_reviewer = bool(member and member.legal_role in {"admin", "reviewer"})
+    if row.user_id != user.id and user.role not in {"admin", "dept_admin"} and not legal_reviewer:
         raise api_error(403, "无权访问该记录", code="LEGAL_ACCESS_FORBIDDEN")
-    if row.user_id != user.id and user.role == "dept_admin":
+    if row.user_id != user.id and user.role in {"dept_admin", "user"}:
         owner = db.query(User).filter(User.id == row.user_id).first()
         if (
             user.organization_id is None
@@ -82,14 +90,28 @@ def case_domain(case_id: int, db: Session = Depends(get_db), current_user: User 
 
 @router.get("/contract-reviews/{item_id}/risk-items")
 def list_risk_items(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    _load_owned_row(db, current_user, ContractReview, item_id, "contract_review")
-    return get_risk_items(db, item_id)
+    review = _load_owned_row(db, current_user, ContractReview, item_id, "contract_review")
+    rows = get_risk_items(db, item_id)
+    from app.models.org import OrganizationMember
+    member = db.query(OrganizationMember).filter(
+        OrganizationMember.organization_id == current_user.organization_id,
+        OrganizationMember.user_id == current_user.id,
+    ).first() if current_user.organization_id else None
+    can_resolve = current_user.role in {"admin", "dept_admin"} or bool(member and member.legal_role in {"admin", "reviewer"})
+    for item in rows:
+        item["can_resolve"] = can_resolve
+    return rows
 
 
 @router.post("/contract-reviews/{item_id}/risk-items/{risk_id}/action")
 def handle_risk_item(item_id: int, risk_id: int, req: RiskActionIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """律师处理风险项：accept / mitigate / dismiss。仅审核角色可执行。"""
-    if current_user.role not in {"admin", "dept_admin"}:
+    from app.models.org import OrganizationMember
+    member = db.query(OrganizationMember).filter(
+        OrganizationMember.organization_id == current_user.organization_id,
+        OrganizationMember.user_id == current_user.id,
+    ).first() if current_user.organization_id else None
+    if current_user.role not in {"admin", "dept_admin"} and not (member and member.legal_role in {"admin", "reviewer"}):
         raise api_error(403, "仅审核律师或管理员可处理风险项", code="LEGAL_RISK_REVIEW_FORBIDDEN")
     _load_owned_row(db, current_user, ContractReview, item_id, "contract_review")
     risk = db.get(ContractRiskItem, risk_id)

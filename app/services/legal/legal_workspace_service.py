@@ -6,6 +6,7 @@ checks, source selection, LLM execution, persistence, and audit records.
 """
 
 import json
+import difflib
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -16,14 +17,17 @@ from app.core.auth import verify_case_access
 from app.core.time import utc_now
 from app.models.legal import (
     ContractReview,
+    LegalCase,
     LegalConsultation,
     LegalDocumentVersion,
+    LegalDocumentComment,
     LegalDraft,
     LegalReviewAction,
     LegalSource,
 )
 from app.models.legal_contract import LegalReviewPolicy, LegalReviewPolicyVersion
 from app.models.user import User
+from app.models.org import LegalMemberRole, OrganizationMember
 from app.services.observability.audit_log_service import AuditLogService
 from app.services.legal.legal_service import (
     DISCLAIMER,
@@ -41,6 +45,7 @@ from app.services.legal.legal_service import (
 from app.services.legal.legal_reference_service import enrich_references
 from app.services.legal.legal_domain_service import legal_domain_service
 from app.services.billing.subscription_service import subscription_service
+from app.services.legal.matter_service import matter_service
 
 
 DRAFT_TITLES = {
@@ -124,7 +129,8 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "references": _json_or(row.references_json, "[]"), "advice": row.advice,
             "risk_level": row.risk_level, "status": row.status,
             "reviewer_id": row.reviewer_id, "review_note": row.review_note,
-            "reviewed_at": row.reviewed_at,
+            "reviewed_at": row.reviewed_at, "review_due_at": getattr(row, "review_due_at", None),
+            "created_at": row.created_at,
             "confidence": compute_confidence(row),
             "feedback_score": row.feedback_score,
             "reviewed_version": getattr(row, "reviewed_version", None),
@@ -140,7 +146,8 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "review_policy_version": row.review_policy_version,
             "review_policy_snapshot": _json_or(row.review_policy_snapshot_json, "{}"),
             "reviewer_id": row.reviewer_id, "review_note": row.review_note,
-            "reviewed_at": row.reviewed_at,
+            "reviewed_at": row.reviewed_at, "review_due_at": getattr(row, "review_due_at", None),
+            "created_at": row.created_at,
             "confidence": compute_confidence(row),
             "feedback_score": row.feedback_score,
             "reviewed_version": getattr(row, "reviewed_version", None),
@@ -154,21 +161,49 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
         "references": _json_or(row.references_json, "[]"), "content": row.content,
         "version": row.version, "status": row.status, "reviewer_id": row.reviewer_id,
         "review_note": row.review_note, "reviewed_at": row.reviewed_at,
+        "review_due_at": getattr(row, "review_due_at", None),
+        "created_at": row.created_at,
         "confidence": compute_confidence(row),
         "feedback_score": row.feedback_score,
         "reviewed_version": getattr(row, "reviewed_version", None),
+        "row_version": getattr(row, "row_version", None),
+        "updated_at": getattr(row, "updated_at", None),
         "is_final": bool(getattr(row, "is_final", 0)),
         "model_snapshot": _json_or(getattr(row, "model_snapshot_json", None), "{}"),
     }
+
+
+def _draft_missing_fields(document_type: str, fields: dict[str, str]) -> list[str]:
+    return [field for field in DRAFT_FIELDS.get(document_type, []) if not fields.get(field)]
 
 
 def serialize_workspace_version(version: LegalDocumentVersion) -> dict:
     return {
         "id": version.id, "target_type": version.target_type, "target_id": version.target_id,
         "version": version.version, "title": version.title, "content": version.content,
+        "fields": _json_or(getattr(version, "fields_json", None), "{}"),
+        "version_note": getattr(version, "version_note", None),
         "status_at_snapshot": version.status_at_snapshot,
         "snapshot_reason": version.snapshot_reason, "created_by": version.created_by,
         "created_at": version.created_at,
+    }
+
+
+def serialize_document_comment(comment: LegalDocumentComment, author: User | None = None) -> dict:
+    return {
+        "id": comment.id,
+        "target_type": comment.target_type,
+        "target_id": comment.target_id,
+        "version": comment.version,
+        "line_start": comment.line_start,
+        "line_end": comment.line_end,
+        "body": comment.body,
+        "mentions": _json_or(comment.mentions_json, "[]"),
+        "status": comment.status,
+        "author_id": comment.author_id,
+        "author_name": (author.full_name or author.username) if author else None,
+        "created_at": comment.created_at,
+        "updated_at": comment.updated_at,
     }
 
 
@@ -284,6 +319,11 @@ class LegalWorkspaceModule:
             db, row, known=known, missing=missing, refs=refs, risk_level=risk,
         )
         subscription_service.record_usage(db, user.id, "consultation")
+        matter_service.record_activity(
+            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="consultation.created", target_type="consultation", target_id=row.id,
+            title="新增法律咨询", summary=row.question[:300],
+        )
         self.audit.log(
             db, user, "legal_consultation_create", target_type="consultation",
             target_id=row.id, detail=f"category={category}, risk={risk}, case_id={case_id}",
@@ -354,6 +394,11 @@ class LegalWorkspaceModule:
         db.refresh(row)
         legal_domain_service.persist_review_artifacts(db, row, risks=risks, refs=refs)
         subscription_service.record_usage(db, user.id, "review")
+        matter_service.record_activity(
+            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="contract_review.created", target_type="contract_review", target_id=row.id,
+            title="提交合同审查", summary=row.title,
+        )
         self.audit.log(
             db, user, "legal_contract_review_create", target_type="contract_review",
             target_id=row.id, detail=f"risks={len(risks)}",
@@ -401,6 +446,11 @@ class LegalWorkspaceModule:
             db, row, known=known, missing=missing, refs=refs, risk_level=risk,
         )
         subscription_service.record_usage(db, user.id, "consultation")
+        matter_service.record_activity(
+            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="consultation.followup_created", target_type="consultation", target_id=row.id,
+            title="追加法律咨询", summary=question[:300],
+        )
         self.audit.log(
             db, user, "legal_followup_create", target_type="consultation",
             target_id=row.id, detail=f"followup to #{consultation_id}",
@@ -437,6 +487,7 @@ class LegalWorkspaceModule:
         row.references_json = json.dumps(refs, ensure_ascii=False)
         row.status = "needs_lawyer_review" if any(isinstance(item, dict) and item.get("risk_level") == "high" for item in risks) else "pending_review"
         row.reviewer_id = None
+        row.review_due_at = None
         row.review_note = None
         row.reviewed_at = None
         row.reviewed_version = None
@@ -446,6 +497,11 @@ class LegalWorkspaceModule:
         # P1：进入新版本后旧版本未决风险项/主张标记为被取代，再持久化新版本结构化工件。
         legal_domain_service.supersede_artifacts(db, user, "contract_review", row.id)
         legal_domain_service.persist_review_artifacts(db, row, risks=risks, refs=refs)
+        matter_service.record_activity(
+            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="contract_review.resubmitted", target_type="contract_review", target_id=row.id,
+            title="重新提交合同审查", summary=f"版本 {row.version}",
+        )
         self.audit.log(
             db, user, "legal_contract_review_resubmit", target_type="contract_review",
             target_id=row.id, detail=f"version={row.version}",
@@ -486,6 +542,11 @@ class LegalWorkspaceModule:
         db.refresh(row)
         legal_domain_service.persist_draft_artifacts(db, row, missing_fields=missing, refs=refs)
         subscription_service.record_usage(db, user.id, "draft")
+        matter_service.record_activity(
+            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="draft.created", target_type="draft", target_id=row.id,
+            title="生成法律文书", summary=row.title,
+        )
         self.audit.log(
             db, user, "legal_draft_create", target_type="draft", target_id=row.id,
             detail=f"type={document_type}, missing={len(missing)}",
@@ -493,7 +554,7 @@ class LegalWorkspaceModule:
         return row, missing_required
 
     async def resubmit_draft(
-        self, db: Session, user: User, *, draft_id: int, document_type: str, fields: dict[str, str],
+        self, db: Session, user: User, *, draft_id: int, document_type: str, fields: dict[str, str], content_override: str | None = None,
     ) -> tuple[LegalDraft, list[str]]:
         row = db.query(LegalDraft).filter(LegalDraft.id == draft_id, LegalDraft.user_id == user.id).first()
         if not row:
@@ -504,7 +565,8 @@ class LegalWorkspaceModule:
             raise KeyError("LEGAL_DRAFT_TYPE_INVALID")
         db.add(LegalDocumentVersion(
             target_type="draft", target_id=row.id, version=row.version, title=row.title,
-            content=row.content, status_at_snapshot=row.status, snapshot_reason="resubmit", created_by=user.id,
+            content=row.content, fields_json=row.fields_json,
+            status_at_snapshot=row.status, snapshot_reason="resubmit", created_by=user.id,
         ))
         # E-7：先落版本快照并归还连接，再进入长 LLM 调用。
         db.commit()
@@ -515,7 +577,7 @@ class LegalWorkspaceModule:
             LegalSource.user_id == user.id, LegalSource.status == "active"
         ).all()
         refs = enrich_references(db, [ref_dict(s) for s in sources[:3]])
-        content = await draft_content(document_type, fields, missing, user_id=user.id)
+        content = content_override if content_override is not None else await draft_content(document_type, fields, missing, user_id=user.id)
         row.fields_json = json.dumps(fields, ensure_ascii=False)
         row.missing_fields_json = json.dumps(missing, ensure_ascii=False)
         row.references_json = json.dumps(refs, ensure_ascii=False)
@@ -523,6 +585,7 @@ class LegalWorkspaceModule:
         row.version += 1
         row.status = "needs_facts" if missing_required else "pending_review"
         row.reviewer_id = None
+        row.review_due_at = None
         row.review_note = None
         row.reviewed_at = None
         row.reviewed_version = None
@@ -531,11 +594,235 @@ class LegalWorkspaceModule:
         db.refresh(row)
         legal_domain_service.supersede_artifacts(db, user, "draft", row.id)
         legal_domain_service.persist_draft_artifacts(db, row, missing_fields=missing, refs=refs)
+        matter_service.record_activity(
+            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="draft.resubmitted", target_type="draft", target_id=row.id,
+            title="重新提交文书", summary=f"版本 {row.version}",
+        )
         self.audit.log(
             db, user, "legal_draft_resubmit", target_type="draft", target_id=row.id,
             detail=f"version={row.version}",
         )
         return row, missing_required
+
+    def _load_editable_draft(self, db: Session, user: User, draft_id: int, base_row_version: int | None = None) -> LegalDraft:
+        row = db.query(LegalDraft).filter(LegalDraft.id == draft_id, LegalDraft.user_id == user.id).first()
+        if not row:
+            raise LookupError("LEGAL_DRAFT_NOT_FOUND")
+        if base_row_version is not None and int(row.row_version or 0) != int(base_row_version):
+            raise ValueError("LEGAL_DRAFT_EDIT_CONFLICT")
+        if row.status in {"lawyer_approved", "archived", "offline_consultation"} or getattr(row, "is_final", 0):
+            raise ValueError("LEGAL_DRAFT_EDIT_LOCKED")
+        return row
+
+    def autosave_draft(
+        self, db: Session, user: User, *, draft_id: int, document_type: str,
+        fields: dict[str, str], content: str, base_row_version: int | None = None,
+    ) -> LegalDraft:
+        row = self._load_editable_draft(db, user, draft_id, base_row_version)
+        if document_type not in DRAFT_FIELDS:
+            raise KeyError("LEGAL_DRAFT_TYPE_INVALID")
+        normalized_fields = {str(key): str(value or "") for key, value in (fields or {}).items()}
+        row.fields_json = json.dumps(normalized_fields, ensure_ascii=False)
+        row.missing_fields_json = json.dumps(_draft_missing_fields(document_type, normalized_fields), ensure_ascii=False)
+        row.content = content or ""
+        row.document_type = document_type
+        row.title = DRAFT_TITLES.get(document_type, row.title)
+        db.commit()
+        db.refresh(row)
+        self.audit.log(db, user, "legal_draft_autosave", target_type="draft", target_id=row.id, detail=f"version={row.version}")
+        return row
+
+    def save_draft_version(
+        self, db: Session, user: User, *, draft_id: int, document_type: str,
+        fields: dict[str, str], content: str, base_row_version: int | None = None,
+        version_note: str | None = None,
+    ) -> LegalDraft:
+        row = self._load_editable_draft(db, user, draft_id, base_row_version)
+        if document_type not in DRAFT_FIELDS:
+            raise KeyError("LEGAL_DRAFT_TYPE_INVALID")
+        normalized_fields = {str(key): str(value or "") for key, value in (fields or {}).items()}
+        next_version = int(row.version or 1) + 1
+        row.version = next_version
+        row.document_type = document_type
+        row.title = DRAFT_TITLES.get(document_type, row.title)
+        row.fields_json = json.dumps(normalized_fields, ensure_ascii=False)
+        row.missing_fields_json = json.dumps(_draft_missing_fields(document_type, normalized_fields), ensure_ascii=False)
+        row.content = content or ""
+        db.add(LegalDocumentVersion(
+            target_type="draft", target_id=row.id, version=next_version, title=row.title,
+            content=row.content, fields_json=json.dumps(normalized_fields, ensure_ascii=False),
+            version_note=(version_note or "").strip()[:512] or None,
+            status_at_snapshot=row.status, snapshot_reason="manual", created_by=user.id,
+        ))
+        db.commit()
+        db.refresh(row)
+        matter_service.record_activity(
+            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="draft.version_saved", target_type="draft", target_id=row.id,
+            title="保存文书版本", summary=f"版本 {row.version}",
+        )
+        self.audit.log(db, user, "legal_draft_version_save", target_type="draft", target_id=row.id, detail=f"version={row.version}")
+        return row
+
+    def _load_collaborative_draft(self, db: Session, user: User, draft_id: int) -> LegalDraft:
+        row = db.query(LegalDraft).filter(LegalDraft.id == draft_id).first()
+        if not row:
+            raise LookupError("LEGAL_DRAFT_NOT_FOUND")
+        allowed = row.user_id == user.id or row.reviewer_id == user.id or user.role in {"admin", "dept_admin"}
+        if not allowed:
+            raise PermissionError("LEGAL_DRAFT_COLLABORATION_FORBIDDEN")
+        return row
+
+    def list_draft_comments(self, db: Session, user: User, *, draft_id: int, status: str | None = None) -> list[dict]:
+        row = self._load_collaborative_draft(db, user, draft_id)
+        query = db.query(LegalDocumentComment).filter(
+            LegalDocumentComment.target_type == "draft", LegalDocumentComment.target_id == row.id,
+        )
+        if status in {"open", "resolved"}:
+            query = query.filter(LegalDocumentComment.status == status)
+        comments = query.order_by(LegalDocumentComment.created_at.asc(), LegalDocumentComment.id.asc()).all()
+        author_ids = {comment.author_id for comment in comments}
+        authors = {item.id: item for item in db.query(User).filter(User.id.in_(author_ids)).all()} if author_ids else {}
+        return [serialize_document_comment(comment, authors.get(comment.author_id)) for comment in comments]
+
+    def add_draft_comment(
+        self, db: Session, user: User, *, draft_id: int, body: str, version: int | None = None,
+        line_start: int | None = None, line_end: int | None = None, mentions: list[int] | None = None,
+    ) -> dict:
+        row = self._load_collaborative_draft(db, user, draft_id)
+        if not body or not body.strip():
+            raise ValueError("LEGAL_DRAFT_COMMENT_EMPTY")
+        if line_start is not None and line_start < 1:
+            raise ValueError("LEGAL_DRAFT_COMMENT_LINE_INVALID")
+        if line_end is not None and line_end < (line_start or 1):
+            raise ValueError("LEGAL_DRAFT_COMMENT_LINE_INVALID")
+        if version is not None and version < 1:
+            raise ValueError("LEGAL_DRAFT_COMMENT_VERSION_INVALID")
+        comment = LegalDocumentComment(
+            target_type="draft", target_id=row.id, version=version or row.version,
+            line_start=line_start, line_end=line_end, body=body.strip()[:4000],
+            mentions_json=json.dumps([int(item) for item in (mentions or [])[:20]], ensure_ascii=False),
+            author_id=user.id, status="open",
+        )
+        db.add(comment)
+        db.commit()
+        db.refresh(comment)
+        self.audit.log(db, user, "legal_draft_comment_add", target_type="draft", target_id=row.id, detail=f"version={comment.version}")
+        return serialize_document_comment(comment, user)
+
+    def resolve_draft_comment(self, db: Session, user: User, *, draft_id: int, comment_id: int, status: str) -> dict:
+        row = self._load_collaborative_draft(db, user, draft_id)
+        if status not in {"open", "resolved"}:
+            raise ValueError("LEGAL_DRAFT_COMMENT_STATUS_INVALID")
+        comment = db.query(LegalDocumentComment).filter(
+            LegalDocumentComment.id == comment_id,
+            LegalDocumentComment.target_type == "draft",
+            LegalDocumentComment.target_id == row.id,
+        ).first()
+        if not comment:
+            raise LookupError("LEGAL_DRAFT_COMMENT_NOT_FOUND")
+        comment.status = status
+        db.commit()
+        db.refresh(comment)
+        self.audit.log(db, user, "legal_draft_comment_status", target_type="draft", target_id=row.id, detail=f"comment={comment.id};status={status}")
+        author = db.query(User).filter(User.id == comment.author_id).first()
+        return serialize_document_comment(comment, author)
+
+    def draft_collaboration(self, db: Session, user: User, *, draft_id: int) -> dict:
+        row = self._load_collaborative_draft(db, user, draft_id)
+        people = {row.user_id, row.reviewer_id} - {None}
+        comments = db.query(LegalDocumentComment.author_id).filter(
+            LegalDocumentComment.target_type == "draft", LegalDocumentComment.target_id == row.id,
+        ).distinct().all()
+        people.update(item[0] for item in comments)
+        users = {item.id: item for item in db.query(User).filter(User.id.in_(people)).all()} if people else {}
+        collaborators = [
+            {"id": person_id, "name": users[person_id].full_name or users[person_id].username,
+             "role": "负责人" if person_id == row.user_id else "审核人" if person_id == row.reviewer_id else "批注人"}
+            for person_id in people if person_id in users
+        ]
+        collaborators.sort(key=lambda item: (item["role"], item["name"]))
+        return {
+            "draft_id": row.id,
+            "row_version": row.row_version,
+            "document_version": row.version,
+            "updated_at": row.updated_at,
+            "status": row.status,
+            "locked": bool(getattr(row, "is_final", 0) or row.status in {"lawyer_approved", "archived", "offline_consultation"}),
+            "collaborators": collaborators,
+        }
+
+    def diff_draft_versions(self, db: Session, user: User, *, draft_id: int, from_id: int, to_id: int) -> dict:
+        row = self._load_collaborative_draft(db, user, draft_id)
+        versions = db.query(LegalDocumentVersion).filter(
+            LegalDocumentVersion.target_type == "draft", LegalDocumentVersion.target_id == row.id,
+            LegalDocumentVersion.id.in_([from_id, to_id]),
+        ).all()
+        by_id = {item.id: item for item in versions}
+        if from_id not in by_id or to_id not in by_id:
+            raise LookupError("LEGAL_DRAFT_VERSION_NOT_FOUND")
+        before, after = by_id[from_id], by_id[to_id]
+        lines = []
+        for item in difflib.ndiff((before.content or "").splitlines(), (after.content or "").splitlines()):
+            prefix, text = item[0], item[2:]
+            if prefix == " ":
+                kind = "same"
+            elif prefix == "+":
+                kind = "added"
+            elif prefix == "-":
+                kind = "removed"
+            else:
+                continue
+            lines.append({"kind": kind, "text": text})
+        return {"from": serialize_workspace_version(before), "to": serialize_workspace_version(after), "rows": lines}
+
+    def restore_draft_version(
+        self, db: Session, user: User, *, draft_id: int, version_id: int,
+        base_row_version: int | None = None,
+    ) -> LegalDraft:
+        row = self._load_editable_draft(db, user, draft_id, base_row_version)
+        snapshot = db.query(LegalDocumentVersion).filter(
+            LegalDocumentVersion.id == version_id,
+            LegalDocumentVersion.target_type == "draft",
+            LegalDocumentVersion.target_id == draft_id,
+        ).first()
+        if not snapshot:
+            raise LookupError("LEGAL_DRAFT_VERSION_NOT_FOUND")
+        current_version = int(row.version or 1)
+        db.add(LegalDocumentVersion(
+            target_type="draft", target_id=row.id, version=current_version, title=row.title,
+            content=row.content, fields_json=row.fields_json,
+            status_at_snapshot=row.status, snapshot_reason="restore", created_by=user.id,
+        ))
+        row.content = snapshot.content or ""
+        if snapshot.fields_json:
+            row.fields_json = snapshot.fields_json
+            try:
+                restored_fields = json.loads(snapshot.fields_json)
+            except (TypeError, json.JSONDecodeError):
+                restored_fields = {}
+            row.missing_fields_json = json.dumps(
+                _draft_missing_fields(row.document_type, restored_fields), ensure_ascii=False,
+            )
+        row.title = snapshot.title or row.title
+        row.version = current_version + 1
+        row.status = "draft"
+        row.reviewer_id = None
+        row.review_due_at = None
+        row.review_note = None
+        row.reviewed_at = None
+        row.reviewed_version = None
+        row.is_final = 0
+        db.commit()
+        db.refresh(row)
+        matter_service.record_activity(
+            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="draft.version_restored", target_type="draft", target_id=row.id,
+            title="恢复文书版本", summary=f"从版本 {snapshot.version} 恢复为版本 {row.version}",
+        )
+        self.audit.log(db, user, "legal_draft_version_restore", target_type="draft", target_id=row.id, detail=f"source_version={snapshot.version};version={row.version}")
+        return row
 
 
 class LegalWorkspaceReadModule:
@@ -592,9 +879,13 @@ class LegalWorkspaceReadModule:
             "approved_drafts": sum(row.status == "lawyer_approved" for row in drafts),
         }
 
-    def list_rows(self, db: Session, user: User, kind: str) -> list[dict]:
+    def list_rows(self, db: Session, user: User, kind: str, case_id: int | None = None) -> list[dict]:
         model = {"consultation": LegalConsultation, "contract_review": ContractReview, "draft": LegalDraft}[kind]
-        rows = db.query(model).filter(model.user_id == user.id).order_by(model.created_at.desc()).limit(50).all()
+        query = db.query(model).filter(model.user_id == user.id)
+        if case_id is not None:
+            verify_case_access(case_id, user.id, db)
+            query = query.filter(model.case_id == case_id)
+        rows = query.order_by(model.created_at.desc()).limit(50).all()
         return [serialize_workspace_row(row) for row in rows]
 
     def get_row(self, db: Session, user: User, kind: str, item_id: int):
@@ -614,11 +905,43 @@ class LegalWorkspaceReadModule:
     def templates(self) -> list[dict]:
         return [{"key": key, "label": label} for key, label in WORKSPACE_TEMPLATE_LABELS.items()]
 
-    def review_queue(self, db: Session, user: User) -> list[dict]:
-        reviewer = user.role in {"admin", "dept_admin"}
+    def _is_legal_reviewer(self, db: Session, user: User) -> bool:
+        if user.role in {"admin", "dept_admin"}:
+            return True
+        if not getattr(user, "organization_id", None):
+            return False
+        member = db.query(OrganizationMember).filter(
+            OrganizationMember.organization_id == user.organization_id,
+            OrganizationMember.user_id == user.id,
+        ).first()
+        return bool(member and member.legal_role in {LegalMemberRole.admin.value, LegalMemberRole.reviewer.value})
+
+    def review_queue(
+        self, db: Session, user: User, case_id: int | None = None, assigned_to: int | None = None,
+        status: str | None = None, overdue: bool | None = None, search: str | None = None,
+    ) -> list[dict]:
+        reviewer = self._is_legal_reviewer(db, user)
+        if user.organization_id:
+            member = db.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == user.organization_id,
+                OrganizationMember.user_id == user.id,
+            ).first()
+            reviewer = reviewer or bool(member and member.legal_role in {LegalMemberRole.admin.value, LegalMemberRole.reviewer.value})
+        if case_id is not None:
+            verify_case_access(case_id, user.id, db)
         items: list[dict] = []
+        case_cache: dict[int, LegalCase | None] = {}
         for model, kind in ((LegalConsultation, "consultation"), (ContractReview, "contract_review"), (LegalDraft, "draft")):
-            query = db.query(model).filter(model.status.in_(["pending_review", "needs_lawyer_review", "needs_facts"]))
+            query = db.query(model)
+            if status:
+                statuses = {item.strip() for item in status.split(",") if item.strip()}
+                query = query.filter(model.status.in_(statuses))
+            else:
+                query = query.filter(model.status.in_(["pending_review", "needs_lawyer_review", "needs_facts"]))
+            if case_id is not None:
+                query = query.filter(model.case_id == case_id)
+            if assigned_to is not None:
+                query = query.filter(model.reviewer_id == assigned_to)
             if not reviewer:
                 query = query.filter(model.user_id == user.id)
             elif user.role == "dept_admin":
@@ -629,17 +952,110 @@ class LegalWorkspaceReadModule:
                     User.organization_id == user.organization_id,
                 )
                 query = query.filter(model.user_id.in_(org_user_ids))
+            elif reviewer and user.role not in {"admin", "dept_admin"}:
+                org_user_ids = db.query(User.id).filter(User.organization_id == user.organization_id)
+                query = query.filter(model.user_id.in_(org_user_ids))
             for row in query.order_by(model.created_at.desc()).limit(50).all():
                 item = serialize_workspace_row(row)
                 item["target_type"] = kind
+                if row.case_id is not None:
+                    if row.case_id not in case_cache:
+                        case_cache[row.case_id] = db.query(LegalCase).filter(LegalCase.id == row.case_id).first()
+                    matter = case_cache[row.case_id]
+                    if matter:
+                        item["case_title"] = matter.title
+                        item["case_status"] = matter.status
+                due_at = getattr(row, "review_due_at", None)
+                item["review_overdue"] = bool(due_at and due_at < utc_now() and row.status in ("pending_review", "needs_lawyer_review", "needs_facts"))
+                if overdue is True and not item["review_overdue"]:
+                    continue
+                if overdue is False and item["review_overdue"]:
+                    continue
+                if search:
+                    needle = search.strip().lower()
+                    haystack = " ".join(str(item.get(key) or "") for key in ("title", "question", "case_title", "summary", "content")).lower()
+                    if needle not in haystack:
+                        continue
                 items.append(item)
-        return items
+        return sorted(items, key=lambda item: str(item.get("created_at") or ""), reverse=True)
+
+    def bulk_assign_reviewers(self, db: Session, user: User, *, items: list[dict], reviewer_id: int | None, due_at=None) -> list[dict]:
+        if not self._is_legal_reviewer(db, user):
+            raise PermissionError("LEGAL_REVIEW_ASSIGN_FORBIDDEN")
+        return [self.assign_reviewer(
+            db, user, target_type=item.get("target_type"), target_id=int(item.get("target_id")),
+            reviewer_id=reviewer_id, due_at=due_at,
+        ) for item in items]
+
+    def bulk_review_action(self, db: Session, user: User, *, items: list[dict], action: str, note: str | None = None) -> list[dict]:
+        if not self._is_legal_reviewer(db, user):
+            raise PermissionError("LEGAL_REVIEW_FORBIDDEN")
+        return [self.apply_review_action(
+            db, user, target_type=item.get("target_type"), target_id=int(item.get("target_id")),
+            action=action, note=note,
+        ) for item in items]
+
+    def review_sla(self, db: Session, user: User) -> dict:
+        if not self._is_legal_reviewer(db, user):
+            raise PermissionError("LEGAL_REVIEW_STATS_FORBIDDEN")
+        queue = self.review_queue(db, user)
+        active = [item for item in queue if item.get("status") in {"pending_review", "needs_lawyer_review", "needs_facts"}]
+        overdue_count = sum(1 for item in active if item.get("review_overdue"))
+        assigned_count = sum(1 for item in active if item.get("reviewer_id"))
+        due_count = sum(1 for item in active if item.get("review_due_at"))
+        completed = []
+        for model in (LegalConsultation, ContractReview, LegalDraft):
+            query = db.query(model).filter(model.reviewed_at.isnot(None))
+            if user.role not in {"admin", "dept_admin"}:
+                query = query.filter(model.reviewer_id == user.id)
+            for row in query.limit(500).all():
+                if row.created_at and row.reviewed_at:
+                    completed.append(max(0.0, (row.reviewed_at - row.created_at).total_seconds() / 3600))
+        average_hours = round(sum(completed) / len(completed), 1) if completed else None
+        return {
+            "active_count": len(active), "overdue_count": overdue_count,
+            "assigned_count": assigned_count, "unassigned_count": len(active) - assigned_count,
+            "due_count": due_count, "average_turnaround_hours": average_hours,
+            "overdue_rate": round(overdue_count / len(active), 4) if active else 0,
+        }
+
+    def assign_reviewer(self, db: Session, user: User, *, target_type: str, target_id: int,
+                        reviewer_id: int | None, due_at=None) -> dict:
+        row = target_query(db, target_type, target_id)
+        if not row:
+            raise LookupError("LEGAL_REVIEW_TARGET_NOT_FOUND")
+        member = db.query(OrganizationMember).filter(
+            OrganizationMember.organization_id == user.organization_id,
+            OrganizationMember.user_id == user.id,
+        ).first()
+        if not member or (user.role not in {"admin", "dept_admin"} and member.legal_role not in {LegalMemberRole.admin.value, LegalMemberRole.reviewer.value}):
+            raise PermissionError("LEGAL_REVIEW_ASSIGN_FORBIDDEN")
+        if getattr(row, "case_id", None):
+            verify_case_access(row.case_id, user.id, db)
+        if reviewer_id is not None:
+            target_member = db.query(OrganizationMember).filter(
+                OrganizationMember.organization_id == user.organization_id,
+                OrganizationMember.user_id == reviewer_id,
+                OrganizationMember.legal_role.in_([LegalMemberRole.admin.value, LegalMemberRole.reviewer.value]),
+            ).first()
+            if not target_member:
+                raise ValueError("LEGAL_REVIEW_ASSIGNEE_INVALID")
+        row.reviewer_id = reviewer_id
+        row.review_due_at = due_at
+        db.commit()
+        db.refresh(row)
+        matter_service.record_activity(
+            db, case_id=getattr(row, "case_id", None), organization_id=user.organization_id, actor_id=user.id,
+            event_type="review.assigned", target_type=target_type, target_id=target_id,
+            title="审核任务已分配", summary=f"reviewer_id={reviewer_id or 'unassigned'}",
+        )
+        return serialize_workspace_row(row)
 
     def apply_review_action(self, db: Session, user: User, *, target_type: str, target_id: int, action: str, note: str | None):
         row = target_query(db, target_type, target_id)
         if not row:
             raise LookupError("LEGAL_REVIEW_TARGET_NOT_FOUND")
-        reviewer = user.role in {"admin", "dept_admin"}
+        reviewer = self._is_legal_reviewer(db, user)
         if action in REVIEWER_ACTIONS:
             if not reviewer:
                 raise PermissionError("LEGAL_REVIEW_FORBIDDEN")
@@ -664,6 +1080,7 @@ class LegalWorkspaceReadModule:
             db.add(LegalDocumentVersion(
                 target_type=target_type, target_id=target_id, version=row.version,
                 title=getattr(row, "title", None), content=getattr(row, "content", "") or "",
+                fields_json=getattr(row, "fields_json", None) if isinstance(row, LegalDraft) else None,
                 status_at_snapshot="lawyer_approved", snapshot_reason="manual", created_by=user.id,
             ))
         if action == "return" and previous == "lawyer_approved":
@@ -678,6 +1095,11 @@ class LegalWorkspaceReadModule:
         ))
         db.commit()
         db.refresh(row)
+        matter_service.record_activity(
+            db, case_id=getattr(row, "case_id", None), organization_id=getattr(user, "organization_id", None), actor_id=user.id,
+            event_type=f"review.{action}", target_type=target_type, target_id=target_id,
+            title=f"审核动作：{action}", summary=f"{previous} -> {status}",
+        )
         self.audit.log(db, user, f"legal_review_{action}", target_type=target_type, target_id=target_id, detail=f"{previous}->{status}")
         return serialize_workspace_row(row)
 
@@ -685,12 +1107,17 @@ class LegalWorkspaceReadModule:
         row = target_query(db, target_type, target_id)
         if not row:
             raise LookupError("LEGAL_REVIEW_TARGET_NOT_FOUND")
-        if not (row.user_id == user.id or user.role in {"admin", "dept_admin"}):
+        if not (row.user_id == user.id or self._is_legal_reviewer(db, user)):
             raise PermissionError("LEGAL_REVIEW_COMMENT_FORBIDDEN")
         comment = LegalReviewAction(reviewer_id=user.id, target_type=target_type, target_id=target_id, action="comment", note=note, from_status=row.status, to_status=row.status, target_version=getattr(row, "version", None))
         db.add(comment)
         db.commit()
         db.refresh(comment)
+        matter_service.record_activity(
+            db, case_id=getattr(row, "case_id", None), organization_id=getattr(user, "organization_id", None), actor_id=user.id,
+            event_type="review.comment_added", target_type=target_type, target_id=target_id,
+            title="新增审核批注", summary=note[:300],
+        )
         self.audit.log(db, user, "legal_review_comment", target_type=target_type, target_id=target_id, detail=note[:100])
         return serialize_review_action(comment)
 
@@ -698,7 +1125,7 @@ class LegalWorkspaceReadModule:
         row = target_query(db, target_type, target_id)
         if not row:
             raise LookupError("LEGAL_REVIEW_TARGET_NOT_FOUND")
-        if user.role not in {"admin", "dept_admin"} and row.user_id != user.id:
+        if not self._is_legal_reviewer(db, user) and row.user_id != user.id:
             raise PermissionError("LEGAL_REVIEW_HISTORY_FORBIDDEN")
         result = serialize_workspace_row(row)
         result["target_type"] = target_type
@@ -708,10 +1135,10 @@ class LegalWorkspaceReadModule:
         return result
 
     def review_stats(self, db: Session, user: User) -> dict:
-        if user.role not in {"admin", "dept_admin"}:
+        if not self._is_legal_reviewer(db, user):
             raise PermissionError("LEGAL_REVIEW_STATS_FORBIDDEN")
         query = db.query(LegalReviewAction)
-        if user.role == "dept_admin":
+        if user.role == "dept_admin" or user.role not in {"admin", "dept_admin"}:
             # 审核动作表无组织维度，部门管理员仅统计本人操作，防止跨租户读取。
             query = query.filter(LegalReviewAction.reviewer_id == user.id)
         actions = query.order_by(LegalReviewAction.created_at.desc()).all()
@@ -723,7 +1150,12 @@ class LegalWorkspaceReadModule:
             type_counts[item.target_type] = type_counts.get(item.target_type, 0) + 1
             if item.action == "return" and item.note:
                 reasons.append({"target_type": item.target_type, "target_id": item.target_id, "note": item.note, "created_at": item.created_at})
-        return {"total_actions": len(actions), "action_distribution": action_counts, "target_type_distribution": type_counts, "return_reasons": reasons[:50], "recent_actions": [serialize_review_action(item) for item in actions[:20]]}
+        return {
+            "total_actions": len(actions), "action_distribution": action_counts,
+            "target_type_distribution": type_counts, "return_reasons": reasons[:50],
+            "recent_actions": [serialize_review_action(item) for item in actions[:20]],
+            "sla": self.review_sla(db, user),
+        }
 
 
 legal_workspace_module = LegalWorkspaceModule()

@@ -1,19 +1,25 @@
 import { computed, ref } from 'vue'
 import { useQuery } from '../query/useQuery.js'
 import { useMutation } from '../query/useMutation.js'
-import { qk } from '../query/keys'
+import { qk, qkPrefix } from '../query/keys'
 
 // 律师审核 tab 领域模块（查询层 + 幂等写）：
 // 审核队列/统计走统一查询层；审核动作、批注经 useMutation（Idempotency-Key 防重复审核）。
 
-export function useLegalReviewQueue({ client, message, prompt, targetLabel }) {
+export function useLegalReviewQueue({ client, message, prompt, targetLabel, caseId, canReview = null, filters = null }) {
   const reviewHistoryMap = ref({})
   const commentDraft = ref({})
   const commentLoading = ref({})
+  const reviewers = ref([])
 
   const queueQuery = useQuery({
-    key: qk.legal.reviewQueue(),
-    fetcher: () => client.listLegalReviewQueue(),
+    key: () => qk.legal.reviewQueue(caseId?.value || null),
+    fetcher: () => client.listLegalReviewQueue({ params: {
+      ...(caseId?.value ? { case_id: caseId.value } : {}),
+      ...(filters?.value?.status ? { status: filters.value.status } : {}),
+      ...(filters?.value?.overdue !== '' && filters?.value?.overdue !== undefined ? { overdue: filters.value.overdue } : {}),
+      ...(filters?.value?.search ? { search: filters.value.search } : {}),
+    } }),
     staleTime: 15 * 1000,
   })
 
@@ -21,6 +27,7 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel }) {
     key: qk.legal.reviewStats(),
     fetcher: () => client.getReviewStats(),
     staleTime: 30 * 1000,
+    enabled: () => (canReview ? canReview.value : true),
   })
 
   const reviewQueue = computed(() => queueQuery.data.value || [])
@@ -30,8 +37,37 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel }) {
     await queueQuery.refetch()
   }
 
+  const bulkAssignReview = async (items, payload) => {
+    const result = await client.bulkAssignReview({ items, ...payload })
+    await loadReviewQueue()
+    message.success(`已更新 ${result.data?.length || items.length} 项审核分配`)
+    return result.data
+  }
+
+  const bulkReviewAction = async (items, action, note = null) => {
+    const result = await client.bulkReviewAction({ items, action, note })
+    await Promise.all([loadReviewQueue(), loadReviewStats()])
+    message.success(`已处理 ${result.data?.length || items.length} 项审核`)
+    return result.data
+  }
+
   const loadReviewStats = async () => {
     await statsQuery.refetch()
+  }
+
+  const loadReviewers = async () => {
+    try {
+      const { data } = await client.listReviewers()
+      reviewers.value = data || []
+    } catch {
+      reviewers.value = []
+    }
+  }
+
+  const assignReview = async (row, payload) => {
+    await client.assignReview(row.target_type, row.id, payload)
+    await loadReviewQueue()
+    message.success(payload.reviewer_id ? '审核任务已分配' : '已取消审核分配')
   }
 
   const reviewKey = (row) => `${row.target_type}:${row.id}`
@@ -74,7 +110,7 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel }) {
 
   const actionMutation = useMutation({
     mutationFn: (payload, ctx) => client.submitLegalReviewAction(payload.type, payload.id, payload.body, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qk.legal.reviewQueue(), qk.legal.reviewStats()],
+    invalidate: [qkPrefix('legal', 'review-queue'), qk.legal.reviewStats()],
     onSuccess: () => {
       message.success('操作成功')
     },
@@ -102,11 +138,16 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel }) {
   return {
     reviewQueue,
     reviewStats,
+    reviewers,
     reviewHistoryMap,
     commentDraft,
     commentLoading,
     loadReviewQueue,
+    bulkAssignReview,
+    bulkReviewAction,
     loadReviewStats,
+    loadReviewers,
+    assignReview,
     reviewKey,
     onExpandReview,
     submitComment,

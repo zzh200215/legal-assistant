@@ -8,7 +8,10 @@
       <div v-if="open" class="bell-panel" @click.stop>
         <div class="bell-header">
           <span class="bell-heading">通知</span>
-          <button v-if="unread > 0" class="bell-mark-all" @click="markAllRead">全部标记已读</button>
+          <div class="bell-header-actions">
+            <button class="bell-view-all" type="button" @click="router.push('/notifications'); open = false">查看全部</button>
+            <button v-if="unread > 0" class="bell-mark-all" type="button" @click="markAllRead">全部标记已读</button>
+          </div>
         </div>
         <div v-if="items.length" class="bell-list">
           <div
@@ -17,9 +20,10 @@
             class="bell-item"
             :class="{ unread: isUnread(n) }"
             :title="isUnread(n) ? '点击标记已读' : ''"
-            @click="markRead(n)"
+            @click="openNotification(n)"
           >
             <div class="bell-item-title">{{ n.title }}</div>
+            <div v-if="n.body" class="bell-item-body">{{ n.body }}</div>
             <div class="bell-item-time">{{ formatTime(n.created_at) }}</div>
           </div>
         </div>
@@ -31,6 +35,7 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { Bell } from '@element-plus/icons-vue'
 import api from '../../api'
 
@@ -38,6 +43,7 @@ const open = ref(false)
 const items = ref([])
 const unread = ref(0)
 const bellRef = ref(null)
+const router = useRouter()
 
 const isUnread = (n) => n.status === 'delivered' || n.status === 'sent'
 
@@ -64,6 +70,20 @@ const markRead = async (n) => {
     unread.value = Math.max(0, unread.value - 1)
   } catch {
     /* ignore */
+  }
+}
+
+const openNotification = async (n) => {
+  await markRead(n)
+  if (n.reference_type === 'workflow_run') {
+    const workflowId = n.reference_id ? String(n.reference_id) : undefined
+    if (n.case_id) {
+      router.push({ path: '/legal-workspace', query: { case_id: String(n.case_id), tab: 'tasks', workflow_id: workflowId } })
+    } else {
+      router.push({ path: '/tasks', query: { workflow_id: workflowId } })
+    }
+  } else if (n.case_id) {
+    router.push({ path: '/legal-workspace', query: { case_id: String(n.case_id) } })
   }
 }
 
@@ -213,6 +233,17 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   margin-top: 3px;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+.bell-header-actions { display: flex; align-items: center; gap: 10px; }
+.bell-view-all { padding: 0; border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--text-xs); cursor: pointer; }
+.bell-view-all:hover { color: var(--color-primary); }
+
+.bell-item-body {
+  margin-top: 3px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
 }
 
 .bell-empty {

@@ -5,7 +5,7 @@ existing project's audit-oriented storage and lets us preserve the exact
 evidence payload returned by an agent for later review/versioning.
 """
 
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 
 from app.core.database import Base
 from app.core.encryption import EncryptedText
@@ -87,6 +87,31 @@ class LegalSource(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class LegalSourceFavorite(Base):
+    """用户收藏的资料库条目。收藏属于用户，不改变法源本身的共享范围。"""
+
+    __tablename__ = "legal_source_favorites"
+    __table_args__ = (UniqueConstraint("user_id", "source_id", name="uq_legal_source_favorite_user_source"),)
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = Column(Integer, ForeignKey("legal_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class LegalCaseSource(Base):
+    """案件与资料库法源的显式关联，支持案件内的资料阅读和引用回溯。"""
+
+    __tablename__ = "legal_case_sources"
+    __table_args__ = (UniqueConstraint("case_id", "source_id", name="uq_legal_case_source_case_source"),)
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("legal_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = Column(Integer, ForeignKey("legal_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class LegalArticle(Base):
     """法律条文 — 按条文号拆分，支持条文级精确定位与召回。
 
@@ -123,6 +148,7 @@ class LegalConsultation(Base):
     disclaimer_level = Column(String(16), nullable=True, default="low", comment="免责声明级别: low/medium/high")
     status = Column(String(32), nullable=False, default="draft", index=True)
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    review_due_at = Column(DateTime(timezone=True), nullable=True, index=True)
     review_note = Column(Text, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     # P1：模型结果快照（模型/提示词版本、输入 hash、生成时间）与审核绑定的业务版本号。
@@ -153,6 +179,7 @@ class ContractReview(Base):
     review_policy_version = Column(Integer, nullable=True)
     review_policy_snapshot_json = Column(Text, nullable=True)
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    review_due_at = Column(DateTime(timezone=True), nullable=True, index=True)
     review_note = Column(Text, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     # P1：模型结果快照与审核绑定的业务版本号。
@@ -185,6 +212,7 @@ class LegalDraft(Base):
     version = Column(Integer, nullable=False, default=1)
     status = Column(String(32), nullable=False, default="draft", index=True)
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    review_due_at = Column(DateTime(timezone=True), nullable=True, index=True)
     review_note = Column(Text, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     # P1：模型结果快照与审核绑定的业务版本号。
@@ -217,10 +245,31 @@ class LegalDocumentVersion(Base):
     version = Column(Integer, nullable=False)
     title = Column(String(256), nullable=True)
     content = Column(EncryptedText, nullable=False)
+    fields_json = Column(Text, nullable=True, comment="文书结构化字段快照，JSON")
+    version_note = Column(String(512), nullable=True, comment="版本说明")
     status_at_snapshot = Column(String(32), nullable=False)
-    snapshot_reason = Column(String(32), nullable=False, default="resubmit")  # resubmit / manual
+    snapshot_reason = Column(String(32), nullable=False, default="resubmit")  # resubmit / manual / restore
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class LegalDocumentComment(Base):
+    """文书正文协作批注：以版本和行号作为稳定定位，正文变更不会丢失历史批注。"""
+
+    __tablename__ = "legal_document_comments"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    target_type = Column(String(32), nullable=False, index=True)
+    target_id = Column(Integer, nullable=False, index=True)
+    version = Column(Integer, nullable=True, index=True)
+    line_start = Column(Integer, nullable=True)
+    line_end = Column(Integer, nullable=True)
+    body = Column(Text, nullable=False)
+    mentions_json = Column(Text, nullable=False, default="[]")
+    status = Column(String(16), nullable=False, default="open", index=True, comment="open / resolved")
+    author_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class LegalApprovalChain(Base):

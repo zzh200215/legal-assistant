@@ -52,7 +52,7 @@ CHANNEL_FEISHU = "feishu"
 ALL_CHANNELS = (CHANNEL_SITE, CHANNEL_EMAIL, CHANNEL_WECHAT, CHANNEL_FEISHU)
 
 # 事件类型
-EVENT_TYPES = ("deadline", "approval", "invoice", "sign", "portal", "all")
+EVENT_TYPES = ("deadline", "approval", "invoice", "sign", "portal", "workflow", "all")
 
 # ── 通知状态机（LegalNotificationEvent 作为通知 Outbox）────────────────────────
 # pending(=requested) -> approved -> sending -> sent / delivered / failed / dead_letter
@@ -693,19 +693,45 @@ class NotificationService:
     def get_user_notifications(self, *, db: Session, user_id: int,
                                status: str | None = None,
                                event_type: str | None = None,
-                               limit: int = 50) -> list[LegalNotificationEvent]:
+                               case_id: int | None = None,
+                               limit: int = 50,
+                               offset: int = 0) -> list[LegalNotificationEvent]:
         """获取用户的站内通知列表。"""
         query = db.query(LegalNotificationEvent).filter(
             LegalNotificationEvent.user_id == user_id,
             LegalNotificationEvent.channel == CHANNEL_SITE,
         )
-        if status:
+        if status == "unread":
+            query = query.filter(LegalNotificationEvent.status.in_(["delivered", "sent"]))
+        elif status:
             query = query.filter(LegalNotificationEvent.status == status)
         if event_type:
             query = query.filter(LegalNotificationEvent.event_type == event_type)
+        if case_id is not None:
+            query = query.filter(LegalNotificationEvent.case_id == case_id)
         return query.order_by(
             LegalNotificationEvent.created_at.desc()
-        ).limit(limit).all()
+        ).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
+
+    def count_user_notifications(self, *, db: Session, user_id: int,
+                                 status: str | None = None,
+                                 event_type: str | None = None,
+                                 case_id: int | None = None) -> int:
+        """Count visible site notifications using the same filters as the list."""
+        query = db.query(LegalNotificationEvent.id).filter(
+            LegalNotificationEvent.user_id == user_id,
+            LegalNotificationEvent.channel == CHANNEL_SITE,
+            LegalNotificationEvent.status != "failed",
+        )
+        if status == "unread":
+            query = query.filter(LegalNotificationEvent.status.in_(["delivered", "sent"]))
+        elif status:
+            query = query.filter(LegalNotificationEvent.status == status)
+        if event_type:
+            query = query.filter(LegalNotificationEvent.event_type == event_type)
+        if case_id is not None:
+            query = query.filter(LegalNotificationEvent.case_id == case_id)
+        return query.count()
 
     def mark_as_read(self, *, db: Session, event_id: int, user_id: int) -> LegalNotificationEvent:
         """标记通知为已读。"""

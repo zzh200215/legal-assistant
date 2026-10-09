@@ -26,11 +26,12 @@ from app.api.legal import (
     legal_case_api,
     legal_contract_api,
     legal_domain_api,
+    matter_api,
     legal_portal_api,
     org_member_api,
 )
 from app.api.org import org_api
-from app.api.tasks import task_api
+from app.api.tasks import task_api, workflow_api
 from app.core.api_response import (
     ApiResponseMiddleware,
     http_exception_handler,
@@ -67,6 +68,7 @@ app.include_router(memory_api.router, prefix="/api/memory", tags=["Conversation 
 app.include_router(document_api.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(legal_api.router, prefix="/api/legal", tags=["Legal Workspace"])
 app.include_router(outbound_api.router, prefix="/api/outbound", tags=["Outbound Email"])
+app.include_router(workflow_api.router, prefix="/api/tasks", tags=["Workflow Runs"])
 app.include_router(task_api.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(pilot_feedback_api.router, prefix="/api/pilot", tags=["Pilot Feedback"])
 app.include_router(document_conflict_api.router, prefix="/api/document-conflicts", tags=["Document Conflicts"])
@@ -89,6 +91,7 @@ app.include_router(legal_billing_api.router, prefix="/api/legal", tags=["Legal B
 app.include_router(legal_portal_api.router, prefix="/api/legal", tags=["Legal Portal"])
 app.include_router(legal_contract_api.router, prefix="/api/legal", tags=["Legal Contracts"])
 app.include_router(legal_domain_api.router, prefix="/api/legal", tags=["Legal Domain Model"])
+app.include_router(matter_api.router, prefix="/api/legal", tags=["Legal Matters"])
 app.include_router(legal_platform_api.router, prefix="/api/developer", tags=["Developer Platform"])
 app.include_router(legal_platform_api.open_router, prefix="/api/open", tags=["Open API"])
 app.include_router(ws_api.router, prefix="/api", tags=["WebSocket"])

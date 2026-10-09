@@ -109,6 +109,15 @@ class TaskRunServiceTests(unittest.TestCase):
             task_run_service.cancelled_or_superseded(
                 self.db, task_name="document_chunk", business_key="doc:3"))
 
+    def test_mark_cancelled_sets_terminal_state_and_error(self):
+        task_id = "t-cancelled"
+        task_run_service.start(self.db, task_id=task_id, task_name="document_index")
+        row = task_run_service.mark_cancelled(self.db, task_id=task_id, reason="用户取消")
+        self.assertEqual(row.status, "cancelled")
+        self.assertEqual(row.error_code, "WORKFLOW_CANCELLED")
+        self.assertEqual(row.error_message, "用户取消")
+        self.assertIsNotNone(row.finished_at)
+
     def test_list_for_tenant_scoped_and_status_filtered(self):
         from app.models.task_run import TaskRun
 

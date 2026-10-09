@@ -1,6 +1,15 @@
 <template>
   <div class="documents-page">
-    <div class="page-header">
+    <div v-if="route.query.case_id" class="matter-document-context">
+      <span>当前案件 · 文档</span>
+      <button type="button" @click="router.push({ path: '/legal-workspace', query: { case_id: route.query.case_id, tab: 'documents' } })">返回案件</button>
+    </div>
+    <header class="page-header">
+      <div class="page-heading-copy">
+        <p class="section-eyebrow">法律资料</p>
+        <h1>文档</h1>
+        <p>集中查看案件材料、合同、证据和法源文档。</p>
+      </div>
       <div class="upload-console">
         <el-upload
           class="upload-dropzone"
@@ -11,8 +20,8 @@
           :on-change="onFileChange"
         >
           <div class="upload-dropzone-inner">
-            <strong>拖拽法律资料到这里</strong>
-            <span>支持法规、案例、合同模板、文书模板等文档</span>
+            <strong>添加法律资料</strong>
+            <span>支持法规、案例、合同、证据和文书模板</span>
           </div>
         </el-upload>
         <div class="upload-console-foot">
@@ -22,25 +31,14 @@
           </el-button>
         </div>
       </div>
-    </div>
+    </header>
 
-    <div class="overview-metrics">
-      <div class="metric-tile">
-        <span>文档总数</span>
-        <strong>{{ documentTotal || documents.length }}</strong>
-      </div>
-      <div class="metric-tile">
-        <span>当前风险点</span>
-        <strong>{{ analysis?.risks?.length || 0 }}</strong>
-      </div>
-      <div class="metric-tile">
-        <span>待办提取</span>
-        <strong>{{ analysis?.todos?.length || 0 }}</strong>
-      </div>
-      <div class="metric-tile">
-        <span>问答记录</span>
-        <strong>{{ qaRecords.length }}</strong>
-      </div>
+    <div class="document-brief" aria-label="文档摘要">
+      <span><strong>{{ documentTotal || documents.length }}</strong> 份资料</span>
+      <span v-if="analysis?.risks?.length"><strong>{{ analysis.risks.length }}</strong> 个待处理风险</span>
+      <span v-if="analysis?.todos?.length"><strong>{{ analysis.todos.length }}</strong> 个待办</span>
+      <span v-if="qaRecords.length"><strong>{{ qaRecords.length }}</strong> 条问答记录</span>
+      <span v-if="!analysis?.risks?.length && !analysis?.todos?.length && !qaRecords.length" class="brief-muted">选择一份资料查看摘要、风险与引用</span>
     </div>
 
     <div class="layout-grid">
@@ -52,7 +50,7 @@
 
 <script setup>
 import { onMounted, onUnmounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElUpload } from 'element-plus/es/components/upload/index'
 import 'element-plus/es/components/button/style/css'
@@ -62,6 +60,7 @@ import DocumentWorkspace from '../components/documents/DocumentWorkspace.vue'
 import { useDocuments } from '../composables/useDocuments'
 
 const route = useRoute()
+const router = useRouter()
 const {
   selectedFiles, uploading, onFileChange, uploadAndAnalyze,
   documentTotal, documents, analysis, qaRecords,
@@ -69,7 +68,7 @@ const {
 } = useDocuments()
 
 onMounted(async () => {
-  await initialize(route.query.documentId)
+  await initialize(route.query.documentId, route.query.case_id)
 })
 
 watch(
@@ -92,13 +91,16 @@ onUnmounted(() => {
   max-width: 1600px;
 }
 .page-header {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(240px, .7fr) minmax(420px, 1.3fr);
+  align-items: end;
+  gap: var(--space-6);
   padding: var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
 }
-.page-header h3 {
+.page-header h1 {
   margin: var(--space-1) 0 var(--space-2);
   color: var(--color-text);
   font-size: var(--text-3xl);
@@ -110,41 +112,19 @@ onUnmounted(() => {
   line-height: 1.6;
   font-size: var(--text-sm);
 }
+.page-heading-copy { display: grid; gap: var(--space-1); }
+.page-heading-copy p:last-child { margin: 0; }
 .section-eyebrow {
   margin-bottom: 4px;
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--color-text-muted);
 }
-.overview-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-4);
-}
-.metric-tile {
-  padding: var(--space-5) var(--space-5);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-light);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-xs);
-  display: grid;
-  gap: var(--space-1);
-  transition: all var(--transition-fast);
-}
-.metric-tile:hover {
-  box-shadow: var(--shadow-card-hover);
-  border-color: var(--color-border-hover);
-}
-.metric-tile span {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-.metric-tile strong {
-  font-size: var(--text-3xl);
-  line-height: var(--text-3xl-lh);
-  color: var(--color-text);
-  font-weight: 600;
-}
+.document-brief { display: flex; align-items: center; gap: 24px; min-height: 42px; padding: 0 4px; border-bottom: 1px solid var(--color-border); color: var(--color-text-secondary); font-size: var(--text-sm); }
+.document-brief span { padding-right: 24px; border-right: 1px solid var(--color-border-light); }
+.document-brief span:last-child { border-right: 0; }
+.document-brief strong { color: var(--color-text); font-size: var(--text-lg); font-weight: 600; }
+.document-brief .brief-muted { color: var(--color-text-muted); }
 .upload-console {
   width: 100%;
   display: grid;
@@ -202,12 +182,16 @@ onUnmounted(() => {
   gap: var(--space-6);
 }
 @media (max-width: 1100px) {
-  .overview-metrics,
+  .page-header,
   .layout-grid {
     grid-template-columns: 1fr;
   }
   .page-header {
     display: grid;
   }
+}
+@media (max-width: 640px) {
+  .document-brief { align-items: flex-start; flex-wrap: wrap; gap: 10px 16px; padding: 8px 4px; }
+  .document-brief span { padding-right: 16px; }
 }
 </style>

@@ -63,12 +63,12 @@ class NotificationCenterTests(unittest.TestCase):
         app.dependency_overrides.clear()
         self.db.close()
 
-    def _add_event(self, status: str = "delivered", title: str = "门户到期") -> LegalNotificationEvent:
+    def _add_event(self, status: str = "delivered", title: str = "门户到期", *, event_type: str = "portal", case_id=None) -> LegalNotificationEvent:
         ev = LegalNotificationEvent(
             organization_id=self.org_id,
             user_id=self.user_id,
-            case_id=None,
-            event_type="portal",
+            case_id=case_id,
+            event_type=event_type,
             title=title,
             channel="site",
             status=status,
@@ -91,6 +91,26 @@ class NotificationCenterTests(unittest.TestCase):
         items = data["items"]
         self.assertEqual(len(items), 3)  # failed 被过滤
         self.assertEqual({i["status"] for i in items}, {"delivered", "sent", "read"})
+        self.assertEqual(data["total"], 3)
+
+    def test_list_supports_unread_case_type_and_pagination(self):
+        self._add_event(title="工作流失败", event_type="workflow", case_id=11)
+        self._add_event(title="关键日期", event_type="deadline", case_id=11)
+        self._add_event(status="read", title="已处理工作流", event_type="workflow", case_id=11)
+        self._add_event(title="其他案件", event_type="workflow", case_id=12)
+
+        resp = self.client.get(
+            "/api/developer/notifications/me?status=unread&event_type=workflow&case_id=11&page=1&page_size=1",
+            headers=self.headers,
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        data = resp.json()["data"]
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["title"], "工作流失败")
+
+        invalid = self.client.get("/api/developer/notifications/me?status=queued", headers=self.headers)
+        self.assertEqual(invalid.status_code, 422)
 
     def test_list_requires_auth(self):
         resp = self.client.get("/api/developer/notifications/me")

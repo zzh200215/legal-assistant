@@ -14,8 +14,27 @@ branch_labels = None
 depends_on = None
 
 
+def _inspector():
+    return sa.inspect(op.get_bind())
+
+
+def _has_column(table: str, column: str) -> bool:
+    inspector = _inspector()
+    return inspector.has_table(table) and column in {
+        item["name"] for item in inspector.get_columns(table)
+    }
+
+
+def _has_index(table: str, name: str) -> bool:
+    inspector = _inspector()
+    return inspector.has_table(table) and any(
+        item.get("name") == name for item in inspector.get_indexes(table)
+    )
+
+
 def upgrade() -> None:
-    op.create_table(
+    if not _inspector().has_table("mcp_policy_versions"):
+        op.create_table(
         "mcp_policy_versions",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("version", sa.String(64), nullable=False),
@@ -30,14 +49,20 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["created_by"], ["users.id"]),
         sa.ForeignKeyConstraint(["activated_by"], ["users.id"]),
         sa.UniqueConstraint("version", name="uq_mcp_policy_versions_version"),
-    )
-    op.create_index("ix_mcp_policy_versions_version", "mcp_policy_versions", ["version"])
-    op.create_index("ix_mcp_policy_versions_status", "mcp_policy_versions", ["status"])
+        )
+        op.create_index("ix_mcp_policy_versions_version", "mcp_policy_versions", ["version"])
+        op.create_index("ix_mcp_policy_versions_status", "mcp_policy_versions", ["status"])
 
-    with op.batch_alter_table("agent_approval_requests") as batch:
-        batch.add_column(sa.Column("policy_version", sa.String(64), nullable=True))
-        batch.add_column(sa.Column("data_scope", sa.String(64), nullable=True))
-        batch.create_index("ix_agent_approval_requests_policy_version", ["policy_version"])
+    if not _has_column("agent_approval_requests", "policy_version"):
+        op.add_column("agent_approval_requests", sa.Column("policy_version", sa.String(64), nullable=True))
+    if not _has_column("agent_approval_requests", "data_scope"):
+        op.add_column("agent_approval_requests", sa.Column("data_scope", sa.String(64), nullable=True))
+    if not _has_index("agent_approval_requests", "ix_agent_approval_requests_policy_version"):
+        op.create_index(
+            "ix_agent_approval_requests_policy_version",
+            "agent_approval_requests",
+            ["policy_version"],
+        )
 
 
 def downgrade() -> None:

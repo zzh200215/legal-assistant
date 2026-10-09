@@ -12,6 +12,8 @@ from app.core.auth import hash_password, create_access_token
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.user import User, UserStatus
+from app.models.org import Organization
+from app.models.legal import LegalCase, ContractReview, LegalDraft, LegalDocumentVersion
 
 
 def _make_engine():
@@ -129,6 +131,45 @@ class AccountDeletionApiTests(unittest.TestCase):
         self.db.refresh(self.user)
         self.assertEqual(self.user.status, UserStatus.deleted.value)
         self.assertTrue(self.user.username.startswith("deleted_"))
+
+    def test_confirm_anonymizes_legal_content_and_bumps_tokens(self):
+        org = Organization(name="Deletion Org", code="deletion-org")
+        self.db.add(org)
+        self.db.commit()
+        case = LegalCase(
+            organization_id=org.id, user_id=self.user.id, title="劳动争议",
+            case_type="labor_dispute", client_name="张三", opposing_party="某公司",
+            description="含个人信息的案情",
+        )
+        self.db.add(case)
+        self.db.commit()
+        review = ContractReview(
+            user_id=self.user.id, case_id=case.id, title="服务合同",
+            content="合同中的个人信息", status="pending_review",
+        )
+        draft = LegalDraft(
+            user_id=self.user.id, case_id=case.id, document_type="complaint",
+            title="起诉状", fields_json='{"原告":"张三"}', content="文书正文",
+        )
+        self.db.add_all([review, draft])
+        self.db.commit()
+        self.db.add(LegalDocumentVersion(
+            target_type="draft", target_id=draft.id, version=1, title="起诉状",
+            content="历史正文", status_at_snapshot="draft", created_by=self.user.id,
+        ))
+        self.db.commit()
+        original_token_version = self.user.token_version
+
+        from app.services.auth.account_deletion_service import confirm_deletion
+
+        confirm_deletion(self.db, self.user, force=True)
+        self.db.refresh(case); self.db.refresh(review); self.db.refresh(draft); self.db.refresh(self.user)
+        self.assertEqual(case.title, f"已匿名案件#{case.id}")
+        self.assertIsNone(case.client_name)
+        self.assertEqual(review.content, "")
+        self.assertEqual(draft.content, "")
+        self.assertEqual(self.user.status, UserStatus.deleted.value)
+        self.assertEqual(self.user.token_version, original_token_version + 1)
 
 
 if __name__ == "__main__":

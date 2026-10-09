@@ -12,10 +12,21 @@ import api from '../api'
 
 const classificationOptions = ['statute', 'judicial_interpretation', 'case_summary', 'contract_template', 'draft_template', 'regulation', 'general']
 
+export const documentClassificationLabel = (value) => ({
+  statute: '法规',
+  judicial_interpretation: '司法解释',
+  case_summary: '案例',
+  contract_template: '合同模板',
+  draft_template: '文书模板',
+  regulation: '规章',
+  general: '其他资料',
+}[value] || value || '未分类')
+
 export function useDocumentList() {
   const documentPage = ref(1)
   const documentPageSize = ref(10)
   const filters = ref({
+    case_id: null,
     knowledge_base_id: null,
     classification: '',
     sensitivity_level: '',
@@ -52,6 +63,7 @@ export function useDocumentList() {
       knowledge_base_id: filters.value.knowledge_base_id || undefined,
       classification: filters.value.classification || undefined,
       sensitivity_level: filters.value.sensitivity_level || undefined,
+      case_id: filters.value.case_id || undefined,
       q: filters.value.q || undefined,
     }, { signal }),
     staleTime: 0,

@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.api_response import api_error, paginated_payload
@@ -7,6 +10,7 @@ from app.core.auth import get_current_user, require_admin_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.user import User
+from app.models.workflow import WorkflowEvent, WorkflowOutboxEvent, WorkflowRun
 from app.services.documents.document_qa_service import document_qa_service
 from app.services.observability.analytics_service import analytics_service
 
@@ -65,6 +69,53 @@ def experiment_overview(
     current_user: User = Depends(require_admin_user),
 ):
     return analytics_service.get_experiment_overview(db=db, days=days)
+
+
+@router.get("/workflows/overview")
+def workflow_overview(
+    days: int = Query(7, ge=1, le=365, description="统计天数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """管理员工作流运行摘要，按组织和时间窗口聚合，不返回正文或技术载荷。"""
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    run_filters = [WorkflowRun.created_at >= since]
+    if current_user.organization_id is not None:
+        run_filters.append(WorkflowRun.organization_id == current_user.organization_id)
+    by_status = dict(
+        db.query(WorkflowRun.status, func.count(WorkflowRun.id))
+        .filter(*run_filters)
+        .group_by(WorkflowRun.status)
+        .all()
+    )
+    outbox_filters = [WorkflowEvent.created_at >= since]
+    if current_user.organization_id is not None:
+        outbox_filters.append(WorkflowRun.organization_id == current_user.organization_id)
+    outbox_by_status = dict(
+        db.query(WorkflowOutboxEvent.status, func.count(WorkflowOutboxEvent.id))
+        .join(WorkflowEvent, WorkflowEvent.id == WorkflowOutboxEvent.workflow_event_id)
+        .join(WorkflowRun, WorkflowRun.id == WorkflowEvent.workflow_run_id)
+        .filter(*outbox_filters)
+        .group_by(WorkflowOutboxEvent.status)
+        .all()
+    )
+    return {
+        "days": days,
+        "organization_id": current_user.organization_id,
+        "runs": {
+            "total": sum(by_status.values()),
+            "active": sum(by_status.get(status, 0) for status in ("queued", "running", "cancelling")),
+            "failed": by_status.get("failed", 0),
+            "cancelled": by_status.get("cancelled", 0),
+            "by_status": by_status,
+        },
+        "outbox": {
+            "pending": outbox_by_status.get("pending", 0),
+            "sending": outbox_by_status.get("sending", 0),
+            "failed": outbox_by_status.get("failed", 0),
+            "delivered": outbox_by_status.get("delivered", 0),
+        },
+    }
 
 
 @router.get("/llm-calls")

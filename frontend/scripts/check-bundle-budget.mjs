@@ -13,13 +13,16 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = resolve(ROOT, 'dist')
 const ASSETS = resolve(DIST, 'assets')
 
-// 预算基线：以本次工程化改造前实测产物为基准（入口 98.5kB raw / 34.4kB gzip，最大页面 chunk 120.4kB，
+// 预算基线：以工程化改造前实测产物为基准（入口 98.5kB raw / 34.4kB gzip，最大页面 chunk 120.4kB，
 // 总资产 1347kB raw），预算取基线 + 合理余量；改造后 LegalWorkspace/System 拆分应显著低于预算。
+// 2026-10 法律工作台重构（案件工作区 + 工作流面板 + 通知中心 + 管理中心）后重定基线：
+// 实测入口 110.1kB raw / 37.0kB gzip、最大页面 chunk 102.3kB、总资产 1566.9kB；
+// LegalWorkspace 面板已按需加载（defineAsyncComponent），prefill/refresh 时序依赖的 tab 保持静态。
 const BUDGETS = {
-  entryJsRawKB: Number(process.env.ENTRY_JS_RAW_KB || 110),
+  entryJsRawKB: Number(process.env.ENTRY_JS_RAW_KB || 115),
   entryJsGzipKB: Number(process.env.ENTRY_JS_GZIP_KB || 42),
   pageChunkRawKB: Number(process.env.PAGE_CHUNK_RAW_KB || 130),
-  totalRawKB: Number(process.env.TOTAL_RAW_KB || 1450),
+  totalRawKB: Number(process.env.TOTAL_RAW_KB || 1600),
 }
 
 // 路由级页面 chunk 命名（router.js 懒加载视图）

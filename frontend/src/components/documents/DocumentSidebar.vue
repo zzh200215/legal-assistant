@@ -3,20 +3,20 @@
     <template #header>
       <div class="card-header-inline">
         <div>
-          <span>文档资源栏</span>
+        <span>资料目录</span>
         </div>
         <el-button text @click="fetchDocuments">刷新</el-button>
       </div>
     </template>
 
-    <div class="governance-box">
-      <div class="compare-title">知识库与权限</div>
+    <details class="governance-box">
+      <summary class="compare-title">上传设置 <span>知识库与权限</span></summary>
       <p class="toolbar-meta" style="margin:0 0 4px">法规、案例与模板入库后自动关联法律咨询和合同审查。</p>
       <el-select v-model="uploadForm.knowledge_base_name" filterable allow-create default-first-option placeholder="知识库名称" style="width: 100%">
         <el-option v-for="item in knowledgeBases" :key="item.id" :label="item.name" :value="item.name" />
       </el-select>
       <el-select v-model="uploadForm.classification" placeholder="文档分类" style="width: 100%">
-        <el-option v-for="item in classificationOptions" :key="item" :label="item" :value="item" />
+        <el-option v-for="item in classificationOptions" :key="item" :label="documentClassificationLabel(item)" :value="item" />
       </el-select>
       <el-input v-model="uploadForm.tags" placeholder="标签，使用逗号分隔" />
       <el-select v-model="uploadForm.sensitivity_level" placeholder="敏感级别" style="width: 100%">
@@ -32,15 +32,15 @@
       </el-select>
       <el-input v-model="uploadForm.permission_users" placeholder="用户 ID，逗号分隔" />
       <el-input v-model="uploadForm.permission_roles" placeholder="角色，逗号分隔" />
-    </div>
+    </details>
 
     <div class="filter-box">
-      <div class="compare-title">筛选条件</div>
+      <div class="compare-title">筛选资料</div>
       <el-select v-model="filters.knowledge_base_id" clearable placeholder="知识库筛选" style="width: 100%" @change="handleFilterChange">
         <el-option v-for="item in knowledgeBases" :key="item.id" :label="item.name" :value="item.id" />
       </el-select>
       <el-select v-model="filters.classification" clearable placeholder="分类筛选" style="width: 100%" @change="handleFilterChange">
-        <el-option v-for="item in classificationOptions" :key="item" :label="item" :value="item" />
+        <el-option v-for="item in classificationOptions" :key="item" :label="documentClassificationLabel(item)" :value="item" />
       </el-select>
       <el-select v-model="filters.sensitivity_level" clearable placeholder="敏感级别" style="width: 100%" @change="handleFilterChange">
         <el-option label="内部" value="internal" />
@@ -50,29 +50,29 @@
       <el-input v-model="filters.q" placeholder="标题搜索" @change="handleFilterChange" />
     </div>
 
-    <div class="retrieval-box">
-      <div class="compare-title">向量检索参数</div>
+    <details class="retrieval-box">
+      <summary class="compare-title">问答设置 <span>高级</span></summary>
       <div class="retrieval-form-grid">
         <label>
-          <span>Top K</span>
+          <span>候选片段数</span>
           <el-input v-model="retrievalForm.topK" placeholder="8" />
         </label>
         <label>
-          <span>Rerank Top N</span>
+          <span>排序结果数</span>
           <el-input v-model="retrievalForm.rerankTopN" placeholder="5" />
         </label>
       </div>
-      <el-select v-model="retrievalForm.rewriteMode" placeholder="Query Rewrite" style="width: 100%">
-        <el-option label="自动改写" value="auto" />
-        <el-option label="保留原问" value="off" />
+      <el-select v-model="retrievalForm.rewriteMode" placeholder="问题改写" style="width: 100%">
+        <el-option label="自动优化问题" value="auto" />
+        <el-option label="保留原问题" value="off" />
       </el-select>
-      <el-select v-model="retrievalForm.contextExpand" placeholder="邻近 Chunk 扩展" style="width: 100%">
+      <el-select v-model="retrievalForm.contextExpand" placeholder="引用上下文" style="width: 100%">
         <el-option label="前后各 1 段" value="1" />
         <el-option label="前后各 2 段" value="2" />
         <el-option label="不扩展" value="0" />
       </el-select>
-      <p>当前问答接口保持原有调用方式，参数用于呈现检索策略配置。</p>
-    </div>
+      <p>调整文档问答返回的引用范围。</p>
+    </details>
 
     <div v-if="docMeta" class="current-doc">
       <div class="current-doc-head">
@@ -159,9 +159,9 @@
         @click="selectDocument(item)"
       >
         <strong>{{ item.title }}</strong>
-        <span>{{ item.file_type }} · {{ item.status }}<template v-if="item.version_number"> · v{{ item.version_number }}</template></span>
+        <span>{{ documentClassificationLabel(item.classification) }} · {{ item.status }}<template v-if="item.version_number"> · v{{ item.version_number }}</template></span>
         <div class="doc-item-foot">
-          <span>{{ item.classification || '未分类' }}</span>
+          <span>{{ item.case_id ? '案件材料' : '资料库' }}</span>
         </div>
       </button>
     </div>
@@ -204,6 +204,7 @@ const {
   fetchDocuments, handleDocumentPageChange, handleFilterChange,
   downloadCurrentDocument, updateDownloadPolicy, runCompare, selectDocument,
 } = useDocuments()
+import { documentClassificationLabel } from '../../composables/useDocumentList'
 </script>
 
 <style scoped>
@@ -259,6 +260,8 @@ const {
   display: grid;
   gap: var(--space-2);
 }
+.governance-box > summary { cursor: pointer; list-style-position: inside; }
+.governance-box > summary span { margin-left: 6px; color: var(--color-text-muted); font-size: var(--text-xs); font-weight: 400; }
 .filter-box {
   background: var(--color-bg-alt);
   display: grid;

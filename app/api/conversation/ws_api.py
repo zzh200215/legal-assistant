@@ -15,10 +15,10 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_settings
+from app.core.auth import get_settings, verify_case_access
 from app.core.database import get_db
 from app.core.llm_client import llm_client
 from app.models.user import User, UserStatus
@@ -217,6 +217,7 @@ async def _handle_chat(session: WsSession, data: dict, db: Session, user: User) 
     content = data.get("content", "")
     document_id = data.get("document_id")
     session_id = data.get("session_id")
+    case_id = data.get("case_id")
 
     if not isinstance(content, str) or not content.strip():
         await send_event(session, "error",
@@ -229,6 +230,29 @@ async def _handle_chat(session: WsSession, data: dict, db: Session, user: User) 
                           "message": f"消息长度不能超过 {MAX_WS_MESSAGE_LENGTH} 字符"},
                          volatile=True)
         return
+
+    case_context = ""
+    if case_id not in (None, ""):
+        try:
+            case_id = int(case_id)
+            case_info = verify_case_access(case_id, user.id, db)
+            case = case_info["case"]
+            case_context = (
+                "当前对话绑定案件（只读上下文）：\n"
+                f"案件名称：{case.title}\n"
+                f"案件类型：{case.case_type}\n"
+                f"案件状态：{case.status}\n"
+                f"客户：{case.client_name or '未登记'}\n"
+                f"对方当事人：{case.opposing_party or '未登记'}\n"
+                f"案情摘要：{case.description or '暂无'}\n"
+                "请优先基于该案件上下文回答；无法从案件资料确认的事实要明确标注并提示人工核对。"
+            )
+        except (TypeError, ValueError):
+            await send_event(session, "error", {"code": "WS_INVALID_PARAM", "message": "case_id 必须为整数"}, volatile=True)
+            return
+        except HTTPException:
+            await send_event(session, "error", {"code": "CASE_NOT_FOUND", "message": "案件不存在或无权访问"}, volatile=True)
+            return
 
     chat_session = chat_session_service.get_or_create_session(
         db,
@@ -284,6 +308,8 @@ async def _handle_chat(session: WsSession, data: dict, db: Session, user: User) 
         }, volatile=False, db=db)
     else:
         messages = conversation_memory_service.build_chat_messages(db, user.id, chat_session.id)
+        if case_context:
+            messages = [{"role": "system", "content": case_context}, *messages]
         await send_event(session, "session", {"session_id": chat_session.id},
                          volatile=False, db=db)
         async for chunk in llm_client.chat_stream(messages, action="chat_stream", user_id=user.id):

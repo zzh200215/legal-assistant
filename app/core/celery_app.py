@@ -47,6 +47,7 @@ def _routes() -> dict:
         "dispatch_payment_events", "recover_stale_payment_events",
         "run_daily_reconciliation", "recover_stale_reconciliation_runs")
     add("connector", "mailbox_sync_task", "recover_stale_mailbox_syncs")
+    add("notification", "dispatch_workflow_outbox", "recover_stale_workflow_outbox")
     return routes
 
 
@@ -89,6 +90,14 @@ celery_app.conf.update(
         },
         "recover-stale-outbox-claims": {
             "task": "recover_stale_outbox_claims",
+            "schedule": 300.0,
+        },
+        "dispatch-workflow-outbox": {
+            "task": "dispatch_workflow_outbox",
+            "schedule": 30.0,
+        },
+        "recover-stale-workflow-outbox": {
+            "task": "recover_stale_workflow_outbox",
             "schedule": 300.0,
         },
         "dispatch-payment-events": {

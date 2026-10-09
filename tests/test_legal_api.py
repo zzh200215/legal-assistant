@@ -12,7 +12,8 @@ import app.models  # noqa: F401
 from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
 from app.main import app
-from app.models.legal import ContractReview, LegalArticle, LegalConsultation, LegalDraft, LegalSource
+from app.models.legal import ContractReview, LegalArticle, LegalCase, LegalConsultation, LegalDraft, LegalSource
+from app.models.org import Organization, OrganizationMember
 from app.models.user import User
 
 
@@ -559,6 +560,115 @@ class LegalApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_draft_autosave_detects_conflict_and_restores_version(self):
+        draft = LegalDraft(
+            user_id=self.member.id, document_type="labor_arbitration_application", title="劳动争议仲裁申请书",
+            fields_json=json.dumps({"申请人": "张三"}), missing_fields_json="[]", references_json="[]",
+            content="第一版正文", version=1, status="draft",
+        )
+        self.db.add(draft)
+        self.db.commit()
+        self.db.refresh(draft)
+        headers = {"Authorization": f"Bearer {create_access_token({'sub': self.member.id})}"}
+
+        autosave = self.client.patch(
+            f"/api/legal/drafts/{draft.id}/autosave",
+            json={"document_type": "labor_arbitration_application", "fields": {"申请人": "张三"},
+                  "content": "自动保存正文", "base_row_version": draft.row_version},
+            headers=headers,
+        )
+        self.assertEqual(autosave.status_code, 200, autosave.text)
+        saved = autosave.json()["data"]
+        self.assertGreater(saved["row_version"], draft.row_version)
+
+        conflict = self.client.patch(
+            f"/api/legal/drafts/{draft.id}/autosave",
+            json={"document_type": "labor_arbitration_application", "fields": {},
+                  "content": "过期正文", "base_row_version": 1},
+            headers=headers,
+        )
+        self.assertEqual(conflict.status_code, 409)
+
+        version = self.client.post(
+            f"/api/legal/drafts/{draft.id}/versions",
+            json={"document_type": "labor_arbitration_application", "fields": {"申请人": "张三"},
+                  "content": "正式版本正文", "base_row_version": saved["row_version"]},
+            headers=headers,
+        )
+        self.assertEqual(version.status_code, 200, version.text)
+        current = version.json()["data"]
+        self.assertEqual(current["version"], 2)
+
+        versions = self.client.get(f"/api/legal/drafts/{draft.id}/versions", headers=headers).json()["data"]
+        self.assertEqual(len(versions), 1)
+        self.assertEqual(versions[0]["content"], "正式版本正文")
+        restore = self.client.post(
+            f"/api/legal/drafts/{draft.id}/versions/{versions[0]['id']}/restore",
+            json={"base_row_version": current["row_version"]}, headers=headers,
+        )
+        self.assertEqual(restore.status_code, 200, restore.text)
+        self.assertEqual(restore.json()["data"]["content"], "正式版本正文")
+        self.assertEqual(restore.json()["data"]["status"], "draft")
+
+    def test_draft_collaboration_comments_and_arbitrary_diff(self):
+        draft = LegalDraft(
+            user_id=self.member.id, document_type="labor_arbitration_application", title="劳动争议仲裁申请书",
+            fields_json=json.dumps({"申请人": "张三"}), missing_fields_json="[]", references_json="[]",
+            content="第一行\n第二行", version=1, status="draft",
+        )
+        self.db.add(draft)
+        self.db.commit()
+        self.db.refresh(draft)
+        headers = {"Authorization": f"Bearer {create_access_token({'sub': self.member.id})}"}
+
+        first = self.client.post(
+            f"/api/legal/drafts/{draft.id}/versions",
+            json={"document_type": "labor_arbitration_application", "fields": {"申请人": "张三"},
+                  "content": "第一行\n修改后的第二行", "version_note": "补充事实", "base_row_version": draft.row_version},
+            headers=headers,
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        first_row = first.json()["data"]
+        second = self.client.post(
+            f"/api/legal/drafts/{draft.id}/versions",
+            json={"document_type": "labor_arbitration_application", "fields": {"申请人": "张三"},
+                  "content": "第一行\n最终第二行", "version_note": "律师确认", "base_row_version": first_row["row_version"]},
+            headers=headers,
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        second_row = second.json()["data"]
+        versions = self.client.get(f"/api/legal/drafts/{draft.id}/versions", headers=headers).json()["data"]
+        self.assertEqual(versions[0]["version_note"], "律师确认")
+        self.assertEqual(versions[1]["version_note"], "补充事实")
+
+        diff = self.client.get(
+            f"/api/legal/drafts/{draft.id}/versions/diff",
+            params={"from_id": versions[1]["id"], "to_id": versions[0]["id"]}, headers=headers,
+        )
+        self.assertEqual(diff.status_code, 200, diff.text)
+        self.assertTrue(any(item["kind"] == "removed" for item in diff.json()["data"]["rows"]))
+        self.assertTrue(any(item["kind"] == "added" for item in diff.json()["data"]["rows"]))
+
+        comment = self.client.post(
+            f"/api/legal/drafts/{draft.id}/comments",
+            json={"body": "请核对第二行事实", "version": second_row["version"], "line_start": 2, "line_end": 2},
+            headers=headers,
+        )
+        self.assertEqual(comment.status_code, 200, comment.text)
+        comment_id = comment.json()["data"]["id"]
+        self.assertEqual(comment.json()["data"]["line_start"], 2)
+        resolved = self.client.patch(
+            f"/api/legal/drafts/{draft.id}/comments/{comment_id}",
+            json={"status": "resolved"}, headers=headers,
+        )
+        self.assertEqual(resolved.status_code, 200, resolved.text)
+        self.assertEqual(resolved.json()["data"]["status"], "resolved")
+
+        collaboration = self.client.get(f"/api/legal/drafts/{draft.id}/collaboration", headers=headers)
+        self.assertEqual(collaboration.status_code, 200, collaboration.text)
+        self.assertEqual(collaboration.json()["data"]["document_version"], 3)
+        self.assertTrue(collaboration.json()["data"]["collaborators"])
+
     # ── 单条法源创建/编辑/删除（管理后台） ─────────────────────
 
     def test_admin_can_create_single_source(self):
@@ -618,6 +728,71 @@ class LegalApiTests(unittest.TestCase):
     def test_delete_source_not_found(self):
         response = self.client.delete("/api/legal/sources/999999", headers=self.admin_headers)
         self.assertEqual(response.status_code, 404)
+
+    def test_source_favorite_round_trip(self):
+        source = LegalSource(
+            user_id=self.admin.id, title="《收藏测试法》", source_type="statute",
+            content="内容", status="active", version="v1",
+        )
+        self.db.add(source)
+        self.db.commit()
+        self.db.refresh(source)
+
+        favorite = self.client.post(f"/api/legal/sources/{source.id}/favorite", headers=self.admin_headers)
+        self.assertEqual(favorite.status_code, 200)
+        self.assertTrue(favorite.json()["data"]["is_favorite"])
+
+        listed = self.client.get("/api/legal/sources", headers=self.admin_headers)
+        row = next(item for item in listed.json()["data"] if item["id"] == source.id)
+        self.assertTrue(row["is_favorite"])
+
+        unfavorite = self.client.delete(f"/api/legal/sources/{source.id}/favorite", headers=self.admin_headers)
+        self.assertEqual(unfavorite.status_code, 200)
+        self.assertFalse(unfavorite.json()["data"]["is_favorite"])
+
+    def test_source_case_link_round_trip(self):
+        organization = Organization(name="资料关联测试组织", code="source-link-test")
+        self.db.add(organization)
+        self.db.flush()
+        self.db.add(OrganizationMember(
+            organization_id=organization.id,
+            user_id=self.admin.id,
+            legal_role="admin",
+        ))
+        source = LegalSource(
+            user_id=self.admin.id, title="《案件关联测试法》", source_type="statute",
+            content="内容", status="active", version="v1",
+        )
+        case = LegalCase(
+            organization_id=organization.id, user_id=self.admin.id,
+            title="资料关联测试案件", case_type="other", status="in_progress",
+        )
+        self.db.add_all([source, case])
+        self.db.commit()
+        self.db.refresh(source)
+        self.db.refresh(case)
+
+        linked = self.client.post(
+            f"/api/legal/sources/{source.id}/cases/{case.id}",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(linked.status_code, 200)
+        self.assertTrue(linked.json()["data"]["is_linked"])
+
+        listed = self.client.get(
+            "/api/legal/sources",
+            params={"case_id": case.id},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual([item["id"] for item in listed.json()["data"]], [source.id])
+
+        unlinked = self.client.delete(
+            f"/api/legal/sources/{source.id}/cases/{case.id}",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(unlinked.status_code, 200)
+        self.assertFalse(unlinked.json()["data"]["is_linked"])
 
     def test_invalid_action_rejected(self):
         consultation = LegalConsultation(

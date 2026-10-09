@@ -267,9 +267,16 @@ def register(req: UserCreate, db: Session = Depends(get_db)):
 # ================== 当前用户 ==================
 
 @router.get("/me", response_model=UserDetailOut)
-def get_current_user_info(current_user: User = Depends(get_current_user)):
+def get_current_user_info(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """获取当前用户信息"""
-    return UserDetailOut.model_validate(current_user)
+    result = UserDetailOut.model_validate(current_user).model_dump()
+    from app.models.org import OrganizationMember
+    member = db.query(OrganizationMember).filter(
+        OrganizationMember.organization_id == current_user.organization_id,
+        OrganizationMember.user_id == current_user.id,
+    ).first() if current_user.organization_id else None
+    result["legal_role"] = member.legal_role if member else None
+    return result
 
 
 @router.get("/security-status")

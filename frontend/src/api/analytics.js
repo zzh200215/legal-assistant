@@ -22,6 +22,9 @@ export default {
   experimentOverview(days = 30) {
     return http.get('/analytics/experiments/overview', { params: { days } })
   },
+  workflowOverview(days = 7) {
+    return http.get('/analytics/workflows/overview', { params: { days } })
+  },
   llmCallStats(params) {
     return http.get('/analytics/llm-calls/stats', { params })
   },

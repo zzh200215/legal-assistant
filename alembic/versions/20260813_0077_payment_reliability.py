@@ -22,14 +22,57 @@ branch_labels = None
 depends_on = None
 
 
+def _inspector():
+    return sa.inspect(op.get_bind())
+
+
+def _has_column(table: str, column: str) -> bool:
+    inspector = _inspector()
+    return inspector.has_table(table) and column in {
+        item["name"] for item in inspector.get_columns(table)
+    }
+
+
+def _has_index(table: str, name: str) -> bool:
+    inspector = _inspector()
+    if not inspector.has_table(table):
+        return False
+    return any(item.get("name") == name for item in inspector.get_indexes(table))
+
+
+def _has_unique_columns(table: str, columns: list[str]) -> bool:
+    inspector = _inspector()
+    if not inspector.has_table(table):
+        return False
+    wanted = tuple(columns)
+    for item in inspector.get_unique_constraints(table):
+        if tuple(item.get("column_names") or ()) == wanted:
+            return True
+    for item in inspector.get_indexes(table):
+        if item.get("unique") and tuple(item.get("column_names") or ()) == wanted:
+            return True
+    return False
+
+
+def _add_column_if_missing(table: str, column: sa.Column) -> None:
+    if not _has_column(table, column.name):
+        op.add_column(table, column)
+
+
 # ── subscription 扩展 ─────────────────────────────────────────────────────────
 
 def _extend_subscription() -> None:
-    with op.batch_alter_table("subscription_plans") as batch_op:
-        batch_op.add_column(sa.Column("price_version", sa.Integer(), nullable=False, server_default="1"))
-        batch_op.add_column(sa.Column("currency", sa.String(8), nullable=False, server_default="CNY"))
+    _add_column_if_missing(
+        "subscription_plans",
+        sa.Column("price_version", sa.Integer(), nullable=False, server_default="1"),
+    )
+    _add_column_if_missing(
+        "subscription_plans",
+        sa.Column("currency", sa.String(8), nullable=False, server_default="CNY"),
+    )
 
-    op.create_table(
+    if not _inspector().has_table("subscription_plan_versions"):
+        op.create_table(
         "subscription_plan_versions",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("plan_id", sa.Integer(), nullable=False),
@@ -43,14 +86,25 @@ def _extend_subscription() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
         sa.UniqueConstraint("plan_id", "price_version", name="uq_plan_versions_plan_id_version"),
         sa.ForeignKeyConstraint(["plan_id"], ["subscription_plans.id"]),
-    )
-    op.create_index("ix_subscription_plan_versions_plan_id", "subscription_plan_versions", ["plan_id"])
-    op.create_index("ix_subscription_plan_versions_tier", "subscription_plan_versions", ["tier"])
+        )
+        op.create_index("ix_subscription_plan_versions_plan_id", "subscription_plan_versions", ["plan_id"])
+        op.create_index("ix_subscription_plan_versions_tier", "subscription_plan_versions", ["tier"])
 
-    with op.batch_alter_table("user_subscriptions") as batch_op:
-        batch_op.add_column(sa.Column("plan_version", sa.Integer(), nullable=False, server_default="1"))
-        batch_op.add_column(sa.Column("idempotency_key", sa.String(128), nullable=True))
-        batch_op.create_index("ix_user_subscriptions_idempotency_key", ["idempotency_key"], unique=True)
+    _add_column_if_missing(
+        "user_subscriptions",
+        sa.Column("plan_version", sa.Integer(), nullable=False, server_default="1"),
+    )
+    _add_column_if_missing(
+        "user_subscriptions",
+        sa.Column("idempotency_key", sa.String(128), nullable=True),
+    )
+    if not _has_index("user_subscriptions", "ix_user_subscriptions_idempotency_key"):
+        op.create_index(
+            "ix_user_subscriptions_idempotency_key",
+            "user_subscriptions",
+            ["idempotency_key"],
+            unique=True,
+        )
 
 
 # ── quota_usages 唯一约束（先去重）────────────────────────────────────────────
@@ -60,11 +114,26 @@ def _quota_usage_unique(bind) -> None:
 
     def _run(conn) -> None:
         # 保留每组最新 id，避免 UNIQUE(user_id, year_month) 因历史重复而失败
-        conn.execute(text(
-            "DELETE FROM quota_usages WHERE id NOT IN ("
-            "SELECT keep.id FROM (SELECT MAX(id) AS id FROM quota_usages "
-            "GROUP BY user_id, year_month) keep)"
-        ))
+        if conn.dialect.name == "mysql":
+            # MySQL 禁止在 DELETE 的子查询中再次读取目标表；临时表也能
+            # 在大表上避免逐行 Python 删除，并且只在当前连接内可见。
+            conn.execute(text(
+                "CREATE TEMPORARY TABLE _quota_usage_keep_ids_0077 AS "
+                "SELECT MAX(`id`) AS id FROM `quota_usages` "
+                "GROUP BY `user_id`, `year_month`"
+            ))
+            conn.execute(text(
+                "DELETE q FROM `quota_usages` q "
+                "LEFT JOIN `_quota_usage_keep_ids_0077` k ON q.`id` = k.`id` "
+                "WHERE k.`id` IS NULL"
+            ))
+            conn.execute(text("DROP TEMPORARY TABLE _quota_usage_keep_ids_0077"))
+        else:
+            conn.execute(text(
+                "DELETE FROM quota_usages WHERE id NOT IN ("
+                "SELECT keep.id FROM (SELECT MAX(id) AS id FROM quota_usages "
+                "GROUP BY user_id, year_month) keep)"
+            ))
 
     if isinstance(bind, Connection):
         _run(bind)
@@ -73,8 +142,9 @@ def _quota_usage_unique(bind) -> None:
             _run(conn)
             conn.commit()
 
-    with op.batch_alter_table("quota_usages") as batch_op:
-        batch_op.create_unique_constraint("uq_quota_usages_user_month", ["user_id", "year_month"])
+    if not _has_unique_columns("quota_usages", ["user_id", "year_month"]):
+        with op.batch_alter_table("quota_usages") as batch_op:
+            batch_op.create_unique_constraint("uq_quota_usages_user_month", ["user_id", "year_month"])
 
 
 # ── 新表 ──────────────────────────────────────────────────────────────────────

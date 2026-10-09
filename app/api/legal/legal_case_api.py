@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.models.legal import LegalCase, LegalConsultation, ContractReview, LegalDraft
 from app.models.org import OrganizationMember, LegalMemberRole
 from app.models.user import User
+from app.services.legal.matter_service import matter_service
 
 router = APIRouter()
 
@@ -144,6 +145,10 @@ def create_case(
         case_id=case.id, organization_id=org_id, user_id=current_user.id,
         case_role="owner", granted_by=current_user.id,
     ))
+    matter_service.record_activity(
+        db, case_id=case.id, organization_id=org_id, actor_id=current_user.id,
+        event_type="matter.created", title="创建案件", summary=case.title,
+    )
     db.commit()
     db.refresh(case)
     return _serialize_case(case, db)
@@ -198,6 +203,10 @@ def update_case(
         raise api_error(403, "仅审核律师或管理员可切换严格模式", code="INSUFFICIENT_ROLE")
     for field, value in req.model_dump(exclude_none=True).items():
         setattr(case, field, value)
+    matter_service.record_activity(
+        db, case_id=case.id, organization_id=org_id, actor_id=current_user.id,
+        event_type="matter.updated", title="更新案件信息", summary=case.title,
+    )
     db.commit()
     db.refresh(case)
     return _serialize_case(case, db)

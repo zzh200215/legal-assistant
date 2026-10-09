@@ -11,7 +11,7 @@
         <div class="topbar-logo">律</div>
         <div class="topbar-title">
           <span class="topbar-name">律智检</span>
-          <span class="topbar-tag">法律文书与合同审查工作台</span>
+          <span class="topbar-tag">企业法务与律师工作台</span>
         </div>
       </div>
 
@@ -20,7 +20,7 @@
           v-for="item in visibleNavItems(navItems)"
           :key="item.path"
           class="nav-entry"
-          :class="isRouteActive(item.path) ? 'active' : ''"
+          :class="isRouteActive(item) ? 'active' : ''"
           :title="item.caption"
           @click="onMenuSelect(item.path)"
         >
@@ -29,12 +29,12 @@
         </button>
 
         <template v-for="group in visibleNavGroups" :key="group.label">
-          <span class="nav-divider" aria-hidden="true"></span>
+          <div class="nav-group-label">{{ group.label }}</div>
           <button
             v-for="item in group.items"
             :key="item.path"
             class="nav-entry"
-            :class="isRouteActive(item.path) ? 'active' : ''"
+            :class="isRouteActive(item) ? 'active' : ''"
             :title="`${group.label} · ${item.caption}`"
             @click="onMenuSelect(item.path)"
           >
@@ -46,7 +46,7 @@
 
       <div class="sidebar-footer">
         <div class="utility-row">
-          <button class="utility-link" @click="onMenuSelect('/system')">
+          <button v-if="authStore.ready && authStore.isAdmin" class="utility-link" @click="onMenuSelect('/system')">
             <span class="status-dot" aria-hidden="true"></span>
             <span class="utility-label">平台状态</span>
           </button>
@@ -65,7 +65,7 @@
 
     <div class="app-workspace">
     <OfflineBanner />
-    <section class="section-strip">
+    <section v-if="!isLegalWorkspaceRoute" class="section-strip">
       <div class="section-heading">
         <h1>{{ currentSection.label }}</h1>
         <p>{{ currentSection.description }}</p>
@@ -90,7 +90,7 @@
         v-for="item in mobileNavItems"
         :key="item.path"
         class="mobile-nav-item"
-        :class="isRouteActive(item.path) ? 'active' : ''"
+        :class="isRouteActive(item) ? 'active' : ''"
         @click="onMenuSelect(item.path)"
       >
         <el-icon><component :is="item.icon" /></el-icon>
@@ -103,16 +103,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  ChatDotRound,
-  Check,
-  Cpu,
-  DataLine,
-  Document,
-  House,
-  Notebook,
-  ScaleToOriginal,
-} from '@element-plus/icons-vue'
+import { Check, Cpu, DataLine, Files, House, List, Notebook, Reading, ScaleToOriginal, Tickets } from '@element-plus/icons-vue'
 import api from './api'
 import { setAccessToken, setRefreshToken } from './api/http'
 import { clearQueryCache } from './query/cache'
@@ -135,47 +126,56 @@ const routeAccess = computed(() => {
   return authStore.capabilities.includes(required) ? 'allow' : 'deny'
 })
 
-const ScaleIcon = ScaleToOriginal
-
 const navItems = [
-  { path: '/legal-workspace', label: '法律工作台', caption: '咨询、审查、文书与审核', icon: ScaleIcon },
-  { path: '/pricing', label: '订阅方案', caption: '套餐、配额与购买', icon: ScaleIcon },
-  { path: '/documents', label: '法律知识库', caption: '法规、案例、合同模板与文书模板', icon: Document },
-  { path: '/chat', label: '对话记录', caption: '通用对话与流式输出', icon: ChatDotRound },
+  { path: '/legal-workspace', label: '工作台', caption: '案件进展与待处理事项', icon: House, match: (r) => r.path === '/legal-workspace' && !r.query.view },
+  { path: '/cases', label: '案件', caption: '案件与案件工作记录', icon: Tickets, match: (r) => r.path === '/legal-workspace' && r.query.view === 'cases' },
+  { path: '/documents', label: '文档', caption: '案件材料与法律文件', icon: Files },
+  { path: '/legal-workspace?view=research', label: '法律研究', caption: '法规、案例与业务资料', icon: Reading, match: (r) => r.path === '/legal-workspace' && r.query.view === 'research' },
+  { path: '/legal-workspace?view=review', label: '审核', caption: '待处理律师审核', icon: Check, match: (r) => r.path === '/legal-workspace' && r.query.view === 'review' },
+  { path: '/tasks', label: '任务', caption: '案件协作事项与处理进度', icon: List },
 ]
 
 const navGroups = [
   {
-    label: '法律业务',
+    label: '管理中心',
     items: [
-      // 导航入口沿用产品规则：仅管理员显示；路由级访问由 router meta.capability 守卫
-      { path: '/tasks', label: '待办任务', caption: '执行项与协作推进', icon: Check, adminOnly: true },
-      { path: '/agent', label: 'Agent配置', caption: '工具编排与执行观测', icon: Cpu, adminOnly: true },
-    ],
-  },
-  {
-    label: '平台管理',
-    items: [
-      { path: '/system', label: '系统中心', caption: '观测与任务中心', icon: DataLine, adminOnly: true },
+      { path: '/management', label: '管理中心', caption: '平台设置与运营', icon: DataLine, adminOnly: true },
+      { path: '/system', label: '系统', caption: '组织、权限与平台运行', icon: DataLine, adminOnly: true, match: (r) => r.path === '/system' && r.query.tab !== 'experiments' },
+      { path: '/agent', label: 'Agent', caption: '自动化执行与运行记录', icon: Cpu, adminOnly: true },
+      { path: '/system?tab=experiments', label: '评测与审计', caption: '质量评测与操作记录', icon: Notebook, adminOnly: true, match: (r) => r.path === '/system' && r.query.tab === 'experiments' },
+      { path: '/pricing', label: '计费', caption: '订阅方案与使用情况', icon: ScaleToOriginal, adminOnly: true },
     ],
   },
 ]
 
 const sectionMeta = {
-  '/legal-workspace': { label: '法律工作台', description: '法律咨询、合同审查、文书草稿与律师审核' },
-  '/': { label: '法律工作台', description: '法律咨询、合同审查、文书草稿与律师审核' },
+  '/legal-workspace': { label: '工作台', description: '案件进展与待处理事项' },
+  '/cases': { label: '案件', description: '管理案件与案件工作记录' },
+  '/': { label: '工作台', description: '案件进展与待处理事项' },
   // `/` 会重定向到 `/legal-onboarding`，缺这条会退回默认值、把产品名当页面标题重复一次
   '/legal-onboarding': { label: '开始使用', description: '按角色完成初始配置，然后进入法律工作台' },
   '/legal-developer': { label: '开发者设置', description: 'API 凭据、Webhook 与集成调试' },
-  '/pricing': { label: '订阅方案', description: '套餐选择、配额说明与订阅管理' },
-  '/documents': { label: '法律知识库', description: '上传法规、案例、合同模板与文书模板，解析入库后可检索、引用溯源与文档对比' },
-  '/tasks': { label: '待办任务', description: '统一查看来源任务、协作进度和执行记录' },
-  '/agent': { label: 'Agent配置', description: '输入目标后自动规划并连续执行；创建任务、批量生成待办或查询敏感数据时请求确认' },
-  '/chat': { label: '对话记录', description: '查看流式对话、上下文消息和引用材料' },
-  '/system': { label: '系统中心', description: '统一查看平台健康、成本使用、反馈闭环和任务运行状态' },
+  '/pricing': { label: '计费', description: '订阅方案、用量与账单' },
+  '/documents': { label: '文档', description: '案件材料、合同与法律文件' },
+  '/tasks': { label: '任务', description: '案件协作事项与处理进度' },
+  '/notifications': { label: '通知中心', description: '案件动作、审核和关键日期提醒' },
+  '/agent': { label: 'Agent', description: '自动化执行与运行记录' },
+  '/chat': { label: '案件助手', description: '基于案件资料开展法律工作' },
+  '/system': { label: '系统', description: '组织、权限、策略与平台运行' },
+  '/management': { label: '管理中心', description: '平台设置、质量与运营' },
 }
 
-const currentSection = computed(() => sectionMeta[route.path] || { label: '律智检', description: '法律文书与合同审查工作台' })
+const isLegalWorkspaceRoute = computed(() => route.path === '/legal-workspace')
+const currentSection = computed(() => {
+  if (route.path === '/legal-workspace') {
+    const view = route.query.view
+    if (view === 'cases') return { label: '案件', description: '管理案件与案件工作记录' }
+    if (view === 'research') return { label: '法律研究', description: '法规、案例与业务资料' }
+    if (view === 'review') return { label: '审核', description: '律师复核与工作流转' }
+    return sectionMeta[route.path]
+  }
+  return sectionMeta[route.path] || { label: '律智检', description: '法律工作台' }
+})
 const visibleNavGroups = computed(() =>
   navGroups
     .map((group) => ({ ...group, items: visibleNavItems(group.items) }))
@@ -188,10 +188,8 @@ const canShow = (item) => {
   return authStore.ready && authStore.isAdmin
 }
 const visibleNavItems = (items) => items.filter(canShow)
-const mobileNavItems = computed(() =>
-  visibleNavItems([...navItems, ...navGroups.flatMap((group) => group.items)]),
-)
-const isRouteActive = (path) => route.path === path
+const mobileNavItems = computed(() => visibleNavItems(navItems).slice(0, 6))
+const isRouteActive = (item) => item.match ? item.match(route) : route.path === item.path
 const onMenuSelect = (path) => router.push(path)
 
 const accountInitial = computed(() => (user.value?.username || '?').slice(0, 1).toUpperCase())
@@ -300,6 +298,13 @@ onMounted(async () => {
   width: auto; height: 1px; margin: 8px var(--space-2);
   background: var(--color-border);
   flex: 0 0 auto;
+}
+
+.nav-group-label {
+  padding: 18px var(--space-2) 6px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
 }
 
 .nav-entry {
@@ -506,7 +511,7 @@ onMounted(async () => {
 
 @media (max-width: 1280px) {
   .app-shell { grid-template-columns: 68px minmax(0, 1fr); }
-  .topbar-title, .nav-entry span, .utility-label, .account-meta { display: none; }
+  .topbar-title, .nav-entry span, .utility-label, .account-meta, .nav-group-label { display: none; }
   .topbar { align-items: center; }
   .topbar-brand { justify-content: center; padding: 0; }
   .nav-entry { justify-content: center; padding: 0; }
@@ -564,16 +569,18 @@ onMounted(async () => {
   }
 
   .mobile-nav-item {
+    flex: 1 1 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 2px;
-    padding: 6px 14px;
+    padding: 6px 2px;
     border: 0;
     background: transparent;
     color: var(--color-text-muted);
-    font-size: var(--text-xs);
+    font-size: 10px;
     font-weight: 400;
     cursor: pointer;
     transition: color var(--transition-fast);

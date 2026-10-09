@@ -2,9 +2,20 @@
   <div class="chat-page grid h-[calc(100vh-220px)] min-h-[620px] grid-cols-[280px_minmax(0,1fr)] gap-5">
     <aside class="ui-card flex min-h-0 flex-col overflow-hidden">
       <div class="border-b border-slate-200 px-5 py-4">
-        <div class="text-sm font-semibold text-slate-950">对话记录</div>
-        <div class="mt-1 text-xs leading-5 text-slate-500">保留当前会话上下文，支持实时流式返回。</div>
+        <div class="text-sm font-semibold text-slate-950">{{ caseTitle ? '案件助手' : '对话记录' }}</div>
+        <div class="mt-1 text-xs leading-5 text-slate-500">{{ caseTitle ? '围绕当前案件资料继续工作。' : '进入案件后，助手会自动绑定案件上下文。' }}</div>
       </div>
+      <section v-if="caseTitle" class="case-assistant-context border-b border-slate-200 px-4 py-4">
+        <div class="text-xs font-medium text-slate-500">当前案件</div>
+        <div class="mt-1 truncate text-sm font-semibold text-slate-950">{{ caseTitle }}</div>
+        <div v-if="caseSummary" class="mt-3 grid grid-cols-2 gap-2 text-xs">
+          <span>咨询 <strong>{{ caseSummary.counts?.consultations || 0 }}</strong></span>
+          <span>审查 <strong>{{ caseSummary.counts?.contract_reviews || 0 }}</strong></span>
+          <span>文书 <strong>{{ caseSummary.counts?.drafts || 0 }}</strong></span>
+          <span>待审 <strong>{{ caseSummary.counts?.pending_reviews || 0 }}</strong></span>
+        </div>
+        <button type="button" class="mt-3 text-xs font-medium text-blue-700" @click="router.push({ path: '/legal-workspace', query: { case_id: caseId } })">打开案件</button>
+      </section>
       <div class="flex-1 overflow-auto p-3">
         <button class="mb-2 w-full rounded-lg border border-blue-100 bg-blue-50 px-3 py-3 text-left">
           <div class="truncate text-sm font-semibold text-blue-700">当前实时会话</div>
@@ -52,12 +63,13 @@
     <section class="ui-card flex min-h-0 flex-col overflow-hidden">
       <header class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
         <div>
-          <div class="text-base font-semibold text-slate-950">法律对话</div>
-          <div class="mt-1 text-xs text-slate-500">结合知识库检索，回答附带法条与案例引用。</div>
+          <div class="text-base font-semibold text-slate-950">{{ caseTitle ? '案件助手' : '法律对话' }}</div>
+          <div v-if="caseTitle" class="mt-1 text-xs text-slate-500">当前案件：{{ caseTitle }} · 基于案件上下文开展工作</div>
+          <div v-else class="mt-1 text-xs text-slate-500">进入案件后，助手会自动绑定案件资料。</div>
         </div>
-        <div class="flex items-center gap-2 text-xs text-slate-500">
-          <span class="h-2 w-2 rounded-full" :class="connected ? 'bg-emerald-500' : 'bg-slate-300'"></span>
-          <span>{{ connected ? '实时通道已连接' : '连接中' }}</span>
+        <div class="flex items-center gap-4 text-xs text-slate-500">
+          <button v-if="caseId" type="button" class="assistant-case-link" @click="router.push({ path: '/legal-workspace', query: { case_id: caseId } })">返回案件</button>
+          <span class="flex items-center gap-2"><span class="h-2 w-2 rounded-full" :class="connected ? 'bg-emerald-500' : 'bg-slate-300'"></span>{{ connected ? '实时通道已连接' : '连接中' }}</span>
         </div>
       </header>
 
@@ -66,8 +78,8 @@
           <div class="empty-icon mb-4 flex h-12 w-12 items-center justify-center rounded-lg">
             <el-icon :size="22"><ChatLineRound /></el-icon>
           </div>
-          <div class="text-lg font-semibold text-slate-950">开始一次法律对话</div>
-          <p class="mt-2 text-sm leading-6 text-slate-500">可以询问法律依据、条款解释、风险识别或文书草稿。涉及知识库的问题建议到知识库页选择文档后提问。</p>
+          <div class="text-lg font-semibold text-slate-950">{{ caseTitle ? `开始处理「${caseTitle}」` : '开始一次法律对话' }}</div>
+          <p class="mt-2 text-sm leading-6 text-slate-500">{{ caseTitle ? '可以分析案情、查找法源、准备文书或梳理下一步工作。最终意见请由律师确认。' : '进入案件后，助手会带入案件上下文，帮助你处理案情、法源和文书。' }}</p>
         </div>
 
         <div
@@ -94,13 +106,18 @@
             </div>
 
             <div v-if="msg.citations?.length" class="mt-3 grid gap-2">
-              <div v-for="(item, index) in msg.citations" :key="`citation-${i}-${index}`" class="rounded-lg border border-blue-100 bg-blue-50/70 p-3">
+              <button v-for="(item, index) in msg.citations" :key="`citation-${i}-${index}`" type="button" class="citation-link rounded-lg border border-blue-100 bg-blue-50/70 p-3 text-left" @click="openCitation(item)">
                 <div class="mb-1 flex items-center justify-between gap-3">
                   <span class="text-xs font-semibold text-blue-700">引用 {{ index + 1 }}</span>
-                  <span v-if="item.page_number" class="text-xs text-blue-500">第 {{ item.page_number }} 页</span>
+                  <span v-if="item.page_number || item.document_id" class="text-xs text-blue-500">{{ item.page_number ? `第 ${item.page_number} 页` : '打开资料' }}</span>
                 </div>
                 <p class="m-0 line-clamp-3 text-xs leading-5 text-slate-600">{{ item.source_text || item.quote || item.content }}</p>
-              </div>
+              </button>
+            </div>
+            <div v-if="caseId && !msg.streaming && msg.role === 'assistant' && msg.content" class="assistant-actions mt-3 flex flex-wrap gap-2">
+              <button type="button" @click="sendQuickAction('根据当前案件资料生成一份待审核的法律咨询摘要')">形成咨询摘要</button>
+              <button type="button" @click="sendQuickAction('根据当前案件资料起草一份文书，并列出缺失事实')">准备文书草稿</button>
+              <button type="button" @click="sendQuickAction('从当前案件资料提取下一步任务和关键日期')">整理下一步</button>
             </div>
           </div>
         </div>
@@ -124,12 +141,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ChatLineRound } from '@element-plus/icons-vue'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import memory from '../api/memory'
+import legalWorkspace from '../api/legalWorkspace'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/input/style/css'
 
@@ -143,6 +162,11 @@ const preferencesOpen = ref(false)
 const preferenceKey = ref('')
 const preferenceValue = ref('')
 const preferenceSaving = ref(false)
+const route = useRoute()
+const router = useRouter()
+const caseId = computed(() => route.query.case_id ? Number(route.query.case_id) : null)
+const caseTitle = ref('')
+const caseSummary = ref(null)
 let ws = null
 let reconnectTimer = null
 
@@ -173,6 +197,7 @@ const connectWS = () => {
       const last = messages.value[messages.value.length - 1]
       if (last && last.role === 'assistant' && last.streaming === true) {
         last.streaming = false
+        if (data.citations) last.citations = data.citations
       }
       loading.value = false
     } else if (data.type === 'error') {
@@ -224,6 +249,7 @@ const send = () => {
     ws.send(JSON.stringify({
       content: input.value,
       session_id: currentSessionId.value,
+      case_id: caseId.value || undefined,
     }))
   } catch (e) {
     console.error('发送消息失败', e)
@@ -237,6 +263,19 @@ const send = () => {
 
   input.value = ''
   loading.value = true
+}
+
+const sendQuickAction = (content) => {
+  input.value = content
+  send()
+}
+
+const openCitation = (item) => {
+  if (item?.document_id) {
+    router.push({ path: '/documents', query: { documentId: String(item.document_id), case_id: String(caseId.value) } })
+    return
+  }
+  router.push({ path: '/legal-workspace', query: { view: 'research', case_id: String(caseId.value) } })
 }
 
 const loadPreferences = async () => {
@@ -280,9 +319,22 @@ const removePreference = async (id) => {
   }
 }
 
+const loadCaseContext = async () => {
+  if (!caseId.value) return
+  try {
+    const { data } = await legalWorkspace.getMatterSummary(caseId.value)
+    caseSummary.value = data
+    caseTitle.value = data?.matter?.title || data?.case?.title || data?.title || ''
+  } catch {
+    caseTitle.value = ''
+    caseSummary.value = null
+  }
+}
+
 onMounted(() => {
   connectWS()
   loadPreferences()
+  loadCaseContext()
 })
 onUnmounted(() => {
   if (reconnectTimer) clearTimeout(reconnectTimer)
@@ -379,6 +431,15 @@ onUnmounted(() => {
   height: 56px;
   border-radius: var(--radius-lg);
 }
+
+.assistant-case-link { border: 0; background: transparent; color: var(--color-primary); cursor: pointer; }
+.assistant-case-link:hover { text-decoration: underline; }
+.case-assistant-context span { color: var(--color-text-muted); }
+.case-assistant-context strong { display: block; margin-top: 3px; color: var(--color-text); font-size: 14px; }
+.citation-link { display: block; width: 100%; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.citation-link:hover { border-color: var(--color-primary); background: #f2f6fa; }
+.assistant-actions button { padding: 5px 8px; border: 1px solid var(--color-border); border-radius: 3px; background: #fff; color: var(--color-primary); font-size: 11px; cursor: pointer; }
+.assistant-actions button:hover { border-color: var(--color-primary); background: var(--color-primary-light); }
 
 :deep(.chat-input .el-textarea__inner) {
   min-height: 56px !important;

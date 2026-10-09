@@ -27,6 +27,7 @@ from app.services.documents.document_state import (
     DocumentStateTransitionError,
     transition_document,
 )
+from app.services.workflows.workflow_service import WorkflowCancelled, workflow_service
 from app.tasks.runtime import (
     acquire_document_lock as _acquire_document_lock,
     background_error_detail as _background_error_detail,
@@ -142,6 +143,8 @@ def parse_document_task(self, document_id: int, version_number: int, file_type: 
         if not doc:
             return {"status": "error", "message": "Document not found"}
 
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
+
         # 长流程权限快照：硬撤销（禁用/强制退出/授权撤销）立即终止。
         if snapshot_id:
             from app.services.org.authorization_service import authorization_service
@@ -176,11 +179,15 @@ def parse_document_task(self, document_id: int, version_number: int, file_type: 
             return {"status": "skipped", "reason": parse_result.get("reason"), "document_id": document_id}
         refresh()
 
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
+
         # 阶段 2：chunk（产物 → 切分 → 写 DocumentChunk）
         chunk_result = run_chunk(db, document_id, expected_version=version_number, lease_refresh=refresh)
         if chunk_result["status"] == "skipped":
             return {"status": "skipped", "reason": chunk_result.get("reason"), "document_id": document_id}
         refresh()
+
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
 
         # 阶段 3：index（切分结果 → 向量索引；失败降级为 parsed）
         index_result = run_index(
@@ -219,6 +226,8 @@ def parse_document_task(self, document_id: int, version_number: int, file_type: 
             "chunks": chunk_count or 0,
             "indexed": not degraded,
         }
+    except WorkflowCancelled:
+        raise
     except (DocumentParsePermanentError, DocumentSecurityError) as e:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if doc:
@@ -277,6 +286,7 @@ def document_chunk_task(self, document_id: int, version_number: int, snapshot_id
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
             return {"status": "error", "message": "Document not found"}
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
         if snapshot_id:
             from app.services.org.authorization_service import authorization_service
 
@@ -289,12 +299,17 @@ def document_chunk_task(self, document_id: int, version_number: int, snapshot_id
         document_job_service.claim_job(job.id, owner, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
         heartbeat = _lease_refresher(job.id, owner)
         refresh = heartbeat.renew
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
         result = run_chunk(db, document_id, expected_version=version_number, lease_refresh=refresh)
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
         if result["status"] in ("success", "replayed"):
+            workflow_service.ensure_not_cancelled(db, task_id=owner)
             document_index_task.delay(document_id, version_number, headers=obs_enqueue_headers())
             document_job_service.mark_succeeded(owner, db, message="文档切分完成", result_summary=f"共切分 {result.get('chunks', 0)} 个片段")
             result["status"] = "success"
         return result
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if doc:
@@ -328,6 +343,7 @@ def document_index_task(self, document_id: int, version_number: int):
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
             return {"status": "error", "message": "Document not found"}
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
         if not _acquire_document_lock(document_id, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS):
             return {"status": "skipped", "reason": "document_locked"}
         job = document_job_service.find_or_create_job(
@@ -336,6 +352,7 @@ def document_index_task(self, document_id: int, version_number: int):
         document_job_service.claim_job(job.id, owner, get_settings().DOCUMENT_JOB_LEASE_TTL_SECONDS, db)
         heartbeat = _lease_refresher(job.id, owner)
         refresh = heartbeat.renew
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
         result = run_index(
             db,
             document_id,
@@ -344,11 +361,14 @@ def document_index_task(self, document_id: int, version_number: int):
             knowledge_base_id=doc.knowledge_base_id,
             lease_refresh=refresh,
         )
+        workflow_service.ensure_not_cancelled(db, task_id=owner)
         if result["status"] == "success":
             document_job_service.mark_succeeded(owner, db, message="文档索引完成", result_summary=f"已索引 {result.get('indexed', 0)} 个片段")
         elif result["status"] == "degraded":
             document_job_service.mark_succeeded(owner, db, message="文档索引已降级", result_summary="索引失败，文档保持已解析状态")
         return result
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if doc:
@@ -427,6 +447,7 @@ def recover_stale_document_jobs_task():
 def summarize_document_task(self, document_id: int, user_id: int, max_length: int = 500, snapshot_id: str | None = None):
     db = SessionLocal()
     try:
+        workflow_service.ensure_not_cancelled(db, task_id=self.request.id)
         # 长流程权限快照：硬撤销立即终止。
         if snapshot_id:
             from app.services.org.authorization_service import authorization_service
@@ -451,6 +472,7 @@ def summarize_document_task(self, document_id: int, user_id: int, max_length: in
         from app.services.documents.document_service import document_service
 
         raw_text = document_service.summarize(document_id, db, user_id=user_id)
+        workflow_service.ensure_not_cancelled(db, task_id=self.request.id)
 
         self.update_state(state="PROCESSING", meta={"step": "summarizing"})
         document_job_service.update_progress(
@@ -461,6 +483,7 @@ def summarize_document_task(self, document_id: int, user_id: int, max_length: in
             progress=65,
         )
         summary = asyncio.run(analysis_service.summarize_document(raw_text, max_length=max_length))
+        workflow_service.ensure_not_cancelled(db, task_id=self.request.id)
 
         doc = document_service.get(document_id, db, user_id=user_id)
         if doc:
@@ -482,6 +505,8 @@ def summarize_document_task(self, document_id: int, user_id: int, max_length: in
             result_summary=(summary or "")[:500],
         )
         return {"document_id": document_id, "summary": summary}
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         _retry_task(
             self,
@@ -499,6 +524,7 @@ def summarize_document_task(self, document_id: int, user_id: int, max_length: in
 def analyze_document_task(self, document_id: int, user_id: int, max_length: int = 500, snapshot_id: str | None = None):
     db = SessionLocal()
     try:
+        workflow_service.ensure_not_cancelled(db, task_id=self.request.id)
         # 长流程权限快照：硬撤销立即终止。
         if snapshot_id:
             from app.services.org.authorization_service import authorization_service
@@ -537,6 +563,7 @@ def analyze_document_task(self, document_id: int, user_id: int, max_length: int 
                 max_length=max_length,
             )
         )
+        workflow_service.ensure_not_cancelled(db, task_id=self.request.id)
         log_async_task_event(
             user_id=user_id,
             module="async_task",
@@ -553,6 +580,8 @@ def analyze_document_task(self, document_id: int, user_id: int, max_length: int 
             result_summary=result_summary,
         )
         return result
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         _retry_task(
             self,

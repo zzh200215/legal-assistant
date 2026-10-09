@@ -2,7 +2,7 @@
 import json
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
@@ -209,6 +209,85 @@ def list_portal_links(
         LegalPortalLink.case_id == case_id,
         LegalPortalLink.organization_id == org_id,
     ).all()
+
+
+@router.get("/orgs/{org_id}/cases/{case_id}/portal-analytics")
+def get_portal_analytics(
+    org_id: int,
+    case_id: int,
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if days not in {7, 30, 90}:
+        raise HTTPException(422, detail="days 只允许 7、30 或 90")
+    _require_case_manager(db, current_user.id, org_id, case_id)
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days - 1)
+    links = db.query(LegalPortalLink).filter(
+        LegalPortalLink.case_id == case_id,
+        LegalPortalLink.organization_id == org_id,
+    ).order_by(LegalPortalLink.created_at.desc()).all()
+    link_ids = [link.id for link in links]
+    logs = db.query(LegalPortalAccessLog).filter(
+        LegalPortalAccessLog.organization_id == org_id,
+        LegalPortalAccessLog.portal_link_id.in_(link_ids),
+        LegalPortalAccessLog.accessed_at >= since,
+    ).all() if link_ids else []
+
+    daily_map: dict[str, dict] = {}
+    action_counts: dict[str, int] = {}
+    visitor_hashes: set[str] = set()
+    successful = 0
+    denied = 0
+    for offset in range(days):
+        day = (since + timedelta(days=offset)).date().isoformat()
+        daily_map[day] = {"date": day, "visits": 0, "unique_visitors": 0}
+    for log in logs:
+        day = log.accessed_at.date().isoformat()
+        action_counts[log.action] = action_counts.get(log.action, 0) + 1
+        if log.result == "success":
+            successful += 1
+            if day in daily_map:
+                daily_map[day]["visits"] += 1
+                if log.ip_hash:
+                    visitor_hashes.add(f"{day}:{log.ip_hash}")
+        else:
+            denied += 1
+
+    for visitor in visitor_hashes:
+        day, _ = visitor.split(":", 1)
+        daily_map[day]["unique_visitors"] += 1
+
+    log_counts: dict[int, int] = {}
+    for log in logs:
+        if log.result == "success":
+            log_counts[log.portal_link_id] = log_counts.get(log.portal_link_id, 0) + 1
+
+    return {
+        "days": days,
+        "summary": {
+            "visits": successful,
+            "denied": denied,
+            "unique_visitors": len({log.ip_hash for log in logs if log.result == "success" and log.ip_hash}),
+            "active_links": sum(1 for link in links if log_counts.get(link.id, 0)),
+        },
+        "daily": list(daily_map.values()),
+        "actions": action_counts,
+        "links": [
+            {
+                "id": link.id,
+                "token_prefix": link.token_prefix,
+                "status": link.status,
+                "aggregate_case": bool(link.aggregate_case),
+                "visits": log_counts.get(link.id, 0),
+                "access_count": link.access_count or 0,
+                "last_accessed_at": link.last_accessed_at,
+            }
+            for link in links
+        ],
+    }
 
 
 @router.post("/portal/{token}/send-otp")
@@ -418,13 +497,16 @@ def portal_get_content(
     progress_updates.sort(key=lambda u: u["published_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
     org = db.query(Organization).filter(Organization.id == link.organization_id).first()
+    billing = _portal_billing_snapshot(db, link)
 
     return {
         "link_id": link.id,
         "case_id": link.case_id,
         "progress_updates": progress_updates,
         "documents": documents,
-        "invoice": _portal_billing_snapshot(db, link),
+        # 保留旧版 invoice 字段，同时提供 P3 完整对账结构。
+        "invoice": billing["latest"] if billing else None,
+        "billing": billing,
         "organization": {
             "name": org.name if org else None,
             "portal_logo_url": org.portal_logo_url if org else None,
