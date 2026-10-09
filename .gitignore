@@ -86,3 +86,6 @@ coverage.json
 sbom/licenses.json
 sbom/licenses.csv
 sbom/outdated.json
+
+# Trae IDE 工作文件（计划/会话文档，勿入库）
+.trae/
