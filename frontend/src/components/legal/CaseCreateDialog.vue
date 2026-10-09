@@ -38,9 +38,10 @@ import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import legalWorkspace from '../../api/legalWorkspace'
+import { errorMessage } from '../../api/errors'
 
 const props = defineProps({
-  orgId: { type: Number, default: 1 },
+  orgId: { type: Number, default: null },
 })
 const emit = defineEmits(['created'])
 
@@ -50,6 +51,8 @@ const caseForm = ref({ title: '', case_type: 'labor_dispute', description: '' })
 
 const createCase = async () => {
   if (!caseForm.value.title.trim()) return ElMessage.warning('请输入案件名称')
+  // 无组织用户兜底：上游按钮已禁用，这里防止其他调用路径绕过（ux-audit P0-1）
+  if (!props.orgId) return ElMessage.warning('你还未加入组织，暂时无法创建案件。请联系系统管理员开通。')
   caseCreating.value = true
   try {
     const { data } = await legalWorkspace.createCase(props.orgId, {
@@ -59,7 +62,8 @@ const createCase = async () => {
     caseDialogVisible.value = false
     emit('created', data.id)
   } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '创建失败')
+    // 走统一错误映射：NOT_ORG_MEMBER 等错误码有可行动的中文文案（ux-audit P0-1）
+    ElMessage.error(errorMessage(error))
   } finally {
     caseCreating.value = false
   }

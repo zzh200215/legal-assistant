@@ -6,8 +6,13 @@
         <h1>今天先处理什么？</h1>
         <p class="workbench-subtitle">从待审核事项、最近案件和关键动作继续工作。</p>
       </div>
-      <button type="button" class="workspace-primary" @click="$emit('create-case')">新建案件</button>
+      <button type="button" class="workspace-primary" :disabled="orgMissing" :title="orgMissing ? '你还未加入组织，暂无法创建案件' : undefined" @click="$emit('create-case')">新建案件</button>
     </header>
+
+    <div v-if="orgMissing" class="workbench-org-alert" role="alert">
+      <strong>你还未加入任何组织</strong>
+      <p>案件、咨询与文书都以组织为单位工作，暂时无法创建内容。请联系系统管理员将你加入组织（或为你创建组织）后刷新本页。</p>
+    </div>
 
     <section class="workbench-summary" aria-label="工作台摘要">
       <div><span>进行中案件</span><strong>{{ activeCaseCount }}</strong><button type="button" @click="$emit('open-cases')">查看案件</button></div>
@@ -60,7 +65,7 @@ import { computed, onMounted, ref } from 'vue'
 import legalWorkspace from '../../api/legalWorkspace'
 
 defineEmits(['create-case', 'open-cases', 'open-review', 'open-case', 'open-documents', 'open-research', 'open-tasks', 'open-chat'])
-const props = defineProps({ overview: { type: Object, default: null }, cases: { type: Array, default: () => [] } })
+const props = defineProps({ overview: { type: Object, default: null }, cases: { type: Array, default: () => [] }, orgMissing: { type: Boolean, default: false } })
 const reviewItems = ref([])
 const reviewLoading = ref(false)
 const activeCaseCount = computed(() => props.cases.filter((item) => item.status === 'in_progress').length)
@@ -87,6 +92,9 @@ onMounted(async () => {
 <style scoped>
 .workbench-home { display: grid; gap: 28px; padding: 8px 0 36px; }
 .workbench-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--color-border); }
+.workbench-org-alert { display: grid; gap: 6px; margin-top: 20px; padding: 14px 16px; border: 1px solid var(--color-border); border-left: 3px solid var(--color-primary); border-radius: 6px; background: #F7FAFC; }
+.workbench-org-alert strong { color: var(--color-text); font-size: 13px; font-weight: 600; }
+.workbench-org-alert p { margin: 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.7; }
 .workbench-kicker { margin: 0 0 7px; color: var(--color-primary); font-size: 12px; font-weight: 600; }
 .workbench-heading h1 { margin: 0; color: var(--color-text); font-size: clamp(26px, 3vw, 36px); font-weight: 620; letter-spacing: 0; }
 .workbench-subtitle { margin: 8px 0 0; color: var(--color-text-secondary); font-size: 14px; }

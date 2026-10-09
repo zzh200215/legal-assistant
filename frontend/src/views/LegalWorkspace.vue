@@ -6,7 +6,7 @@
           <h1>案件</h1>
           <p>按案件集中查看工作进展、咨询、审查与文书。</p>
         </div>
-        <button class="workspace-primary" type="button" @click="caseDialog?.open()">新建案件</button>
+        <button class="workspace-primary" type="button" :disabled="!hasOrg" :title="!hasOrg ? '你还未加入组织，暂无法创建案件' : undefined" @click="caseDialog?.open()">新建案件</button>
       </header>
 
       <div class="case-list-toolbar">
@@ -49,7 +49,7 @@
           <el-option v-for="matter in cases" :key="matter.id" :label="matter.title" :value="matter.id" />
         </el-select>
         <button class="quiet-action" type="button" @click="goToView('cases')">全部案件</button>
-        <button class="quiet-action new-matter" type="button" @click="caseDialog?.open()">新建案件</button>
+        <button class="quiet-action new-matter" type="button" :disabled="!hasOrg" @click="caseDialog?.open()">新建案件</button>
       </div>
 
       <CaseHeader :matter="currentCase" @continue="continueMatter" />
@@ -215,6 +215,7 @@
       v-else
       :overview="overviewQuery.data.value"
       :cases="cases"
+      :org-missing="overviewQuery.isSuccess.value && !hasOrg"
       @create-case="caseDialog?.open()"
       @open-cases="goToView('cases')"
       @open-review="goToView('review')"
@@ -268,8 +269,11 @@ const draftsTabRef = ref(null)
 const contractsTabRef = ref(null)
 
 const overviewQuery = useQuery({ key: qk.legal.overview(), fetcher: () => legalWorkspace.getLegalOverview(), staleTime: 60_000 })
-const currentOrgId = computed(() => overviewQuery.data.value?.organization_id || 1)
-const casesQuery = useQuery({ key: () => qk.legal.cases(currentOrgId.value), fetcher: () => legalWorkspace.listCases(currentOrgId.value), staleTime: 30_000, enabled: () => overviewQuery.isSuccess.value })
+// 自注册且未归属组织的用户 organization_id 为 null：不再回退默认组织（回退会让全部
+// 写操作打到无权限的组织上，只能得到"不是该组织成员"的不可理解错误，见 ux-audit P0-1）。
+const hasOrg = computed(() => overviewQuery.data.value?.organization_id != null)
+const currentOrgId = computed(() => overviewQuery.data.value?.organization_id || null)
+const casesQuery = useQuery({ key: () => qk.legal.cases(currentOrgId.value), fetcher: () => legalWorkspace.listCases(currentOrgId.value), staleTime: 30_000, enabled: () => overviewQuery.isSuccess.value && hasOrg.value })
 const cases = computed(() => casesQuery.data.value || [])
 const view = computed(() => route.query.view || '')
 const currentCase = computed(() => cases.value.find((matter) => matter.id === currentCaseId.value) || null)

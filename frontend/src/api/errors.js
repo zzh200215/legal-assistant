@@ -33,6 +33,7 @@ const CODE_TEXT = {
   DOCUMENT_NOT_FOUND: '文档不存在或无权访问',
   TASK_NOT_FOUND: '任务不存在',
   ORG_NOT_FOUND: '组织不存在',
+  NOT_ORG_MEMBER: '你暂无该组织的访问权限。请联系组织管理员将你加入团队，或切换到自己有权限的组织。',
   SOURCE_NOT_FOUND: '法源不存在',
   SERVICE_UNAVAILABLE: '服务暂不可用，请稍后重试',
   REQUEST_TIMEOUT: '请求超时，请重试',
