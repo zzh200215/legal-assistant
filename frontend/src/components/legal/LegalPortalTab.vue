@@ -1,6 +1,11 @@
 <template>
   <div class="tab-panel">
-    <el-card shadow="never">
+    <el-card v-if="!canManagePortal" shadow="never" class="portal-permission-card">
+      <el-empty description="客户门户的链接、品牌与访问分析由组织管理员或审核律师管理。" :image-size="80" />
+      <p class="portal-permission-hint">你仍可在下方"案件进度更新"中记录案件进展。</p>
+    </el-card>
+
+    <el-card v-if="canManagePortal" shadow="never">
       <template #header>
         <div class="result-header">
           <span class="card-title">客户门户品牌</span>
@@ -17,7 +22,7 @@
       </el-form>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card v-if="canManagePortal" shadow="never">
       <template #header>
         <div class="result-header">
           <span class="card-title">客户门户链接</span>
@@ -63,7 +68,7 @@
       </el-table>
     </el-card>
 
-    <section class="portal-analytics" aria-label="门户访问分析">
+    <section v-if="canManagePortal" class="portal-analytics" aria-label="门户访问分析">
       <header class="portal-analytics-heading">
         <div><h3>访问分析</h3><span>仅显示当前案件的聚合访问数据</span></div>
         <select v-model="analyticsDays" aria-label="访问分析周期" :disabled="analyticsLoading" @change="loadPortalAnalytics">
@@ -123,14 +128,14 @@
         </el-table-column>
         <el-table-column label="操作" width="200">
           <template #default="{ row }">
-            <el-button v-if="row.status === 'pending_review'" size="small" type="primary" @click="publishProgress(row)">审核并发布</el-button>
-            <el-button v-if="row.status === 'published'" size="small" type="warning" @click="withdrawProgress(row)">撤回</el-button>
+            <el-button v-if="row.status === 'pending_review' && canManagePortal" size="small" type="primary" @click="publishProgress(row)">审核并发布</el-button>
+            <el-button v-if="row.status === 'published' && canManagePortal" size="small" type="warning" @click="withdrawProgress(row)">撤回</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <el-card shadow="never" style="margin-top:20px">
+    <el-card v-if="canManagePortal" shadow="never" style="margin-top:20px">
       <template #header><span class="card-title">案件成员</span></template>
       <el-table :data="caseMembers" stripe size="small">
         <el-table-column prop="user_id" label="用户ID" width="80" />
@@ -189,11 +194,17 @@ import 'element-plus/es/components/switch/style/css'
 import { legalWorkspace } from '../../api'
 import { useLegalCaseCollaboration } from '../../composables/useLegalCaseCollaboration'
 import { formatDate } from '../../composables/useLegalWorkspacePresentation'
+import { useAuthStore } from '../../stores/auth'
 
 const props = defineProps({
   organizationId: { type: [Number, String], default: null },
   caseId: { type: [Number, String], default: null },
 })
+
+const auth = useAuthStore()
+// 门户管理（品牌/链接/分析/成员/进度发布）后端要求组织 admin 或 reviewer（_require_case_manager）。
+// 与后端保持同一判据：仅看 legal_role，不看系统角色（ux-audit P1-5）。
+const canManagePortal = computed(() => ['admin', 'reviewer'].includes(auth.currentUser?.legal_role))
 
 const {
   portalLinks,
@@ -295,20 +306,24 @@ const portalSummary = computed(() => {
 })
 
 onMounted(() => {
-  loadPortalLinks()
+  if (canManagePortal.value) {
+    loadPortalLinks()
+    loadCaseMembers()
+    loadBranding()
+    loadPortalAnalytics()
+  }
   loadProgressUpdates()
-  loadCaseMembers()
-  loadBranding()
-  loadPortalAnalytics()
 })
 watch(
   () => [props.organizationId, props.caseId],
   () => {
-    loadPortalLinks()
+    if (canManagePortal.value) {
+      loadPortalLinks()
+      loadCaseMembers()
+      loadBranding()
+      loadPortalAnalytics()
+    }
     loadProgressUpdates()
-    loadCaseMembers()
-    loadBranding()
-    loadPortalAnalytics()
   },
 )
 
@@ -353,6 +368,7 @@ const barHeight = (value) => {
 .analytics-bar-wrap { display: flex; align-items: end; width: 10px; height: 82px; background: var(--color-surface-hover); }
 .analytics-bar-wrap i { display: block; width: 100%; min-height: 3px; background: var(--color-primary); }
 .portal-analytics-empty { padding: 24px 0; color: var(--color-text-muted); font-size: 12px; }
+.portal-permission-hint { margin: -8px 0 4px; text-align: center; color: var(--color-text-muted); font-size: 13px; }
 .aggregate-hint {
   font-size: 12px;
   color: var(--color-text-muted);
