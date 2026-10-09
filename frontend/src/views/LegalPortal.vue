@@ -3,13 +3,23 @@
     <div v-if="errorState" class="portal-error">
       <el-card shadow="never">
         <el-empty :description="errorState" :image-size="80" />
+        <p class="portal-error-hint">请联系您的律师重新生成门户链接。</p>
       </el-card>
     </div>
 
     <div v-else-if="step === 'otp'" class="portal-otp">
       <el-card shadow="never">
-        <template #header><span class="card-title">案件查询验证</span></template>
-        <el-alert v-if="maskedEmail" type="info" :closable="false" show-icon style="margin-bottom:16px">
+        <template #header>
+          <div class="otp-header">
+            <span class="card-title">案件查询验证</span>
+            <span v-if="organizationName" class="otp-org-name">{{ organizationName }}</span>
+          </div>
+        </template>
+        <el-alert v-if="otpError" type="error" :closable="false" show-icon class="otp-error-alert">
+          <template #title>{{ otpError }}</template>
+          <p class="otp-error-hint">请稍后点击下方"重新发送"重试；若多次失败，请联系您的律师协助。</p>
+        </el-alert>
+        <el-alert v-else-if="maskedEmail" type="info" :closable="false" show-icon style="margin-bottom:16px">
           <template #title>验证码已发送至 {{ maskedEmail }}</template>
         </el-alert>
         <el-form @submit.prevent="verifyOtp">
@@ -175,6 +185,9 @@ const token = route.params.token
 
 const step = ref('otp')
 const errorState = ref('')
+// OTP 邮件发送失败（503/限流）不进终态：留在验证页允许重试（ux-audit P1-4）
+const otpError = ref('')
+const organizationName = ref('')
 const maskedEmail = ref('')
 const otpCode = ref('')
 const verifyLoading = ref(false)
@@ -224,12 +237,18 @@ const initOtp = async () => {
   try {
     const { data } = await api.portalSendOtp(token)
     maskedEmail.value = data.email_masked || ''
+    organizationName.value = data.organization_name || organizationName.value
+    otpError.value = ''
     startCooldown()
   } catch (e) {
     const detail = e.response?.data?.detail
-    if (e.response?.status === 404) errorState.value = '链接不存在'
-    else if (e.response?.status === 410) errorState.value = '链接已过期'
-    else if (e.response?.status === 403) errorState.value = '链接已被撤销'
+    const status = e.response?.status
+    if (status === 404) errorState.value = '链接不存在'
+    else if (status === 410) errorState.value = '链接已过期'
+    else if (status === 403) errorState.value = '链接已被撤销'
+    else if (status === 400) errorState.value = detail || '链接配置有误'
+    // 503（邮件服务暂不可用）/429（发送频率限制）/网络错误：可重试，不进终态死胡同
+    else if (status === 503 || status === 429 || !e.response) otpError.value = detail || '验证码邮件暂时无法发送，请稍后重试'
     else errorState.value = detail || '无法访问'
   }
 }
@@ -254,10 +273,17 @@ const resendOtp = async () => {
   try {
     const { data } = await api.portalSendOtp(token)
     maskedEmail.value = data.email_masked || maskedEmail.value
+    organizationName.value = data.organization_name || organizationName.value
+    otpError.value = ''
     startCooldown()
     ElMessage.success('验证码已重新发送')
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '发送失败')
+    const status = e.response?.status
+    const detail = e.response?.data?.detail
+    ElMessage.error(detail || '发送失败')
+    if (status === 503 || status === 429 || !e.response) {
+      otpError.value = detail || '验证码邮件暂时无法发送，请稍后重试'
+    }
   }
   resendLoading.value = false
 }
@@ -340,6 +366,35 @@ onUnmounted(() => {
 
 .otp-input {
   width: 240px;
+}
+
+.otp-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.otp-org-name {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.otp-error-alert {
+  margin-bottom: 16px;
+}
+
+.otp-error-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.portal-error-hint {
+  margin: -8px 0 4px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
 }
 
 .card-title {

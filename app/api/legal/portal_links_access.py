@@ -52,6 +52,26 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 router = APIRouter()
 
+
+def _log_portal_otp_failure(db: Session, link, *, reason: str) -> None:
+    """门户 OTP 邮件发送失败告警：写 OperationLog 供运营告警聚合推送（ux-audit P1-4）。
+
+    告警失败不阻断对客户的 503 响应路径。
+    """
+    try:
+        from app.services.observability.oplog_service import oplog_service
+
+        oplog_service.log(
+            module="portal",
+            action="portal_otp_send_failed",
+            db=db,
+            target_type="portal_link",
+            target_id=link.id,
+            detail=f"portal otp email failed: {reason}",
+        )
+    except Exception:
+        db.rollback()
+
 class PortalLinkCreate(BaseModel):
     client_email: str = Field(..., max_length=256, description="客户邮箱，必填，用于 OTP 验证")
     expires_days: int = Field(default=30, description="链接有效天数，只允许 7/30/90，默认 30（#93）")
@@ -320,12 +340,15 @@ def portal_send_otp(
     from app.services.notification.outbound_email_service import outbound_email_service
     sender = db.query(User).filter(User.id == link.created_by).first()
     if not sender:
+        _log_portal_otp_failure(db, link, reason="sender_missing")
         raise HTTPException(503, detail="门户邮件配置不可用")
     try:
         outbound_email_service.send_portal_otp(
             db=db, user=sender, recipient=link.client_email, otp=otp,
         )
     except (ValueError, OSError) as exc:
+        # 运维告警：写 OperationLog，由 dispatch_operational_alerts beat 任务聚合推送（ux-audit P1-4）
+        _log_portal_otp_failure(db, link, reason=type(exc).__name__)
         raise HTTPException(503, detail="门户验证码邮件暂不可用") from exc
     r.setex(_otp_key(token_hash), _OTP_TTL, otp)
 
@@ -340,7 +363,15 @@ def portal_send_otp(
     ))
     db.commit()
 
-    return {"sent": True, "email_masked": _mask_email(link.client_email), "ttl_seconds": _OTP_TTL}
+    organization_name = db.query(Organization.name).filter(
+        Organization.id == link.organization_id
+    ).scalar()
+    return {
+        "sent": True,
+        "email_masked": _mask_email(link.client_email),
+        "ttl_seconds": _OTP_TTL,
+        "organization_name": organization_name or "",
+    }
 
 
 @router.post("/portal/{token}/verify")
