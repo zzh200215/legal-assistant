@@ -12,7 +12,8 @@
 
 | 领域 | 已实现能力 |
 | --- | --- |
-| 法律工作台 | 法律咨询、合同审查、文书草稿、案件归档、律师审核、计时计费、关键日期与客户门户。 |
+| 法律工作台 | 以案件为中心的工作区：法律咨询、合同审查、文书草稿、律师审核与批量审核分配、文档协作与版本对比、案件活动流、计时计费、关键日期与客户门户；配套统一通知中心与管理中心。 |
+| 案件工作流 | 案件动作以持久化 WorkflowRun 执行，支持取消、重试与事务性 Outbox 分发；运行进度、事件与案件活动全程可追溯。 |
 | 法律知识库 | 文档上传、版本管理、解析、向量检索、BM25、重排序、Agentic RAG、引用与法源有效性核验。 |
 | 扫描合同理解 | 版面感知 OCR、置信度校验、印章/签字区域识别、表格与条款抽取、证据页码和坐标定位；可选择调用视觉模型辅助识别。 |
 | Agent 编排 | Supervisor/Worker 执行、工具调用、敏感操作审批、幂等控制、Run 历史，以及受约束的内部 A2A 委派。 |
@@ -38,12 +39,14 @@ flowchart TB
     Web -->|REST / WebSocket| Api[FastAPI API 层]
 
     Api --> Legal[法律工作台服务]
+    Api --> Workflow[案件工作流服务]
     Api --> Doc[文档服务]
     Api --> Agent[Agent 编排服务]
     Api --> RAG[RAG 检索服务]
     Api --> Admin[运营与治理服务]
 
     Legal --> Mysql[(MySQL)]
+    Workflow --> Mysql
     Doc --> Storage[本地或对象存储]
     Doc --> Queue[Celery 队列]
     RAG --> Vector[(Chroma / Qdrant)]
@@ -65,7 +68,7 @@ flowchart TB
 | 层 | 职责 | 主要目录 |
 | --- | --- | --- |
 | 表现层 | HTTP、WebSocket、认证、请求响应与 OpenAPI 契约。 | `app/api/`、`frontend/src/` |
-| 业务层 | 法律工作台、文档、RAG、Agent、计费、通知和组织等领域服务。 | `app/services/` |
+| 业务层 | 法律工作台、案件工作流、文档、RAG、Agent、计费、通知和组织等领域服务。 | `app/services/` |
 | 领域与数据层 | SQLAlchemy 模型、Pydantic DTO、数据访问和版本控制。 | `app/models/`、`app/schemas/`、`app/repositories/` |
 | 基础设施层 | 配置、数据库、缓存、LLM 网关、加密、遥测、错误处理。 | `app/core/` |
 | 执行层 | MCP 工具策略与执行、Celery 异步任务。 | `app/mcp/`、`app/tasks/` |
@@ -169,6 +172,12 @@ docker compose ps
 
 ## 关键工作流
 
+### 案件工作流与协作
+
+1. 案件是工作的容器：咨询、合同审查、文书和律师审核都在案件内完成，`GET /api/legal/matters/{case_id}/activity` 提供案件活动流。
+2. 案件动作进入持久化 WorkflowRun：`GET /api/tasks/workflows` 查看运行列表与详情，`POST /api/tasks/workflows/{id}/cancel|retry` 干预执行；事件经事务性 Outbox 可靠分发。
+3. 审核队列支持批量分配（`POST /api/legal/review-queue/bulk-assignment`），文档版本与差异对比为协作留痕。
+
 ### 扫描合同分析
 
 1. 上传 PDF 或图片合同并完成基础解析。
@@ -226,6 +235,7 @@ node scripts/capture-readme-screenshots.mjs
 | 主题 | 文档 |
 | --- | --- |
 | 架构与模块边界 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 前端工作台信息架构 | [frontend-legal-workbench-redesign.md](docs/frontend-legal-workbench-redesign.md) |
 | MCP 策略、审计回放 | [MCP_POLICY_AS_CODE.md](docs/MCP_POLICY_AS_CODE.md) |
 | 内部 A2A 协作 | [A2A_COLLABORATION.md](docs/A2A_COLLABORATION.md) |
 | RAG 指标与评测 | [RAG_EVALUATION_GUIDE.md](docs/RAG_EVALUATION_GUIDE.md) / [EVAL_METRICS.md](docs/EVAL_METRICS.md) |
