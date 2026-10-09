@@ -1,7 +1,6 @@
 # 律智检 · 架构基线（ARCHITECTURE.md）
 
-> 本文件是重构的「对照图」与依赖红线。完整评估与分阶段计划见
-> [`docs/ARCHITECTURE_REFACTOR_PLAN.md`](./ARCHITECTURE_REFACTOR_PLAN.md)。
+> 本文件是架构的「对照图」与依赖红线。
 
 ## 1. 架构风格
 

@@ -2,7 +2,7 @@
 
 > 范围：统一密钥读取抽象（SecretProvider）、密钥版本化、受控轮换流程与轮换审计。
 > 不覆盖：LLM 出站数据保护（P0，见 `docs/llm-outbound-data-protection.md`）、
-> 数据库静态加密列的选择（见 `app/core/encryption.py` 与 `docs/security-policy-compilation-draft.md` §6）。
+> 数据库静态加密列的选择（见 `app/core/encryption.py`）。
 > 关联配置：`docs/CONFIG.md`「安全密钥配置」；实现：`app/core/secrets/`、
 > `app/core/encryption.py`、`scripts/rotate_encryption_key.py`。
 
@@ -87,7 +87,7 @@ call args、pytest traceback、`logger.exception` 的局部变量快照（Sentry
 - **.env 写入与发布**：脚本只输出 `env_to_set`，由运维写入 .env 并滚动重启进程；
   多实例部署需确保所有实例在摘除旧版本前已切换到新版本。
 - **审计保留期限**：`security_audit_events`（含 key_rotation 事件）的保留/归档
-  期限与访问控制，与 `docs/data-retention-sla-draft.md` 对齐。
+  期限与访问控制，由部署方按合规要求配置。
 - **连接器凭据密钥**：`CONNECTOR_CREDENTIAL_ENCRYPTION_KEY` 目前仍为环境变量直读
   （为空时从 SECRET_KEY 派生，属降级路径）；统一迁入 SecretProvider 列为后续项。
 - **LLM/第三方凭据**：`LLM_API_KEY` 等目前保持环境变量直读（满足"不硬编码、

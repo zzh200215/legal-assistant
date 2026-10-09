@@ -52,6 +52,9 @@ backups/
 # Runtime data (sqlite DB, uploads, backups, daily check / baseline / weekly artifacts)
 data/
 
+# Seed 演示产物（scripts/seed_demo_data.py 重新生成）
+/uploads/
+
 # Runtime cursor for review-feedback eval export
 scripts/review_feedback_state.json
 

@@ -2,7 +2,7 @@
 
 ## 背景（Context）
 
-本产品（AI 法律助手 / 律智检）为个人模拟项目。上一轮迭代已完成客户门户基础能力（OTP 鉴权、进度时间线、文书/PDF 下载、默认 30 天过期、品牌化、客户反馈），但 `docs/portal-polish-checklist.md`（#79）P1 三项中仍有缺口：
+本产品（AI 法律助手 / 律智检）为个人模拟项目。上一轮迭代已完成客户门户基础能力（OTP 鉴权、进度时间线、文书/PDF 下载、默认 30 天过期、品牌化、客户反馈），但客户门户打磨（#79）P1 三项中仍有缺口：
 
 - **「链接到期策略：默认 30 天过期 + 自动撤销提醒（邮件/飞书通知到律师）」** → 过期检测已有（每小时扫描置 `expired`，见 `app/tasks/__init__.py:745`），但**无任何通知触达律师**。
 - **「移动端最小适配」** → 仅 640px 基础断点，未验证且有溢出点。
@@ -127,6 +127,6 @@ US-001~US-004 已全部实现并通过验证：
 - 提交：`1dacaea feat(portal): notify lawyers on link expiry, add notification center + mobile polish`
 - 后续补齐：`9577e0c` 新增 `dispatch_notification_events` beat 任务调度 `notification_service.dispatch_pending`，deadline/contract/审批等 pending 通知投递为 delivered 进入铃铛未读（此前对律师不可见）。
 - P2 聚合页：`553484c` 新增 `aggregate_case` 开关（迁移 `20260808_0066`），开启后该链接自动聚合该案全部已发布客户可见内容（进度+文书），一个案件一个URL；管理端加开关与「聚合」类型标签，7 个后端测试 + 浏览器验证通过。
-- P2 门户访问分析入周报：经核实现有 `scripts/pilot_weekly_report.py` 已包含 portal 指标（访问/访客/重复访问/时段），无需新增。
+- P2 门户访问分析入周报：经核实周报已包含 portal 指标（访问/访客/重复访问/时段），无需新增。
 
 遗留（非本次范围，见 Non-Goals）：P3 客户可见账单对账（门户已展示发票快照，完整对账待评估）。

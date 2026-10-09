@@ -1,7 +1,7 @@
 # LLM 出站数据保护与可审计性（P0）
 
 > 范围：仅覆盖**出站 LLM 请求**（应用 → 外部模型提供方）的数据保护与审计。
-> 不覆盖：数据库静态加密（见 `app/core/encryption.py` 与 `docs/security-policy-compilation-draft.md` §6）、
+> 不覆盖：数据库静态加密（见 `app/core/encryption.py`）、
 > 外发邮件 DLP（见 `app/services/notification/dlp_scanner.py`）、文件上传安全、密钥轮换、Webhook 防重放
 > （列为后续 P1 待办，见文末）。
 > 关联配置：`docs/CONFIG.md`「LLM 出站数据保护（P0）」；实现：`app/services/llm/llm_outbound_gate.py`、
@@ -72,12 +72,11 @@ generate_with_images / chat_stream / embed）均收敛于 `ModelGateway`
 - **KMS/密钥托管**：`LEGAL_DATA_ENCRYPTION_KEY` 及其轮换版本
   （`LEGAL_DATA_ENCRYPTION_KEYS_JSON`）的生产托管方式（KMS/保险库）、
   轮换周期与责任人是部署方职责；出站网关本身不管理该密钥。
-- **日志保留期限**：`llm_call_logs` 的保留/归档/清理期限（与
-  `docs/data-retention-sla-draft.md` 对齐），以及审计导出的访问控制，需部署方配置。
+- **日志保留期限**：`llm_call_logs` 的保留/归档/清理期限，以及审计导出的访问控制，需部署方配置。
 - **地区/跨境传输**：本网关不改变模型提供方与调用地域。若部署环境或供应商位于
   其他法域，数据传输合规（如出境评估/标准合同条款）由部署方与供应商协议确认。
 - **第三方模型数据政策**：脱敏后仍可能包含业务上下文；第三方模型供应商的数据
-  使用/训练政策需在合同层面约束（供应商清单见 `docs/supplier-list-and-data-transfer-draft.md`）。
+  使用/训练政策需在合同层面约束。
 - **人工审批流程**：`highly_sensitive` 放行名单（`LLM_OUTBOUND_HIGHLY_SENSITIVE_ACTIONS_JSON`）
   的评审与审批流程、放行后的定期复核由部署方管理；代码默认不放行任何 action。
 - **检测器误报/漏报调优**：规则正则（含地址规则）的误报率监控与调优、以及
