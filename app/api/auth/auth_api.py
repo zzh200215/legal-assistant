@@ -16,6 +16,7 @@ from app.services.observability.audit_log_service import audit_log_service, Audi
 from app.services.auth.user_auth_service import user_auth_service
 from app.services.auth.auth_token_service import auth_token_service, get_client_ip
 from app.services.auth.mfa_service import mfa_service
+from app.services.org.personal_org_service import ensure_personal_org
 from app.schemas.user import (
     UserCreate, UserLogin, UserOut, UserDetailOut, UserListOut,
     UserRoleUpdate, UserStatusUpdate, UserPasswordReset,
@@ -97,6 +98,19 @@ def _issue_token_response(db: Session, user: User) -> TokenResponse:
         refresh_token=session["refresh_token"],
         user=UserOut.model_validate(user),
     )
+
+
+def _log_personal_org_created(db: Session, user: User, org) -> None:
+    """注册自动建组织的审计日志。必须在业务 commit 之后调用（log 内部会 db.commit()，
+    提前调用会把半成品事务一起提交）；审计失败不阻断注册结果。"""
+    try:
+        audit_log_service.log_org_action(
+            db, operator=user, action=AuditAction.ORG_CREATE,
+            org_id=org.id, org_name=org.name,
+            detail="personal org auto-created on register",
+        )
+    except Exception:
+        db.rollback()
 
 
 # ================== 登录相关 ==================
@@ -252,15 +266,17 @@ def register(req: UserCreate, db: Session = Depends(get_db)):
         full_name=req.full_name,
         role=UserRole.user.value,
         status=UserStatus.active.value,
-        # 自注册不接受 organization_id/department_id，防止伪造归属读取组织级数据；
-        # 组织归属须经管理员/组织邀请流程分配
+        # 自注册不接受请求中的 organization_id/department_id，防止伪造归属读取组织级数据；
+        # 归属由系统自动创建"个人组织"（admin）解决无组织用户 401 的问题（ux-audit P0-1）
         job_title=req.job_title,
         employee_id=req.employee_id,
     )
     db.add(user)
+    org = ensure_personal_org(db, user)
     db.commit()
     db.refresh(user)
 
+    _log_personal_org_created(db, user, org)
     return _issue_token_response(db, user)
 
 
@@ -725,9 +741,11 @@ def register_with_code(req: RegisterWithCodeRequest, db: Session = Depends(get_d
         status=UserStatus.active.value,
     )
     db.add(user)
+    org = ensure_personal_org(db, user)
     db.commit()
     db.refresh(user)
 
+    _log_personal_org_created(db, user, org)
     return _issue_token_response(db, user)
 
 

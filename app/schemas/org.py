@@ -37,6 +37,8 @@ class OrganizationOut(BaseModel):
     id: int
     name: str
     code: str
+    # 组织性质：personal（注册自动创建的个人工作台）/ team（手工创建的团队组织）
+    org_type: str = "team"
     description: Optional[str] = None
     created_at: datetime
     updated_at: datetime

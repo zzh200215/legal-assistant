@@ -24,6 +24,8 @@ class Organization(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String(128), unique=True, nullable=False, index=True)
     code = Column(String(64), unique=True, nullable=False, index=True)
+    # 组织性质：personal=注册自动创建的个人工作台，team=手工/管理员创建的团队组织。
+    org_type = Column(String(16), nullable=False, server_default=text("team"))
     description = Column(Text, nullable=True)
     portal_logo_url = Column(String(512), nullable=True, comment="客户门户展示的律所 logo 图片 URL")
     portal_welcome_message = Column(String(256), nullable=True, comment="客户门户顶部欢迎语")

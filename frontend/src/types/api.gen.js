@@ -621,6 +621,7 @@
  * @property {string | null}= description
  * @property {number} id
  * @property {string} name
+ * @property {string}= org_type
  * @property {string} updated_at
  * @typedef {Object} OrganizationUpdate
  * @property {string | null}= description

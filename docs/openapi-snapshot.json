@@ -28307,6 +28307,11 @@
             "type": "string",
             "title": "Code"
           },
+          "org_type": {
+            "type": "string",
+            "title": "Org Type",
+            "default": "team"
+          },
           "description": {
             "anyOf": [
               {
