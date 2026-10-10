@@ -59,30 +59,33 @@
             </el-card>
           </div>
 
-          <el-card v-if="consultations.length" shadow="never" class="history-card">
+          <el-card v-if="historyVisible" shadow="never" class="history-card">
             <template #header><span class="card-title">历史咨询</span></template>
-            <el-table :data="consultations" stripe size="small">
-              <el-table-column prop="id" label="ID" width="60" />
-              <el-table-column prop="category" label="分类" width="120">
-                <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
-              </el-table-column>
-              <el-table-column prop="question" label="问题" show-overflow-tooltip />
-              <el-table-column prop="risk_level" label="风险" width="80">
-                <template #default="{ row }">
-                  <el-tag :type="riskTagType(row.risk_level)" size="small">{{ riskLabel(row.risk_level) }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="status" label="状态" width="120">
-                <template #default="{ row }">
-                  <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="100">
-                <template #default="{ row }">
-                  <el-button size="small" link type="primary" :loading="openDetailLoading && focusRowId === row.id" @click="openHistoryResult(row)">查看结果</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
+            <!-- 三态区分（ux-audit P1-3/M-13）：加载失败与"暂无咨询"分开呈现 -->
+            <QueryStateView :status="historyStatus" :error="historyError" min-height="0px" @retry="loadConsultations">
+              <el-table :data="consultations" stripe size="small">
+                <el-table-column prop="id" label="ID" width="60" />
+                <el-table-column prop="category" label="分类" width="120">
+                  <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
+                </el-table-column>
+                <el-table-column prop="question" label="问题" show-overflow-tooltip />
+                <el-table-column prop="risk_level" label="风险" width="80">
+                  <template #default="{ row }">
+                    <el-tag :type="riskTagType(row.risk_level)" size="small">{{ riskLabel(row.risk_level) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="status" label="状态" width="120">
+                  <template #default="{ row }">
+                    <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="100">
+                  <template #default="{ row }">
+                    <el-button size="small" link type="primary" :loading="openDetailLoading && focusRowId === row.id" @click="openHistoryResult(row)">查看结果</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </QueryStateView>
           </el-card>
         </div>
 </template>
@@ -111,6 +114,7 @@ import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
 import legalWorkspace from '../../api/legalWorkspace'
 import AiOutputFeedback from '../AiOutputFeedback.vue'
+import QueryStateView from '../QueryStateView.vue'
 import { useLegalConsultations } from '../../composables/useLegalConsultations'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
@@ -142,6 +146,7 @@ const {
   consultLoading,
   consultResult,
   consultations,
+  consultationsQuery,
   followupQuestion,
   followupLoading,
   openDetailLoading,
@@ -157,6 +162,16 @@ const {
   caseId: computed(() => props.caseId),
   onReviewSubmitted: props.onReviewSubmitted,
 })
+
+// 历史咨询三态（ux-audit P1-3/M-13）：失败态可重试，不再与"暂无咨询"混同
+const historyStatus = computed(() => {
+  if (consultationsQuery.isLoading.value) return 'loading'
+  if (consultationsQuery.isError.value) return 'error'
+  if (!consultations.value.length) return 'empty'
+  return 'success'
+})
+const historyError = computed(() => (consultationsQuery.isError.value ? consultationsQuery.error.value : null))
+const historyVisible = computed(() => historyStatus.value !== 'empty')
 
 // 历史咨询 → 结果卡：点击行内"查看结果"加载完整详情（含送审按钮），替代刷新后丢失的会话内状态
 const focusRowId = ref(null)

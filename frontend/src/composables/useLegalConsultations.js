@@ -130,6 +130,7 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
     consultLoading,
     consultResult,
     consultations: consultationsList,
+    consultationsQuery,
     followupQuestion,
     followupLoading,
     openDetailLoading,

@@ -29,30 +29,36 @@
     <div class="workbench-grid">
       <section class="workbench-section workbench-review">
         <div class="workbench-section-head"><div><h2>待处理审核</h2><p>需要律师作出决定的工作项</p></div><button type="button" @click="$emit('open-review')">查看全部</button></div>
-        <div v-if="reviewLoading" class="workbench-empty">正在加载审核事项…</div>
-        <div v-else-if="reviewItems.length" class="workbench-list">
-          <button v-for="item in reviewItems.slice(0, 6)" :key="`${item.target_type}-${item.id}`" type="button" class="review-row" @click="$emit('open-review')">
-            <span class="review-type">{{ reviewTypeLabel(item.target_type) }}</span>
-            <span class="review-main"><strong>{{ item.title || item.question || '待审核记录' }}</strong><small>{{ item.case_title || '未关联案件' }} · {{ statusLabel(item.status) }}</small></span>
-            <span class="review-date">{{ formatDate(item.created_at) }}</span>
-          </button>
-        </div>
-        <div v-else class="workbench-empty">当前没有待审核事项。</div>
+        <!-- 三态区分（ux-audit P1-3/M-13）：加载失败不再是"空数据"假象 -->
+        <QueryStateView :status="reviewStatus" :error="reviewError" min-height="0px" @retry="loadReviewItems">
+          <template #empty><div class="workbench-empty">当前没有待审核事项。</div></template>
+          <div class="workbench-list">
+            <button v-for="item in reviewItems.slice(0, 6)" :key="`${item.target_type}-${item.id}`" type="button" class="review-row" @click="$emit('open-review')">
+              <span class="review-type">{{ reviewTypeLabel(item.target_type) }}</span>
+              <span class="review-main"><strong>{{ item.title || item.question || '待审核记录' }}</strong><small>{{ item.case_title || '未关联案件' }} · {{ statusLabel(item.status) }}</small></span>
+              <span class="review-date">{{ formatDate(item.created_at) }}</span>
+            </button>
+          </div>
+        </QueryStateView>
       </section>
 
       <section class="workbench-section workbench-cases">
         <div class="workbench-section-head"><div><h2>最近案件</h2><p>按最近更新排列</p></div><button type="button" @click="$emit('open-cases')">全部案件</button></div>
-        <div v-if="cases.length" class="workbench-list">
-          <button v-for="matter in recentCases" :key="matter.id" type="button" class="case-row" @click="$emit('open-case', matter)">
-            <span class="case-status-mark" :class="`status-${matter.status}`"></span>
-            <span class="case-main"><strong>{{ matter.title }}</strong><small>{{ matter.client_name || '未登记客户' }} · {{ caseStatusLabel(matter.status) }}</small></span>
-            <span class="case-count">{{ caseRecordCount(matter) }} 项</span>
-          </button>
-        </div>
-        <div v-else class="workbench-empty">
-          还没有案件，先创建一个案件开始归档工作。
-          <button type="button" class="workspace-primary empty-cta" :disabled="orgMissing" @click="$emit('create-case')">新建案件</button>
-        </div>
+        <QueryStateView :status="casesStatus" :error="casesError" min-height="0px" @retry="$emit('retry-cases')">
+          <template #empty>
+            <div class="workbench-empty">
+              还没有案件，先创建一个案件开始归档工作。
+              <button type="button" class="workspace-primary empty-cta" :disabled="orgMissing" @click="$emit('create-case')">新建案件</button>
+            </div>
+          </template>
+          <div class="workbench-list">
+            <button v-for="matter in recentCases" :key="matter.id" type="button" class="case-row" @click="$emit('open-case', matter)">
+              <span class="case-status-mark" :class="`status-${matter.status}`"></span>
+              <span class="case-main"><strong>{{ matter.title }}</strong><small>{{ matter.client_name || '未登记客户' }} · {{ caseStatusLabel(matter.status) }}</small></span>
+              <span class="case-count">{{ caseRecordCount(matter) }} 项</span>
+            </button>
+          </div>
+        </QueryStateView>
       </section>
     </div>
 
@@ -73,14 +79,23 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import legalWorkspace from '../../api/legalWorkspace'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-defineEmits(['create-case', 'open-cases', 'open-review', 'open-case', 'open-documents', 'open-research', 'open-tasks', 'open-chat'])
-const props = defineProps({ overview: { type: Object, default: null }, cases: { type: Array, default: () => [] }, orgMissing: { type: Boolean, default: false } })
+defineEmits(['create-case', 'open-cases', 'open-review', 'open-case', 'open-documents', 'open-research', 'open-tasks', 'open-chat', 'retry-cases'])
+const props = defineProps({
+  overview: { type: Object, default: null },
+  cases: { type: Array, default: () => [] },
+  orgMissing: { type: Boolean, default: false },
+  // 案件查询三态（父级 useQuery 状态透传，ux-audit P1-3/M-13）
+  casesLoading: { type: Boolean, default: false },
+  casesError: { type: Object, default: null },
+})
 const reviewItems = ref([])
 const reviewLoading = ref(false)
+const reviewError = ref(null)
 const activeCaseCount = computed(() => props.cases.filter((item) => item.status === 'in_progress').length)
 const recentCases = computed(() => [...props.cases].sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''))).slice(0, 6))
 const reviewTypeLabel = (type) => ({ consultation: '咨询', contract_review: '审查', draft: '文书' }[type] || '审核')
@@ -89,18 +104,35 @@ const caseStatusLabel = (status) => ({ in_progress: '进行中', closed: '已结
 const caseRecordCount = (matter) => (matter.item_counts?.consultations || 0) + (matter.item_counts?.reviews || 0) + (matter.item_counts?.drafts || 0)
 const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '时间未记录'
 
-onMounted(async () => {
+const reviewStatus = computed(() => {
+  if (reviewLoading.value) return 'loading'
+  if (reviewError.value) return 'error'
+  if (!reviewItems.value.length) return 'empty'
+  return 'success'
+})
+const casesStatus = computed(() => {
+  if (props.casesLoading) return 'loading'
+  if (props.casesError) return 'error'
+  if (!props.cases.length) return 'empty'
+  return 'success'
+})
+
+const loadReviewItems = async () => {
   reviewLoading.value = true
+  reviewError.value = null
   try {
     const { data } = await legalWorkspace.listLegalReviewQueue()
     reviewItems.value = data || []
   } catch (error) {
     reviewItems.value = []
+    reviewError.value = error
     console.error('[workbench] 待审核列表加载失败', error)
   } finally {
     reviewLoading.value = false
   }
-})
+}
+
+onMounted(loadReviewItems)
 </script>
 
 <style scoped>

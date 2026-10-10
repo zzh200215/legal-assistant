@@ -7,11 +7,11 @@
       <div class="qs-skeleton-line w-55"></div>
     </div>
 
-    <!-- error：明确原因 + 重试路径 -->
+    <!-- error：明确原因 + 重试路径（文案走 errors.js 统一映射，不透传 axios 原文） -->
     <div v-else-if="status === 'error'" class="qs-error" role="alert">
       <div class="qs-error-icon">!</div>
       <div class="qs-error-body">
-        <strong>{{ error?.message || '加载失败' }}</strong>
+        <strong>{{ errorText }}</strong>
         <span v-if="error?.detail" class="qs-error-detail">{{ error.detail }}</span>
         <span v-if="error?.requestId" class="qs-error-meta">request_id: {{ error.requestId }}</span>
       </div>
@@ -24,11 +24,13 @@
       <span>网络不可用，正在展示缓存内容。恢复网络后自动刷新。</span>
     </div>
 
-    <!-- empty：空数据 + 可执行动作 -->
+    <!-- empty：空数据 + 可执行动作；默认 el-empty，可用 #empty 插槽自定义轻量空态 -->
     <div v-else-if="status === 'empty'" class="qs-empty">
-      <el-empty :description="emptyText || '暂无数据'" :image-size="56">
-        <slot name="empty-action"></slot>
-      </el-empty>
+      <slot name="empty">
+        <el-empty :description="emptyText || '暂无数据'" :image-size="56">
+          <slot name="empty-action"></slot>
+        </el-empty>
+      </slot>
     </div>
 
     <!-- 数据 + 可选 stale 标记 -->
@@ -40,12 +42,14 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElEmpty } from 'element-plus/es/components/empty/index'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/empty/style/css'
+import { errorMessage } from '../api/errors.js'
 
-defineProps({
+const props = defineProps({
   status: {
     type: String,
     default: 'loading', // loading | error | empty | offline | stale | success
@@ -68,6 +72,9 @@ defineProps({
   },
 })
 defineEmits(['retry'])
+
+// 失败文案统一走 normalizeError 映射（中文、可读、带兜底），不透传 axios 原始 message
+const errorText = computed(() => (props.error ? errorMessage(props.error) : '加载失败'))
 </script>
 
 <style scoped>

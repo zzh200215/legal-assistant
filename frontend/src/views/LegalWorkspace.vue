@@ -219,10 +219,13 @@
       :overview="overviewQuery.data.value"
       :cases="cases"
       :org-missing="overviewQuery.isSuccess.value && !hasOrg"
+      :cases-loading="casesLoading"
+      :cases-error="casesError"
       @create-case="caseDialog?.open()"
       @open-cases="goToView('cases')"
       @open-review="goToView('review')"
       @open-case="openMatter"
+      @retry-cases="casesQuery.refetch()"
       @open-documents="router.push('/documents')"
       @open-research="goToView('research')"
       @open-tasks="router.push('/tasks')"
@@ -278,6 +281,9 @@ const hasOrg = computed(() => overviewQuery.data.value?.organization_id != null)
 const currentOrgId = computed(() => overviewQuery.data.value?.organization_id || null)
 const casesQuery = useQuery({ key: () => qk.legal.cases(currentOrgId.value), fetcher: () => legalWorkspace.listCases(currentOrgId.value), staleTime: 30_000, enabled: () => overviewQuery.isSuccess.value && hasOrg.value })
 const cases = computed(() => casesQuery.data.value || [])
+// 案件查询三态透传给 WorkbenchHome（ux-audit P1-3/M-13：失败不与"暂无案件"混同）
+const casesLoading = computed(() => casesQuery.isLoading.value)
+const casesError = computed(() => (casesQuery.isError.value ? casesQuery.error.value : null))
 const view = computed(() => route.query.view || '')
 const currentCase = computed(() => cases.value.find((matter) => matter.id === currentCaseId.value) || null)
 const activeCaseTab = computed(() => route.query.tab || 'overview')
