@@ -10,6 +10,9 @@
       <el-tab-pane label="用户漏斗" name="funnel" lazy>
         <PilotAnalyticsTabs section="funnel" />
       </el-tab-pane>
+      <el-tab-pane label="事件漏斗" name="event_funnel" lazy>
+        <SystemEventFunnelTab />
+      </el-tab-pane>
       <el-tab-pane label="留存与北极星" name="retention" lazy>
         <PilotAnalyticsTabs section="retention" />
       </el-tab-pane>
@@ -70,11 +73,12 @@ import SystemOrgTab from '../components/system/SystemOrgTab.vue'
 import SystemSensitivityTab from '../components/system/SystemSensitivityTab.vue'
 import SystemTasksTab from '../components/system/SystemTasksTab.vue'
 import PilotAnalyticsTabs from '../components/system/PilotAnalyticsTabs.vue'
+import SystemEventFunnelTab from '../components/system/SystemEventFunnelTab.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-const TAB_NAMES = ['health', 'tokens', 'oplogs', 'alerts', 'experiments', 'feedback', 'funnel', 'retention', 'tool_health', 'approvals', 'knowledge', 'orgs', 'sensitivity', 'tasks']
+const TAB_NAMES = ['health', 'tokens', 'oplogs', 'alerts', 'experiments', 'feedback', 'funnel', 'event_funnel', 'retention', 'tool_health', 'approvals', 'knowledge', 'orgs', 'sensitivity', 'tasks']
 
 const activeTab = ref(TAB_NAMES.includes(route.query.tab) ? route.query.tab : 'health')
 

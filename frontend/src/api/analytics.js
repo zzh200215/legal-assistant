@@ -13,6 +13,9 @@ export default {
   dashboardFunnel(days = 30) {
     return http.get('/admin/funnel', { params: { days } })
   },
+  funnelSummary(days = 30) {
+    return http.get('/analytics/funnel/summary', { params: { days } })
+  },
   dashboardRetention(days = 90) {
     return http.get('/admin/retention', { params: { days } })
   },
