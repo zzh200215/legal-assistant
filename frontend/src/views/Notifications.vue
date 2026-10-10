@@ -32,24 +32,23 @@
       <span class="notification-summary">未读 {{ unread }} · 共 {{ total }} 条</span>
     </div>
 
-    <div v-if="error" class="notification-error">{{ error }}</div>
-    <div v-else-if="loading && !items.length" class="notification-empty">正在加载通知…</div>
-    <div v-else-if="!items.length" class="notification-empty">当前筛选下暂无通知。</div>
-    <div v-else class="notification-list">
-      <article v-for="item in items" :key="item.id" class="notification-row" :class="{ unread: isUnread(item) }">
-        <button class="notification-main" type="button" @click="openNotification(item)">
-          <span class="notification-row-heading">
-            <strong>{{ item.title }}</strong>
-            <span>{{ eventLabel(item.event_type) }}</span>
-          </span>
-          <span v-if="item.body" class="notification-body">{{ item.body }}</span>
-          <span class="notification-meta">
-            {{ item.case_id ? `案件 ${item.case_id}` : '工作台' }} · {{ formatTime(item.created_at) }}
-          </span>
-        </button>
-        <button v-if="isUnread(item)" class="notification-read" type="button" @click="markRead(item)">标记已读</button>
-      </article>
-    </div>
+    <QueryStateView :status="listStatus" :error="loadError" empty-text="当前筛选下暂无通知。" min-height="0px" @retry="load">
+      <div class="notification-list">
+        <article v-for="item in items" :key="item.id" class="notification-row" :class="{ unread: isUnread(item) }">
+          <button class="notification-main" type="button" @click="openNotification(item)">
+            <span class="notification-row-heading">
+              <strong>{{ item.title }}</strong>
+              <span>{{ eventLabel(item.event_type) }}</span>
+            </span>
+            <span v-if="item.body" class="notification-body">{{ item.body }}</span>
+            <span class="notification-meta">
+              {{ item.case_id ? `案件 ${item.case_id}` : '工作台' }} · {{ formatTime(item.created_at) }}
+            </span>
+          </button>
+          <button v-if="isUnread(item)" class="notification-read" type="button" @click="markRead(item)">标记已读</button>
+        </article>
+      </div>
+    </QueryStateView>
 
     <footer v-if="total > pageSize" class="notification-pagination">
       <button type="button" :disabled="page <= 1 || loading" @click="page -= 1; load()">上一页</button>
@@ -62,7 +61,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import api from '../api'
+import QueryStateView from '../components/QueryStateView.vue'
+import { normalizeError, errorMessage } from '../api/errors.js'
 
 const router = useRouter()
 const items = ref([])
@@ -71,7 +74,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
-const error = ref('')
+const loadError = ref(null)
 const filters = reactive({ status: 'all', event_type: '', case_id: '' })
 const eventTypes = [
   { value: 'workflow', label: '案件工作流' },
@@ -86,9 +89,17 @@ const isUnread = (item) => item.status === 'delivered' || item.status === 'sent'
 const eventLabel = (value) => eventLabels[value] || value || '系统通知'
 const formatTime = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '时间未记录'
 
+// 三态（ux-audit P1-3/M-13）：加载失败与"暂无通知"分离，失败可重试；刷新时保留已有列表不闪骨架
+const listStatus = computed(() => {
+  if (loading.value && !items.value.length) return 'loading'
+  if (loadError.value) return 'error'
+  if (!items.value.length) return 'empty'
+  return 'success'
+})
+
 const load = async () => {
   loading.value = true
-  error.value = ''
+  loadError.value = null
   try {
     const params = {
       status: filters.status,
@@ -102,7 +113,7 @@ const load = async () => {
     unread.value = Number(data.unread) || 0
     total.value = Number(data.total) || 0
   } catch (err) {
-    error.value = err.response?.data?.detail || '通知暂时无法加载'
+    loadError.value = normalizeError(err)
   } finally {
     loading.value = false
   }
@@ -120,7 +131,7 @@ const markRead = async (item) => {
     item.status = 'read'
     unread.value = Math.max(0, unread.value - 1)
   } catch (err) {
-    error.value = err.response?.data?.detail || '标记通知失败'
+    ElMessage.error(errorMessage(err))
   }
 }
 
@@ -130,7 +141,7 @@ const markAllRead = async () => {
     items.value.forEach((item) => { if (isUnread(item)) item.status = 'read' })
     unread.value = 0
   } catch (err) {
-    error.value = err.response?.data?.detail || '标记通知失败'
+    ElMessage.error(errorMessage(err))
   }
 }
 
@@ -168,7 +179,7 @@ onMounted(load)
 .notification-main:hover { background: #F8FAFB; }
 .notification-row-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }.notification-row-heading strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.notification-row-heading span { flex: 0 0 auto; color: var(--color-text-muted); font-size: 11px; }
 .notification-body, .notification-meta { overflow: hidden; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }.notification-meta { color: var(--color-text-muted); font-size: 11px; }
-.notification-read { padding: 4px 0; white-space: nowrap; }.notification-error, .notification-empty { padding: 24px 0; color: var(--color-text-muted); font-size: 13px; }.notification-error { color: var(--color-danger); }
+.notification-read { padding: 4px 0; white-space: nowrap; }
 .notification-pagination { display: flex; justify-content: center; align-items: center; gap: 16px; padding-top: 18px; color: var(--color-text-muted); font-size: 12px; }.notification-pagination button:disabled { color: var(--color-text-muted); cursor: not-allowed; }
 @media (max-width: 700px) { .notification-summary { width: 100%; margin-left: 0; }.notification-row { gap: 8px; }.notification-row-heading { display: grid; gap: 2px; }.notification-body { white-space: normal; }.notification-toolbar { align-items: stretch; }.notification-refresh { align-self: end; } }
 </style>

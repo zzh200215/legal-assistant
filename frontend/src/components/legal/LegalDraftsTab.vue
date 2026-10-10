@@ -82,13 +82,14 @@
 
     <details class="draft-history">
       <summary>文书版本 <span>{{ drafts.length }} 份历史草稿</span></summary>
-      <div class="draft-history-list">
-        <button v-for="draft in drafts" :key="draft.id" class="draft-history-row" type="button" @click="selectDraft(draft)">
-          <span><strong>{{ draft.title || '未命名文书' }}</strong><small>{{ formatDate(draft.created_at) }}</small></span>
-          <span>Version {{ draft.version || 1 }}</span><em>{{ statusLabel(draft.status) }}</em>
-        </button>
-        <div v-if="!drafts.length" class="draft-muted">还没有历史文书。</div>
-      </div>
+      <QueryStateView :status="draftsStatus" :error="draftsError" empty-text="还没有历史文书。" min-height="80px" @retry="loadDrafts">
+        <div class="draft-history-list">
+          <button v-for="draft in drafts" :key="draft.id" class="draft-history-row" type="button" @click="selectDraft(draft)">
+            <span><strong>{{ draft.title || '未命名文书' }}</strong><small>{{ formatDate(draft.created_at) }}</small></span>
+            <span>Version {{ draft.version || 1 }}</span><em>{{ statusLabel(draft.status) }}</em>
+          </button>
+        </div>
+      </QueryStateView>
     </details>
 
     <AiOutputFeedback v-if="draftResult" :target-type="'draft'" :target-id="draftResult.id" :value="draftResult.feedback_score" @submit="submitDraftFeedback" />
@@ -114,6 +115,7 @@ import { useLegalDrafts } from '../../composables/useLegalDrafts'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
 import { useStagedProgress } from '../../composables/useStagedProgress'
+import QueryStateView from '../QueryStateView.vue'
 import { statusLabel } from '../../composables/useLegalWorkspacePresentation'
 
 const props = defineProps({ caseId: { type: Number, default: null }, downloadText: { type: Function, default: null } })
@@ -122,7 +124,7 @@ const isDraftFieldRequired = (field) => DRAFT_REQUIRED_KEYWORDS.some((keyword) =
 const { loadQuota } = useQuota()
 const { openSourceDetail } = useLegalSourceDetail()
 const {
-  templates, draftForm, draftLoading, draftResult, drafts, draftFieldMap, draftVersionMap,
+  templates, draftForm, draftLoading, draftResult, drafts, draftsQuery, draftFieldMap, draftVersionMap,
   loadTemplates, setTemplateFields, loadDrafts, submitDraft: runDraftSubmit,
   resubmitDraftForm, resubmitLoading, loadDraftVersions, resubmitDraft: saveDraft,
   autosaveDraft, saveDraftVersion: persistDraftVersion, restoreDraftVersion: restoreVersion,
@@ -137,6 +139,14 @@ const draftStageText = useStagedProgress(draftLoading, [
   '正在起草文书正文…',
 ])
 const currentDraftFields = computed(() => draftFieldMap.value[draftForm.value.document_type] || [])
+// 历史草稿三态（ux-audit P1-3/M-13）：加载失败与"还没有历史文书"分离，失败可重试
+const draftsStatus = computed(() => {
+  if (draftsQuery.isLoading.value) return 'loading'
+  if (draftsQuery.isError.value) return 'error'
+  if (!drafts.value.length) return 'empty'
+  return 'success'
+})
+const draftsError = computed(() => (draftsQuery.isError.value ? draftsQuery.error.value : null))
 const editableContent = ref('')
 const selectedVersion = ref(null)
 const draftSaveState = ref('saved')

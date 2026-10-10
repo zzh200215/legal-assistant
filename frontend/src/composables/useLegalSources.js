@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { normalizeError } from '../api/errors.js'
 
 const emptySource = () => ({
   title: '', source_type: 'statute', citation: '', jurisdiction: '中国大陆',
@@ -8,6 +9,8 @@ const emptySource = () => ({
 
 export function useLegalSources({ client, message, confirm }) {
   const legalSources = ref([])
+  const sourcesLoading = ref(false)
+  const sourcesError = ref(null)
   const importLoading = ref(false)
   const importResult = ref(null)
   const retrievalQuestion = ref('')
@@ -18,11 +21,19 @@ export function useLegalSources({ client, message, confirm }) {
   const sourceSaving = ref(false)
   const sourceForm = ref(emptySource())
 
+  // 三态（ux-audit P1-3/M-13）：不再静默吞错——失败置 sourcesError 让列表区显式报错可重试
   const loadLegalSources = async (config = {}) => {
+    sourcesLoading.value = true
+    sourcesError.value = null
     try {
       const { data } = await client.listLegalSources(config)
       legalSources.value = data
-    } catch { /* 静默忽略 */ }
+    } catch (error) {
+      sourcesError.value = normalizeError(error)
+      console.error('[legal-sources] 法源库加载失败', error)
+    } finally {
+      sourcesLoading.value = false
+    }
   }
 
   const handleSourceImport = async (file) => {
@@ -112,7 +123,7 @@ export function useLegalSources({ client, message, confirm }) {
   }
 
   return {
-    legalSources, importLoading, importResult, retrievalQuestion, retrievalLoading, retrievalResult,
+    legalSources, sourcesLoading, sourcesError, importLoading, importResult, retrievalQuestion, retrievalLoading, retrievalResult,
     sourceDialogVisible, editingSource, sourceSaving, sourceForm,
     loadLegalSources, handleSourceImport, syncKeywords, openSourceDialog, saveSource,
     deleteSourceHandler, updateSourceStatus, submitRetrievalTest,

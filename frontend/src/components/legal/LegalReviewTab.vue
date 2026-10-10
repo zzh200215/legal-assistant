@@ -23,13 +23,16 @@
           <button type="button" :disabled="bulkLoading" @click="bulkAction('return')">批量退回</button>
           <button type="button" :disabled="bulkLoading" @click="clearSelection">清除</button>
         </div>
-        <button v-for="item in reviewQueue" :key="reviewKey(item)" class="queue-item" :class="{ selected: selectedItem === item }" type="button" @click="selectItem(item)">
-          <input v-if="canReview" class="queue-check" type="checkbox" :checked="isSelected(item)" :aria-label="`选择${item.title || item.question || item.id}`" @click.stop="toggleSelection(item)" />
-          <span class="queue-type">{{ targetLabel(item.target_type) }}</span>
-          <strong>{{ item.question || item.title || item.content?.slice(0, 85) || '待审核记录' }}</strong>
-          <span class="queue-meta"><span>{{ statusLabel(item.status) }}<template v-if="item.reviewer_id"> · 已分配</template><template v-if="item.review_overdue"> · 逾期</template></span><time>{{ formatDate(item.created_at) }}</time></span>
-        </button>
-        <div v-if="!reviewQueue.length" class="review-empty">当前没有待处理审核。</div>
+        <QueryStateView :status="queueStatus" :error="queueError" empty-text="当前没有待处理审核。" min-height="120px" @retry="loadReviewQueue">
+          <div class="queue-items">
+            <button v-for="item in reviewQueue" :key="reviewKey(item)" class="queue-item" :class="{ selected: selectedItem === item }" type="button" @click="selectItem(item)">
+              <input v-if="canReview" class="queue-check" type="checkbox" :checked="isSelected(item)" :aria-label="`选择${item.title || item.question || item.id}`" @click.stop="toggleSelection(item)" />
+              <span class="queue-type">{{ targetLabel(item.target_type) }}</span>
+              <strong>{{ item.question || item.title || item.content?.slice(0, 85) || '待审核记录' }}</strong>
+              <span class="queue-meta"><span>{{ statusLabel(item.status) }}<template v-if="item.reviewer_id"> · 已分配</template><template v-if="item.review_overdue"> · 逾期</template></span><time>{{ formatDate(item.created_at) }}</time></span>
+            </button>
+          </div>
+        </QueryStateView>
       </section>
 
       <section v-if="selectedItem" class="review-detail-pane">
@@ -80,6 +83,7 @@ import { CAPABILITY } from '../../auth/capabilities'
 import { formatDate, riskLabel, statusLabel, targetLabel } from '../../composables/useLegalWorkspacePresentation'
 import EvidenceReference from './EvidenceReference.vue'
 import ReviewTimeline from './ReviewTimeline.vue'
+import QueryStateView from '../QueryStateView.vue'
 import { useAuthStore } from '../../stores/auth'
 
 const props = defineProps({ caseId: { type: Number, default: null } })
@@ -92,10 +96,18 @@ const selectedKeys = ref([])
 const bulkReviewerId = ref(null)
 const bulkLoading = ref(false)
 const {
-  reviewStats, reviewQueue, reviewHistoryMap, reviewKey, onExpandReview, submitComment, reviewAction,
+  reviewStats, reviewQueue, queueQuery, reviewHistoryMap, reviewKey, onExpandReview, submitComment, reviewAction,
   commentDraft, commentLoading, loadReviewQueue, loadReviewStats, reviewers, loadReviewers, assignReview,
   bulkAssignReview, bulkReviewAction,
 } = useLegalReviewQueue({ client: legalWorkspace, message: ElMessage, prompt: ElMessageBox.prompt, targetLabel, caseId: computed(() => props.caseId), canReview, filters: computed(() => queueFilters.value) })
+// 审核队列三态（ux-audit P1-3/M-13）：加载失败与"无待处理"分离，失败可重试
+const queueStatus = computed(() => {
+  if (queueQuery.isLoading.value) return 'loading'
+  if (queueQuery.isError.value) return 'error'
+  if (!reviewQueue.value.length) return 'empty'
+  return 'success'
+})
+const queueError = computed(() => (queueQuery.isError.value ? queueQuery.error.value : null))
 const selectedItem = ref(null)
 const missingItems = (item) => [...(item?.missing_facts || []), ...(item?.missing_fields || [])].filter(Boolean)
 const openCase = (caseId) => router.push({ path: '/legal-workspace', query: { case_id: String(caseId) } })

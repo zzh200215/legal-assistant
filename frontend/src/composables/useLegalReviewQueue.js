@@ -143,6 +143,7 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel, case
 
   return {
     reviewQueue,
+    queueQuery,
     reviewStats,
     reviewers,
     reviewHistoryMap,

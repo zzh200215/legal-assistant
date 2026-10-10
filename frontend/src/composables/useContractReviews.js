@@ -131,6 +131,7 @@ export function useContractReviews({ client, message, caseId }) {
     contractLoading,
     contractResult,
     contractReviews,
+    reviewsQuery,
     uploadLoading,
     contractVersionMap,
     resubmitDraftForm,

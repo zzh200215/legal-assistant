@@ -126,20 +126,21 @@
             <el-option label="高风险" value="high" /><el-option label="中风险" value="medium" /><el-option label="低风险" value="low" />
           </el-select>
         </div>
-        <div class="review-history-list">
-          <details v-for="item in filteredContractReviews" :key="item.id" class="history-item" @toggle="loadHistoryVersions($event, item)">
-            <summary><strong>{{ item.title || `合同审查 #${item.id}` }}</strong><span>v{{ item.version || 1 }}</span><span>{{ statusLabel(item.status) }}</span><time>{{ formatDate(item.created_at) }}</time></summary>
-            <div class="history-item-body">
-              <div v-if="item.status === 'returned_for_facts'" class="resubmit-editor">
-                <label class="field-label" :for="`resubmit-history-${item.id}`">修订合同原文</label>
-                <el-input :id="`resubmit-history-${item.id}`" v-model="resubmitDraftForm[item.id]" type="textarea" :rows="5" placeholder="修改合同内容后重新提交。" />
-                <el-button size="small" type="primary" :loading="resubmitLoading[item.id]" @click="submitContractResubmit(item)">提交修订版本</el-button>
+        <QueryStateView :status="historyStatus" :error="historyError" empty-text="暂无历史审查记录。" min-height="80px" @retry="loadContractReviews">
+          <div class="review-history-list">
+            <details v-for="item in filteredContractReviews" :key="item.id" class="history-item" @toggle="loadHistoryVersions($event, item)">
+              <summary><strong>{{ item.title || `合同审查 #${item.id}` }}</strong><span>v{{ item.version || 1 }}</span><span>{{ statusLabel(item.status) }}</span><time>{{ formatDate(item.created_at) }}</time></summary>
+              <div class="history-item-body">
+                <div v-if="item.status === 'returned_for_facts'" class="resubmit-editor">
+                  <label class="field-label" :for="`resubmit-history-${item.id}`">修订合同原文</label>
+                  <el-input :id="`resubmit-history-${item.id}`" v-model="resubmitDraftForm[item.id]" type="textarea" :rows="5" placeholder="修改合同内容后重新提交。" />
+                  <el-button size="small" type="primary" :loading="resubmitLoading[item.id]" @click="submitContractResubmit(item)">提交修订版本</el-button>
+                </div>
+                <DocumentVersion :versions="contractVersionMap[item.id] || []" />
               </div>
-              <DocumentVersion :versions="contractVersionMap[item.id] || []" />
-            </div>
-          </details>
-          <div v-if="!filteredContractReviews.length" class="legal-empty">暂无历史审查记录。</div>
-        </div>
+            </details>
+          </div>
+        </QueryStateView>
       </details>
     </template>
 
@@ -182,12 +183,13 @@ import { useContractComparison } from '../../composables/useContractComparison'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
 import { useStagedProgress } from '../../composables/useStagedProgress'
+import QueryStateView from '../QueryStateView.vue'
 
 const props = defineProps({ caseId: { type: Number, default: null }, downloadText: { type: Function, default: null } })
 const { quotaHint, loadQuota } = useQuota()
 const { openSourceDetail } = useLegalSourceDetail()
 const {
-  contractForm, contractLoading, contractResult, contractReviews, uploadLoading, contractVersionMap,
+  contractForm, contractLoading, contractResult, contractReviews, reviewsQuery, uploadLoading, contractVersionMap,
   resubmitDraftForm, resubmitLoading, loadContractReviews, submitContractReview: runContractReview,
   onExpandContractReview, submitContractResubmit, handleContractUpload: uploadContractReview,
 } = useContractReviews({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
@@ -203,6 +205,14 @@ const {
   resetRiskFilter, jumpToRisk,
 } = useContractRiskPresentation({ contractForm, contractResult, contractReviews })
 const { compareForm, compareLoading, compareResult, submitCompare } = useContractComparison({ client: legalWorkspace, message: ElMessage })
+// 历史审查三态（ux-audit P1-3/M-13）：加载失败与"暂无记录"分离，失败可重试
+const historyStatus = computed(() => {
+  if (reviewsQuery.isLoading.value) return 'loading'
+  if (reviewsQuery.isError.value) return 'error'
+  if (!filteredContractReviews.value.length) return 'empty'
+  return 'success'
+})
+const historyError = computed(() => (reviewsQuery.isError.value ? reviewsQuery.error.value : null))
 const selectedRisk = ref(null)
 const structuredRiskItems = ref([])
 const riskActionLoading = ref(false)

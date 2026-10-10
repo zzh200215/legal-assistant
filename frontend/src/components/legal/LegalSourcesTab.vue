@@ -35,18 +35,21 @@
             <div v-if="libraryMode === 'sources'" class="research-layout">
               <aside class="source-catalog" aria-label="资料目录">
                 <div class="catalog-heading"><strong>资料目录</strong><span>{{ displaySources.length }} 条</span></div>
-                  <button
-                  v-for="source in displaySources"
-                  :key="source.id"
-                  type="button"
-                  class="source-catalog-row"
-                  :class="{ active: selectedSource?.id === source.id }"
-                  @click="openSource(source)"
-                  >
-                    <span class="source-catalog-title">{{ source.title }}</span>
-                    <span class="source-catalog-meta"><span>{{ sourceTypeLabel(source.source_type) }}</span><span>{{ sourceStatusLabel(source.status) }}</span><span v-if="source.is_favorite" class="source-favorite-mark" title="已收藏">★</span><span v-if="source.is_linked" title="已关联当前案件">案件</span></span>
-                </button>
-                <div v-if="!displaySources.length" class="legal-empty">没有符合条件的资料。</div>
+                <QueryStateView :status="sourcesStatus" :error="sourcesError" empty-text="没有符合条件的资料。" min-height="160px" @retry="reloadSources">
+                  <div class="source-catalog-rows">
+                    <button
+                    v-for="source in displaySources"
+                    :key="source.id"
+                    type="button"
+                    class="source-catalog-row"
+                    :class="{ active: selectedSource?.id === source.id }"
+                    @click="openSource(source)"
+                    >
+                      <span class="source-catalog-title">{{ source.title }}</span>
+                      <span class="source-catalog-meta"><span>{{ sourceTypeLabel(source.source_type) }}</span><span>{{ sourceStatusLabel(source.status) }}</span><span v-if="source.is_favorite" class="source-favorite-mark" title="已收藏">★</span><span v-if="source.is_linked" title="已关联当前案件">案件</span></span>
+                  </button>
+                  </div>
+                </QueryStateView>
               </aside>
 
               <article v-if="selectedSource" class="source-reader" aria-label="资料阅读器">
@@ -345,9 +348,12 @@ import legalWorkspace from '../../api/legalWorkspace'
 import api from '../../api'
 import { useLegalSources } from '../../composables/useLegalSources'
 import { sourceStatusLabel, sourceStatusType, sourceTypeLabel } from '../../composables/useLegalWorkspacePresentation'
+import QueryStateView from '../QueryStateView.vue'
 
 const {
   legalSources,
+  sourcesLoading,
+  sourcesError,
   importLoading,
   importResult,
   retrievalQuestion,
@@ -396,6 +402,14 @@ const displaySources = computed(() => {
   const rows = favoritesOnly.value ? legalSources.value.filter((source) => source.is_favorite) : legalSources.value
   return filterRows(rows)
 })
+// 法源库三态（ux-audit P1-3/M-13）：加载失败不再伪装成"没有资料"，可重试
+const sourcesStatus = computed(() => {
+  if (sourcesLoading.value && !legalSources.value.length) return 'loading'
+  if (sourcesError.value) return 'error'
+  if (!displaySources.value.length) return 'empty'
+  return 'success'
+})
+const reloadSources = () => loadLegalSources(caseId.value ? { params: { case_id: caseId.value } } : {})
 
 const documentKind = (item) => item.document_kind || item.classification || ''
 const materialKindMap = { contract: ['contract', 'contract_template'], evidence: ['evidence', 'case_material'], statute: ['statute', 'regulation', 'judicial_interpretation'], case: ['case', 'case_summary'] }

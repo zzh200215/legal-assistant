@@ -199,6 +199,7 @@ export function useLegalDrafts({ client, message, caseId }) {
     draftLoading,
     draftResult,
     drafts,
+    draftsQuery,
     draftFieldMap,
     draftVersionMap,
     draftComments,
