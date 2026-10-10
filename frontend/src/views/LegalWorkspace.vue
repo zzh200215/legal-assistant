@@ -162,7 +162,7 @@
 
       <section v-else-if="activeCaseTab === 'consultation'" class="matter-panel">
         <div class="legal-section-heading"><h2>案件法律咨询</h2></div>
-        <AsyncLegalConsultationsTab :key="`consultation-${currentCaseId}`" :case-id="currentCaseId" :on-review-submitted="refreshReviewQueue" @go-to-draft="handleGoToDraftFromConsult" @go-to-review="handleGoToReviewFromConsult" />
+        <AsyncLegalConsultationsTab :key="`consultation-${currentCaseId}`" :case-id="currentCaseId" :initial-consultation-id="consultationFocusId" :on-review-submitted="refreshReviewQueue" @go-to-draft="handleGoToDraftFromConsult" @go-to-review="handleGoToReviewFromConsult" />
       </section>
 
       <section v-else-if="activeCaseTab === 'contract'" class="matter-panel">
@@ -281,6 +281,8 @@ const cases = computed(() => casesQuery.data.value || [])
 const view = computed(() => route.query.view || '')
 const currentCase = computed(() => cases.value.find((matter) => matter.id === currentCaseId.value) || null)
 const activeCaseTab = computed(() => route.query.tab || 'overview')
+// 咨询 tab 直达焦点（通知/案件记录带 consultation_id 进入时自动恢复结果卡）
+const consultationFocusId = computed(() => (activeCaseTab.value === 'consultation' && route.query.consultation_id ? Number(route.query.consultation_id) : null))
 const matterTabs = [
   { key: 'overview', label: '案件概览' },
   { key: 'documents', label: '文档' },
@@ -364,7 +366,8 @@ const setMatterTab = (tab) => {
 }
 const goToView = (nextView) => router.push({ path: '/legal-workspace', query: { view: nextView } })
 const handleCaseSelect = (caseId) => {
-  router.replace({ query: { ...route.query, view: undefined, case_id: caseId, tab: activeCaseTab.value === 'overview' ? undefined : activeCaseTab.value } })
+  // 切换案件时清掉上一案件的咨询焦点，避免新案件 tab 自动恢复无关结果卡
+  router.replace({ query: { ...route.query, view: undefined, case_id: caseId, tab: activeCaseTab.value === 'overview' ? undefined : activeCaseTab.value, consultation_id: undefined } })
 }
 const openMatter = (matter) => router.push({ path: '/legal-workspace', query: { case_id: matter.id } })
 const handleCaseCreated = async (caseId) => {
@@ -372,7 +375,15 @@ const handleCaseCreated = async (caseId) => {
   await casesQuery.refetch()
   await router.replace({ path: '/legal-workspace', query: { case_id: caseId } })
 }
-const openRecord = (item) => setMatterTab(({ consultation: 'consultation', contract_review: 'contract', draft: 'draft' })[item.type] || 'overview')
+const openRecord = (item) => {
+  const tab = ({ consultation: 'consultation', contract_review: 'contract', draft: 'draft' })[item.type] || 'overview'
+  // 咨询记录直达时带上 consultation_id，进入 tab 后自动恢复结果卡（D12 回归发现修复）
+  if (item.type === 'consultation' && item.id) {
+    router.replace({ query: { ...route.query, view: undefined, tab, consultation_id: String(item.id) } })
+    return
+  }
+  setMatterTab(tab)
+}
 const continueMatter = () => {
   const item = pendingItems.value[0]
   if (item) return openRecord(item)

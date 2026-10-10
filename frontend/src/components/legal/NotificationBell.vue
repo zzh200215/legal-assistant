@@ -92,11 +92,14 @@ const openNotification = async (n) => {
     }
     return
   }
-  // 生成完成通知（咨询/审查/文书）：直达对应结果 tab（ux-audit M-9）
+  // 生成完成通知（咨询/审查/文书）：直达对应结果 tab（ux-audit M-9）；
+  // 咨询另带 consultation_id，进入 tab 后自动恢复结果卡（D12 回归发现修复）
   const tabByType = { consultation: 'consultation', contract_review: 'contract', draft: 'draft' }
   const tab = tabByType[n.reference_type]
   if (tab && n.case_id) {
-    router.push({ path: '/legal-workspace', query: { case_id: String(n.case_id), tab } })
+    const query = { case_id: String(n.case_id), tab }
+    if (n.reference_type === 'consultation' && n.reference_id) query.consultation_id = String(n.reference_id)
+    router.push({ path: '/legal-workspace', query })
     open.value = false
     return
   }

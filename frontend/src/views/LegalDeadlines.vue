@@ -1,5 +1,12 @@
 <template>
   <div class="legal-deadlines">
+    <!-- 与后端 _require_case_manager 同判据：创建/操作/列表均限管理员或审核律师，
+         不可用操作不展示（ux-audit P1-5 同模式，D12 回归发现） -->
+    <el-card v-if="!canManageDeadlines" shadow="never" class="deadline-permission-card">
+      <el-empty description="关键日期由组织管理员或审核律师管理。" :image-size="80" />
+      <p class="permission-hint">如需创建或调整期限，请联系你的组织管理员或审核律师。</p>
+    </el-card>
+    <template v-else>
     <div v-if="noCase" class="no-case-hint">当前未选择案件。「创建期限」「期限列表」需在顶部案件选择器中选择案件后使用。</div>
     <el-card shadow="never">
       <template #header><span class="card-title">创建期限</span></template>
@@ -124,6 +131,7 @@
         </span>
       </div>
     </el-card>
+    </template>
   </div>
 </template>
 
@@ -132,6 +140,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
 import { ElCard } from 'element-plus/es/components/card/index'
+import { ElEmpty } from 'element-plus/es/components/empty/index'
 import { ElCol } from 'element-plus/es/components/col/index'
 import { ElRow } from 'element-plus/es/components/row/index'
 import { ElDivider } from 'element-plus/es/components/divider/index'
@@ -151,7 +160,11 @@ import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/empty/style/css'
 import api from '../api'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
 
 const props = defineProps({
   orgId: { type: Number, required: true },
@@ -159,6 +172,9 @@ const props = defineProps({
 })
 
 const noCase = computed(() => !props.caseId)
+
+// 与后端 _require_case_manager 同判据：仅看 legal_role，不看系统角色（ux-audit P1-5）
+const canManageDeadlines = computed(() => ['admin', 'reviewer'].includes(auth.currentUser?.legal_role))
 
 const orgMembers = ref([])
 const loadOrgMembers = async () => {
@@ -346,6 +362,13 @@ onMounted(() => {
   padding: 10px 14px;
   margin-bottom: 16px;
   font-size: 13px;
+}
+
+.permission-hint {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  margin: 0;
+  text-align: center;
 }
 
 .result-header {

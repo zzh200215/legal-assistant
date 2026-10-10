@@ -77,13 +77,19 @@
                   <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
                 </template>
               </el-table-column>
+              <el-table-column label="操作" width="100">
+                <template #default="{ row }">
+                  <el-button size="small" link type="primary" :loading="openDetailLoading && focusRowId === row.id" @click="openHistoryResult(row)">查看结果</el-button>
+                </template>
+              </el-table-column>
             </el-table>
           </el-card>
         </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElCard } from 'element-plus/es/components/card/index'
@@ -122,6 +128,8 @@ const confidenceTagType = (score) => {
 
 const props = defineProps({
   caseId: { type: Number, default: null },
+  // 通知/案件记录直达时聚焦的咨询 ID：挂载及变化时自动恢复结果卡（D12 回归发现修复）
+  initialConsultationId: { type: Number, default: null },
   onReviewSubmitted: { type: Function, default: null },
 })
 const emit = defineEmits(['go-to-draft', 'go-to-review'])
@@ -136,6 +144,8 @@ const {
   consultations,
   followupQuestion,
   followupLoading,
+  openDetailLoading,
+  openConsultationDetail,
   loadConsultations,
   submitConsultation: runConsultation,
   submitFollowup,
@@ -146,6 +156,28 @@ const {
   confirm: ElMessageBox.confirm,
   caseId: computed(() => props.caseId),
   onReviewSubmitted: props.onReviewSubmitted,
+})
+
+// 历史咨询 → 结果卡：点击行内"查看结果"加载完整详情（含送审按钮），替代刷新后丢失的会话内状态
+const focusRowId = ref(null)
+const openHistoryResult = async (row) => {
+  focusRowId.value = row.id
+  await openConsultationDetail(row.id)
+  if (consultResult.value?.id === row.id) focusRowId.value = null
+}
+
+watch(() => props.initialConsultationId, (id) => {
+  if (id) openConsultationDetail(id)
+}, { immediate: true })
+
+// 结果卡内容与 URL 焦点不一致（提交新咨询/追问/打开历史行）时清掉直达参数，
+// 避免之后重新进入 tab 恢复过期的结果卡
+const route = useRoute()
+const router = useRouter()
+watch(() => consultResult.value?.id, (id) => {
+  if (id && route.query.consultation_id && Number(route.query.consultation_id) !== id) {
+    router.replace({ query: { ...route.query, consultation_id: undefined } })
+  }
 })
 
 // 内联校验（ux-audit M-11）：问题必填即时提示，替代提交后的全局 toast

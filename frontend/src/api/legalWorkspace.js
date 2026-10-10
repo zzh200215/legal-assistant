@@ -80,6 +80,9 @@ export default {
   listLegalConsultations(config = {}) {
     return http.get('/legal/consultations', config)
   },
+  getLegalConsultation(id, config = {}) {
+    return http.get(`/legal/consultations/${id}`, config)
+  },
   followupConsultation(id, question, options = {}) {
     return http.post(`/legal/consultations/${id}/followup`, { question }, { headers: idempotencyHeaders(options) })
   },

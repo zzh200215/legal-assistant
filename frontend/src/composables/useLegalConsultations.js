@@ -80,6 +80,22 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
     }
   }
 
+  // 咨询结果卡持久化（ux-audit D12 回归发现）：consultResult 原为会话本地 state，
+  // 刷新/直达后结果与"提交律师审核"入口丢失；从历史详情恢复，保证送审链路在任何入口可达。
+  const openDetailLoading = ref(false)
+  const openConsultationDetail = async (id) => {
+    if (!id || openDetailLoading.value) return
+    openDetailLoading.value = true
+    try {
+      const { data } = await client.getLegalConsultation(id)
+      consultResult.value = data
+    } catch (error) {
+      message.error(error.response?.data?.detail || error.message || '咨询结果加载失败')
+    } finally {
+      openDetailLoading.value = false
+    }
+  }
+
   const submitReviewMutation = useMutation({
     mutationFn: (payload, ctx) => client.submitLegalReviewAction(payload.type, payload.id, payload.body, { idempotencyKey: ctx.idempotencyKey }),
     invalidate: [qkPrefix('legal', 'consultations')],
@@ -116,6 +132,8 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
     consultations: consultationsList,
     followupQuestion,
     followupLoading,
+    openDetailLoading,
+    openConsultationDetail,
     loadConsultations,
     submitConsultation,
     submitFollowup,
