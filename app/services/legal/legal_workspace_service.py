@@ -234,6 +234,39 @@ class LegalWorkspaceModule:
     def __init__(self, *, audit: AuditLogService | None = None):
         self.audit = audit or AuditLogService()
 
+    def _notify_generation_done(
+        self, db: Session, user: User, *, title: str, body: str,
+        reference_type: str, reference_id: int, case_id: int | None,
+    ) -> None:
+        """LLM 生成完成（咨询/审查/文书）写一条站内通知，点击可直达结果（ux-audit M-9）。
+
+        同步生成约 20-30s，用户可能切走；通知让用户回来后能一键定位结果。
+        通知失败只记日志，绝不影响生成主流程。
+        """
+        try:
+            from app.services.notification.notification_service import CHANNEL_SITE, notification_service
+
+            if not user.organization_id:
+                return
+            notification_service.create_notification(
+                db=db,
+                organization_id=user.organization_id,
+                user_id=user.id,
+                event_type="workflow",
+                title=title,
+                body=body,
+                channel=CHANNEL_SITE,
+                case_id=case_id,
+                reference_type=reference_type,
+                reference_id=reference_id,
+            )
+        except Exception:  # noqa: BLE001 - notification failure cannot affect generation
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "generation notification failed for %s=%s", reference_type, reference_id, exc_info=True,
+            )
+
     def _resolve_case_id(self, db: Session, user: User, case_id: int | None) -> int | None:
         """校验案件访问权限后返回 case_id；未关联返回 None，无权访问抛错。
 
@@ -328,6 +361,11 @@ class LegalWorkspaceModule:
             db, user, "legal_consultation_create", target_type="consultation",
             target_id=row.id, detail=f"category={category}, risk={risk}, case_id={case_id}",
         )
+        self._notify_generation_done(
+            db, user, title="法律咨询已完成",
+            body=f"「{row.question[:40]}」的分析结果已生成，点击查看建议。",
+            reference_type="consultation", reference_id=row.id, case_id=row.case_id,
+        )
         return ConsultationResult(row=row, disclaimer=disclaimer)
 
     async def create_contract_review(
@@ -402,6 +440,11 @@ class LegalWorkspaceModule:
         self.audit.log(
             db, user, "legal_contract_review_create", target_type="contract_review",
             target_id=row.id, detail=f"risks={len(risks)}",
+        )
+        self._notify_generation_done(
+            db, user, title="合同审查已完成",
+            body=f"「{row.title or '未命名合同'}」的风险分析已生成（{len(risks)} 项风险），点击查看。",
+            reference_type="contract_review", reference_id=row.id, case_id=row.case_id,
         )
         return row
 
@@ -548,8 +591,13 @@ class LegalWorkspaceModule:
             title="生成法律文书", summary=row.title,
         )
         self.audit.log(
-            db, user, "legal_draft_create", target_type="draft", target_id=row.id,
-            detail=f"type={document_type}, missing={len(missing)}",
+            db, user, "legal_draft_create", target_type="draft",
+            target_id=row.id, detail=f"type={document_type}, missing={len(missing)}",
+        )
+        self._notify_generation_done(
+            db, user, title="文书草稿已生成",
+            body=f"「{row.title}」已生成，点击查看与编辑。",
+            reference_type="draft", reference_id=row.id, case_id=row.case_id,
         )
         return row, missing_required
 

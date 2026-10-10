@@ -190,6 +190,7 @@ class NotificationService:
 
         # P1 链路关联：统一上下文 trace_id/request_id（API/Celery headers 传播）。
         ctx = get_context()
+        delivered_now = channel == CHANNEL_SITE
         event = LegalNotificationEvent(
             organization_id=organization_id,
             user_id=user_id,
@@ -198,7 +199,11 @@ class NotificationService:
             title=title,
             body=body,
             channel=channel,
-            status=STATUS_PENDING,
+            # 站内通知无外部副作用，同步置 delivered（ux-audit M-9）：
+            # 不等 beat 的 60s 批处理，beat 停摆时通知也不会永久 pending。
+            # 邮件/微信/飞书等外部渠道仍走 Outbox 异步投递（含审批/DLP）。
+            status=STATUS_DELIVERED if delivered_now else STATUS_PENDING,
+            sent_at=utc_now() if delivered_now else None,
             reference_type=reference_type,
             reference_id=reference_id,
             scheduled_at=scheduled_at,

@@ -19,7 +19,11 @@
             :key="n.id"
             class="bell-item"
             :class="{ unread: isUnread(n) }"
+            role="button"
+            tabindex="0"
+            :aria-label="`${n.title}，点击查看`"
             :title="isUnread(n) ? '点击标记已读' : ''"
+            @keydown.enter.prevent="openNotification(n)"
             @click="openNotification(n)"
           >
             <div class="bell-item-title">{{ n.title }}</div>
@@ -86,7 +90,17 @@ const openNotification = async (n) => {
     } else {
       router.push({ path: '/tasks', query: { workflow_id: workflowId } })
     }
-  } else if (n.case_id) {
+    return
+  }
+  // 生成完成通知（咨询/审查/文书）：直达对应结果 tab（ux-audit M-9）
+  const tabByType = { consultation: 'consultation', contract_review: 'contract', draft: 'draft' }
+  const tab = tabByType[n.reference_type]
+  if (tab && n.case_id) {
+    router.push({ path: '/legal-workspace', query: { case_id: String(n.case_id), tab } })
+    open.value = false
+    return
+  }
+  if (n.case_id) {
     router.push({ path: '/legal-workspace', query: { case_id: String(n.case_id) } })
   }
 }
@@ -111,11 +125,31 @@ const onDocClick = (e) => {
   if (bellRef.value && !bellRef.value.contains(e.target)) open.value = false
 }
 
+// 30s 轮询未读计数（ux-audit M-9）：等待审核结果/生成完成时无需手动刷新。
+// 面板打开时跳过——toggle 已即时刷新，避免轮询打断用户阅读列表。
+let pollTimer = null
+const startPolling = () => {
+  if (pollTimer) return
+  pollTimer = setInterval(() => {
+    if (!open.value) load()
+  }, 30000)
+}
+const stopPolling = () => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
 onMounted(() => {
   load()
+  startPolling()
   document.addEventListener('click', onDocClick)
 })
-onUnmounted(() => document.removeEventListener('click', onDocClick))
+onUnmounted(() => {
+  stopPolling()
+  document.removeEventListener('click', onDocClick)
+})
 </script>
 
 <style scoped>
@@ -218,8 +252,10 @@ onUnmounted(() => document.removeEventListener('click', onDocClick))
   transition: background var(--transition-fast);
 }
 
-.bell-item:hover {
+.bell-item:hover,
+.bell-item:focus-visible {
   background: var(--color-primary-light);
+  outline: none;
 }
 
 .bell-item-title {

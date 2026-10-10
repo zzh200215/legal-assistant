@@ -309,16 +309,18 @@ class NotificationOutboxTests(unittest.TestCase):
         self.assertEqual(request.attempt, 0)
         self.assertIsNone(request.dead_letter_at)
 
-    def test_site_notification_delivers_via_claim(self):
+    def test_site_notification_delivers_immediately(self):
+        """站内通知创建即 delivered（ux-audit M-9）：无外部副作用，不等 beat 批处理。"""
         event = notification_service.create_notification(
             db=self.db, organization_id=self.org_id, user_id=self.user_id,
             event_type="deadline", title="站内提醒", channel="site",
             reference_type="deadline", reference_id=7)
-        stats = notification_service.dispatch_pending(db=self.db)
-        self.assertEqual(stats["delivered"], 1)
         self.db.refresh(event)
         self.assertEqual(event.status, "delivered")
         self.assertIsNotNone(event.sent_at)
+        # 已投递的站内通知不会被 dispatch_pending 重复领取
+        stats = notification_service.dispatch_pending(db=self.db)
+        self.assertEqual(stats["delivered"], 0)
 
     # ── 死信与人工重试 ──────────────────────────────────────────────
 
