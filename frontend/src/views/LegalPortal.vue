@@ -179,7 +179,6 @@ import { ElAlert } from 'element-plus/es/components/alert/index'
 import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
-import { ElDescriptions, ElDescriptionsItem } from 'element-plus/es/components/descriptions/index'
 import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/card/style/css'
 import 'element-plus/es/components/empty/style/css'
@@ -189,8 +188,6 @@ import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
-import 'element-plus/es/components/descriptions/style/css'
-import 'element-plus/es/components/descriptions-item/style/css'
 import 'element-plus/es/components/tag/style/css'
 import api from '../api'
 
@@ -479,7 +476,7 @@ onUnmounted(() => {
 .portal-invoice-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
 .portal-invoice-facts div { display: grid; gap: 4px; min-width: 0; }.portal-invoice-facts dd { margin: 0; color: var(--color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
 .portal-invoice-items { width: 100%; border-collapse: collapse; color: var(--color-text-secondary); font-size: 12px; table-layout: fixed; }
-.portal-invoice-items th, .portal-invoice-items td { padding: 7px 8px; border-bottom: 1px solid var(--el-border-color-lighter); text-align: left; overflow-wrap: anywhere; }.portal-invoice-items th { color: var(--color-text-muted); font-size: 11px; font-weight: 500; }.portal-invoice-items th:nth-child(n+2), .portal-invoice-items td:nth-child(n+2) { width: 18%; text-align: right; }
+.portal-invoice-items th, .portal-invoice-items td { padding: 7px 8px; border-bottom: 1px solid var(--el-border-color-lighter); text-align: left; }.portal-invoice-items th:first-child, .portal-invoice-items td:first-child { overflow-wrap: anywhere; }.portal-invoice-items th { color: var(--color-text-muted); font-size: 11px; font-weight: 500; }.portal-invoice-items th:nth-child(n+2), .portal-invoice-items td:nth-child(n+2) { width: 18%; text-align: right; white-space: nowrap; }
 .portal-payment-list { display: grid; gap: 6px; margin-top: 14px; }.billing-subheading { font-weight: 600; }.portal-payment-list > div { display: flex; justify-content: space-between; gap: 12px; color: var(--color-text-secondary); font-size: 11px; }
 
 .otp-actions {
@@ -623,10 +620,11 @@ onUnmounted(() => {
   .billing-summary, .portal-invoice-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .portal-invoice-heading { flex-direction: column; gap: 8px; }
 
-  .invoice-desc :deep(.el-descriptions__table) {
-    table-layout: fixed;
-    word-break: break-all;
-  }
+  /* 375px 专项：行项目表数字列过窄，金额被 overflow-wrap 从中间折断——缩小字号 + 收紧内边距 + 窄化数量列 */
+  .portal-invoice-items { font-size: 10px; }
+  .portal-invoice-items th, .portal-invoice-items td { padding: 6px 4px; }
+  .portal-invoice-items th:nth-child(2), .portal-invoice-items td:nth-child(2) { width: 12%; }
+  .portal-invoice-items th:nth-child(n+3), .portal-invoice-items td:nth-child(n+3) { width: 23%; }
 
   .progress-header {
     flex-direction: column;
