@@ -63,6 +63,8 @@ class UserOut(UserBase):
     status: str
     external_provider: Optional[str] = None
     last_login_at: Optional[datetime] = None
+    # NULL=尚未完成首次引导（前端登录后导向 /legal-onboarding）
+    onboarded_at: Optional[datetime] = None
     created_at: datetime
     legal_role: Optional[str] = None
 

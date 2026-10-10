@@ -23,7 +23,9 @@
 import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import http from '../api/http'
+import api from '../api'
 import { ElMessage } from 'element-plus'
+import { useAuthStore } from '../stores/auth'
 import { ElCard } from 'element-plus/es/components/card/index'
 import { ElRadioGroup, ElRadioButton } from 'element-plus/es/components/radio/index'
 import { ElSteps, ElStep } from 'element-plus/es/components/steps/index'
@@ -59,6 +61,20 @@ onMounted(async () => {
   } catch {}
 })
 
+// 标记引导已完成（ux-audit P1-2）：登录后不再重定向回本页；失败不阻断操作
+async function markOnboarded() {
+  try {
+    await api.completeOnboarding()
+    // 同步本地快照：工作台的"三步上手"引导条立即消失
+    const authStore = useAuthStore()
+    if (authStore.currentUser) {
+      authStore.setUser({ ...authStore.currentUser, onboarded_at: new Date().toISOString() })
+    }
+  } catch (e) {
+    ElMessage.warning('引导状态记录失败，下次登录可能再次看到本页')
+  }
+}
+
 async function complete() {
   completed.value = steps.value
   try {
@@ -67,9 +83,11 @@ async function complete() {
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '保存引导进度失败')
   }
+  await markOnboarded()
 }
 
-function enterWorkspace() {
+async function enterWorkspace() {
+  await markOnboarded()
   router.push('/legal-workspace')
 }
 </script>

@@ -176,7 +176,8 @@ const handleLogin = async () => {
       return
     }
     ElMessage.success('登录成功')
-    router.push('/')
+    // 首次用户先进入初始引导（ux-audit P1-2）
+    router.push(authStore.currentUser?.onboarded_at ? '/' : '/legal-onboarding')
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '登录失败')
   }
@@ -204,7 +205,8 @@ const handleRegister = async () => {
       return
     }
     ElMessage.success('注册成功')
-    router.push('/')
+    // 新注册用户必然未完成引导，直接进入初始引导（ux-audit P1-2）
+    router.push(authStore.currentUser?.onboarded_at ? '/' : '/legal-onboarding')
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '注册失败')
   }

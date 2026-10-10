@@ -6,5 +6,6 @@ export default {
   forgotPassword(data) { return http.post('/auth/forgot-password', data) },
   resetPassword(data) { return http.post('/auth/reset-password', data) },
   getMe() { return http.get('/auth/me') },
+  completeOnboarding() { return http.post('/auth/complete-onboarding') },
   listUsers() { return http.get('/auth/users') },
 }

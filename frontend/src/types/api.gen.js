@@ -944,6 +944,7 @@
  * @property {string | null}= legal_role
  * @property {string | null}= locked_until
  * @property {number}= login_fail_count
+ * @property {string | null}= onboarded_at
  * @property {number | null}= organization_id
  * @property {string} role
  * @property {string} status

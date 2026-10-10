@@ -14,6 +14,11 @@
       <p>案件、咨询与文书都以组织为单位工作，暂时无法创建内容。请联系系统管理员将你加入组织（或为你创建组织）后刷新本页。</p>
     </div>
 
+    <div v-if="!authStore.currentUser?.onboarded_at" class="workbench-org-alert">
+      <strong>刚开始使用？完成三步上手</strong>
+      <p>选择你的角色，按引导创建第一个案件。<button type="button" class="text-action" @click="router.push('/legal-onboarding')">开始使用引导</button></p>
+    </div>
+
     <section class="workbench-summary" aria-label="工作台摘要">
       <div><span>进行中案件</span><strong>{{ activeCaseCount }}</strong><button type="button" @click="$emit('open-cases')">查看案件</button></div>
       <div><span>待审核</span><strong>{{ reviewItems.length }}</strong><button type="button" @click="$emit('open-review')">打开审核</button></div>
@@ -62,7 +67,12 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import legalWorkspace from '../../api/legalWorkspace'
+import { useAuthStore } from '../../stores/auth'
+
+const router = useRouter()
+const authStore = useAuthStore()
 
 defineEmits(['create-case', 'open-cases', 'open-review', 'open-case', 'open-documents', 'open-research', 'open-tasks', 'open-chat'])
 const props = defineProps({ overview: { type: Object, default: null }, cases: { type: Array, default: () => [] }, orgMissing: { type: Boolean, default: false } })
@@ -95,6 +105,8 @@ onMounted(async () => {
 .workbench-org-alert { display: grid; gap: 6px; margin-top: 20px; padding: 14px 16px; border: 1px solid var(--color-border); border-left: 3px solid var(--color-primary); border-radius: 6px; background: #F7FAFC; }
 .workbench-org-alert strong { color: var(--color-text); font-size: 13px; font-weight: 600; }
 .workbench-org-alert p { margin: 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.7; }
+.workbench-org-alert .text-action { border: 0; background: transparent; padding: 0; color: var(--color-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.workbench-org-alert .text-action:hover { text-decoration: underline; }
 .workbench-kicker { margin: 0 0 7px; color: var(--color-primary); font-size: 12px; font-weight: 600; }
 .workbench-heading h1 { margin: 0; color: var(--color-text); font-size: clamp(26px, 3vw, 36px); font-weight: 620; letter-spacing: 0; }
 .workbench-subtitle { margin: 8px 0 0; color: var(--color-text-secondary); font-size: 14px; }

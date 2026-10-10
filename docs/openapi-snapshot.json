@@ -432,6 +432,43 @@
         ]
       }
     },
+    "/api/auth/complete-onboarding": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Complete Onboarding",
+        "description": "标记首次引导已完成（ux-audit P1-2）：登录后不再重定向 /legal-onboarding",
+        "operationId": "complete_onboarding_api_auth_complete_onboarding_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
+      }
+    },
     "/api/auth/me": {
       "get": {
         "tags": [
@@ -30820,6 +30857,18 @@
               }
             ],
             "title": "Last Login At"
+          },
+          "onboarded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Onboarded At"
           },
           "created_at": {
             "type": "string",

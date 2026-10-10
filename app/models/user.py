@@ -82,6 +82,9 @@ class User(Base):
     external_provider = Column(String(32), nullable=True, index=True)  # wecom/dingtalk/ldap
     external_user_id = Column(String(128), nullable=True, index=True)
 
+    # 首次引导完成时间：NULL=尚未完成初始引导（登录后导向 /legal-onboarding）
+    onboarded_at = Column(DateTime(timezone=True), nullable=True)
+
     # 登录安全
     login_fail_count = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime(timezone=True), nullable=True)

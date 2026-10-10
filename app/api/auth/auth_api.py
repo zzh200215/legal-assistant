@@ -296,6 +296,17 @@ def register(req: UserCreate, db: Session = Depends(get_db)):
 
 # ================== 当前用户 ==================
 
+@router.post("/complete-onboarding")
+def complete_onboarding(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """标记首次引导已完成（ux-audit P1-2）：登录后不再重定向 /legal-onboarding"""
+    if not current_user.onboarded_at:
+        current_user.onboarded_at = datetime.now(timezone.utc)
+        db.add(current_user)
+        db.commit()
+        db.refresh(current_user)
+    return {"completed": True}
+
+
 @router.get("/me", response_model=UserDetailOut)
 def get_current_user_info(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """获取当前用户信息"""

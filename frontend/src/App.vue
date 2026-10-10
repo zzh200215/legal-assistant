@@ -46,6 +46,10 @@
 
       <div class="sidebar-footer">
         <div class="utility-row">
+          <button class="utility-link" @click="onMenuSelect('/legal-onboarding')">
+            <span class="guide-dot" aria-hidden="true"></span>
+            <span class="utility-label">使用指南</span>
+          </button>
           <button v-if="authStore.ready && authStore.isAdmin" class="utility-link" @click="onMenuSelect('/system')">
             <span class="status-dot" aria-hidden="true"></span>
             <span class="utility-label">平台状态</span>
@@ -381,6 +385,14 @@ onMounted(async () => {
   height: 6px;
   border-radius: var(--radius-full);
   background: var(--color-success);
+  flex-shrink: 0;
+}
+
+.guide-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
   flex-shrink: 0;
 }
 
