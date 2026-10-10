@@ -22,7 +22,7 @@
         <el-alert v-else-if="maskedEmail" type="info" :closable="false" show-icon style="margin-bottom:16px">
           <template #title>验证码已发送至 {{ maskedEmail }}</template>
         </el-alert>
-        <el-form @submit.prevent="verifyOtp">
+        <el-form label-position="top" @submit.prevent="verifyOtp">
           <el-form-item label="6位验证码">
             <el-input v-model="otpCode" maxlength="6" placeholder="输入邮件中的 6 位数字验证码" class="otp-input" @input="otpCode = otpCode.replace(/\D/g, '')" />
           </el-form-item>
@@ -74,7 +74,8 @@
 
       <el-card v-if="publishedDocs.length" shadow="never" style="margin-top:20px">
         <template #header><span class="card-title">公开文档</span></template>
-        <el-table :data="publishedDocs" stripe size="small">
+        <!-- 桌面表格 / 移动端卡片行（375px 专项 M-10）：窄屏表格截断依赖 tooltip，触屏不可用 -->
+        <el-table class="desktop-table" :data="publishedDocs" stripe size="small">
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column prop="title" label="文档名称" show-overflow-tooltip />
           <el-table-column label="操作" width="120">
@@ -83,6 +84,12 @@
             </template>
           </el-table-column>
         </el-table>
+        <div class="mobile-item-list">
+          <div v-for="d in publishedDocs" :key="d.id" class="mobile-item-row">
+            <span class="mobile-item-title">{{ d.title }}</span>
+            <el-button size="small" text type="primary" @click="downloadDoc(d)">下载</el-button>
+          </div>
+        </div>
       </el-card>
 
       <el-card v-if="portalContent.billing || portalContent.invoice" shadow="never" style="margin-top:20px">
@@ -135,7 +142,7 @@
 
       <el-card v-if="portalContent.sign_requests?.length" shadow="never" style="margin-top:20px">
         <template #header><span class="card-title">签署请求</span></template>
-        <el-table :data="portalContent.sign_requests" stripe size="small">
+        <el-table class="desktop-table" :data="portalContent.sign_requests" stripe size="small">
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column prop="title" label="文档" show-overflow-tooltip />
           <el-table-column prop="status" label="状态" width="100">
@@ -150,6 +157,13 @@
             </template>
           </el-table-column>
         </el-table>
+        <div class="mobile-item-list">
+          <div v-for="row in portalContent.sign_requests" :key="row.id" class="mobile-item-row">
+            <span class="mobile-item-title">{{ row.title }}</span>
+            <el-tag :type="row.status === 'pending' ? 'warning' : 'success'" size="small">{{ row.status === 'pending' ? '待签署' : '已签署' }}</el-tag>
+            <el-button v-if="row.status === 'pending'" size="small" text type="primary" @click="openSignLink(row)">前往签署</el-button>
+          </div>
+        </div>
       </el-card>
     </div>
   </div>
@@ -365,7 +379,8 @@ onUnmounted(() => {
 }
 
 .otp-input {
-  width: 240px;
+  /* 375px 专项 M-10：窄屏随容器满宽，桌面保持 240px */
+  width: min(240px, 100%);
 }
 
 .otp-header {
@@ -574,6 +589,24 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+/* 375px 专项 M-10：文档/签署双布局——桌面表格、窄屏卡片行 */
+.mobile-item-list { display: none; }
+.mobile-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.mobile-item-row:last-child { border-bottom: 0; }
+.mobile-item-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 640px) {
   .legal-portal {
     max-width: 100%;
@@ -581,9 +614,11 @@ onUnmounted(() => {
     padding: 0 12px;
   }
 
-  .otp-input {
-    width: 100%;
-  }
+  /* 触控目标：small 按钮仅 24px 高，移动端抬到 40px（ux-audit M-10） */
+  .legal-portal .el-button { min-height: 40px; }
+
+  .desktop-table { display: none; }
+  .mobile-item-list { display: grid; }
 
   .billing-summary, .portal-invoice-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .portal-invoice-heading { flex-direction: column; gap: 8px; }
