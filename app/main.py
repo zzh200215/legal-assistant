@@ -31,6 +31,7 @@ from app.api.legal import (
     org_member_api,
 )
 from app.api.org import org_api
+from app.api.notification import ws_notifications_api
 from app.api.tasks import task_api, workflow_api
 from app.core.api_response import (
     ApiResponseMiddleware,
@@ -95,6 +96,7 @@ app.include_router(matter_api.router, prefix="/api/legal", tags=["Legal Matters"
 app.include_router(legal_platform_api.router, prefix="/api/developer", tags=["Developer Platform"])
 app.include_router(legal_platform_api.open_router, prefix="/api/open", tags=["Open API"])
 app.include_router(ws_api.router, prefix="/api", tags=["WebSocket"])
+app.include_router(ws_notifications_api.router, prefix="/api", tags=["WebSocket Notifications"])
 
 app.add_middleware(ApiResponseMiddleware)
 app.add_middleware(OperationLogMiddleware)

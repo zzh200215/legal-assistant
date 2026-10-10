@@ -144,13 +144,56 @@ const stopPolling = () => {
   }
 }
 
+// WS 实时推送（ux-audit M-9 中期项）：服务端创建站内通知即推送，收到后立即刷新；
+// 断线 15s 重连，认证失败(1008)不重连——轮询兜底仍在，避免无效重连风暴。
+let socket = null
+let wsRetryTimer = null
+const connectWs = () => {
+  const token = localStorage.getItem('token')
+  if (!token || socket) return
+  try {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    const wsHost = import.meta.env.DEV ? (import.meta.env.VITE_WS_HOST || 'localhost:8001') : location.host
+    socket = new WebSocket(`${proto}://${wsHost}/api/ws/notifications`, [`bearer.${token}`])
+  } catch {
+    socket = null
+    return
+  }
+  socket.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data)
+      if (msg.type === 'notification') load()
+    } catch { /* 忽略非 JSON 帧 */ }
+  }
+  socket.onclose = (e) => {
+    socket = null
+    if (e.code === 1008) return
+    if (!wsRetryTimer) wsRetryTimer = setTimeout(() => { wsRetryTimer = null; connectWs() }, 15000)
+  }
+  socket.onerror = () => {
+    try { socket?.close() } catch { /* 已关闭 */ }
+  }
+}
+const disconnectWs = () => {
+  if (wsRetryTimer) {
+    clearTimeout(wsRetryTimer)
+    wsRetryTimer = null
+  }
+  if (socket) {
+    try { socket.close() } catch { /* 已关闭 */ }
+    socket = null
+  }
+}
+
 onMounted(() => {
   load()
   startPolling()
+  connectWs()
   document.addEventListener('click', onDocClick)
 })
 onUnmounted(() => {
   stopPolling()
+  disconnectWs()
   document.removeEventListener('click', onDocClick)
 })
 </script>

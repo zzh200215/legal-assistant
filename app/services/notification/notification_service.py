@@ -220,6 +220,23 @@ class NotificationService:
         oplog_service.log(module="notification", action="notification_created", db=db,
                           user_id=user_id, target_type="notification_event", target_id=event.id,
                           detail=f"channel={channel}; event_type={event_type}; idempotency_key={idem_key}")
+        if delivered_now:
+            # WS 实时推送（ux-audit M-9 中期项）：站内通知创建即 delivered，顺手推给在线连接；
+            # Celery 进程内无事件循环，notify_user 自动 no-op，由前端 30s 轮询兜底。
+            from app.services.notification.notification_ws import notification_push
+            notification_push.notify_user(user_id, {
+                "type": "notification",
+                "notification": {
+                    "id": event.id,
+                    "event_type": event.event_type,
+                    "title": event.title,
+                    "body": event.body,
+                    "case_id": event.case_id,
+                    "reference_type": event.reference_type,
+                    "reference_id": event.reference_id,
+                    "created_at": str(event.created_at or ""),
+                },
+            })
         return event
 
     def create_multi_channel_notification(self, *, db: Session, organization_id: int,
