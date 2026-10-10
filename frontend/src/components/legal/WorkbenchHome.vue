@@ -49,7 +49,10 @@
             <span class="case-count">{{ caseRecordCount(matter) }} 项</span>
           </button>
         </div>
-        <div v-else class="workbench-empty">还没有案件，先创建一个案件开始归档工作。</div>
+        <div v-else class="workbench-empty">
+          还没有案件，先创建一个案件开始归档工作。
+          <button type="button" class="workspace-primary empty-cta" :disabled="orgMissing" @click="$emit('create-case')">新建案件</button>
+        </div>
       </section>
     </div>
 
@@ -137,6 +140,9 @@ onMounted(async () => {
 .case-status-mark.status-closed { background: #78A889; }
 .case-status-mark.status-archived { background: #A6AFB8; }
 .workbench-empty { padding: 28px 4px; color: var(--color-text-muted); font-size: 13px; }
+.workbench-empty .empty-cta { margin-top: 12px; font-size: 13px; padding: 8px 18px; border-radius: 6px; border: 0; background: var(--color-primary); color: #fff; cursor: pointer; }
+.workbench-empty .empty-cta:disabled { background: var(--color-border); color: var(--color-text-muted); cursor: not-allowed; }
+.workbench-empty .empty-cta:hover { background: var(--color-primary-hover); }
 .workbench-actions { padding-top: 8px; }
 .action-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .action-list button { display: grid; gap: 7px; min-height: 92px; padding: 16px 18px 16px 0; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }

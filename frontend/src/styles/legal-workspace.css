@@ -12,6 +12,9 @@
 .legal-list-row:hover { background: #F8FAFB; }
 .legal-muted { color: var(--color-text-muted); font-size: 12px; }
 .legal-empty { padding: 22px 0; color: var(--color-text-muted); font-size: 13px; text-align: center; }
+.legal-empty .empty-cta { display: block; margin: 12px auto 0; padding: 8px 20px; border: 0; border-radius: 6px; background: var(--color-primary); color: #fff; font-size: 13px; cursor: pointer; }
+.legal-empty .empty-cta:hover { background: var(--color-primary-hover); }
+.legal-empty .empty-cta:disabled { background: var(--color-border); color: var(--color-text-muted); cursor: not-allowed; }
 .legal-divider { height: 1px; background: var(--color-border); }
 .legal-matter-tabs { display: flex; gap: 22px; overflow-x: auto; margin: 0; padding: 0; border-bottom: 1px solid var(--color-border); scrollbar-width: thin; }
 .legal-matter-tab { position: relative; flex: 0 0 auto; min-height: 44px; padding: 0 1px; border: 0; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 13px; cursor: pointer; }

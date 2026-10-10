@@ -25,7 +25,10 @@
           </span>
           <span class="case-list-status" :class="`status-${matter.status}`">{{ caseStatusLabel(matter.status) }}</span>
         </button>
-        <div v-if="!filteredCases.length" class="legal-empty">{{ cases.length ? '没有符合条件的案件' : '还没有案件，创建一个案件以开始归档工作。' }}</div>
+        <div v-if="!filteredCases.length" class="legal-empty">
+          {{ cases.length ? '没有符合条件的案件' : '还没有案件，创建一个案件以开始归档工作。' }}
+          <button v-if="!cases.length" type="button" class="empty-cta" :disabled="!hasOrg" @click="caseDialog?.open()">新建案件</button>
+        </div>
       </div>
     </template>
 

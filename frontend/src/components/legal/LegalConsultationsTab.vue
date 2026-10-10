@@ -7,6 +7,7 @@
                 <el-input v-model="consultForm.question" type="textarea" :rows="4" placeholder="例如：我在公司工作了3年，公司突然辞退我，没有支付经济补偿金..." maxlength="12000" show-word-limit />
               </el-form-item>
               <el-button type="primary" :loading="consultLoading" @click="submitConsultation">提交咨询</el-button>
+              <div v-if="consultLoading" class="staged-hint" aria-live="polite">{{ consultStageText }}</div>
             </el-form>
           </el-card>
 
@@ -104,6 +105,7 @@ import AiOutputFeedback from '../AiOutputFeedback.vue'
 import { useLegalConsultations } from '../../composables/useLegalConsultations'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
+import { useStagedProgress } from '../../composables/useStagedProgress'
 import {
   riskTagType, riskLabel, categoryLabel,
   sourceStatusType, sourceStatusLabel, statusTagType, statusLabel,
@@ -148,6 +150,13 @@ const submitConsultation = () => {
   loadQuota()
 }
 
+// LLM 生成约需 20-30 秒，阶段性提示缓解等待焦虑（ux-audit M-6）
+const consultStageText = useStagedProgress(consultLoading, [
+  '正在检索相关法源…',
+  '正在分析问题要点与风险…',
+  '正在生成法律建议…',
+])
+
 const submitConsultFeedback = async (score, note) => {
   if (!consultResult.value?.id) return
   try {
@@ -168,6 +177,11 @@ onMounted(() => {
 .tab-panel {
   display: grid;
   gap: 20px;
+}
+.staged-hint {
+  margin-top: 10px;
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 .card-title {
   font-weight: 700;

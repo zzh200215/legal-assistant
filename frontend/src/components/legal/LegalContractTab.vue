@@ -13,6 +13,7 @@
           <el-button :loading="uploadLoading">上传合同文件</el-button>
         </el-upload>
         <el-button type="primary" :loading="contractLoading" @click="submitContractReview">开始审查</el-button>
+        <div v-if="contractLoading" class="staged-hint" aria-live="polite">{{ contractStageText }}</div>
       </div>
     </section>
 
@@ -180,6 +181,7 @@ import { useContractRiskPresentation, clauseLabel, formatDate, riskLabel, status
 import { useContractComparison } from '../../composables/useContractComparison'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
+import { useStagedProgress } from '../../composables/useStagedProgress'
 
 const props = defineProps({ caseId: { type: Number, default: null }, downloadText: { type: Function, default: null } })
 const { quotaHint, loadQuota } = useQuota()
@@ -189,6 +191,13 @@ const {
   resubmitDraftForm, resubmitLoading, loadContractReviews, submitContractReview: runContractReview,
   onExpandContractReview, submitContractResubmit, handleContractUpload: uploadContractReview,
 } = useContractReviews({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
+
+// LLM 审查约需 20-30 秒，阶段性提示缓解等待焦虑（ux-audit M-6）
+const contractStageText = useStagedProgress(contractLoading, [
+  '正在解析合同条款…',
+  '正在逐条识别风险与缺失义务…',
+  '正在生成审查建议…',
+])
 const {
   reviewFilter, riskFilter, highlightedParagraph, availableClauseTypes, filteredRisks, filteredContractReviews,
   resetRiskFilter, jumpToRisk,
@@ -379,6 +388,7 @@ onMounted(openLatestContractReview)
 .field-label { margin: 4px 0 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 550; }
 .intake-actions, .document-actions, .compare-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .intake-actions { justify-content: flex-end; padding-top: 6px; }
+.staged-hint { flex-basis: 100%; margin-top: 2px; text-align: right; color: var(--color-text-muted); font-size: 12px; }
 .document-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border); }
 .document-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .back-action { width: 30px; height: 30px; border: 1px solid var(--color-border); border-radius: 4px; background: white; color: var(--color-text-secondary); font-size: 21px; line-height: 1; cursor: pointer; }

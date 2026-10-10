@@ -16,6 +16,7 @@
           <p v-if="!currentDraftFields.length" class="draft-sidebar-empty">选择文书类型后填写事实字段。</p>
         </div>
         <el-button class="generate-button" type="primary" :loading="draftLoading" @click="submitDraft">生成草稿</el-button>
+        <div v-if="draftLoading" class="staged-hint" aria-live="polite">{{ draftStageText }}</div>
       </div>
 
       <section class="draft-editor-pane">
@@ -112,6 +113,7 @@ import DocumentDiff from './DocumentDiff.vue'
 import { useLegalDrafts } from '../../composables/useLegalDrafts'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
+import { useStagedProgress } from '../../composables/useStagedProgress'
 import { statusLabel } from '../../composables/useLegalWorkspacePresentation'
 
 const props = defineProps({ caseId: { type: Number, default: null }, downloadText: { type: Function, default: null } })
@@ -127,6 +129,13 @@ const {
   draftComments, draftCollaboration, loadDraftComments, loadDraftCollaboration, loadDraftDiff,
   addDraftComment, updateDraftComment,
 } = useLegalDrafts({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
+
+// LLM 起草约需 20-30 秒，阶段性提示缓解等待焦虑（ux-audit M-6）
+const draftStageText = useStagedProgress(draftLoading, [
+  '正在梳理案件事实…',
+  '正在匹配文书模板与法条…',
+  '正在起草文书正文…',
+])
 const currentDraftFields = computed(() => draftFieldMap.value[draftForm.value.document_type] || [])
 const editableContent = ref('')
 const selectedVersion = ref(null)
@@ -384,6 +393,7 @@ defineExpose({ prefill(documentType, fields) { if (documentType) draftForm.value
 .draft-field small { color: var(--color-warning); font-size: 10px; line-height: 1.45; }
 .draft-sidebar-empty, .draft-muted { margin: 4px 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.6; }
 .generate-button { width: 100%; margin-top: 8px; }
+.staged-hint { margin-top: 8px; color: var(--color-text-muted); font-size: 12px; text-align: center; }
 .draft-editor-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-width: 0; padding: 18px 22px; }
 .draft-editor-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border-light); }
 .draft-kicker { margin: 0 0 4px; color: var(--color-text-muted); font-size: 11px; }
