@@ -38,11 +38,11 @@
           </el-tabs>
         </div>
 
-        <el-form v-show="tab === 'login'" @submit.prevent="handleLogin" class="login-form">
-          <el-form-item>
+        <el-form v-show="tab === 'login'" ref="loginFormRef" :model="loginForm" :rules="loginRules" class="login-form" @submit.prevent="handleLogin">
+          <el-form-item prop="username">
             <el-input v-model="loginForm.username" placeholder="用户名" :prefix-icon="UserIcon" size="large" />
           </el-form-item>
-          <el-form-item>
+          <el-form-item prop="password">
             <el-input v-model="loginForm.password" type="password" placeholder="密码" show-password :prefix-icon="LockIcon" size="large" />
           </el-form-item>
           <div class="form-auxiliary">
@@ -53,8 +53,8 @@
           </el-button>
         </el-form>
 
-        <el-form v-show="tab === 'forgot'" @submit.prevent="handleForgotPassword" class="login-form">
-          <el-form-item>
+        <el-form v-show="tab === 'forgot'" ref="forgotFormRef" :model="forgotForm" :rules="forgotRules" class="login-form" @submit.prevent="handleForgotPassword">
+          <el-form-item prop="email">
             <el-input v-model="forgotForm.email" placeholder="注册时使用的邮箱" :prefix-icon="MessageIcon" size="large" />
           </el-form-item>
           <el-alert
@@ -74,14 +74,14 @@
           </div>
         </el-form>
 
-        <el-form v-show="tab === 'register'" @submit.prevent="handleRegister" class="login-form">
-          <el-form-item>
+        <el-form v-show="tab === 'register'" ref="regFormRef" :model="regForm" :rules="regRules" class="login-form" @submit.prevent="handleRegister">
+          <el-form-item prop="username">
             <el-input v-model="regForm.username" placeholder="用户名" :prefix-icon="UserIcon" size="large" />
           </el-form-item>
-          <el-form-item>
+          <el-form-item prop="email">
             <el-input v-model="regForm.email" placeholder="邮箱" :prefix-icon="MessageIcon" size="large" />
           </el-form-item>
-          <el-form-item>
+          <el-form-item prop="password">
             <el-input v-model="regForm.password" type="password" placeholder="密码" show-password :prefix-icon="LockIcon" size="large" />
           </el-form-item>
           <el-form-item>
@@ -129,9 +129,36 @@ const regForm = ref({ username: '', email: '', password: '', full_name: '' })
 const forgotForm = ref({ email: '' })
 const forgotSent = ref(false)
 
+// 表单内联校验（ux-audit M-11）：必填与格式在输入框下方即时提示，不再只靠提交后的全局 toast
+const loginFormRef = ref(null)
+const regFormRef = ref(null)
+const forgotFormRef = ref(null)
+const trimValue = (value) => (value || '').trim()
+const requiredRule = (message) => ({ required: true, message, trigger: 'blur', transform: trimValue })
+const emailRules = [
+  requiredRule('请输入邮箱'),
+  { type: 'email', message: '邮箱格式不正确', trigger: 'blur', transform: trimValue },
+]
+const loginRules = {
+  username: [requiredRule('请输入用户名')],
+  password: [requiredRule('请输入密码')],
+}
+const forgotRules = { email: emailRules }
+const regRules = {
+  username: [requiredRule('请输入用户名')],
+  email: emailRules,
+  password: [requiredRule('请输入密码')],
+}
+
+// 校验通过返回 true；formRef 尚未挂载时放行（v-show 表单始终渲染，仅作兜底）
+const validateForm = async (formRef) => {
+  if (!formRef) return true
+  return await formRef.validate().catch(() => false)
+}
+
 const handleForgotPassword = async () => {
+  if (!(await validateForm(forgotFormRef.value))) return
   const email = forgotForm.value.email.trim()
-  if (!email) return ElMessage.warning('请输入注册时使用的邮箱')
   loading.value = true
   try {
     await api.forgotPassword({ email })
@@ -156,9 +183,7 @@ const MessageIcon = h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'curr
 ])
 
 const handleLogin = async () => {
-  if (!loginForm.value.username || !loginForm.value.password) {
-    return ElMessage.warning('请输入用户名和密码')
-  }
+  if (!(await validateForm(loginFormRef.value))) return
   loading.value = true
   try {
     const { data } = await api.login(loginForm.value)
@@ -185,9 +210,7 @@ const handleLogin = async () => {
 }
 
 const handleRegister = async () => {
-  if (!regForm.value.username || !regForm.value.email || !regForm.value.password) {
-    return ElMessage.warning('请填写必填项')
-  }
+  if (!(await validateForm(regFormRef.value))) return
   loading.value = true
   try {
     const { data } = await api.register(regForm.value)

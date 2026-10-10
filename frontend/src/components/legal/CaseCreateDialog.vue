@@ -1,7 +1,7 @@
 <template>
   <el-dialog v-model="caseDialogVisible" title="新建案件" width="520px">
-    <el-form :model="caseForm" label-width="90px" size="small">
-      <el-form-item label="案件名称" required>
+    <el-form ref="caseFormRef" :model="caseForm" :rules="caseRules" label-width="90px" size="small">
+      <el-form-item label="案件名称" prop="title">
         <el-input v-model="caseForm.title" placeholder="如：张三 vs XX公司 劳动争议" maxlength="256" />
       </el-form-item>
       <el-form-item label="案件类型">
@@ -14,7 +14,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="案情摘要">
-        <el-input v-model="caseForm.description" type="textarea" :rows="3" placeholder="简要描述案件背景（AES 加密存储）" maxlength="4000" />
+        <el-input v-model="caseForm.description" type="textarea" :rows="3" placeholder="简要描述案件背景、争议焦点与诉求，仅你和你的团队可见" maxlength="4000" />
       </el-form-item>
     </el-form>
     <template #footer>
@@ -49,8 +49,15 @@ const caseDialogVisible = ref(false)
 const caseCreating = ref(false)
 const caseForm = ref({ title: '', case_type: 'labor_dispute', description: '' })
 
+// 内联校验（ux-audit M-11）：标题必填即时提示，替代提交后的全局 toast
+const caseFormRef = ref(null)
+const caseRules = {
+  title: [{ required: true, message: '请输入案件名称', trigger: 'blur', transform: (v) => (v || '').trim() }],
+}
+
 const createCase = async () => {
-  if (!caseForm.value.title.trim()) return ElMessage.warning('请输入案件名称')
+  const valid = await caseFormRef.value?.validate().catch(() => false)
+  if (!valid) return
   // 无组织用户兜底：上游按钮已禁用，这里防止其他调用路径绕过（ux-audit P0-1）
   if (!props.orgId) return ElMessage.warning('你还未加入组织，暂时无法创建案件。请联系系统管理员开通。')
   caseCreating.value = true
@@ -72,6 +79,7 @@ const createCase = async () => {
 defineExpose({
   open() {
     caseForm.value = { title: '', case_type: 'labor_dispute', description: '' }
+    caseFormRef.value?.clearValidate()
     caseDialogVisible.value = true
   },
 })

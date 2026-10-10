@@ -2,8 +2,8 @@
         <div class="tab-panel">
           <el-card shadow="never">
             <template #header><span class="card-title">法律咨询辅助</span></template>
-            <el-form @submit.prevent="submitConsultation">
-              <el-form-item label="描述您的法律问题">
+            <el-form ref="consultFormRef" :model="consultForm" :rules="consultRules" @submit.prevent="submitConsultation">
+              <el-form-item label="描述您的法律问题" prop="question">
                 <el-input v-model="consultForm.question" type="textarea" :rows="4" placeholder="例如：我在公司工作了3年，公司突然辞退我，没有支付经济补偿金..." maxlength="12000" show-word-limit />
               </el-form-item>
               <el-button type="primary" :loading="consultLoading" @click="submitConsultation">提交咨询</el-button>
@@ -83,8 +83,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, onMounted, ref } from 'vue'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElCard } from 'element-plus/es/components/card/index'
 import { ElDescriptions, ElDescriptionsItem } from 'element-plus/es/components/descriptions/index'
 import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
@@ -100,6 +101,8 @@ import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/message/style/css'
+import 'element-plus/es/components/message-box/style/css'
 import legalWorkspace from '../../api/legalWorkspace'
 import AiOutputFeedback from '../AiOutputFeedback.vue'
 import { useLegalConsultations } from '../../composables/useLegalConsultations'
@@ -145,7 +148,15 @@ const {
   onReviewSubmitted: props.onReviewSubmitted,
 })
 
-const submitConsultation = () => {
+// 内联校验（ux-audit M-11）：问题必填即时提示，替代提交后的全局 toast
+const consultFormRef = ref(null)
+const consultRules = {
+  question: [{ required: true, message: '请输入法律问题', trigger: 'blur', transform: (v) => (v || '').trim() }],
+}
+
+const submitConsultation = async () => {
+  const valid = await consultFormRef.value?.validate().catch(() => false)
+  if (!valid) return
   runConsultation()
   loadQuota()
 }

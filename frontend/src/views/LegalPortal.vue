@@ -24,7 +24,7 @@
         </el-alert>
         <el-form @submit.prevent="verifyOtp">
           <el-form-item label="6位验证码">
-            <el-input v-model="otpCode" maxlength="6" placeholder="请输入验证码" class="otp-input" @input="otpCode = otpCode.replace(/\D/g, '')" />
+            <el-input v-model="otpCode" maxlength="6" placeholder="输入邮件中的 6 位数字验证码" class="otp-input" @input="otpCode = otpCode.replace(/\D/g, '')" />
           </el-form-item>
           <div class="otp-actions">
             <el-button type="primary" :loading="verifyLoading" @click="verifyOtp">验证</el-button>
