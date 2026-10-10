@@ -111,8 +111,9 @@ export function useDocumentAnalysis({ docId, parseJobs, onCompleted }) {
         try {
           const { data } = await api.getDocumentTaskStatus(existingJob.task_id)
           if (data.result) analysis.value = normalizeResult(data.result)
-        } catch {
-          // 结果拉取失败静默，不影响其他功能
+        } catch (error) {
+          // 结果拉取失败静默，不影响其他功能，但保留可观测
+          console.error('[document-analysis] 分析结果拉取失败', error)
         } finally {
           loading.value = false
         }

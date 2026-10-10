@@ -94,8 +94,9 @@ onMounted(async () => {
   try {
     const { data } = await legalWorkspace.listLegalReviewQueue()
     reviewItems.value = data || []
-  } catch {
+  } catch (error) {
     reviewItems.value = []
+    console.error('[workbench] 待审核列表加载失败', error)
   } finally {
     reviewLoading.value = false
   }

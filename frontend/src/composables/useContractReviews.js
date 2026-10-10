@@ -93,8 +93,9 @@ export function useContractReviews({ client, message, caseId }) {
     try {
       const { data } = await client.listContractReviewVersions(row.id)
       contractVersionMap.value = { ...contractVersionMap.value, [row.id]: data }
-    } catch {
+    } catch (error) {
       contractVersionMap.value = { ...contractVersionMap.value, [row.id]: [] }
+      console.error('[contract] 审查版本列表加载失败', error)
     }
   }
 

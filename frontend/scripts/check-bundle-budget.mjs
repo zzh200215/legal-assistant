@@ -18,8 +18,10 @@ const ASSETS = resolve(DIST, 'assets')
 // 2026-10 法律工作台重构（案件工作区 + 工作流面板 + 通知中心 + 管理中心）后重定基线：
 // 实测入口 110.1kB raw / 37.0kB gzip、最大页面 chunk 102.3kB、总资产 1566.9kB；
 // LegalWorkspace 面板已按需加载（defineAsyncComponent），prefill/refresh 时序依赖的 tab 保持静态。
+// 2026-10-10 吞错修复（M-13）后 NotificationBell 首次引入 ElMessage（操作反馈），入口 raw 重定 120：
+// 实测入口 118.5kB raw / 40.1kB gzip、最大页面 chunk 102.2kB、总资产 1581.4kB。
 const BUDGETS = {
-  entryJsRawKB: Number(process.env.ENTRY_JS_RAW_KB || 115),
+  entryJsRawKB: Number(process.env.ENTRY_JS_RAW_KB || 120),
   entryJsGzipKB: Number(process.env.ENTRY_JS_GZIP_KB || 42),
   pageChunkRawKB: Number(process.env.PAGE_CHUNK_RAW_KB || 130),
   totalRawKB: Number(process.env.TOTAL_RAW_KB || 1600),

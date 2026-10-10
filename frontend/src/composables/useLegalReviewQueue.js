@@ -6,6 +6,9 @@ import { qk, qkPrefix } from '../query/keys'
 // 律师审核 tab 领域模块（查询层 + 幂等写）：
 // 审核队列/统计走统一查询层；审核动作、批注经 useMutation（Idempotency-Key 防重复审核）。
 
+// ElMessageBox 取消 reject 值；用户主动取消不算错误
+const isUserCancel = (error) => error === 'cancel' || error === 'close' || error?.message === 'cancel'
+
 export function useLegalReviewQueue({ client, message, prompt, targetLabel, caseId, canReview = null, filters = null }) {
   const reviewHistoryMap = ref({})
   const commentDraft = ref({})
@@ -59,8 +62,9 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel, case
     try {
       const { data } = await client.listReviewers()
       reviewers.value = data || []
-    } catch {
+    } catch (error) {
       reviewers.value = []
+      console.error('[review-queue] 审核人列表加载失败', error)
     }
   }
 
@@ -78,8 +82,9 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel, case
     try {
       const { data } = await client.getReviewHistory(row.target_type, row.id)
       reviewHistoryMap.value = { ...reviewHistoryMap.value, [key]: data.history || [] }
-    } catch {
+    } catch (error) {
       reviewHistoryMap.value = { ...reviewHistoryMap.value, [key]: [] }
+      console.error('[review-queue] 审核历史加载失败', error)
     }
   }
 
@@ -130,8 +135,9 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel, case
         id: row.id,
         body: { action, note: note || null },
       })
-    } catch {
-      // 用户取消输入框：静默
+    } catch (error) {
+      // 用户取消输入框：静默。API 错误由 actionMutation 的 onError 统一弹提示，此处不重复
+      if (!isUserCancel(error)) console.error('[review-queue] 审核操作异常', error)
     }
   }
 

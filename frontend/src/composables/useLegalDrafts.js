@@ -79,8 +79,9 @@ export function useLegalDrafts({ client, message, caseId }) {
     try {
       const { data } = await client.listDraftVersions(draftId)
       draftVersionMap.value = { ...draftVersionMap.value, [draftId]: data || [] }
-    } catch {
+    } catch (error) {
       draftVersionMap.value = { ...draftVersionMap.value, [draftId]: [] }
+      console.error('[draft] 文书版本列表加载失败', error)
     }
   }
 
@@ -89,8 +90,9 @@ export function useLegalDrafts({ client, message, caseId }) {
     try {
       const { data } = await client.listDraftComments(draftId)
       draftComments.value = data || []
-    } catch {
+    } catch (error) {
       draftComments.value = []
+      console.error('[draft] 文书批注加载失败', error)
     }
     return draftComments.value
   }
@@ -100,8 +102,9 @@ export function useLegalDrafts({ client, message, caseId }) {
     try {
       const { data } = await client.getDraftCollaboration(draftId)
       draftCollaboration.value = data
-    } catch {
+    } catch (error) {
       draftCollaboration.value = null
+      console.error('[draft] 文书协作信息加载失败', error)
     }
     return draftCollaboration.value
   }

@@ -4,6 +4,12 @@ import { isOnline } from '../utils/network.js'
 // 页面只消费 normalizeError 后的 { kind, code, message, detail, requestId, traceId }，
 // 不再散落手写 error.response?.data?.detail 与裸异常文本。
 // 错误码对照后端 x-error-codes 注册表（docs/openapi-snapshot.json 顶层 x-error-codes）。
+//
+// 吞错规范（ux-audit M-13）：
+// 1. 写操作失败必须给用户反馈（message.error(errorMessage(error))）；
+// 2. 读操作降级（置空继续渲染）时至少 console.error('[模块] 上下文', error)；
+// 3. 用户主动取消（ElMessageBox reject 'cancel'/'close'）不算错误，不弹提示；
+// 4. 错误已被 useMutation onError 等统一出口处理时，外层 catch 不重复弹窗。
 
 export const ErrorKind = {
   NETWORK: 'network',

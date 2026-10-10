@@ -447,7 +447,9 @@ const loadBillingRules = async () => {
   try {
     const { data } = await api.listBillingRules(props.orgId, props.caseId)
     billingRules.value = data
-  } catch {}
+  } catch (error) {
+    console.error('[billing] 计费规则列表加载失败', error)
+  }
 }
 
 const submitBillingRule = async () => {

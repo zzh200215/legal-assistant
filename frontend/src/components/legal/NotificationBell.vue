@@ -37,6 +37,8 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bell } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import api from '../../api'
 
 const open = ref(false)
@@ -52,8 +54,9 @@ const load = async () => {
     const { data } = await api.getNotifications()
     items.value = data.items || []
     unread.value = data.unread || 0
-  } catch {
-    /* 通知加载失败不影响主界面 */
+  } catch (error) {
+    // 通知加载失败不影响主界面，但需要可观测（ux-audit M-13 吞错修复）
+    console.error('[notification] 通知列表加载失败', error)
   }
 }
 
@@ -68,8 +71,9 @@ const markRead = async (n) => {
     await api.markNotificationRead(n.id)
     n.status = 'read'
     unread.value = Math.max(0, unread.value - 1)
-  } catch {
-    /* ignore */
+  } catch (error) {
+    console.error('[notification] 标记已读失败', error)
+    ElMessage.error('标记已读失败，请重试')
   }
 }
 
@@ -92,8 +96,9 @@ const markAllRead = async () => {
     await api.markAllNotificationsRead()
     items.value.forEach((n) => { n.status = 'read' })
     unread.value = 0
-  } catch {
-    /* ignore */
+  } catch (error) {
+    console.error('[notification] 全部已读失败', error)
+    ElMessage.error('全部已读失败，请重试')
   }
 }
 
