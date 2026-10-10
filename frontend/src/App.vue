@@ -458,8 +458,6 @@ onMounted(async () => {
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-6);
-  max-width: 1500px;
-  margin: 0 auto;
   padding: var(--space-6) var(--space-8) var(--space-4);
 }
 
@@ -482,8 +480,6 @@ onMounted(async () => {
 }
 
 .main-content {
-  max-width: 1500px;
-  margin: 0 auto;
   padding: var(--space-4) var(--space-8) var(--space-10);
   background: transparent;
   min-height: calc(100vh - 180px);
@@ -521,7 +517,7 @@ onMounted(async () => {
   opacity: 0;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1024px) {
   .app-shell { grid-template-columns: 68px minmax(0, 1fr); }
   .topbar-title, .nav-entry span, .utility-label, .account-meta, .nav-group-label { display: none; }
   .topbar { align-items: center; }
