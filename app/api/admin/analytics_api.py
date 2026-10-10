@@ -53,6 +53,21 @@ def my_token_stats(
     return analytics_service.get_user_token_stats(current_user.id, db, days=days)
 
 
+@router.get("/funnel/summary")
+def funnel_summary(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """产品漏斗汇总（ux-audit 需补充信息）：注册/登录/建案/咨询/审核事件计数 + 门户访问。
+
+    转化率在展示层按 events 中的 total/unique_users 计算；门户访问复用 legal_portal_access_logs。
+    """
+    from app.services.observability.funnel_service import funnel_summary as summarize
+
+    return summarize(db, days=days)
+
+
 @router.get("/tokens/global-stats")
 def global_token_stats(
     days: int = Query(30, description="统计天数"),

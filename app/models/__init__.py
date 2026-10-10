@@ -1,5 +1,6 @@
 from app.models.agent import A2ADelegation, AgentApprovalRequest, AgentAuditEvent, AgentRun, ToolCallLog
 from app.models.agent_eval import AgentEvalCandidate
+from app.models.analytics_funnel import AnalyticsFunnelEvent
 from app.models.api_key import APIKey
 from app.models.archive import DatabaseArchiveRun
 from app.models.auth_log import AdminAuditLog, LoginLog
@@ -246,4 +247,5 @@ __all__ = [
     "OpsMetricWatermark",
     "WsEventLog",
     "WebhookNonce",
+    "AnalyticsFunnelEvent",
 ]

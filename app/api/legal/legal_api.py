@@ -815,6 +815,14 @@ def create_consultation(req: ConsultationIn, db: Session = Depends(get_db), curr
     result = serialize(operation.row)
     result["disclaimer_level"] = operation.disclaimer["level"]
     result["disclaimer_label"] = operation.disclaimer["label"]
+    # 产品漏斗埋点：咨询提交成功（服务端记录，失败不影响咨询流程）
+    from app.services.observability.funnel_service import record_event
+    record_event(
+        db, "consult_submit", user_id=current_user.id,
+        organization_id=getattr(current_user, "organization_id", None),
+        case_id=req.case_id,
+    )
+    db.commit()
     return result
 
 
@@ -1281,10 +1289,20 @@ def bulk_review_action(req: ReviewBulkActionIn, db: Session = Depends(get_db), c
 @router.post("/review-queue/{target_type}/{target_id}/actions")
 def review_action(target_type: str, target_id: int, req: ReviewActionIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        return legal_workspace_read_module.apply_review_action(
+        result = legal_workspace_read_module.apply_review_action(
             db, current_user, target_type=target_type, target_id=target_id,
             action=req.action, note=req.note,
         )
+        # 产品漏斗埋点：审核动作成功（服务端记录，失败不影响审核流程）
+        from app.services.observability.funnel_service import record_event
+        record_event(
+            db, "review_submit", user_id=current_user.id,
+            organization_id=getattr(current_user, "organization_id", None),
+            case_id=result.get("case_id") if isinstance(result, dict) else None,
+            props={"action": req.action, "target_type": target_type},
+        )
+        db.commit()
+        return result
     except LookupError:
         raise api_error(404, "待审核记录不存在", code="LEGAL_REVIEW_TARGET_NOT_FOUND")
     except PermissionError:

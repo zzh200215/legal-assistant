@@ -155,6 +155,10 @@ def login(req: UserLogin, request: Request, db: Session = Depends(get_db)):
         organization_id=getattr(user, "organization_id", None),
         db=db,
     )
+    # 产品漏斗埋点：登录成功（服务端记录，失败不影响登录流程）
+    from app.services.observability.funnel_service import record_event
+    record_event(db, "auth_login", user_id=user.id, organization_id=getattr(user, "organization_id", None))
+    db.commit()
     return _issue_login_response(db, user, request, ip=ip, ua=ua)
 
 
@@ -291,6 +295,10 @@ def register(req: UserCreate, db: Session = Depends(get_db)):
     db.refresh(user)
 
     _log_personal_org_created(db, user, org)
+    # 产品漏斗埋点：注册成功（服务端记录，失败不影响注册流程）
+    from app.services.observability.funnel_service import record_event
+    record_event(db, "auth_register", user_id=user.id, organization_id=getattr(user, "organization_id", None))
+    db.commit()
     return _issue_token_response(db, user)
 
 
@@ -771,6 +779,10 @@ def register_with_code(req: RegisterWithCodeRequest, db: Session = Depends(get_d
     db.refresh(user)
 
     _log_personal_org_created(db, user, org)
+    # 产品漏斗埋点：注册成功（服务端记录，失败不影响注册流程）
+    from app.services.observability.funnel_service import record_event
+    record_event(db, "auth_register", user_id=user.id, organization_id=getattr(user, "organization_id", None))
+    db.commit()
     return _issue_token_response(db, user)
 
 

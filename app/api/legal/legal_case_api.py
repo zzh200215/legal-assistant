@@ -149,6 +149,9 @@ def create_case(
         db, case_id=case.id, organization_id=org_id, actor_id=current_user.id,
         event_type="matter.created", title="创建案件", summary=case.title,
     )
+    # 产品漏斗埋点：建案成功（与业务同事务提交，SAVEPOINT 隔离埋点失败）
+    from app.services.observability.funnel_service import record_event
+    record_event(db, "case_create", user_id=current_user.id, organization_id=org_id, case_id=case.id)
     db.commit()
     db.refresh(case)
     return _serialize_case(case, db)
