@@ -121,7 +121,7 @@ import { useAuthStore } from '../stores/auth'
 const authStore = useAuthStore()
 const router = useRouter()
 const route = useRoute()
-const tab = ref(route.query.tab === 'forgot' ? 'forgot' : 'login')
+const tab = ref(['register', 'forgot'].includes(route.query.tab) ? route.query.tab : 'login')
 const loading = ref(false)
 
 const loginForm = ref({ username: '', password: '' })
@@ -460,6 +460,22 @@ const handleRegister = async () => {
   .brand-footer {
     position: static;
     margin-top: 24px;
+  }
+}
+
+/* 移动端压缩品牌宣传区：能力列表对已决定登录的用户无价值，占满首屏导致表单不可见（ux-audit M-10） */
+@media (max-width: 760px) {
+  .login-brand {
+    padding: 32px 24px 20px;
+  }
+  .brand-capabilities {
+    display: none;
+  }
+  .brand-footer {
+    margin-top: 16px;
+  }
+  .login-form-panel {
+    padding: 28px 20px 40px;
   }
 }
 </style>
