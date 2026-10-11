@@ -929,28 +929,41 @@ class LegalWorkspaceReadModule:
 
     def list_rows(self, db: Session, user: User, kind: str, case_id: int | None = None) -> list[dict]:
         model = {"consultation": LegalConsultation, "contract_review": ContractReview, "draft": LegalDraft}[kind]
-        query = db.query(model).filter(model.user_id == user.id)
         if case_id is not None:
+            # 可见性边界（方案 B：案件级协作）：案件上下文列表返回该案件下全体成员记录，
+            # 调用者须能访问该案件（verify_case_access）。
             verify_case_access(case_id, user.id, db)
-            query = query.filter(model.case_id == case_id)
+            query = db.query(model).filter(model.case_id == case_id)
+        else:
+            # 个人工作台默认视图维持按提交人隔离，不泄漏他人记录。
+            query = db.query(model).filter(model.user_id == user.id)
         rows = query.order_by(model.created_at.desc()).limit(50).all()
-        return [serialize_workspace_row(row) for row in rows]
+        result = [serialize_workspace_row(row) for row in rows]
+        if case_id is not None and rows:
+            # 方案 B：案件上下文附上提交人名，便于前端区分"本人/同事"记录
+            names = {u.id: (u.full_name or u.username) for u in db.query(User).filter(User.id.in_({r.user_id for r in rows})).all()}
+            for item, row in zip(result, rows):
+                item["submitter_name"] = names.get(row.user_id)
+        return result
 
     def get_row(self, db: Session, user: User, kind: str, item_id: int):
         model = {"consultation": LegalConsultation, "contract_review": ContractReview, "draft": LegalDraft}[kind]
         row = db.query(model).filter(model.id == item_id).first()
         if not row:
             raise LookupError(f"LEGAL_{kind.upper()}_NOT_FOUND")
-        # 可见性边界（ux-audit 方案 A）：本人维持原行为；非本人仅被指派审核人/平台管理员/
-        # 与所有者同组织的审核律师可读，关联案件再叠严格成员校验；其余按"不存在"处理（防枚举）。
+        # 可见性边界（ux-audit 方案 A→B）：本人恒可读。非本人——归属案件的记录按方案 B 开放给
+        # 能访问该案件者（verify_case_access：普通模式=组织成员、严格模式=案件成员），平台管理员与
+        # 被指派审核人亦可；孤立记录（无案件）回退方案 A（同组织审核律师/被指派/管理员）。其余按"不存在"处理（防枚举）。
         if row.user_id != user.id:
-            if not self._can_read_others_row(db, user, row):
-                raise LookupError(f"LEGAL_{kind.upper()}_NOT_FOUND")
+            is_privileged = user.role in {"admin", "dept_admin"} or getattr(row, "reviewer_id", None) == user.id
             if row.case_id:
-                try:
-                    verify_case_access(row.case_id, user.id, db)
-                except Exception:
-                    raise LookupError(f"LEGAL_{kind.upper()}_NOT_FOUND")
+                if not is_privileged:
+                    try:
+                        verify_case_access(row.case_id, user.id, db)
+                    except Exception:
+                        raise LookupError(f"LEGAL_{kind.upper()}_NOT_FOUND")
+            elif not self._can_read_others_row(db, user, row):
+                raise LookupError(f"LEGAL_{kind.upper()}_NOT_FOUND")
         return row
 
     def versions(self, db: Session, user: User, kind: str, item_id: int) -> list[dict]:
