@@ -69,6 +69,9 @@
                   <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
                 </el-table-column>
                 <el-table-column prop="question" label="问题" show-overflow-tooltip />
+                <el-table-column v-if="caseId" prop="submitter_name" label="提交人" width="100">
+                  <template #default="{ row }">{{ row.submitter_name || '—' }}</template>
+                </el-table-column>
                 <el-table-column prop="risk_level" label="风险" width="80">
                   <template #default="{ row }">
                     <el-tag :type="riskTagType(row.risk_level)" size="small">{{ riskLabel(row.risk_level) }}</el-tag>

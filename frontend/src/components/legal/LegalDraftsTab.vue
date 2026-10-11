@@ -86,7 +86,7 @@
         <div class="draft-history-list">
           <button v-for="draft in drafts" :key="draft.id" class="draft-history-row" type="button" @click="selectDraft(draft)">
             <span><strong>{{ draft.title || '未命名文书' }}</strong><small>{{ formatDate(draft.created_at) }}</small></span>
-            <span>Version {{ draft.version || 1 }}</span><em>{{ statusLabel(draft.status) }}</em>
+            <span>Version {{ draft.version || 1 }}</span><em>{{ statusLabel(draft.status) }}</em><em v-if="draft.submitter_name">· {{ draft.submitter_name }}</em>
           </button>
         </div>
       </QueryStateView>

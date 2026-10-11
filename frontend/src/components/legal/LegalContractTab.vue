@@ -129,7 +129,7 @@
         <QueryStateView :status="historyStatus" :error="historyError" empty-text="暂无历史审查记录。" min-height="80px" @retry="loadContractReviews">
           <div class="review-history-list">
             <details v-for="item in filteredContractReviews" :key="item.id" class="history-item" @toggle="loadHistoryVersions($event, item)">
-              <summary><strong>{{ item.title || `合同审查 #${item.id}` }}</strong><span>v{{ item.version || 1 }}</span><span>{{ statusLabel(item.status) }}</span><time>{{ formatDate(item.created_at) }}</time></summary>
+              <summary><strong>{{ item.title || `合同审查 #${item.id}` }}</strong><span>v{{ item.version || 1 }}</span><span>{{ statusLabel(item.status) }}</span><span v-if="item.submitter_name">{{ item.submitter_name }}</span><time>{{ formatDate(item.created_at) }}</time></summary>
               <div class="history-item-body">
                 <div v-if="item.status === 'returned_for_facts'" class="resubmit-editor">
                   <label class="field-label" :for="`resubmit-history-${item.id}`">修订合同原文</label>
