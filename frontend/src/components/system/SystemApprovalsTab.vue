@@ -31,6 +31,7 @@
 
   <el-card class="system-panel-card">
     <template #header>审批请求</template>
+    <QueryStateView :status="approvalsStatus" :error="approvalsError" empty-text="暂无待审批项" min-height="200px" @retry="fetchApprovalData">
     <el-table :data="approvals" v-loading="approvalsLoading" border size="small" max-height="520">
       <el-table-column prop="tool_name" label="工具" width="180" />
       <el-table-column prop="agent_type" label="Agent" width="140" />
@@ -58,13 +59,13 @@
         </template>
       </el-table-column>
     </el-table>
+    </QueryStateView>
   </el-card>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElCard } from 'element-plus/es/components/card/index'
 import { ElCol } from 'element-plus/es/components/col/index'
@@ -83,11 +84,19 @@ import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemApprovals } from '../../composables/useSystemApprovals'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-const { approvalsLoading, approvals, fetchApprovalData } = useSystemApprovals({ client: api, message: ElMessage })
+const { approvalsLoading, approvalsError, approvals, fetchApprovalData } = useSystemApprovals({ client: api })
+
+const approvalsStatus = computed(() => {
+  if (approvalsLoading.value && !approvals.value.length) return 'loading'
+  if (approvalsError.value) return 'error'
+  if (!approvals.value.length) return 'empty'
+  return 'success'
+})
 
 const openApprovalInAgent = (row) => {
   router.push({ path: '/agent', query: { tab: 'approvals', approvalId: String(row.id) } })

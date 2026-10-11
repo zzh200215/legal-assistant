@@ -13,6 +13,7 @@
 
   <el-card class="system-panel-card">
     <template #header>敏感文档列表</template>
+    <QueryStateView :status="sensitivityStatus" :error="sensitivityError" empty-text="暂无敏感文档" min-height="200px" @retry="fetchSensitiveDocuments">
     <el-table :data="sensitiveDocuments" v-loading="sensitivityLoading" border size="small" max-height="520">
       <el-table-column prop="title" label="文档" min-width="180" show-overflow-tooltip />
       <el-table-column prop="classification" label="分类" width="120" />
@@ -32,11 +33,12 @@
         </template>
       </el-table-column>
     </el-table>
+    </QueryStateView>
   </el-card>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElCard } from 'element-plus/es/components/card/index'
@@ -50,6 +52,7 @@ import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemKnowledge } from '../../composables/useSystemKnowledge'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 defineProps({
   openDocument: { type: Function, default: null },
@@ -57,7 +60,14 @@ defineProps({
 
 const authStore = useAuthStore()
 
-const { sensitivityLoading, sensitiveDocuments, fetchSensitiveDocuments } = useSystemKnowledge({ client: api, message: ElMessage })
+const { sensitivityLoading, sensitivityError, sensitiveDocuments, fetchSensitiveDocuments } = useSystemKnowledge({ client: api, message: ElMessage })
+
+const sensitivityStatus = computed(() => {
+  if (sensitivityLoading.value && !sensitiveDocuments.value.length) return 'loading'
+  if (sensitivityError.value) return 'error'
+  if (!sensitiveDocuments.value.length) return 'empty'
+  return 'success'
+})
 
 onMounted(async () => {
   await authStore.loadMe()

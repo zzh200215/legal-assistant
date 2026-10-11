@@ -64,6 +64,7 @@
 
   <el-card class="system-panel-card">
     <template #header>任务列表</template>
+    <QueryStateView :status="taskRunsStatus" :error="taskError" empty-text="暂无任务运行记录" min-height="200px" @retry="fetchTaskRuns">
     <el-table :data="taskRuns" v-loading="taskLoading" border size="small" max-height="560">
       <el-table-column prop="source" label="来源" width="100">
         <template #default="{ row }">
@@ -100,6 +101,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </QueryStateView>
     <el-pagination
       background
       layout="total, prev, pager, next"
@@ -202,6 +204,7 @@ import { getStatusLabel } from '../../utils/status'
 import { useSystemTaskMonitor } from '../../composables/useSystemTaskMonitor'
 import { useSystemActivity } from '../../composables/useSystemActivity'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 import WorkflowOperationsPanel from './WorkflowOperationsPanel.vue'
 
 const route = useRoute()
@@ -212,11 +215,18 @@ const isAdmin = computed(() => authStore.isAdmin)
 const { fetchAlerts } = useSystemActivity({ client: api, message: ElMessage, isAdmin })
 
 const {
-  taskDays, taskScope, taskSource, taskStatus, taskRuns, taskLoading, taskRunPage, taskRunPageSize,
+  taskDays, taskScope, taskSource, taskStatus, taskRuns, taskLoading, taskError, taskRunPage, taskRunPageSize,
   taskRunTotal, retryingTaskKey, taskDetailVisible, selectedTaskDetail, runningTaskCount,
   failedTaskCount, retryableTaskCount, fetchTaskRuns, resetTaskRunPagination, handleTaskRunPageChange,
   openTaskTarget, retryTask, showTaskDetail,
 } = useSystemTaskMonitor({ client: api, message: ElMessage, router, isAdmin, onTaskRetried: () => fetchAlerts() })
+
+const taskRunsStatus = computed(() => {
+  if (taskLoading.value && !taskRuns.value.length) return 'loading'
+  if (taskError.value) return 'error'
+  if (!taskRuns.value.length) return 'empty'
+  return 'success'
+})
 
 onMounted(async () => {
   await authStore.loadMe()

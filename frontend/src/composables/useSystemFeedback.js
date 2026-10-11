@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { normalizeError } from '../api/errors.js'
 
 export function useSystemFeedback({ client, message, router, isAdmin }) {
   const feedbackDays = ref(30)
@@ -8,6 +9,7 @@ export function useSystemFeedback({ client, message, router, isAdmin }) {
   const feedbackRows = ref([])
   const feedbackStats = ref({})
   const feedbackLoading = ref(false)
+  const feedbackError = ref(null)
   const feedbackPage = ref(1)
   const feedbackPageSize = ref(20)
   const feedbackTotal = ref(0)
@@ -17,6 +19,7 @@ export function useSystemFeedback({ client, message, router, isAdmin }) {
   const resolvingFeedback = ref(false)
   const fetchFeedbackData = async () => {
     feedbackLoading.value = true
+    feedbackError.value = null
     try {
       const params = { days: feedbackDays.value, page: feedbackPage.value, page_size: feedbackPageSize.value, scope: isAdmin.value ? feedbackScope.value : 'mine' }
       if (feedbackValueFilter.value) params.feedback_value = feedbackValueFilter.value
@@ -24,9 +27,8 @@ export function useSystemFeedback({ client, message, router, isAdmin }) {
       const [listRes, statsRes] = await Promise.all([client.listFeedback(params), client.feedbackStats(params)])
       feedbackRows.value = listRes.data?.items || []; feedbackTotal.value = listRes.data?.total || 0; feedbackStats.value = statsRes.data || {}
     } catch (error) {
-      feedbackRows.value = []; feedbackTotal.value = 0; feedbackStats.value = {}
+      feedbackRows.value = []; feedbackTotal.value = 0; feedbackStats.value = {}; feedbackError.value = normalizeError(error)
       if (error.response?.status === 403) { message.warning(error.response?.data?.detail || '当前账号无权查看该范围反馈'); feedbackScope.value = 'mine' }
-      else message.error(error.response?.data?.detail || '获取反馈数据失败')
     } finally { feedbackLoading.value = false }
   }
   const exportFeedbackBundle = async () => {
@@ -43,5 +45,5 @@ export function useSystemFeedback({ client, message, router, isAdmin }) {
     try { await client.resolveFeedback(selectedFeedback.value.id, { resolution_note: feedbackResolutionNote.value || null }); feedbackResolveVisible.value = false; selectedFeedback.value = null; feedbackResolutionNote.value = ''; message.success('反馈已处理'); await fetchFeedbackData() }
     catch (error) { message.error(error.response?.data?.detail || '处理反馈失败') } finally { resolvingFeedback.value = false }
   }
-  return { feedbackDays, feedbackScope, feedbackValueFilter, feedbackStatusFilter, feedbackRows, feedbackStats, feedbackLoading, feedbackPage, feedbackPageSize, feedbackTotal, feedbackResolveVisible, selectedFeedback, feedbackResolutionNote, resolvingFeedback, fetchFeedbackData, exportFeedbackBundle, resetFeedbackPagination, handleFeedbackPageChange, openFeedbackTarget, openFeedbackResolve, submitFeedbackResolve }
+  return { feedbackDays, feedbackScope, feedbackValueFilter, feedbackStatusFilter, feedbackRows, feedbackStats, feedbackLoading, feedbackError, feedbackPage, feedbackPageSize, feedbackTotal, feedbackResolveVisible, selectedFeedback, feedbackResolutionNote, resolvingFeedback, fetchFeedbackData, exportFeedbackBundle, resetFeedbackPagination, handleFeedbackPageChange, openFeedbackTarget, openFeedbackResolve, submitFeedbackResolve }
 }

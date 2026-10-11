@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { normalizeError } from '../api/errors.js'
 
 // 任务中心为模块级单例：顶部概览条（运行/失败/重试/成功率）与「任务中心」tab 共享同一份
 // taskRuns 状态，避免拆分成两个组件后各自持有副本导致顶部统计与列表割裂。
@@ -8,6 +9,7 @@ const taskSource = ref(null)
 const taskStatus = ref(null)
 const taskRuns = ref([])
 const taskLoading = ref(false)
+const taskError = ref(null)
 const taskRunPage = ref(1)
 const taskRunPageSize = ref(20)
 const taskRunTotal = ref(0)
@@ -29,6 +31,7 @@ export function useSystemTaskMonitor({ client, message, router, isAdmin, onTaskR
   if (onTaskRetried) retriedCallback = onTaskRetried
   const fetchTaskRuns = async () => {
     taskLoading.value = true
+    taskError.value = null
     try {
       const params = { days: taskDays.value, page: taskRunPage.value, page_size: taskRunPageSize.value, scope: isAdmin.value ? taskScope.value : 'mine' }
       if (taskSource.value) params.source = taskSource.value
@@ -36,9 +39,8 @@ export function useSystemTaskMonitor({ client, message, router, isAdmin, onTaskR
       const { data } = await client.listTaskRuns(params)
       taskRuns.value = data?.items || []; taskRunTotal.value = data?.total || 0
     } catch (error) {
-      taskRuns.value = []; taskRunTotal.value = 0
+      taskRuns.value = []; taskRunTotal.value = 0; taskError.value = normalizeError(error)
       if (error.response?.status === 403) { message.warning(error.response?.data?.detail || '当前账号无权查看该范围任务'); taskScope.value = 'mine' }
-      else message.error(error.response?.data?.detail || '获取任务中心失败')
     } finally { taskLoading.value = false }
   }
   const resetTaskRunPagination = async () => { taskRunPage.value = 1; await fetchTaskRuns() }
@@ -61,5 +63,5 @@ export function useSystemTaskMonitor({ client, message, router, isAdmin, onTaskR
     } catch (error) { message.error(error.response?.data?.detail || '重试失败') } finally { retryingTaskKey.value = '' }
   }
   const showTaskDetail = (row) => { selectedTaskDetail.value = row; taskDetailVisible.value = true }
-  return { taskDays, taskScope, taskSource, taskStatus, taskRuns, taskLoading, taskRunPage, taskRunPageSize, taskRunTotal, retryingTaskKey, taskDetailVisible, selectedTaskDetail, runningTaskCount, failedTaskCount, retryableTaskCount, agentRunCount, agentSucceededCount, agentSuccessRate, fetchTaskRuns, resetTaskRunPagination, handleTaskRunPageChange, openTaskTarget, retryTask, showTaskDetail }
+  return { taskDays, taskScope, taskSource, taskStatus, taskRuns, taskLoading, taskError, taskRunPage, taskRunPageSize, taskRunTotal, retryingTaskKey, taskDetailVisible, selectedTaskDetail, runningTaskCount, failedTaskCount, retryableTaskCount, agentRunCount, agentSucceededCount, agentSuccessRate, fetchTaskRuns, resetTaskRunPagination, handleTaskRunPageChange, openTaskTarget, retryTask, showTaskDetail }
 }

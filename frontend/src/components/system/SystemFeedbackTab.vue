@@ -82,6 +82,7 @@
 
   <el-card>
     <template #header>反馈列表</template>
+    <QueryStateView :status="feedbackStatus" :error="feedbackError" empty-text="暂无反馈" min-height="200px" @retry="fetchFeedbackData">
     <el-table :data="feedbackRows" v-loading="feedbackLoading" border size="small" max-height="560">
       <el-table-column prop="document_title" label="文档" width="180" show-overflow-tooltip />
       <el-table-column prop="question" label="问题" min-width="220" show-overflow-tooltip />
@@ -119,6 +120,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </QueryStateView>
     <el-pagination
       background
       layout="total, prev, pager, next"
@@ -188,6 +190,7 @@ import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemFeedback } from '../../composables/useSystemFeedback'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -195,11 +198,18 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 const {
   feedbackDays, feedbackScope, feedbackValueFilter, feedbackStatusFilter, feedbackRows, feedbackStats,
-  feedbackLoading, feedbackPage, feedbackPageSize, feedbackTotal, feedbackResolveVisible,
+  feedbackLoading, feedbackError, feedbackPage, feedbackPageSize, feedbackTotal, feedbackResolveVisible,
   selectedFeedback, feedbackResolutionNote, resolvingFeedback, fetchFeedbackData, exportFeedbackBundle,
   resetFeedbackPagination, handleFeedbackPageChange, openFeedbackTarget, openFeedbackResolve,
   submitFeedbackResolve,
 } = useSystemFeedback({ client: api, message: ElMessage, router, isAdmin })
+
+const feedbackStatus = computed(() => {
+  if (feedbackLoading.value && !feedbackRows.value.length) return 'loading'
+  if (feedbackError.value) return 'error'
+  if (!feedbackRows.value.length) return 'empty'
+  return 'success'
+})
 
 const feedbackReasonRows = computed(() => {
   const byReason = feedbackStats.value.by_reason || {}

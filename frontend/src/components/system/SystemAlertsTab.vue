@@ -89,6 +89,7 @@
 
   <el-card class="system-panel-card">
     <template #header>告警列表</template>
+    <QueryStateView :status="alertStatus" :error="alertError" empty-text="暂无告警" min-height="200px" @retry="fetchAlerts">
     <el-table :data="alerts" v-loading="alertLoading" border size="small" max-height="520">
       <el-table-column prop="source" label="来源" width="110">
         <template #default="{ row }">
@@ -116,6 +117,7 @@
       <el-table-column prop="message" label="详情" show-overflow-tooltip />
       <el-table-column prop="created_at" label="时间" width="180" />
     </el-table>
+    </QueryStateView>
     <el-pagination
       background
       layout="total, prev, pager, next"
@@ -157,15 +159,23 @@ import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemActivity } from '../../composables/useSystemActivity'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
 
 const {
   alertDays, alertScope, alertSource, alertCategory, alertSeverity, alerts, alertStats,
-  alertLoading, alertPage, alertPageSize, alertTotal, fetchAlerts,
+  alertLoading, alertError, alertPage, alertPageSize, alertTotal, fetchAlerts,
   resetAlertPagination, handleAlertPageChange,
 } = useSystemActivity({ client: api, message: ElMessage, isAdmin })
+
+const alertStatus = computed(() => {
+  if (alertLoading.value && !alerts.value.length) return 'loading'
+  if (alertError.value) return 'error'
+  if (!alerts.value.length) return 'empty'
+  return 'success'
+})
 
 const alertCategoryOptions = [
   { label: '模型错误', value: 'model_error' },

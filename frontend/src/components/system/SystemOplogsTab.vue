@@ -49,6 +49,7 @@
 
   <el-card class="system-panel-card">
     <template #header>操作记录</template>
+    <QueryStateView :status="logStatus" :error="logError" empty-text="暂无操作日志" min-height="200px" @retry="fetchLogData">
     <el-table :data="logs" v-loading="logLoading" border size="small" max-height="500">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="module" label="模块" width="90">
@@ -63,6 +64,7 @@
       <el-table-column prop="ip_address" label="IP" width="130" />
       <el-table-column prop="created_at" label="时间" width="170" />
     </el-table>
+    </QueryStateView>
     <el-pagination
       background
       layout="total, prev, pager, next"
@@ -101,14 +103,22 @@ import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemActivity } from '../../composables/useSystemActivity'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
 
 const {
-  logDays, logModule, logScope, logs, logStats, logLoading, logPage, logPageSize, logTotal,
+  logDays, logModule, logScope, logs, logStats, logLoading, logError, logPage, logPageSize, logTotal,
   fetchLogData, resetLogPagination, handleLogPageChange,
 } = useSystemActivity({ client: api, message: ElMessage, isAdmin })
+
+const logStatus = computed(() => {
+  if (logLoading.value && !logs.value.length) return 'loading'
+  if (logError.value) return 'error'
+  if (!logs.value.length) return 'empty'
+  return 'success'
+})
 
 const moduleLabel = (mod) => ({
   document: '文档',
