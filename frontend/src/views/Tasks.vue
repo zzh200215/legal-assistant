@@ -53,6 +53,7 @@
       :compact="true"
     />
 
+    <QueryStateView :status="taskStatus" :error="taskError" :empty-text="taskEmptyText" min-height="240px" @retry="fetchTasks">
     <div v-if="viewMode === 'kanban'" class="kanban-board">
       <el-card v-for="col in columns" :key="col.status" class="kanban-column">
         <template #header>
@@ -135,6 +136,7 @@
         </el-table-column>
       </el-table>
     </el-card>
+    </QueryStateView>
 
     <el-pagination
       background
@@ -194,6 +196,8 @@ import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 import api from '../api'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import QueryStateView from '../components/QueryStateView.vue'
+import { normalizeError } from '../api/errors.js'
 import StatusTag from '../components/StatusTag.vue'
 import { useAuthStore } from '../stores/auth'
 import TaskCreateDialogs from '../components/tasks/TaskCreateDialogs.vue'
@@ -211,6 +215,14 @@ const taskPage = ref(1)
 const taskPageSize = ref(12)
 const taskTotal = ref(0)
 const loading = ref(false)
+// 三态（ux-audit M-13）：任务列表加载失败与"暂无任务"分离，失败可重试；看板/表格两视图共用
+const taskError = ref(null)
+const taskStatus = computed(() => {
+  if (loading.value && !tasks.value.length) return 'loading'
+  if (taskError.value) return 'error'
+  if (!tasks.value.length) return 'empty'
+  return 'success'
+})
 const viewMode = ref('kanban')
 const scopeFilter = ref('all')
 const detailVisible = ref(false)
@@ -337,7 +349,7 @@ const fetchTasks = async () => {
     })
     tasks.value = data?.items || []
     taskTotal.value = data?.total || 0
-  } catch (e) { ElMessage.error('获取任务失败') }
+  } catch (e) { taskError.value = normalizeError(e) }
   loading.value = false
 }
 
