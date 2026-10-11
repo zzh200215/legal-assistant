@@ -59,6 +59,7 @@
           </el-select>
         </div>
       </template>
+      <QueryStateView :status="deadlinesStatus" :error="deadlinesError" empty-text="暂无关键日期" min-height="120px" @retry="loadDeadlines">
       <el-table :data="deadlines" stripe size="small">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="deadline_type" label="类型" width="120">
@@ -86,6 +87,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </QueryStateView>
       <div class="pagination-row">
         <el-pagination
           v-model:current-page="deadlinePage"
@@ -163,6 +165,8 @@ import 'element-plus/es/components/tag/style/css'
 import 'element-plus/es/components/empty/style/css'
 import api from '../api'
 import { useAuthStore } from '../stores/auth'
+import QueryStateView from '../components/QueryStateView.vue'
+import { normalizeError } from '../api/errors.js'
 
 const auth = useAuthStore()
 
@@ -239,15 +243,28 @@ const deadlinePage = ref(1)
 const deadlinePageSize = ref(20)
 const deadlineTotal = ref(0)
 const deadlineFilter = ref('')
+// 三态（ux-audit M-13）：加载失败与"暂无期限"分离，失败可重试；刷新时保留已有列表不闪骨架
+const deadlinesLoading = ref(false)
+const deadlinesError = ref(null)
+const deadlinesStatus = computed(() => {
+  if (deadlinesLoading.value && !deadlines.value.length) return 'loading'
+  if (deadlinesError.value) return 'error'
+  if (!deadlines.value.length) return 'empty'
+  return 'success'
+})
 
 const loadDeadlines = async () => {
-  if (noCase.value) { deadlines.value = []; deadlineTotal.value = 0; return }
+  if (noCase.value) { deadlines.value = []; deadlineTotal.value = 0; deadlinesError.value = null; return }
+  deadlinesLoading.value = true
+  deadlinesError.value = null
   try {
     const { data } = await api.listDeadlines(props.orgId, props.caseId, deadlineFilter.value, deadlinePage.value, deadlinePageSize.value)
     deadlines.value = data.items || data
     deadlineTotal.value = data.total || (Array.isArray(data) ? data.length : 0)
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '关键日期加载失败')
+    deadlinesError.value = normalizeError(e)
+  } finally {
+    deadlinesLoading.value = false
   }
 }
 

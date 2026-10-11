@@ -12,16 +12,15 @@
       <button v-for="item in categories" :key="item.value" type="button" :class="{ active: category === item.value }" @click="category = item.value">{{ item.label }}</button>
     </div>
 
-    <div v-if="loading" class="case-documents-empty">正在加载案件材料…</div>
-    <div v-else-if="error" class="case-documents-error">{{ error }}</div>
-    <div v-else-if="!filteredDocuments.length" class="case-documents-empty">当前案件暂无{{ category ? categoryLabel(category) : '关联' }}材料。</div>
-    <div v-else class="case-document-list">
-      <button v-for="item in filteredDocuments" :key="item.id" type="button" class="case-document-row" @click="openDocument(item)">
-        <span class="case-document-kind">{{ documentKindLabel(item) }}</span>
-        <span class="case-document-main"><strong>{{ item.title }}</strong><small>{{ item.file_type }} · v{{ item.version_number || 1 }} · {{ item.status || '处理中' }}</small></span>
-        <span class="case-document-meta">{{ formatDate(item.created_at) }}</span>
-      </button>
-    </div>
+    <QueryStateView :status="docsStatus" :error="loadError" :empty-text="emptyText" min-height="120px" @retry="load">
+      <div class="case-document-list">
+        <button v-for="item in filteredDocuments" :key="item.id" type="button" class="case-document-row" @click="openDocument(item)">
+          <span class="case-document-kind">{{ documentKindLabel(item) }}</span>
+          <span class="case-document-main"><strong>{{ item.title }}</strong><small>{{ item.file_type }} · v{{ item.version_number || 1 }} · {{ item.status || '处理中' }}</small></span>
+          <span class="case-document-meta">{{ formatDate(item.created_at) }}</span>
+        </button>
+      </div>
+    </QueryStateView>
   </section>
 </template>
 
@@ -29,12 +28,14 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '../../api'
+import QueryStateView from '../QueryStateView.vue'
+import { normalizeError } from '../../api/errors.js'
 
 const props = defineProps({ caseId: { type: [Number, String], required: true } })
 const router = useRouter()
 const documents = ref([])
 const loading = ref(false)
-const error = ref('')
+const loadError = ref(null)
 const category = ref('')
 const categories = [
   { value: '', label: '全部' },
@@ -51,6 +52,14 @@ const filteredDocuments = computed(() => {
   const accepted = categoryMap[category.value] || []
   return documents.value.filter((item) => accepted.includes(documentKind(item)))
 })
+// 三态（ux-audit M-13）：失败态与空态分离、失败可重试；空态文案随分类变化
+const emptyText = computed(() => `当前案件暂无${category.value ? categoryLabel(category.value) : '关联'}材料。`)
+const docsStatus = computed(() => {
+  if (loading.value && !documents.value.length) return 'loading'
+  if (loadError.value) return 'error'
+  if (!filteredDocuments.value.length) return 'empty'
+  return 'success'
+})
 const documentKindLabel = (item) => {
   const kind = documentKind(item)
   if (categoryMap.contract.includes(kind)) return '合同'
@@ -65,12 +74,12 @@ const load = async () => {
   const caseId = Number(props.caseId)
   if (!Number.isFinite(caseId) || caseId <= 0) return
   loading.value = true
-  error.value = ''
+  loadError.value = null
   try {
     const { data } = await api.listDocuments({ case_id: caseId, page: 1, page_size: 100 })
     documents.value = data?.items || []
   } catch (err) {
-    error.value = err.response?.data?.detail || '案件材料暂时无法加载'
+    loadError.value = normalizeError(err)
   } finally {
     loading.value = false
   }
