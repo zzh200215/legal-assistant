@@ -37,7 +37,14 @@
 
       <section v-if="selectedItem" class="review-detail-pane">
         <header class="detail-header"><div><span class="detail-kicker">{{ targetLabel(selectedItem.target_type) }}</span><h3>{{ selectedItem.title || selectedItem.question || '审核对象' }}</h3></div><div class="detail-header-actions"><button v-if="selectedItem.case_id" type="button" class="case-link" @click="openCase(selectedItem.case_id)">回到案件</button><span class="detail-status">{{ statusLabel(selectedItem.status) }}</span></div></header>
-        <div class="detail-case-context"><span>所属案件</span><strong>{{ selectedItem.case_title || '未关联案件' }}</strong></div>
+        <div class="detail-case-context"><span>所属案件</span><strong>{{ selectedItem.case_title || '未关联案件' }}</strong>
+          <label v-if="!selectedItem.case_id" class="associate-case">归入案件
+            <select :value="''" :disabled="associatingCase" aria-label="将记录归入案件" @change="associateCase(selectedItem, $event.target.value)">
+              <option value="" disabled>选择案件…</option>
+              <option v-for="c in cases" :key="c.id" :value="c.id">{{ c.title || `案件 #${c.id}` }}</option>
+            </select>
+          </label>
+        </div>
         <section v-if="canReview" class="assignment-bar">
           <label>审核人
             <select v-model="assignment.reviewer_id">
@@ -109,6 +116,32 @@ const queueStatus = computed(() => {
 })
 const queueError = computed(() => (queueQuery.isError.value ? queueQuery.error.value : null))
 const selectedItem = ref(null)
+// 归入案件（ux-audit L-17）：孤立记录（无 case_id）可由提交人或审核律师归档到某个案件
+const cases = ref([])
+const associatingCase = ref(false)
+const loadCases = async () => {
+  const orgId = auth.currentUser?.organization_id
+  if (!orgId) return
+  try {
+    const { data } = await legalWorkspace.listCases(orgId)
+    cases.value = data || []
+  } catch (error) {
+    console.error('[review-queue] 案件列表加载失败', error)
+  }
+}
+const associateCase = async (item, caseId) => {
+  if (!caseId) return
+  associatingCase.value = true
+  try {
+    await legalWorkspace.associateReviewCase(item.target_type, item.id, Number(caseId))
+    ElMessage.success('已归入案件')
+    await loadReviewQueue()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || error.response?.data?.error?.detail || '归入案件失败')
+  } finally {
+    associatingCase.value = false
+  }
+}
 const missingItems = (item) => [...(item?.missing_facts || []), ...(item?.missing_fields || [])].filter(Boolean)
 const openCase = (caseId) => router.push({ path: '/legal-workspace', query: { case_id: String(caseId) } })
 const assignment = ref({ reviewer_id: null, due_at: '' })
@@ -149,7 +182,7 @@ watch(reviewQueue, (queue) => {
 }, { immediate: true })
 watch(queueFilters, () => { loadReviewQueue() }, { deep: true })
 watch(canReview, (allowed, previous) => { if (allowed && !previous) loadReviewStats() })
-onMounted(async () => { await loadReviewQueue(); if (canReview.value) { await Promise.all([loadReviewStats(), loadReviewers()]) } })
+onMounted(async () => { loadCases(); await loadReviewQueue(); if (canReview.value) { await Promise.all([loadReviewStats(), loadReviewers()]) } })
 defineExpose({ refresh: () => Promise.all([loadReviewQueue(), loadReviewStats()]) })
 </script>
 
@@ -189,6 +222,8 @@ defineExpose({ refresh: () => Promise.all([loadReviewQueue(), loadReviewStats()]
 .detail-status { padding-left: 9px; border-left: 2px solid var(--color-warning); color: var(--color-text-secondary); font-size: 11px; white-space: nowrap; }
 .detail-case-context { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; padding: 10px 0; border-bottom: 1px solid var(--color-border-light); color: var(--color-text-muted); font-size: 11px; }
 .detail-case-context strong { color: var(--color-text); font-size: 12px; font-weight: 600; }
+.associate-case { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-muted); font-size: 11px; }
+.associate-case select { height: 26px; padding: 0 6px; border: 1px solid var(--color-border); border-radius: 3px; background: #fff; color: var(--color-text); font: inherit; font-size: 11px; cursor: pointer; }
 .assignment-bar { display: flex; align-items: end; flex-wrap: wrap; gap: 10px 14px; padding: 11px 0; border-bottom: 1px solid var(--color-border-light); }
 .assignment-bar label { display: grid; gap: 4px; color: var(--color-text-muted); font-size: 11px; }
 .assignment-bar select, .assignment-bar input { min-width: 150px; height: 30px; padding: 0 7px; border: 1px solid var(--color-border); border-radius: 3px; background: #fff; color: var(--color-text); font: inherit; font-size: 12px; }

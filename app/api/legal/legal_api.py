@@ -116,6 +116,10 @@ class ReviewAssignmentIn(BaseModel):
     due_at: datetime | None = None
 
 
+class ReviewAssociateCaseIn(BaseModel):
+    case_id: int = Field(ge=1)
+
+
 class ReviewQueueBulkItem(BaseModel):
     target_type: str
     target_id: int = Field(ge=1)
@@ -1255,6 +1259,21 @@ def assign_review(target_type: str, target_id: int, req: ReviewAssignmentIn, db:
         raise api_error(403, "无权分配审核任务", code="LEGAL_REVIEW_ASSIGN_FORBIDDEN")
     except ValueError:
         raise api_error(400, "审核人必须是本组织审核律师或管理员", code="LEGAL_REVIEW_ASSIGNEE_INVALID")
+
+
+@router.patch("/review-queue/{target_type}/{target_id}/case")
+def associate_review_case(target_type: str, target_id: int, req: ReviewAssociateCaseIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """将孤立待审核记录归入案件（ux-audit L-17）：提交人本人或审核律师可操作。"""
+    try:
+        return legal_workspace_read_module.associate_case(
+            db, current_user, target_type=target_type, target_id=target_id, case_id=req.case_id,
+        )
+    except LookupError:
+        raise api_error(404, "待审核记录不存在", code="LEGAL_REVIEW_TARGET_NOT_FOUND")
+    except PermissionError:
+        raise api_error(403, "仅提交人或审核律师可将记录归入案件", code="LEGAL_REVIEW_ASSOCIATE_CASE_FORBIDDEN")
+    except ValueError:
+        raise api_error(400, "目标案件无效或不属于本组织", code="LEGAL_CASE_INVALID")
 
 
 @router.post("/review-queue/bulk-assignment")

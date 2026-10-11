@@ -171,6 +171,9 @@ export default {
   assignReview(targetType, targetId, payload, options = {}) {
     return http.patch(`/legal/review-queue/${targetType}/${targetId}/assignment`, payload, { headers: idempotencyHeaders(options) })
   },
+  associateReviewCase(targetType, targetId, caseId) {
+    return http.patch(`/legal/review-queue/${targetType}/${targetId}/case`, { case_id: caseId })
+  },
   bulkAssignReview(payload, options = {}) {
     return http.post('/legal/review-queue/bulk-assignment', payload, { headers: idempotencyHeaders(options) })
   },

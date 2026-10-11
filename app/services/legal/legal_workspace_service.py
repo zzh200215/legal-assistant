@@ -1099,6 +1099,32 @@ class LegalWorkspaceReadModule:
         )
         return serialize_workspace_row(row)
 
+    def associate_case(self, db: Session, user: User, *, target_type: str, target_id: int, case_id: int) -> dict:
+        """将孤立待审核记录归入某个案件（ux-audit L-17）：提交人本人或审核律师可操作；
+        目标案件须属本组织且调用者有访问权（复用 verify_case_access 的严格成员校验）。"""
+        row = target_query(db, target_type, target_id)
+        if not row:
+            raise LookupError("LEGAL_REVIEW_TARGET_NOT_FOUND")
+        if not (row.user_id == user.id or self._is_legal_reviewer(db, user)):
+            raise PermissionError("LEGAL_REVIEW_ASSOCIATE_CASE_FORBIDDEN")
+        case = db.query(LegalCase).filter(
+            LegalCase.id == case_id,
+            LegalCase.organization_id == user.organization_id,
+        ).first()
+        if not case:
+            raise ValueError("LEGAL_CASE_INVALID")
+        verify_case_access(case_id, user.id, db)
+        row.case_id = case_id
+        db.commit()
+        db.refresh(row)
+        matter_service.record_activity(
+            db, case_id=case_id, organization_id=user.organization_id, actor_id=user.id,
+            event_type="review.case_associated", target_type=target_type, target_id=target_id,
+            title="记录归入案件", summary=f"case_id={case_id}",
+        )
+        self.audit.log(db, user, "legal_review_associate_case", target_type=target_type, target_id=target_id, detail=f"case_id={case_id}")
+        return serialize_workspace_row(row)
+
     def apply_review_action(self, db: Session, user: User, *, target_type: str, target_id: int, action: str, note: str | None):
         row = target_query(db, target_type, target_id)
         if not row:
