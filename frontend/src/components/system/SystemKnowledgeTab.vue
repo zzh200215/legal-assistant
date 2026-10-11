@@ -54,7 +54,7 @@
                 <el-table-column prop="permission_scope" label="权限" width="100" />
                 <el-table-column label="操作" width="90" fixed="right">
                   <template #default="{ row }">
-                    <el-button text type="primary" @click="openKnowledgeDocument(row)">查看</el-button>
+                    <el-button text type="primary" @click="openDocument?.(row)">查看</el-button>
                   </template>
                 </el-table-column>
               </el-table>
