@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { normalizeError } from '../api/errors.js'
 
 const emptyOrganization = () => ({ name: '', code: '', description: '' })
 const emptyDepartment = () => ({ organization_id: null, name: '', code: '', description: '' })
@@ -7,6 +8,7 @@ const emptyAssignment = () => ({ user_id: null, organization_id: null, departmen
 export function useSystemOrganization({ client, message }) {
   const orgLoading = ref(false)
   const organizations = ref([])
+  const orgError = ref(null)
   const departments = ref([])
   const users = ref([])
   const newOrg = ref(emptyOrganization())
@@ -15,11 +17,13 @@ export function useSystemOrganization({ client, message }) {
 
   const fetchOrgData = async () => {
     orgLoading.value = true
+    orgError.value = null
     try {
       const [orgRes, deptRes, userRes] = await Promise.all([client.listOrganizations(), client.listDepartments(), client.listUsers()])
       organizations.value = orgRes.data || []; departments.value = deptRes.data || []; users.value = userRes.data || []
     } catch (error) {
       organizations.value = []; departments.value = []; users.value = []
+      orgError.value = normalizeError(error)
       message.error(error.response?.data?.detail || '获取组织架构失败')
     } finally { orgLoading.value = false }
   }
@@ -51,5 +55,5 @@ export function useSystemOrganization({ client, message }) {
     } catch (error) { message.error(error.response?.data?.detail || '用户归属更新失败') } finally { orgLoading.value = false }
   }
 
-  return { orgLoading, organizations, departments, users, newOrg, newDepartment, userAssignForm, fetchOrgData, createOrganization, createDepartment, assignUserOrg }
+  return { orgLoading, organizations, orgError, departments, users, newOrg, newDepartment, userAssignForm, fetchOrgData, createOrganization, createDepartment, assignUserOrg }
 }

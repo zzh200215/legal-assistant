@@ -186,6 +186,7 @@
       </el-col>
     </el-row>
 
+    <QueryStateView :status="llmStatus" :error="llmError" empty-text="暂无调用记录" min-height="200px" @retry="fetchTokenData">
     <el-table :data="llmCalls" v-loading="llmLoading" border size="small" max-height="360">
       <el-table-column prop="module_name" label="模块" width="100">
         <template #default="{ row }">{{ moduleLabel(row.module_name) }}</template>
@@ -206,6 +207,7 @@
       <el-table-column prop="error_message" label="错误信息" show-overflow-tooltip />
       <el-table-column prop="created_at" label="时间" width="180" />
     </el-table>
+    </QueryStateView>
     <el-pagination
       background
       layout="total, prev, pager, next"
@@ -343,6 +345,7 @@ import api from '../../api'
 import { useSystemTokenAnalytics } from '../../composables/useSystemTokenAnalytics'
 import { useSystemTaskMonitor } from '../../composables/useSystemTaskMonitor'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -350,11 +353,19 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 const {
   tokenDays, myStats, globalStats, llmPage, llmPageSize, llmTotal, llmStats, llmCalls,
-  llmLoading, billingStats, qaReplayRows, qaReplayVisible, selectedQaReplay, fetchTokenData,
+  llmLoading, llmError, billingStats, qaReplayRows, qaReplayVisible, selectedQaReplay, fetchTokenData,
   openQaReplay, resetTokenPagination, handleLlmPageChange,
 } = useSystemTokenAnalytics({ client: api, message: ElMessage, isAdmin })
 
 const { agentRunCount, agentSucceededCount, agentSuccessRate } = useSystemTaskMonitor({ client: api, message: ElMessage, router, isAdmin })
+
+// 三态（ux-audit M-13）：仅包裹主结果表 llmCalls；多表共用一次 fetch，保留原有 message.error 以覆盖其它表
+const llmStatus = computed(() => {
+  if (llmLoading.value && !llmCalls.value.length) return 'loading'
+  if (llmError.value) return 'error'
+  if (!llmCalls.value.length) return 'empty'
+  return 'success'
+})
 
 const emptyGovernance = () => ({ today: {}, rate_limit: {}, policy: {} })
 const myGovernance = computed(() => ({ ...emptyGovernance(), ...(myStats.value.governance || {}) }))

@@ -33,12 +33,14 @@
           <el-col :span="10">
             <el-card>
               <template #header>知识库列表</template>
+              <QueryStateView :status="knowledgeStatus" :error="knowledgeError" empty-text="暂无知识库数据" min-height="200px" @retry="fetchKnowledgeData">
               <el-table :data="knowledgeBases" v-loading="knowledgeLoading" border size="small" max-height="420">
                 <el-table-column prop="name" label="名称" min-width="140" />
                 <el-table-column prop="category" label="分类" width="100" />
                 <el-table-column prop="permission_scope" label="权限" width="100" />
                 <el-table-column prop="created_at" label="创建时间" width="180" />
               </el-table>
+              </QueryStateView>
             </el-card>
           </el-col>
           <el-col :span="14">
@@ -62,7 +64,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ElCard } from 'element-plus/es/components/card/index'
 import { ElCol } from 'element-plus/es/components/col/index'
@@ -77,6 +79,7 @@ import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import api from '../../api'
 import { useSystemKnowledge } from '../../composables/useSystemKnowledge'
+import QueryStateView from '../QueryStateView.vue'
 
 defineProps({
   openDocument: { type: Function, default: null },
@@ -86,8 +89,17 @@ const {
   knowledgeLoading,
   knowledgeBases,
   knowledgeDocuments,
+  knowledgeError,
   fetchKnowledgeData,
 } = useSystemKnowledge({ client: api, message: ElMessage })
+
+// 三态（ux-audit M-13）：仅包裹主结果表 knowledgeBases；多表共用一次 fetch，保留原有 message.error 以覆盖其它表
+const knowledgeStatus = computed(() => {
+  if (knowledgeLoading.value && !knowledgeBases.value.length) return 'loading'
+  if (knowledgeError.value) return 'error'
+  if (!knowledgeBases.value.length) return 'empty'
+  return 'success'
+})
 
 onMounted(() => {
   fetchKnowledgeData()

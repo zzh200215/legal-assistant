@@ -45,11 +45,13 @@
       <el-col :span="10">
         <el-card>
           <template #header>组织列表</template>
+          <QueryStateView :status="orgStatus" :error="orgError" empty-text="暂无组织" min-height="200px" @retry="fetchOrgData">
           <el-table :data="organizations" v-loading="orgLoading" border size="small" max-height="420">
             <el-table-column prop="name" label="名称" />
             <el-table-column prop="code" label="编码" width="120" />
             <el-table-column prop="description" label="说明" show-overflow-tooltip />
           </el-table>
+          </QueryStateView>
         </el-card>
       </el-col>
       <el-col :span="14">
@@ -122,6 +124,7 @@ import 'element-plus/es/components/table-column/style/css'
 import api from '../../api'
 import { useSystemOrganization } from '../../composables/useSystemOrganization'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
@@ -129,6 +132,7 @@ const isAdmin = computed(() => authStore.isAdmin)
 const {
   orgLoading,
   organizations,
+  orgError,
   departments,
   users,
   newOrg,
@@ -139,6 +143,14 @@ const {
   createDepartment,
   assignUserOrg,
 } = useSystemOrganization({ client: api, message: ElMessage })
+
+// 三态（ux-audit M-13）：仅包裹主结果表 organizations；多表共用一次 fetch，保留原有 message.error 以覆盖其它表
+const orgStatus = computed(() => {
+  if (orgLoading.value && !organizations.value.length) return 'loading'
+  if (orgError.value) return 'error'
+  if (!organizations.value.length) return 'empty'
+  return 'success'
+})
 
 watch(isAdmin, (admin) => {
   if (admin) fetchOrgData()

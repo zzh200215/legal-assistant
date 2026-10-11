@@ -68,6 +68,7 @@
       <el-col :span="15">
         <el-card>
           <template #header>实验结果</template>
+          <QueryStateView :status="experimentStatus" :error="experimentError" empty-text="暂无实验" min-height="200px" @retry="fetchExperimentOverview">
           <el-table :data="experimentRows" v-loading="experimentLoading" border size="small" max-height="420">
             <el-table-column prop="name" label="实验" width="150" show-overflow-tooltip />
             <el-table-column prop="prompt_label" label="Prompt" width="140" show-overflow-tooltip />
@@ -88,6 +89,7 @@
               <template #default="{ row }">{{ row.config_drift_count }}</template>
             </el-table-column>
           </el-table>
+          </QueryStateView>
         </el-card>
       </el-col>
       <el-col :span="9">
@@ -147,6 +149,7 @@ import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemObservability } from '../../composables/useSystemObservability'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
@@ -155,6 +158,7 @@ const {
   experimentDays,
   experimentLoading,
   experimentOverview,
+  experimentError,
   fetchExperimentOverview,
 } = useSystemObservability({ client: api, message: ElMessage, isAdmin })
 
@@ -197,6 +201,14 @@ const promptTrafficRows = computed(() => {
     ...row,
     success_rate_text: formatRate(row.calls ? ((row.calls - row.failed_calls) / row.calls) : 0),
   }))
+})
+
+// 三态（ux-audit M-13）：仅包裹主结果表 experimentRows；多表共用一次 fetch，保留原有 message.error 以覆盖其它表
+const experimentStatus = computed(() => {
+  if (experimentLoading.value && !experimentRows.value.length) return 'loading'
+  if (experimentError.value) return 'error'
+  if (!experimentRows.value.length) return 'empty'
+  return 'success'
 })
 
 const formatRate = (value) => {

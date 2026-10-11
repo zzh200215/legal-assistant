@@ -11,6 +11,7 @@ export function useSystemObservability({ client, message, isAdmin }) {
   const experimentDays = ref(30)
   const experimentLoading = ref(false)
   const experimentOverview = ref(emptyExperiment())
+  const experimentError = ref(null)
   const toolHealthLoading = ref(false)
   const toolHealthRows = ref([])
   const toolHealthError = ref(null)
@@ -22,10 +23,11 @@ export function useSystemObservability({ client, message, isAdmin }) {
     finally { healthLoading.value = false }
   }
   const fetchExperimentOverview = async () => {
+    experimentError.value = null
     if (!isAdmin.value) { experimentOverview.value = emptyExperiment(); return }
     experimentLoading.value = true
     try { const { data } = await client.experimentOverview(experimentDays.value); experimentOverview.value = data || emptyExperiment() }
-    catch (error) { experimentOverview.value = emptyExperiment(); message.error(error.response?.data?.detail || '获取实验观测失败') }
+    catch (error) { experimentOverview.value = emptyExperiment(); experimentError.value = normalizeError(error); message.error(error.response?.data?.detail || '获取实验观测失败') }
     finally { experimentLoading.value = false }
   }
   const fetchToolHealth = async () => {
@@ -35,5 +37,5 @@ export function useSystemObservability({ client, message, isAdmin }) {
     catch (error) { toolHealthRows.value = []; toolHealthError.value = normalizeError(error) }
     finally { toolHealthLoading.value = false }
   }
-  return { healthLoading, healthData, experimentDays, experimentLoading, experimentOverview, toolHealthLoading, toolHealthRows, toolHealthError, fetchHealthData, fetchExperimentOverview, fetchToolHealth }
+  return { healthLoading, healthData, experimentDays, experimentLoading, experimentOverview, experimentError, toolHealthLoading, toolHealthRows, toolHealthError, fetchHealthData, fetchExperimentOverview, fetchToolHealth }
 }

@@ -5,17 +5,20 @@ export function useSystemKnowledge({ client, message }) {
   const knowledgeLoading = ref(false)
   const knowledgeBases = ref([])
   const knowledgeDocuments = ref([])
+  const knowledgeError = ref(null)
   const sensitivityLoading = ref(false)
   const sensitivityError = ref(null)
   const sensitiveDocuments = ref([])
 
   const fetchKnowledgeData = async () => {
     knowledgeLoading.value = true
+    knowledgeError.value = null
     try {
       const [kbRes, docRes] = await Promise.all([client.listKnowledgeBases(), client.listDocuments({ page: 1, page_size: 20 })])
       knowledgeBases.value = kbRes.data || []; knowledgeDocuments.value = docRes.data?.items || []
     } catch (error) {
       knowledgeBases.value = []; knowledgeDocuments.value = []
+      knowledgeError.value = normalizeError(error)
       message.error(error.response?.data?.detail || '获取知识库数据失败')
     } finally { knowledgeLoading.value = false }
   }
@@ -35,5 +38,5 @@ export function useSystemKnowledge({ client, message }) {
     } finally { sensitivityLoading.value = false }
   }
 
-  return { knowledgeLoading, knowledgeBases, knowledgeDocuments, sensitivityLoading, sensitivityError, sensitiveDocuments, fetchKnowledgeData, fetchSensitiveDocuments }
+  return { knowledgeLoading, knowledgeBases, knowledgeDocuments, knowledgeError, sensitivityLoading, sensitivityError, sensitiveDocuments, fetchKnowledgeData, fetchSensitiveDocuments }
 }
