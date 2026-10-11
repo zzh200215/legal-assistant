@@ -938,9 +938,19 @@ class LegalWorkspaceReadModule:
 
     def get_row(self, db: Session, user: User, kind: str, item_id: int):
         model = {"consultation": LegalConsultation, "contract_review": ContractReview, "draft": LegalDraft}[kind]
-        row = db.query(model).filter(model.id == item_id, model.user_id == user.id).first()
+        row = db.query(model).filter(model.id == item_id).first()
         if not row:
             raise LookupError(f"LEGAL_{kind.upper()}_NOT_FOUND")
+        # 可见性边界（ux-audit 方案 A）：本人维持原行为；非本人仅被指派审核人/平台管理员/
+        # 与所有者同组织的审核律师可读，关联案件再叠严格成员校验；其余按"不存在"处理（防枚举）。
+        if row.user_id != user.id:
+            if not self._can_read_others_row(db, user, row):
+                raise LookupError(f"LEGAL_{kind.upper()}_NOT_FOUND")
+            if row.case_id:
+                try:
+                    verify_case_access(row.case_id, user.id, db)
+                except Exception:
+                    raise LookupError(f"LEGAL_{kind.upper()}_NOT_FOUND")
         return row
 
     def versions(self, db: Session, user: User, kind: str, item_id: int) -> list[dict]:
@@ -952,6 +962,18 @@ class LegalWorkspaceReadModule:
 
     def templates(self) -> list[dict]:
         return [{"key": key, "label": label} for key, label in WORKSPACE_TEMPLATE_LABELS.items()]
+
+    def _can_read_others_row(self, db: Session, user: User, row) -> bool:
+        """方案 A：非本人读取工作台记录详情的鉴权。被指派审核人、平台管理员、或与记录所有者
+        同组织的审核律师可读；记录无 organization_id，经所有者推导组织以防跨组织越权。"""
+        if getattr(row, "reviewer_id", None) == user.id:
+            return True
+        if user.role in {"admin", "dept_admin"}:
+            return True
+        if self._is_legal_reviewer(db, user):
+            owner = db.query(User).filter(User.id == row.user_id).first()
+            return bool(owner and owner.organization_id and owner.organization_id == getattr(user, "organization_id", None))
+        return False
 
     def _is_legal_reviewer(self, db: Session, user: User) -> bool:
         if user.role in {"admin", "dept_admin"}:
