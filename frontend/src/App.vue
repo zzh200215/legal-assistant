@@ -50,6 +50,10 @@
             <span class="guide-dot" aria-hidden="true"></span>
             <span class="utility-label">使用指南</span>
           </button>
+          <a class="utility-link" href="mailto:17779699791@163.com?subject=律智检使用反馈&body=（请描述你遇到的问题或建议，可附上页面名称）" title="意见反馈">
+            <span class="feedback-dot" aria-hidden="true"></span>
+            <span class="utility-label">意见反馈</span>
+          </a>
           <button v-if="authStore.ready && authStore.isAdmin" class="utility-link" @click="onMenuSelect('/system')">
             <span class="status-dot" aria-hidden="true"></span>
             <span class="utility-label">平台状态</span>
@@ -359,6 +363,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--space-2);
   padding: 0 var(--space-2) var(--space-1);
 }
@@ -372,6 +377,7 @@ onMounted(async () => {
   background: transparent;
   color: var(--color-text-muted);
   font-size: var(--text-xs);
+  text-decoration: none;
   cursor: pointer;
   transition: color var(--transition-fast);
 }
@@ -393,6 +399,14 @@ onMounted(async () => {
   height: 6px;
   border-radius: var(--radius-full);
   background: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.feedback-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
   flex-shrink: 0;
 }
 

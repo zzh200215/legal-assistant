@@ -167,7 +167,7 @@
         <el-form-item label="邮箱验证"><el-tag type="success">强制启用</el-tag></el-form-item>
         <el-form-item label="聚合全部">
           <el-switch v-model="portalForm.aggregate_case" />
-          <div class="aggregate-hint">开启后该链接自动展示本案件全部已发布客户可见内容（进度+文书），一个案件一个URL</div>
+          <div class="aggregate-hint">开启后该链接自动展示本案件全部已发布客户可见内容（进度+文书），一个案件一个URL。仅包含已发布内容，未发布项不会暴露；建议发布前对照清单复核客户可见范围。</div>
         </el-form-item>
       </el-form>
       <template #footer>
