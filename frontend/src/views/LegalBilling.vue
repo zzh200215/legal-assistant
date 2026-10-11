@@ -39,6 +39,7 @@
 
     <el-card shadow="never" style="margin-top:20px">
       <template #header><span class="card-title">工时记录</span></template>
+      <QueryStateView :status="entriesStatus" :error="entriesError" empty-text="暂无工时记录" min-height="160px" @retry="loadTimeEntries">
       <el-table :data="timeEntries" stripe size="small">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="description" label="描述" show-overflow-tooltip />
@@ -68,6 +69,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </QueryStateView>
       <div class="pagination-row">
         <el-pagination
           v-model:current-page="entryPage"
@@ -105,6 +107,7 @@
           <el-button type="primary" :loading="ruleLoading" @click="submitBillingRule">创建规则</el-button>
         </el-form-item>
       </el-form>
+      <QueryStateView :status="rulesStatus" :error="rulesError" empty-text="暂无计费规则" min-height="160px" @retry="loadBillingRules">
       <el-table :data="billingRules" stripe size="small">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="规则名称" show-overflow-tooltip />
@@ -123,6 +126,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </QueryStateView>
     </el-card>
 
     <el-divider />
@@ -143,6 +147,7 @@
           <el-option label="已作废" value="voided" />
         </el-select>
       </div>
+      <QueryStateView :status="invoicesStatus" :error="invoicesError" empty-text="暂无费用通知单" min-height="160px" @retry="loadInvoices">
       <el-table :data="invoices" stripe size="small" style="margin-top:12px">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="invoice_no" label="通知单号" width="140" />
@@ -168,6 +173,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </QueryStateView>
       <div class="pagination-row">
         <el-pagination
           v-model:current-page="invoicePage"
@@ -299,6 +305,8 @@ import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 import api from '../api'
+import QueryStateView from '../components/QueryStateView.vue'
+import { normalizeError } from '../api/errors.js'
 
 const props = defineProps({
   orgId: { type: Number, required: true },
@@ -404,9 +412,20 @@ const timeEntries = ref([])
 const entryPage = ref(1)
 const entryPageSize = ref(20)
 const entryTotal = ref(0)
+// 三态（ux-audit M-13）：加载失败与"暂无记录"分离，失败可重试；刷新时保留已有列表不闪骨架
+const entriesLoading = ref(false)
+const entriesError = ref(null)
+const entriesStatus = computed(() => {
+  if (entriesLoading.value && !timeEntries.value.length) return 'loading'
+  if (entriesError.value) return 'error'
+  if (!timeEntries.value.length) return 'empty'
+  return 'success'
+})
 
 const loadTimeEntries = async () => {
-  if (noCase.value) { timeEntries.value = []; entryTotal.value = 0; runningEntry.value = null; stopInterval(); return }
+  if (noCase.value) { timeEntries.value = []; entryTotal.value = 0; entriesError.value = null; runningEntry.value = null; stopInterval(); return }
+  entriesLoading.value = true
+  entriesError.value = null
   try {
     const { data } = await api.listTimeEntries(props.orgId, props.caseId, entryPage.value, entryPageSize.value)
     timeEntries.value = data.items || data
@@ -419,7 +438,9 @@ const loadTimeEntries = async () => {
       if (active.status === 'running') startInterval()
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '工时记录加载失败')
+    entriesError.value = normalizeError(e)
+  } finally {
+    entriesLoading.value = false
   }
 }
 
@@ -442,13 +463,26 @@ const patchEntry = async (entryId, payload) => {
 const billingRules = ref([])
 const ruleForm = ref({ name: '', billing_mode: 'hourly', hourly_rate: 500, fixed_amount: 0 })
 const ruleLoading = ref(false)
+// 三态（ux-audit M-13）：列表加载失败可重试，不再静默 console.error
+const rulesLoading = ref(false)
+const rulesError = ref(null)
+const rulesStatus = computed(() => {
+  if (rulesLoading.value && !billingRules.value.length) return 'loading'
+  if (rulesError.value) return 'error'
+  if (!billingRules.value.length) return 'empty'
+  return 'success'
+})
 
 const loadBillingRules = async () => {
+  rulesLoading.value = true
+  rulesError.value = null
   try {
     const { data } = await api.listBillingRules(props.orgId, props.caseId)
     billingRules.value = data
-  } catch (error) {
-    console.error('[billing] 计费规则列表加载失败', error)
+  } catch (e) {
+    rulesError.value = normalizeError(e)
+  } finally {
+    rulesLoading.value = false
   }
 }
 
@@ -472,14 +506,27 @@ const invoicePage = ref(1)
 const invoicePageSize = ref(20)
 const invoiceTotal = ref(0)
 const invoiceFilter = ref('')
+// 三态（ux-audit M-13）：加载失败与"暂无通知单"分离，失败可重试
+const invoicesLoading = ref(false)
+const invoicesError = ref(null)
+const invoicesStatus = computed(() => {
+  if (invoicesLoading.value && !invoices.value.length) return 'loading'
+  if (invoicesError.value) return 'error'
+  if (!invoices.value.length) return 'empty'
+  return 'success'
+})
 
 const loadInvoices = async () => {
+  invoicesLoading.value = true
+  invoicesError.value = null
   try {
     const { data } = await api.listInvoices(props.orgId, props.caseId, invoiceFilter.value, invoicePage.value, invoicePageSize.value)
     invoices.value = data.items || data
     invoiceTotal.value = data.total || (Array.isArray(data) ? data.length : 0)
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '计费规则加载失败')
+    invoicesError.value = normalizeError(e)
+  } finally {
+    invoicesLoading.value = false
   }
 }
 
