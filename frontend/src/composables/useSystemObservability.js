@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { tokenDays } from './useSystemPeriod'
+import { normalizeError } from '../api/errors.js'
 
 const emptyHealth = () => ({ status: '', checks: {}, timestamp: '' })
 const emptyExperiment = () => ({ artifact_status: {}, summary: {}, experiments: [], rollouts: { items: [] }, prompt_traffic: { items: [] } })
@@ -12,6 +13,7 @@ export function useSystemObservability({ client, message, isAdmin }) {
   const experimentOverview = ref(emptyExperiment())
   const toolHealthLoading = ref(false)
   const toolHealthRows = ref([])
+  const toolHealthError = ref(null)
 
   const fetchHealthData = async () => {
     healthLoading.value = true
@@ -28,9 +30,10 @@ export function useSystemObservability({ client, message, isAdmin }) {
   }
   const fetchToolHealth = async () => {
     toolHealthLoading.value = true
+    toolHealthError.value = null
     try { const { data } = await client.toolHealth({ days: tokenDays.value, scope: isAdmin.value ? 'all' : 'mine' }); toolHealthRows.value = data?.items || [] }
-    catch (error) { toolHealthRows.value = []; message.error(error.response?.data?.detail || '获取工具健康失败') }
+    catch (error) { toolHealthRows.value = []; toolHealthError.value = normalizeError(error) }
     finally { toolHealthLoading.value = false }
   }
-  return { healthLoading, healthData, experimentDays, experimentLoading, experimentOverview, toolHealthLoading, toolHealthRows, fetchHealthData, fetchExperimentOverview, fetchToolHealth }
+  return { healthLoading, healthData, experimentDays, experimentLoading, experimentOverview, toolHealthLoading, toolHealthRows, toolHealthError, fetchHealthData, fetchExperimentOverview, fetchToolHealth }
 }

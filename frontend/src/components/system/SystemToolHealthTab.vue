@@ -13,6 +13,7 @@
 
   <el-card class="system-panel-card">
     <template #header>工具健康概览</template>
+    <QueryStateView :status="toolHealthStatus" :error="toolHealthError" empty-text="暂无工具调用数据" min-height="200px" @retry="fetchToolHealth">
     <el-table :data="toolHealthRows" v-loading="toolHealthLoading" border size="small" max-height="560">
       <el-table-column prop="tool_name" label="工具" width="180" />
       <el-table-column prop="calls" label="调用数" width="90" />
@@ -25,6 +26,7 @@
       <el-table-column prop="last_error" label="最近错误" show-overflow-tooltip />
       <el-table-column prop="last_called_at" label="最近调用" width="180" />
     </el-table>
+    </QueryStateView>
   </el-card>
 </template>
 
@@ -41,11 +43,19 @@ import 'element-plus/es/components/table-column/style/css'
 import api from '../../api'
 import { useSystemObservability } from '../../composables/useSystemObservability'
 import { useAuthStore } from '../../stores/auth'
+import QueryStateView from '../QueryStateView.vue'
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.isAdmin)
 
-const { toolHealthLoading, toolHealthRows, fetchToolHealth } = useSystemObservability({ client: api, message: ElMessage, isAdmin })
+const { toolHealthLoading, toolHealthRows, toolHealthError, fetchToolHealth } = useSystemObservability({ client: api, message: ElMessage, isAdmin })
+// 三态（ux-audit M-13）：保留 v-loading 的刷新遮罩，叠加 QueryStateView 的空态与失败重试
+const toolHealthStatus = computed(() => {
+  if (toolHealthLoading.value && !toolHealthRows.value.length) return 'loading'
+  if (toolHealthError.value) return 'error'
+  if (!toolHealthRows.value.length) return 'empty'
+  return 'success'
+})
 
 const formatRate = (value) => {
   if (value === null || value === undefined || value === '') return '-'
