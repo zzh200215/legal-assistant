@@ -161,6 +161,7 @@ export function useDocumentList() {
     documentPage,
     documentPageSize,
     documents,
+    documentsQuery,
     documentTotal,
     knowledgeBases,
     classificationOptions,

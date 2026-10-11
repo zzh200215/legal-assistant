@@ -164,6 +164,7 @@ function createDocuments() {
     documentPage: list.documentPage,
     documentPageSize: list.documentPageSize,
     documents: list.documents,
+    documentsQuery: list.documentsQuery,
     documentTotal: list.documentTotal,
     knowledgeBases: list.knowledgeBases,
     classificationOptions: list.classificationOptions,

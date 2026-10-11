@@ -150,6 +150,7 @@
       <span>{{ documentTotal || documents.length }} 份</span>
     </div>
 
+    <QueryStateView :status="docsStatus" :error="docsError" empty-text="暂无文档" min-height="160px" @retry="fetchDocuments">
     <div class="doc-list">
       <button
         v-for="item in documents"
@@ -165,6 +166,7 @@
         </div>
       </button>
     </div>
+    </QueryStateView>
 
     <el-pagination
       small
@@ -180,6 +182,7 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElCard } from 'element-plus/es/components/card/index'
 import { ElInput } from 'element-plus/es/components/input/index'
@@ -196,15 +199,25 @@ import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/switch/style/css'
 import 'element-plus/es/components/tag/style/css'
 import { useDocuments } from '../../composables/useDocuments'
+import QueryStateView from '../QueryStateView.vue'
 
 const {
-  docId, docMeta, documents, knowledgeBases, uploadForm, filters, retrievalForm,
+  docId, docMeta, documents, documentsQuery, knowledgeBases, uploadForm, filters, retrievalForm,
   classificationOptions, documentPage, documentPageSize, documentTotal,
   downloadPolicySaving, downloading, compareSelection, compareLoading,
   fetchDocuments, handleDocumentPageChange, handleFilterChange,
   downloadCurrentDocument, updateDownloadPolicy, runCompare, selectDocument,
 } = useDocuments()
 import { documentClassificationLabel } from '../../composables/useDocumentList'
+
+// 三态（ux-audit M-13）：文档列表加载失败与"暂无文档"分离，失败可重试（documentsQuery 为 useQuery）
+const docsStatus = computed(() => {
+  if (documentsQuery.isLoading.value) return 'loading'
+  if (documentsQuery.isError.value) return 'error'
+  if (!documents.value.length) return 'empty'
+  return 'success'
+})
+const docsError = computed(() => (documentsQuery.isError.value ? documentsQuery.error.value : null))
 </script>
 
 <style scoped>
