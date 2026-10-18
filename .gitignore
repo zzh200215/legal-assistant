@@ -61,6 +61,14 @@ scripts/review_feedback_state.json
 # Eval run artifacts (generated reports; dataset & scripts are tracked)
 eval/outputs/
 
+# jieba 分词缓存（检索评测首次运行时按 CWD 落盘）
+jieba.cache
+
+# 本地临时产物：评测/探针脚本的中间目录与临时向量库（可随时重建）
+.tmp_*/
+chroma_eval_store/
+aibg_test_chroma/
+
 # External repo export artifacts (_repo_main.py, _repo_meta.json, etc.)
 _repo_*
 
