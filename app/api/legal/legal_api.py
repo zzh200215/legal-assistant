@@ -63,6 +63,10 @@ def _run_async(coro):
 class ConsultationIn(BaseModel):
     question: str = Field(min_length=1, max_length=12000)
     case_id: int | None = None
+    # 右栏助手可以带上「用户此刻正在看的材料」：服务端按 id 读正文并做权限校验，
+    # 客户端不能直接塞正文（塞了也会被忽略）。两者互斥，同时给返回 400。
+    contract_review_id: int | None = None
+    draft_id: int | None = None
 
 
 class ContractReviewIn(BaseModel):
@@ -806,15 +810,22 @@ async def reindex_source_articles(source_id: int, db: Session = Depends(get_db),
 def create_consultation(req: ConsultationIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
         operation = _run_async(
-            legal_workspace_module.create_consultation(db, current_user, req.question, case_id=req.case_id)
+            legal_workspace_module.create_consultation(
+                db, current_user, req.question, case_id=req.case_id,
+                contract_review_id=req.contract_review_id, draft_id=req.draft_id,
+            )
         )
     except ValueError as exc:
         if str(exc) == "QUOTA_EXCEEDED":
             raise api_error(429, "本月咨询配额已用完，请升级订阅", code="QUOTA_EXCEEDED")
+        if str(exc) == "LEGAL_CONTEXT_CONFLICT":
+            raise api_error(400, "一次只能带一份参考材料", code="LEGAL_CONTEXT_CONFLICT")
         raise
     except LookupError as exc:
         if str(exc) == "LEGAL_CASE_NOT_FOUND":
             raise api_error(404, "案件不存在或无权访问", code="LEGAL_CASE_NOT_FOUND")
+        if str(exc) == "LEGAL_CONTEXT_NOT_FOUND":
+            raise api_error(404, "参考材料不存在或无权访问", code="LEGAL_CONTEXT_NOT_FOUND")
         raise
     result = serialize(operation.row)
     result["disclaimer_level"] = operation.disclaimer["level"]

@@ -37,6 +37,7 @@ from app.models.org import Organization, OrganizationMember
 from app.models.user import User
 from app.services.legal.legal_domain_service import (
     assert_publishable,
+    finalize_consultation_trace,
     persist_consultation_artifacts,
     persist_draft_artifacts,
     persist_review_artifacts,
@@ -428,6 +429,35 @@ class LegalDomainServiceTests(unittest.TestCase):
         self.db.refresh(review)
         self.assertEqual(review.reviewed_version, 2)
         self.assertTrue(assert_publishable(self.db, self.user, "contract_review", review.id)["ok"])
+
+
+class ConsultationTraceFinalizeTests(unittest.TestCase):
+    """trace 定稿：模型名与提示词版本取自 model_snapshot，缺数据时不编造。"""
+
+    def test_appends_model_and_prompt_version_to_generate_step(self):
+        trace = {"trace_version": 1, "steps": [
+            {"id": "retrieve", "label": "检索法源", "detail": "带回 2 条候选法源"},
+            {"id": "generate", "label": "生成建议", "detail": "模型返回结构化结果"},
+        ]}
+        out = finalize_consultation_trace(trace, json.dumps({"model": "glm-5.2", "prompt_version": 3}))
+        steps = json.loads(out)["steps"]
+        self.assertEqual(steps[0]["detail"], "带回 2 条候选法源")
+        self.assertEqual(steps[1]["detail"], "模型返回结构化结果 · 模型 glm-5.2 · 提示词 v3")
+
+    def test_only_model_available_appends_model_alone(self):
+        trace = {"steps": [{"id": "generate", "detail": "模型返回结构化结果"}]}
+        out = finalize_consultation_trace(trace, json.dumps({"model": "glm-5.2"}))
+        self.assertEqual(json.loads(out)["steps"][0]["detail"], "模型返回结构化结果 · 模型 glm-5.2")
+
+    def test_returns_none_when_trace_has_no_steps(self):
+        self.assertIsNone(finalize_consultation_trace({}, "{}"))
+        self.assertIsNone(finalize_consultation_trace(None, None))
+        self.assertIsNone(finalize_consultation_trace({"steps": []}, "{}"))
+
+    def test_broken_snapshot_json_still_persists_trace(self):
+        trace = {"steps": [{"id": "generate", "detail": "规则兜底"}]}
+        out = finalize_consultation_trace(trace, "{not json")
+        self.assertEqual(json.loads(out)["steps"][0]["detail"], "规则兜底")
 
 
 if __name__ == "__main__":

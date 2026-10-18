@@ -43,7 +43,7 @@ from app.services.legal.legal_service import (
     target_query,
 )
 from app.services.legal.legal_reference_service import enrich_references
-from app.services.legal.legal_domain_service import legal_domain_service
+from app.services.legal.legal_domain_service import finalize_consultation_trace, legal_domain_service
 from app.services.billing.subscription_service import subscription_service
 from app.services.legal.matter_service import matter_service
 
@@ -135,6 +135,10 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "feedback_score": row.feedback_score,
             "reviewed_version": getattr(row, "reviewed_version", None),
             "model_snapshot": _json_or(getattr(row, "model_snapshot_json", None), "{}"),
+            # 处理过程 trace：面板时间线直读（无 trace 的老记录返回 {}，前端回退到事后回放）。
+            "trace": _json_or(getattr(row, "trace_json", None), "{}"),
+            # 句级引用映射：面板逐句溯源直读（无映射的老记录返回 {}，前端回退到整篇答案粒度）。
+            "attribution": _json_or(getattr(row, "attribution_json", None), "{}"),
         }
     if isinstance(row, ContractReview):
         return {
@@ -312,14 +316,58 @@ class LegalWorkspaceModule:
             except HTTPException:
                 raise LookupError("LEGAL_CASE_NOT_FOUND")
 
+    def _load_consult_context(
+        self, db: Session, user: User, *, contract_review_id: int | None = None,
+        draft_id: int | None = None,
+    ) -> dict | None:
+        """把「用户此刻正在看的合同审查 / 文书草稿」读成一段可注入的参考上下文。
+
+        权限口径与 LegalWorkspaceReadModule.get_row 一致：本人记录直接可用；他人记录需能访问
+        该记录所属案件（管理员/审核人例外），否则一律按「不存在」处理，不泄露记录是否存在。
+        必须在 create_consultation 的 db.expunge_all() 之前调用——之后 ORM 会脱离会话。
+        """
+        if contract_review_id and draft_id:
+            raise ValueError("LEGAL_CONTEXT_CONFLICT")
+        if contract_review_id:
+            model, kind, label, item_id = ContractReview, "contract_review", "合同审查", contract_review_id
+        elif draft_id:
+            model, kind, label, item_id = LegalDraft, "draft", "文书草稿", draft_id
+        else:
+            return None
+
+        row = db.query(model).filter(model.id == item_id).first()
+        if row is None:
+            raise LookupError("LEGAL_CONTEXT_NOT_FOUND")
+        if row.user_id != user.id:
+            is_privileged = user.role in {"admin", "dept_admin"} or getattr(row, "reviewer_id", None) == user.id
+            if not is_privileged:
+                if not row.case_id:
+                    raise LookupError("LEGAL_CONTEXT_NOT_FOUND")
+                try:
+                    verify_case_access(row.case_id, user.id, db)
+                except HTTPException:
+                    raise LookupError("LEGAL_CONTEXT_NOT_FOUND")
+        return {
+            "type": kind,
+            "type_label": label,
+            "id": row.id,
+            "title": getattr(row, "title", None) or f"{label} #{row.id}",
+            "text": getattr(row, "content", None) or "",
+        }
+
     async def create_consultation(
         self, db: Session, user: User, question: str, *, case_id: int | None = None,
+        contract_review_id: int | None = None, draft_id: int | None = None,
     ) -> ConsultationResult:
         subscription_service.ensure_default_plans(db)
         if not subscription_service.check_quota(db, user.id, "consultation"):
             raise ValueError("QUOTA_EXCEEDED")
 
         case_id = self._resolve_case_id(db, user, case_id)
+        # 面板的「当前材料」：必须在 expunge/commit 之前读，读完只留纯文本 + 元数据。
+        extra_context = self._load_consult_context(
+            db, user, contract_review_id=contract_review_id, draft_id=draft_id,
+        )
         ensure_demo_sources(db, user.id)
         sources = db.query(LegalSource).filter(
             LegalSource.user_id == user.id, LegalSource.status == "active"
@@ -328,8 +376,11 @@ class LegalWorkspaceModule:
         # expunge 使已加载的 sources 脱离 session，避免 commit 后属性访问触发 N+1 重查。
         db.expunge_all()
         db.commit()
+        trace: dict = {}
+        attribution: dict = {}
         category, known, missing, refs, advice, risk, status = await consultation_payload(
-            question, sources, user_id=user.id, db=db
+            question, sources, user_id=user.id, db=db, trace_out=trace,
+            attribution_out=attribution, extra_context=extra_context,
         )
         disclaimer = compute_disclaimer_level(risk_level=risk, category=category)
         row = LegalConsultation(
@@ -351,6 +402,12 @@ class LegalWorkspaceModule:
         legal_domain_service.persist_consultation_artifacts(
             db, row, known=known, missing=missing, refs=refs, risk_level=risk,
         )
+        # 过程 trace 在模型快照落库后再定稿：模型名与提示词版本取自同一份快照，
+        # 面板时间线与响应里的 model_snapshot 因此不会出现两套说法。
+        row.trace_json = finalize_consultation_trace(trace, row.model_snapshot_json)
+        # 句级引用映射与 trace 同批落库：它同样是「过程产物」，读的时候不该再算一遍
+        row.attribution_json = json.dumps(attribution, ensure_ascii=False) if attribution else None
+        db.commit()
         subscription_service.record_usage(db, user.id, "consultation")
         matter_service.record_activity(
             db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,

@@ -95,6 +95,35 @@ def _build_model_snapshot(db: Session, *, action: str, input_text: str) -> str:
     return json.dumps(snapshot, ensure_ascii=False)
 
 
+def finalize_consultation_trace(trace: dict | None, model_snapshot_json: str | None) -> str | None:
+    """把模型名与提示词版本补进 trace 的「生成建议」步，返回可入库的 JSON。
+
+    模型/提示词版本取自 model_snapshot（与响应里的 model_snapshot 同源），
+    避免面板时间线与结果字段出现两套说法。没有 trace 时返回 None，调用方跳过写入。
+    """
+    if not isinstance(trace, dict) or not trace.get("steps"):
+        return None
+    snapshot: dict = {}
+    if model_snapshot_json:
+        try:
+            parsed = json.loads(model_snapshot_json)
+            if isinstance(parsed, dict):
+                snapshot = parsed
+        except (TypeError, ValueError):
+            snapshot = {}
+    model = str(snapshot.get("model") or "").strip()
+    version = snapshot.get("prompt_version")
+    suffix = " · ".join(
+        part for part in (f"模型 {model}" if model else "", f"提示词 v{version}" if version else "") if part
+    )
+    if suffix:
+        for step in trace["steps"]:
+            if isinstance(step, dict) and step.get("id") == "generate":
+                base = str(step.get("detail") or "").strip()
+                step["detail"] = f"{base} · {suffix}" if base else suffix
+    return json.dumps(trace, ensure_ascii=False)
+
+
 def _add_reference(
     db: Session,
     ref: dict,

@@ -1,8 +1,9 @@
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from app.models.legal import ContractReview
+from app.models.legal import ContractReview, LegalConsultation
 from app.services.legal.legal_workspace_service import (
     LegalWorkspaceModule,
     LegalWorkspaceReadModule,
@@ -46,6 +47,43 @@ class ComputeConfidenceTests(unittest.TestCase):
         self.assertIn("confidence", payload)
         self.assertEqual(payload["feedback_score"], 1)
         self.assertIn("created_at", payload)
+
+
+class ProcessTraceSerializationTests(unittest.TestCase):
+    """copilot 面板时间线直读响应里的 trace：有则原样透出，无则空对象（前端回退事后回放）。"""
+
+    def _row(self, **overrides):
+        fields = dict(
+            id=9, user_id=3, question="公司无故辞退我，怎么主张赔偿？", category="labor",
+            known_facts_json="[]", missing_facts_json="[]", references_json="[]",
+            advice="建议先固定证据。", risk_level="medium", status="pending_review",
+        )
+        fields.update(overrides)
+        return LegalConsultation(**fields)
+
+    def test_serialize_exposes_process_trace(self):
+        trace = {
+            "trace_version": 1,
+            "source": "legal_consultation",
+            "steps": [
+                {"id": "retrieve", "label": "检索法源", "status": "success", "duration_ms": 3,
+                 "detail": "带回 2 条候选法源"},
+                {"id": "generate", "label": "生成建议", "status": "success", "duration_ms": 1840,
+                 "detail": "模型返回结构化结果 · 模型 glm-5.2 · 提示词 v3"},
+            ],
+        }
+        payload = serialize_workspace_row(self._row(trace_json=json.dumps(trace, ensure_ascii=False)))
+        self.assertEqual(payload["trace"]["trace_version"], 1)
+        self.assertEqual([step["id"] for step in payload["trace"]["steps"]], ["retrieve", "generate"])
+        self.assertEqual(payload["trace"]["steps"][1]["duration_ms"], 1840)
+
+    def test_serialize_trace_defaults_to_empty_object_for_legacy_rows(self):
+        payload = serialize_workspace_row(self._row(trace_json=None))
+        self.assertEqual(payload["trace"], {})
+
+    def test_serialize_trace_survives_broken_json(self):
+        payload = serialize_workspace_row(self._row(trace_json="{not json"))
+        self.assertEqual(payload["trace"], {})
 
 
 class LegalWorkspaceReadModuleTests(unittest.TestCase):

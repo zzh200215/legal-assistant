@@ -8,6 +8,7 @@ surfaced instead of being invented.
 import json
 import logging
 import re
+import time
 from datetime import date
 
 import jieba
@@ -15,12 +16,13 @@ from sqlalchemy.orm import Session
 
 from app.models.legal import (
     ContractReview,
+    LegalArticle,
     LegalConsultation,
     LegalDraft,
     LegalSource,
 )
 from app.services.org.data_protection_service import data_protection_service
-from app.services.legal.legal_reference_service import enrich_references
+from app.services.legal.legal_reference_service import enrich_references, parse_citation_numbers
 from app.services.llm.prompt_service import prompt_service
 
 logger = logging.getLogger(__name__)
@@ -186,7 +188,7 @@ async def _llm_chat(prompt: str, user_id: int | None = None, action: str = "lega
             user_id=user_id,
         )
     except Exception as exc:
-        logger.warning("LLM call failed, falling back to deterministic logic: %s", exc)
+        logger.warning("LLM call failed, falling back to deterministic logic: %s", exc, exc_info=True)
         return None
 
 
@@ -318,6 +320,59 @@ def _extract_citations(text: str) -> set[str]:
     return set(CITATION_PATTERN.findall(text or ""))
 
 
+# 书名规范化：去掉书名号/空白/括号，以及「中华人民共和国」前缀（模型爱写全称，库里的标题不一定）
+_TITLE_NOISE = re.compile(r"[《》\s（）()]")
+
+
+def _normalize_source_title(title: str) -> str:
+    text = _TITLE_NOISE.sub("", title or "")
+    return text[len("中华人民共和国"):] if text.startswith("中华人民共和国") else text
+
+
+def _citation_numbers(text: str) -> set[str]:
+    """条号集合（复用 legal_reference_service 的解析，兼容「第40、46、47条」写法）。"""
+    return set(parse_citation_numbers(text))
+
+
+def _title_affinity(left: str, right: str) -> bool:
+    """书名相似度（字符集合重叠 ≥3），用于「条号相同但书名不同」时避免跨法误配。"""
+    return len(set(left) & set(right)) >= 3
+
+
+def match_reference_to_source(ref: dict, sources: list[LegalSource]) -> LegalSource | None:
+    """把模型返回的引用对上法源库条目。
+
+    模型经常只给书名与条号、不给 source_id（形状 A），此前只用「标题或引用完全相等」匹配，
+    真实数据下几乎匹配不上，导致核验只能显示「无法核验」、句级溯源也没有正文可比。
+    这里三级放宽：① 规范化书名完全一致 → ② 书名互相包含（≥4 字）→ ③ 条号有交集且书名相似。
+    都对不上就返回 None，宁可让该引用保持「无法核验」，也不硬配一条错法源。
+    """
+    if not sources:
+        return None
+    ref_title = _normalize_source_title(ref.get("title"))
+    if not ref_title:
+        return None
+    ref_numbers = _citation_numbers(f"{ref.get('citation') or ''} {ref.get('title') or ''}")
+    contained = numbered = None
+    for source in sources:
+        source_title = _normalize_source_title(source.title)
+        if not source_title:
+            continue
+        if source_title == ref_title:
+            return source
+        if (
+            contained is None
+            and len(source_title) >= 4 and len(ref_title) >= 4
+            and (source_title in ref_title or ref_title in source_title)
+        ):
+            contained = source
+            continue
+        if numbered is None and ref_numbers and _title_affinity(ref_title, source_title):
+            if ref_numbers & _citation_numbers(source.citation or ""):
+                numbered = source
+    return contained or numbered
+
+
 def _tokenize(text: str) -> set[str]:
     """中文分词 + 英文单词提取，过滤停用词和单字噪声。
 
@@ -419,22 +474,340 @@ def _rank_sources_by_relevance(question: str, sources: list[LegalSource], max_ro
     return best
 
 
-async def consultation_payload(question: str, sources: list[LegalSource], user_id: int | None = None, db: Session | None = None):
-    """LLM-powered legal consultation with deterministic fallback."""
+def _trace_step(step_id: str, label: str, *, status: str = "success", duration_ms: int = 0, detail: str = "") -> dict:
+    """过程 trace 的一步：状态 + 耗时 + 人可读依据。
+
+    面板时间线直读这些字段，不再由前端按结果反推，所以 detail 必须写「实际做了什么」，
+    没做到的步骤要如实降级（status=degraded/skipped），不能编造。
+    """
+    return {
+        "id": step_id,
+        "label": label,
+        "status": status,
+        "duration_ms": max(0, int(duration_ms)),
+        "detail": detail,
+    }
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+def _reference_verification_counts(refs: list) -> tuple[int, int, int]:
+    """引用核验三态计数：已核验 / 未核验 / 无核验字段（与前端证据卡的判定口径一致）。"""
+    verified = unverified = 0
+    for ref in refs or []:
+        if not isinstance(ref, dict):
+            continue
+        verdict = ref.get("verification")
+        if not isinstance(verdict, dict):
+            continue
+        if verdict.get("verified") is True:
+            verified += 1
+        elif verdict.get("verified") is False:
+            unverified += 1
+    return verified, unverified, len([r for r in (refs or []) if isinstance(r, dict)]) - verified - unverified
+
+
+def _attach_trace_metrics(
+    trace_out: dict | None, *, candidate_sources: int, refs: list, counts: tuple[int, int, int],
+) -> None:
+    """把可机读的计数一并写进 trace。
+
+    面板只读步骤文案，但接口与评测需要能直接取数（命中数 / 引用数 / 核验三态）。
+    `rounds` 固定 1：咨询链路是单跳（一次检索 + 一次生成），没有多轮补检，
+    写死一个不存在的轮次数才是失真。
+    """
+    if trace_out is None or not trace_out.get("steps"):
+        return
+    verified, unverified, unmarked = counts
+    trace_out["metrics"] = {
+        "rounds": 1,
+        "candidate_sources": candidate_sources,
+        "references": len([ref for ref in (refs or []) if isinstance(ref, dict)]),
+        "verified": verified,
+        "unverified": unverified,
+        "unmarked": unmarked,
+    }
+
+
+# 逐句溯源：句子与法源正文的词面重合度门槛、每句最多给几条依据
+ATTRIBUTION_MIN_SCORE = 0.34
+ATTRIBUTION_MAX_MATCHES = 2
+
+# 与前端 splitAnswerSentences 同一口径：句末标点后断开，换行也断开，标点保留在句尾
+SENTENCE_PATTERN = re.compile(r"[^。！？；!?;\n]+[。！？；!?;]*")
+
+
+def split_answer_sentences(text: str) -> list[str]:
+    """把建议正文切成句子（与前端 splitAnswerSentences 保持一致，句索引才能对齐）。"""
+    if not isinstance(text, str):
+        return []
+    return [part.strip() for part in SENTENCE_PATTERN.findall(text) if part.strip()]
+
+
+def _article_text_by_source(db: Session | None, refs: list) -> dict[int, str]:
+    """按 source_id 汇总条文级正文。
+
+    语料导入的法源常常只在 legal_articles 里有正文（legal_sources.content 只是摘要），
+    句级比对用条文正文才有意义，所以这里优先取条文、取不到再退回法源正文。
+    """
+    if db is None:
+        return {}
+    source_ids = {
+        ref.get("source_id")
+        for ref in (refs or [])
+        if isinstance(ref, dict) and ref.get("source_id")
+    }
+    if not source_ids:
+        return {}
+    rows = db.query(LegalArticle).filter(LegalArticle.source_id.in_(source_ids)).all()
+    texts: dict[int, str] = {}
+    for article in rows:
+        texts[article.source_id] = texts.get(article.source_id, "") + f"{article.article_number} {article.content}\n"
+    return texts
+
+
+def _dedupe_references(refs: list[dict]) -> list[dict]:
+    """同一部法源 + 同一条号只保留第一次出现（模型偶尔会把同一条引用列两遍）。"""
+    seen: set[tuple] = set()
+    unique: list[dict] = []
+    for ref in refs:
+        key = (
+            ref.get("source_id"),
+            _normalize_source_title(ref.get("title") or ""),
+            str(ref.get("citation") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(ref)
+    return unique
+
+
+def _reference_source_text(ref: dict, source_by_id: dict, article_text_by_source: dict | None = None) -> str:
+    """引用参与比对的文本：优先取被引用法源的条文正文，其次法源正文，取不到才退回引用自身的标题与条号。"""
+    source = source_by_id.get(ref.get("source_id")) if ref.get("source_id") else None
+    if source is not None:
+        article_text = (article_text_by_source or {}).get(source.id)
+        body = article_text or source.full_text or source.content or ""
+        return f"{source.title or ''} {source.citation or ''} {body}"
+    return f"{ref.get('title') or ''} {ref.get('citation') or ''}"
+
+
+def _sentence_citation_numbers(refs: list, attribution: dict) -> dict[int, list[str]]:
+    """从「已判定归属某条引用的句子」里收集条号，作为该引用的条级核验范围。
+
+    模型经常把「第四十七条」写在正文里，而 references[].citation 只写书名；句级映射既然
+    已经知道哪句属于哪条引用，就把这些条号交给核验，让条级核验有据可依（不改写模型原文）。
+    """
+    numbers_by_index: dict[int, list[str]] = {}
+    for item in (attribution or {}).get("sentences") or []:
+        numbers = parse_citation_numbers(item.get("text"))
+        if not numbers:
+            continue
+        for match in item.get("matches") or []:
+            index = match.get("reference_index")
+            if not isinstance(index, int) or not (0 <= index < len(refs)):
+                continue
+            if not isinstance(refs[index], dict):
+                continue
+            bucket = numbers_by_index.setdefault(index, [])
+            for number in numbers:
+                if number not in bucket:
+                    bucket.append(number)
+    return numbers_by_index
+
+
+def attribute_sentences_to_references(
+    advice: str,
+    references: list,
+    sources: list[LegalSource],
+    *,
+    min_score: float = ATTRIBUTION_MIN_SCORE,
+    max_matches: int = ATTRIBUTION_MAX_MATCHES,
+    article_text_by_source: dict | None = None,
+) -> dict:
+    """把建议正文逐句对应到引用（句级溯源）。
+
+    口径（宁可空着，也不编造）：
+    - 只用词面重合度（jieba 分词后的交集 / 本句词数），不调用模型、不做语义猜测；
+    - 低于 min_score 的句子**不给依据**：与其把整篇引用塞给每一句，不如承认这句没匹配上；
+    - 引用没有 source_id 或法源没有正文时，用它自己的标题/条号参与比对，匹配不上就自然落空；
+    - 返回空 dict 表示本次连句子或引用都拿不到，前端回退到「整篇答案」粒度。
+    """
+    sentences = split_answer_sentences(advice)
+    refs = [ref for ref in (references or []) if isinstance(ref, dict)]
+    if not sentences or not refs:
+        return {}
+    source_by_id = {source.id: source for source in (sources or [])}
+    ref_tokens = [
+        _tokenize(_reference_source_text(ref, source_by_id, article_text_by_source))
+        for ref in refs
+    ]
+    if not any(ref_tokens):
+        return {}
+
+    items: list[dict] = []
+    matched_sentences = 0
+    for index, sentence in enumerate(sentences):
+        tokens = _tokenize(sentence)
+        matches: list[dict] = []
+        if tokens:
+            for ref_index, tokens_ref in enumerate(ref_tokens):
+                if not tokens_ref:
+                    continue
+                shared = tokens & tokens_ref
+                if not shared:
+                    continue
+                score = round(len(shared) / len(tokens), 4)
+                if score < min_score:
+                    continue
+                matches.append({
+                    "reference_index": ref_index,
+                    "source_id": refs[ref_index].get("source_id"),
+                    "title": refs[ref_index].get("title") or "",
+                    "score": score,
+                    "shared_terms": sorted(shared)[:6],
+                })
+        matches.sort(key=lambda item: (-item["score"], item["reference_index"]))
+        matches = matches[:max_matches]
+        if matches:
+            matched_sentences += 1
+        items.append({"index": index, "text": sentence, "matches": matches})
+
+    return {
+        "granularity": "sentence",
+        "attribution_version": 1,
+        "method": "lexical_overlap",
+        "min_score": min_score,
+        "total_sentences": len(sentences),
+        "matched_sentences": matched_sentences,
+        "sentences": items,
+    }
+
+
+# 注入 prompt 的参考上下文长度上限：与合同审查的正文截断（review_contract 的 8000 字）同口径。
+CONTEXT_MAX_CHARS = 8000
+
+
+def _prepare_extra_context(extra_context: dict | None) -> dict | None:
+    """把调用方读到的「当前材料」整理成可注入文本 + 可如实记录的元数据。
+
+    先过 `_redact_for_llm`（与问题同一口径），再截断到 `CONTEXT_MAX_CHARS`。
+    拿不到正文就返回 None——宁可不注入，也不写一句编造的「已参考」。
+    """
+    if not isinstance(extra_context, dict):
+        return None
+    raw_text = extra_context.get("text")
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        return None
+    safe_text, _ = _redact_for_llm(raw_text)
+    safe_text = safe_text.strip()[:CONTEXT_MAX_CHARS]
+    if not safe_text:
+        return None
+    return {
+        "type": str(extra_context.get("type") or "context"),
+        "type_label": str(extra_context.get("type_label") or "参考材料"),
+        "id": extra_context.get("id"),
+        "title": str(extra_context.get("title") or "未命名"),
+        "chars": len(safe_text),
+        "text": safe_text,
+    }
+
+
+def _record_trace_context(trace_out: dict | None, context_meta: dict | None) -> None:
+    """把「本次实际参考了哪份材料、多少字」写进 trace 顶层 contexts（与 steps/metrics 同级）。
+
+    只记元数据不记正文：trace 会随响应回到前端，正文本来就在用户自己的记录里。
+    """
+    if trace_out is None or not context_meta:
+        return
+    trace_out["contexts"] = [{
+        "type": context_meta["type"],
+        "id": context_meta["id"],
+        "title": context_meta["title"],
+        "chars": context_meta["chars"],
+    }]
+
+
+async def consultation_payload(
+    question: str,
+    sources: list[LegalSource],
+    user_id: int | None = None,
+    db: Session | None = None,
+    trace_out: dict | None = None,
+    attribution_out: dict | None = None,
+    extra_context: dict | None = None,
+):
+    """LLM-powered legal consultation with deterministic fallback.
+
+    `trace_out`（可选，由调用方传入空 dict）会按阶段写入过程 trace：检索法源 / 生成建议 /
+    抽取事实 / 核验引用，每步带状态、耗时与依据。不传则完全不记录，行为与从前一致。
+
+    `attribution_out`（可选，同样传空 dict）会写入句级引用映射：每句建议对应哪几条引用、
+    词面重合度多少。不传则完全不计算，行为与从前一致。
+
+    `extra_context`（可选）是调用方读到的「用户当前正在看的材料」（合同审查正文 / 文书正文），
+    形如 `{"type", "type_label", "id", "title", "text"}`：只拼进 prompt 的问题段作为参考上下文，
+    不参与法源排序，也不会被当成法源引用；实际用了哪份、多少字会如实写进 trace 顶层 `contexts`。
+    不传则 prompt 与从前逐字一致。
+    """
+    steps: list[dict] = []
+
+    def _record(step: dict) -> None:
+        if trace_out is None:
+            return
+        steps.append(step)
+        trace_out["trace_version"] = 1
+        trace_out["source"] = "legal_consultation"
+        trace_out["steps"] = steps
+
     # 拒答：涉及违法/危害行为的实施求助，在进入 LLM 与检索前直接拒绝（合规红线）
     if _should_refuse(question):
+        _record(_trace_step(
+            "refuse", "合规拦截", status="refused",
+            detail="问题涉及违法或危害行为的实施求助，未进入检索与生成",
+        ))
         return classify_question(question or ""), [], [], [], REFUSAL_ADVICE, "high", "needs_lawyer_review"
     # FL.md 7: redact PII before LLM call
     safe_question, redaction = _redact_for_llm(question)
+    # 面板带进来的「当前材料」：只用于生成段，不参与下面的法源排序（避免正文把排序带偏）
+    context_meta = _prepare_extra_context(extra_context)
     # FL.md 8.2: Agentic RAG source ranking
+    retrieve_started = time.perf_counter()
     ranked_sources = _rank_sources_by_relevance(safe_question, sources)
     has_valid_source = any(s.status == "active" for s in ranked_sources)
+    retrieve_ms = _elapsed_ms(retrieve_started)
     source_list = "\n".join(
         f"- ID:{s.id} {s.title}（{s.citation}，{s.version}）"
         for s in ranked_sources[:5]
     ) or "暂无法源数据"
+    if ranked_sources:
+        retrieve_detail = f"带回 {len(ranked_sources)} 条候选法源"
+        if not has_valid_source:
+            retrieve_detail += "，均未生效"
+    else:
+        retrieve_detail = "本次未检索到候选法源"
+    _record(_trace_step(
+        "retrieve", "检索法源",
+        status="success" if ranked_sources else "degraded",
+        duration_ms=retrieve_ms,
+        detail=retrieve_detail,
+    ))
     required_facts_json = _dump(REQUIRED_FACTS)
     effective_disclaimer = DISCLAIMER if has_valid_source else f"{NO_VALID_SOURCE} {DISCLAIMER}"
+
+    # 参考上下文拼进「用户问题」这一段，并写明它不是法源：模板变量契约不变，
+    # 不需要为新变量发模板版本（模板缺变量是静默的，加了反而可能悄悄不生效）。
+    prompt_question = safe_question
+    if context_meta:
+        prompt_question = (
+            f"{safe_question}\n\n"
+            f"参考上下文（{context_meta['type_label']}《{context_meta['title']}》"
+            f"#{context_meta['id']}，仅本次提问；它不是法源，不能作为法律依据引用）：\n"
+            f"{context_meta['text']}"
+        )
 
     prompt = prompt_service.render_by_name(
         "legal_consultation",
@@ -442,9 +815,11 @@ async def consultation_payload(question: str, sources: list[LegalSource], user_i
         required_facts_json=required_facts_json,
         source_list=source_list,
         disclaimer=effective_disclaimer,
-        question=safe_question,
+        question=prompt_question,
     )
+    generate_started = time.perf_counter()
     llm_result = await _llm_chat(prompt, user_id, action="legal_consultation")
+    generate_ms = _elapsed_ms(generate_started)
 
     if llm_result:
         parsed = _parse_json_safe(llm_result)
@@ -461,21 +836,93 @@ async def consultation_payload(question: str, sources: list[LegalSource], user_i
             # Ensure references include source_id if available
             for ref in refs:
                 if "source_id" not in ref:
-                    for s in ranked_sources:
-                        if s.title == ref.get("title") or s.citation == ref.get("citation"):
-                            ref["source_id"] = s.id
-                            ref.update({k: v for k, v in ref_dict(s).items() if k != "source_id"})
-                            break
+                    matched_source = match_reference_to_source(ref, ranked_sources) or match_reference_to_source(ref, sources)
+                    if matched_source is not None:
+                        ref["source_id"] = matched_source.id
+                        ref.update({k: v for k, v in ref_dict(matched_source).items() if k != "source_id"})
             # Fill references from ranked sources if LLM returned empty
             if not refs:
                 refs = [ref_dict(s) for s in ranked_sources[:3]]
-            refs = enrich_references(db, refs)
+            # 去重：模型偶尔把同一部法源列两遍，重复引用会让句级映射出现无意义的一对多。
+            refs = _dedupe_references(refs)
+            # 句级映射先算：模型常把条号写在正文里、references[].citation 只写书名，
+            # 这里把「被判定属于某条引用的句子」里出现的条号并入该引用的核验范围。
+            attribution = {}
+            if attribution_out is not None:
+                attribution = attribute_sentences_to_references(
+                    advice, refs, sources, article_text_by_source=_article_text_by_source(db, refs),
+                )
+            verify_started = time.perf_counter()
+            refs = enrich_references(db, refs, sentence_numbers=_sentence_citation_numbers(refs, attribution))
+            verify_ms = _elapsed_ms(verify_started)
+            _record(_trace_step(
+                "generate", "生成建议", status="success", duration_ms=generate_ms,
+                detail="模型返回结构化结果",
+            ))
+            _record(_trace_step(
+                "facts", "抽取事实", status="success",
+                detail=f"已确认 {len(known)} 项 · 待补充 {len(missing)} 项",
+            ))
+            verified, unverified, unmarked = _reference_verification_counts(refs)
+            if not refs:
+                verify_detail, verify_status = "无法源引用，无需核验", "skipped"
+            else:
+                verify_detail = f"{verified} 条已核验 · {unverified} 条未核验"
+                if unmarked:
+                    verify_detail += f" · {unmarked} 条无核验字段"
+                verify_status = "success"
+            _record(_trace_step(
+                "verify", "核验引用", status=verify_status, duration_ms=verify_ms, detail=verify_detail,
+            ))
+            _attach_trace_metrics(
+                trace_out, candidate_sources=len(ranked_sources), refs=refs,
+                counts=(verified, unverified, unmarked),
+            )
+            _record_trace_context(trace_out, context_meta)
+            if attribution_out is not None:
+                attribution_out.update(attribution)
             status = "needs_lawyer_review" if risk == "high" or missing else "pending_review"
             return category, known, missing, refs, advice, risk, status
+        _record(_trace_step(
+            "generate", "生成建议", status="degraded", duration_ms=generate_ms,
+            detail="模型返回无法解析为结构化结果，已用规则兜底",
+        ))
+    else:
+        _record(_trace_step(
+            "generate", "生成建议", status="degraded", duration_ms=generate_ms,
+            detail="模型调用未返回结果，已用规则兜底",
+        ))
 
     # Fallback: deterministic logic
+    verify_started = time.perf_counter()
     category, known, missing, refs, advice, risk, status = _consultation_deterministic(safe_question, ranked_sources)
-    return category, known, missing, enrich_references(db, refs), advice, risk, status
+    refs = enrich_references(db, refs)
+    verify_ms = _elapsed_ms(verify_started)
+    _record(_trace_step(
+        "facts", "抽取事实", status="degraded",
+        detail=f"按问题文本抽取：已确认 {len(known)} 项 · 待补充 {len(missing)} 项",
+    ))
+    verified, unverified, unmarked = _reference_verification_counts(refs)
+    if not refs:
+        verify_detail, verify_status = "无法源引用，无需核验", "skipped"
+    else:
+        verify_detail = f"{verified} 条已核验 · {unverified} 条未核验"
+        if unmarked:
+            verify_detail += f" · {unmarked} 条无核验字段"
+        verify_status = "success"
+    _record(_trace_step(
+        "verify", "核验引用", status=verify_status, duration_ms=verify_ms, detail=verify_detail,
+    ))
+    _attach_trace_metrics(
+        trace_out, candidate_sources=len(ranked_sources), refs=refs,
+        counts=(verified, unverified, unmarked),
+    )
+    _record_trace_context(trace_out, context_meta)
+    if attribution_out is not None:
+        attribution_out.update(attribute_sentences_to_references(
+            advice, refs, sources, article_text_by_source=_article_text_by_source(db, refs),
+        ))
+    return category, known, missing, refs, advice, risk, status
 
 
 def _consultation_deterministic(question: str, sources: list[LegalSource]):
@@ -680,13 +1127,13 @@ async def consultation_followup(
             refs = [r for r in refs if isinstance(r, dict)]
             for ref in refs:
                 if "source_id" not in ref:
-                    for s in ranked_sources:
-                        if s.title == ref.get("title") or s.citation == ref.get("citation"):
-                            ref["source_id"] = s.id
-                            ref.update({k: v for k, v in ref_dict(s).items() if k != "source_id"})
-                            break
+                    matched_source = match_reference_to_source(ref, ranked_sources) or match_reference_to_source(ref, sources)
+                    if matched_source is not None:
+                        ref["source_id"] = matched_source.id
+                        ref.update({k: v for k, v in ref_dict(matched_source).items() if k != "source_id"})
             if not refs:
                 refs = [ref_dict(s) for s in ranked_sources[:3]]
+            refs = _dedupe_references(refs)
             refs = enrich_references(db, refs)
             status = "needs_lawyer_review" if risk == "high" or missing else "pending_review"
             return category, known, missing, refs, advice, risk, status

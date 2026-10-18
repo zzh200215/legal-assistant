@@ -153,6 +153,12 @@ class LegalConsultation(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     # P1：模型结果快照（模型/提示词版本、输入 hash、生成时间）与审核绑定的业务版本号。
     model_snapshot_json = Column(Text, nullable=True, comment="原始模型结果快照，JSON")
+    # 处理过程 trace：检索/生成/抽取/核验各阶段的状态、耗时与依据，JSON。
+    # 与 model_snapshot_json 同源，但面向「过程可解释」（面板时间线直读），而非「结果可追溯」。
+    trace_json = Column(Text, nullable=True, comment="处理过程 trace，JSON")
+    # 逐句溯源：建议正文每一句对应哪几条引用（句级），JSON。
+    # 与 references_json 的区别：references_json 是「本次引用了什么」，本列是「哪一句用了哪条」。
+    attribution_json = Column(Text, nullable=True, comment="句级引用映射，JSON")
     reviewed_version = Column(Integer, nullable=True, comment="审核动作所绑定的业务版本号")
     feedback_score = Column(Integer, nullable=True, comment="用户评分：1=满意 -1=不满意")
     feedback_note = Column(Text, nullable=True, comment="用户反馈备注")
