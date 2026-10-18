@@ -259,8 +259,10 @@ class ModelGatewayCircuitTests(_GatewaySettingsMixin, unittest.IsolatedAsyncioTe
             await self.gateway.generate("请审查合同付款条款", action="legal_consultation")
         self.assertEqual(ctx.exception.kind, ModelErrorKind.CIRCUIT_OPEN)
 
-    async def test_embed_raises_circuit_open_when_primary_open(self):
-        embedding_key = self.gateway._circuit_key(self.gateway.primary_target, "embedding")
+    async def test_embed_raises_circuit_open_when_embedding_target_open(self):
+        # 向量化走独立的 embedding 目标（可与聊天目标不同平台），熔断键必须按它算；
+        # 早期版本复用 primary_target，拆分 embedding 目标后该断言已失效（2026-10-18 修正）。
+        embedding_key = self.gateway._circuit_key(self.gateway.embedding_target, "embedding")
         self.gateway.circuit_breaker.record_failure(embedding_key, counts=True)
         with self.assertRaises(ModelError) as ctx:
             await self.gateway.embed(["第一段"])

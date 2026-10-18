@@ -31,6 +31,38 @@ settings = get_settings()
 OPENAI_COMPATIBLE_EMBED_BATCH_SIZE = 10
 DEFAULT_REQUEST_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 1.5
+# 供应商限流（429）常按「分钟窗口」计算，固定 1.5s/3s/4.5s 的退避等不到窗口，
+# 于是免费额度下会出现「重试 3 次仍 429 → 整轮评测/整次咨询失败」。这里优先按
+# 响应里的 Retry-After 等待，并设上限避免把请求挂死。
+RETRY_AFTER_MAX_SECONDS = 60.0
+
+
+def _retry_after_seconds(exc: Exception, *, cap_seconds: float = RETRY_AFTER_MAX_SECONDS) -> float | None:
+    """从异常里读供应商给的 Retry-After（仅数字秒；HTTP-date 形式忽略）。"""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        seconds = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    if seconds < 0:
+        return None
+    return min(seconds, cap_seconds)
+
+
+def _retry_delay_seconds(exc: Exception, attempt: int) -> float:
+    """重试等待：固定退避，遇到 429 的 Retry-After 时取两者较大值。"""
+    delay = RETRY_BACKOFF_SECONDS * attempt
+    retry_after = _retry_after_seconds(exc)
+    if retry_after is not None:
+        delay = max(delay, retry_after)
+    return delay
+
 
 _COMPLEX_REQUEST_MARKERS = (
     "合同",
@@ -137,8 +169,12 @@ class ModelGateway:
             api_key=self.api_key,
         )
         self.small_target = self._build_small_target()
-        # 连接池：key=(provider, base_url, api_key 指纹, timeout)，按供应商目标隔离复用。
-        self._clients: dict[tuple[str, str, str, float], httpx.AsyncClient] = {}
+        self.embedding_target = self._build_embedding_target()
+        # 连接池：key=(provider, base_url, api_key 指纹, timeout)，值是 (创建它的事件循环, client)；
+        # 循环一并入键，避免跨事件循环复用连接池（见 _get_client 注释）。
+        self._clients: dict[
+            tuple[str, str, str, float], tuple[asyncio.AbstractEventLoop | None, httpx.AsyncClient]
+        ] = {}
         self._started = False
         self.circuit_breaker = build_circuit_breaker()
         # LLM 响应缓存：仅显式 cacheable 请求命中/写入（进程内 LRU + 可选 Redis）。
@@ -153,9 +189,13 @@ class ModelGateway:
 
     async def close(self) -> None:
         """关闭全部供应商连接池客户端并清空（幂等；可安全重复调用/测试内调用）。"""
-        clients, self._clients = list(self._clients.values()), {}
+        entries, self._clients = list(self._clients.values()), {}
         self._started = False
-        for client in clients:
+        for entry_loop, client in entries:
+            # 只关当前循环里的客户端；属于已关闭循环的连接池无法安全 aclose（会再抛
+            # Event loop is closed），直接丢弃引用交给 GC。
+            if entry_loop is not None and entry_loop.is_closed():
+                continue
             aclose = getattr(client, "aclose", None)
             if aclose is None:
                 continue
@@ -167,11 +207,27 @@ class ModelGateway:
         await self.close()
 
     def _get_client(self, target: _ModelTarget, *, timeout: float) -> httpx.AsyncClient:
+        """按「供应商目标 + 事件循环」取连接池客户端。
+
+        连接池与 asyncio 传输是绑定事件循环的：后台线程里的一次性 ``asyncio.run``（例如
+        Chroma 侧调用嵌入）会用自己的临时循环，若与主循环共用同一个 client，临时循环关闭后
+        池里的 keep-alive 连接再被主循环复用时就会抛
+        ``RuntimeError: Event loop is closed``（Windows Proactor 上表现为下一次 LLM 调用直接降级）。
+        因此这里把事件循环纳入缓存键：换循环就重建客户端，旧连接池随引用释放。
+        """
+        try:
+            loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
         key = (target.provider, target.base_url, _key_fingerprint(target.api_key), timeout)
-        client = self._clients.get(key)
-        if client is None:
-            client = httpx.AsyncClient(timeout=timeout)
-            self._clients[key] = client
+        entry = self._clients.get(key)
+        if entry is not None:
+            entry_loop, client = entry
+            if entry_loop is loop:
+                return client
+            self._clients.pop(key, None)
+        client = httpx.AsyncClient(timeout=timeout)
+        self._clients[key] = (loop, client)
         return client
 
     def _resolve_base_url(self, *, provider: str, configured_url: str = "") -> str:
@@ -193,6 +249,17 @@ class ModelGateway:
         api_key = str(settings.LLM_SMALL_MODEL_API_KEY or "").strip() or self.api_key
         return _ModelTarget("small", model, provider, base_url, api_key)
 
+    def _build_embedding_target(self) -> _ModelTarget:
+        """Embedding 目标：可独立配置供应商/地址/密钥；三项留空时回退复用主模型（聊天）目标，
+        行为与拆分前一致。支持聊天与向量来自不同平台（如聊天走商汤、向量走 dashscope）。"""
+        provider = str(settings.EMBEDDING_PROVIDER or "").strip() or self.provider
+        base_url = self._resolve_base_url(
+            provider=provider,
+            configured_url=str(settings.EMBEDDING_API_BASE_URL or "").strip(),
+        ).rstrip("/")
+        api_key = str(settings.EMBEDDING_API_KEY or "").strip() or self.api_key
+        return _ModelTarget("embedding", self.embedding_model, provider, base_url, api_key)
+
     def _build_headers(self, target: _ModelTarget | None = None) -> dict[str, str]:
         target = target or self.primary_target
         return provider_adapter(target.provider).headers(target.api_key)
@@ -206,7 +273,7 @@ class ModelGateway:
         return provider_adapter(target.provider).generate_url(target.base_url)
 
     def _embedding_url(self) -> str:
-        return provider_adapter(self.provider).embedding_url(self.base_url)
+        return provider_adapter(self.embedding_target.provider).embedding_url(self.embedding_target.base_url)
 
     def _build_chat_payload(
         self,
@@ -251,7 +318,7 @@ class ModelGateway:
         return payload
 
     def _build_embed_payload(self, texts: list[str]) -> dict:
-        return provider_adapter(self.provider).embedding_payload(self.embedding_model, texts)
+        return provider_adapter(self.embedding_target.provider).embedding_payload(self.embedding_model, texts)
 
     @staticmethod
     def _normalize_messages(messages: list[dict]) -> list[dict]:
@@ -485,7 +552,7 @@ class ModelGateway:
                     last_error = exc
                     if attempt == retries:
                         break
-                    await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+                    await asyncio.sleep(_retry_delay_seconds(exc, attempt))
             if last_error is not None:
                 raise last_error
             raise RuntimeError("Request failed without a captured exception")
@@ -1484,7 +1551,7 @@ class ModelGateway:
                         # 重试会从头重放流，导致客户端收到重复内容。
                         if not classify_error(exc).retryable or attempt == retries or full_response:
                             raise
-                        await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+                        await asyncio.sleep(_retry_delay_seconds(exc, attempt))
             except Exception as exc:
                 self.circuit_breaker.record_failure(
                     circuit_key,
@@ -1569,7 +1636,7 @@ class ModelGateway:
             estimated_output_tokens=enforcement.get("estimated_output_tokens"),
             **self._gate_audit_fields(gate_result),
         )
-        circuit_key = self._circuit_key(self.primary_target, policy.task)
+        circuit_key = self._circuit_key(self.embedding_target, policy.task)
         if not self.circuit_breaker.can_attempt(circuit_key):
             raise self._circuit_open_error(
                 task=policy.task,
@@ -1578,15 +1645,15 @@ class ModelGateway:
             )
 
         url = self._embedding_url()
-        headers = self._build_headers()
+        headers = self._build_headers(self.embedding_target)
         batches = [safe_texts]
-        adapter = provider_adapter(self.provider)
+        adapter = provider_adapter(self.embedding_target.provider)
         if not adapter.uses_native_embedding_batch:
             batches = self._chunk_texts(safe_texts, OPENAI_COMPATIBLE_EMBED_BATCH_SIZE)
 
         embeddings: list[list[float]] = []
-        client = self._get_client(self.primary_target, timeout=self._policy_timeout(policy))
-        retries = self._policy_retries(policy, self.primary_target)
+        client = self._get_client(self.embedding_target, timeout=self._policy_timeout(policy))
+        retries = self._policy_retries(policy, self.embedding_target)
         for batch in batches:
             payload = self._build_embed_payload(batch)
             start = time.time()
