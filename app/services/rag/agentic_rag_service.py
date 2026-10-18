@@ -10,6 +10,7 @@ never bypasses document permissions, citation grounding, or refusal checks in
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Annotated, Any, TypedDict
@@ -34,6 +35,48 @@ from app.workflows.langgraph_compat import (
 
 # 多跳门槛：只有问题里真的像有多个子问题，才值得付分解那一次 LLM 往返。
 _MULTI_HOP_MARKERS = ("以及", "并且", "同时", "分别", "还有", "另外", "；", ";")
+
+# 连接词门槛漏掉了自然提问里最常见的写法：用逗号把两问串起来（"试用期最长多久，经济补偿怎么算"），
+# 既没有连接词也常常只有一个问号，实测放行率只有 3.7%（27 题里 1 题）。
+# 这里改为数「疑问子句」的个数：按逗号/分号切段，段内出现疑问词才算一段。
+# 用疑问词而不是逗号本身做判据，是为了不把 "我在公司工作了三年，公司突然辞退我" 这类
+# 单问题的陈述句误判成多跳——那种句子只有一个疑问子句。
+_CLAUSE_SEPARATORS = re.compile(r"[，,；;、]")
+_INTERROGATIVE_MARKERS = (
+    # 疑问词
+    "什么",
+    "怎么",
+    "怎样",
+    "如何",
+    "多少",
+    "多长",
+    "多大",
+    "多久",
+    "几年",
+    "几个月",
+    "几天",
+    "哪些",
+    "哪个",
+    "哪种",
+    "何时",
+    "为什么",
+    # 正反问（"要不要赔偿"、"包不包括信息网络传播权"）
+    "是否",
+    "能否",
+    "可否",
+    "要不要",
+    "该不该",
+    "会不会",
+    "有没有",
+    "能不能",
+    "算不算",
+    "包不包括",
+    "属不属于",
+    # 选择问与句末语气词（"提前通知还是额外付一个月工资"）
+    "还是",
+    "吗",
+    "呢",
+)
 
 # 忠实性校验不通过时的拒答口径：沿用 RAGService 的拒答措辞风格，只换 refusal_reason。
 _UNFAITHFUL_ANSWER = "根据当前文档内容，暂时无法给出可核对到片段的确定答案。"
@@ -93,13 +136,33 @@ class AgenticRAGService:
         return len(normalized) >= 24 or any(marker in normalized for marker in complex_markers)
 
     @staticmethod
-    def _looks_multi_hop(question: str) -> bool:
-        """便宜的前置门槛：问了两件事才分解，避免为单问题白付一次 LLM 往返。"""
+    def _count_interrogative_clauses(question: str) -> int:
+        """数问题里有几段「在提问」的子句：按逗号/分号切段，段内出现疑问词才算一段。"""
+        return sum(
+            1
+            for clause in _CLAUSE_SEPARATORS.split(question)
+            if clause.strip() and any(marker in clause for marker in _INTERROGATIVE_MARKERS)
+        )
+
+    @classmethod
+    def _looks_multi_hop(cls, question: str) -> bool:
+        """便宜的前置门槛：问了两件事才分解，避免为单问题白付一次 LLM 往返。
+
+        ``cls`` 而不是 ``self``：评测脚本会以 ``staticmethod(lambda q: True)`` 换掉这个
+        门槛来单独测「分解本身」的收益（``eval/run_agentic_rag_eval.py`` 的
+        ``multi_hop_forced`` 臂），那个替身不接受 ``self``。
+        """
         normalized = (question or "").strip()
-        if len(normalized) < 16:
+        if not normalized:
             return False
         if normalized.count("？") + normalized.count("?") >= 2:
             return True
+        # 逗号串起来的两个疑问子句（"试用期最长多久，经济补偿怎么算"）——早于长度门槛判定，
+        # 否则这类 15 字的典型提问会被长度下限直接挡掉。
+        if cls._count_interrogative_clauses(normalized) >= 2:
+            return True
+        if len(normalized) < 16:
+            return False
         return any(marker in normalized for marker in _MULTI_HOP_MARKERS)
 
     async def _plan_query(
@@ -245,23 +308,15 @@ class AgenticRAGService:
         }
 
     async def _workflow_merge_evidence(self, state: dict[str, Any]) -> dict[str, Any]:
-        """按**子问题顺序**合并各分支证据：去重保序，再截到一次检索的上下文预算内。
+        """按**子问题顺序**合并各分支证据：去重，再按轮转裁到一次检索的上下文预算内。
 
         用计划顺序而不是完成顺序，同一次问答才可复现；并发分支的耗时取最大值而不是求和，
         否则观测到的检索延迟会被重复计算。
         """
         results = sorted((state.get("sub_results") or {}).values(), key=lambda item: item["index"])
-        merged: list[Any] = []
-        seen: set[str] = set()
-        for item in results:
-            for chunk in item["chunks"]:
-                key = self._chunk_key(chunk)
-                if key in seen:
-                    continue
-                seen.add(key)
-                merged.append(chunk)
         runtime_config = state["runtime_config"]
-        merged = merged[: max(int(runtime_config["context_max_chunks"]), int(runtime_config["top_k"]))]
+        budget = max(int(runtime_config["context_max_chunks"]), int(runtime_config["top_k"]))
+        merged, per_branch_kept = self._merge_round_robin(results, budget)
         # 合并集的置信度取**各分支的最小值**，而不是拿原问题去评合并集：
         # _estimate_confidence 的关键词/距离项只看前 3 个片段，而合并集的前 3 个片段属于第一个
         # 子问题，对整个问题的覆盖必然偏低——那会让刚扇出的证据立刻被判不足、再退回单跳。
@@ -291,12 +346,48 @@ class AgenticRAGService:
                 "round": state["round"],
                 "sub_questions": [item["sub_question"] for item in results],
                 "sub_hit_counts": [len(item["chunks"]) for item in results],
+                "sub_kept_counts": per_branch_kept,
                 "branch_confidences": [round(value, 4) for value in branch_confidences],
                 "hit_count": len(merged),
                 "confidence": round(confidence, 4),
             }
         )
         return state
+
+    @classmethod
+    def _merge_round_robin(cls, results: list[dict[str, Any]], budget: int) -> tuple[list[Any], list[int]]:
+        """按「子问题轮转」取片段，而不是先塞满第一个子问题再轮到下一个。
+
+        原先按子问题顺序平铺再整体截断，``top_k=8`` 时第一个子问题的 8 个片段会把
+        ``RAG_CONTEXT_MAX_CHUNKS=8`` 的预算吃光，后面子问题的证据一个都进不去——离线消融里
+        表现为 multi_hop 在 ``top_k=8`` 覆盖率反降 16.7pt（三条臂的片段数都顶到 8.00，是预算
+        截断而非召回变差）。轮转取片等于给每个子问题预留 1/N 的预算，同时保留「每个子问题
+        内部按相关度排序」的语义：第 r 轮取各分支的第 r 个片段。
+
+        返回 ``(合并片段, 各分支实际入选数)``——后者进 trace，便于消融时看出是哪个子问题被饿死。
+        """
+        if not results:
+            return [], []
+        seen: set[str] = set()
+        per_branch_kept = [0] * len(results)
+        merged: list[Any] = []
+        depth = max((len(item["chunks"]) for item in results), default=0)
+        for rank in range(depth):
+            for position, item in enumerate(results):
+                if len(merged) >= budget:
+                    return merged, per_branch_kept
+                chunks = item["chunks"]
+                # 分支长度不齐时短分支直接跳过，不占别人的轮次。
+                if rank >= len(chunks):
+                    continue
+                chunk = chunks[rank]
+                key = cls._chunk_key(chunk)
+                if key in seen:
+                    continue
+                seen.add(key)
+                per_branch_kept[position] += 1
+                merged.append(chunk)
+        return merged, per_branch_kept
 
     @staticmethod
     def _chunk_key(chunk: dict[str, Any]) -> str:
@@ -401,7 +492,11 @@ class AgenticRAGService:
         return state
 
     async def _workflow_assess_evidence(self, state: dict[str, Any]) -> dict[str, Any]:
-        threshold = max(float(state["runtime_config"]["confidence_threshold"]), 0.45)
+        # 门槛只取运行时配置这一个来源。这里原先写作 max(..., 0.45)，等于把
+        # RAG_CONFIDENCE_THRESHOLD 低于 0.45 的取值静默抬高 0.1，使得同一条问答链路上
+        # 图节点与 answer_from_chunks_async 用两套口径（实测把 confidence 0.442 的正确
+        # 证据判成 refine_or_refuse，最后拒答）。要更严就显式调 RAG_CONFIDENCE_THRESHOLD。
+        threshold = float(state["runtime_config"]["confidence_threshold"])
         evidence_ready = bool(state["latest_chunks"]) and state["latest_confidence"] >= threshold
         heuristic_ready = evidence_ready
         judgement: dict[str, Any] | None = None

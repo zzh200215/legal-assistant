@@ -147,6 +147,31 @@ class MultiHopFanOutTests(_DepthTestCase):
         self.assertEqual(merge["sub_hit_counts"], [2, 2])
         self.assertEqual(merge["hit_count"], 3)
 
+    async def test_wide_top_k_does_not_let_the_first_sub_question_eat_the_budget(self):
+        """top_k=8 时两个分支各回 8 个片段：8 个名额必须两家分，而不是第一家全占。
+
+        这是离线消融里 multi_hop 在 top_k=8 反降 16.7pt 的根因——按子问题顺序平铺再整体
+        截断，第一个子问题的片段会把 RAG_CONTEXT_MAX_CHUNKS 吃光，第二个一条都进不去。
+        """
+        left = [_chunk(f"L{i}", f"试用期证据 {i}", i) for i in range(8)]
+        right = [_chunk(f"R{i}", f"经济补偿证据 {i}", i + 8) for i in range(8)]
+        with _settings(
+            self.service,
+            AGENTIC_RAG_MULTI_HOP_ENABLED=True,
+            AGENTIC_RAG_PLANNER_ENABLED=False,
+        ), self._decompose(["试用期最长多久", "经济补偿怎么算"]), _stub_rag(
+            results={"试用期": left, "经济补偿": right}, confidence=0.8, answer=_answer()
+        ) as stubs:
+            result = await self.service.answer_async(self.question, document_id=1, user_id=7, top_k=8)
+
+        chunks = stubs.answer.await_args.kwargs["chunks"]
+        self.assertEqual(len(chunks), 8)
+        # 轮转取片：第 r 轮取各分支的第 r 个，两个子问题都被代表到。
+        self.assertEqual([chunk["id"] for chunk in chunks], ["L0", "R0", "L1", "R1", "L2", "R2", "L3", "R3"])
+        merge = self._step(result, "merge_evidence")
+        self.assertEqual(merge["sub_kept_counts"], [4, 4])
+        self.assertEqual(merge["sub_hit_counts"], [8, 8])
+
     async def test_branches_cannot_widen_the_permission_scope(self):
         """分支只拿到 ``Send`` 载荷，范围过滤必须逐个带过去，否则分支等于越权检索。"""
         with _settings(
@@ -393,16 +418,16 @@ class FaithfulnessTests(_DepthTestCase):
 
 
 class DefaultsTests(unittest.TestCase):
-    def test_the_three_extra_llm_round_trips_are_opt_in(self):
-        """默认关闭是刻意的成本取舍，且有实测依据；改默认值请连带改文档。
+    def test_the_extra_llm_round_trips_follow_measured_payoff(self):
+        """默认值是刻意的成本取舍，且有实测依据；改默认值请连带改文档。
 
         27 题法规多跳消融（eval/run_agentic_rag_eval.py --corpus-kind statutes）在生产
-        默认 top_k=5 上的结论：判分补检索零收益、恒定多 2 次 LLM 往返；多跳分解本身有
-        收益，但 _looks_multi_hop 只放行 3.7% 的自然提问，且 top_k=8 时反降 16.7pt。
+        默认 top_k=5 上的结论：判分补检索零收益、恒定多 2 次 LLM 往返，所以保持关闭；
+        多跳分解在门槛与预算修复后于 top_k=5/8 均不劣于单跳（放行率 100%），因此翻为开启。
         数字见 eval/results.md。
         """
         fields = RAGSettings.model_fields
-        self.assertFalse(fields["AGENTIC_RAG_MULTI_HOP_ENABLED"].default)
+        self.assertTrue(fields["AGENTIC_RAG_MULTI_HOP_ENABLED"].default)
         self.assertFalse(fields["AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED"].default)
         self.assertFalse(fields["AGENTIC_RAG_FAITHFULNESS_CHECK_ENABLED"].default)
 
@@ -426,6 +451,121 @@ class NoExtraCallsWhenDisabledTests(_DepthTestCase):
         judge.assert_not_awaited()
         check.assert_not_awaited()
         self.assertEqual(self._nodes(result), ["plan", "retrieve", "assess_evidence"])
+
+
+class MultiHopThresholdTests(unittest.TestCase):
+    """前置门槛只该在「真的问了两件事」时放行：它拦在分解那一次 LLM 往返之前。"""
+
+    def test_comma_joined_two_questions_are_let_through(self):
+        """自然提问最常见的写法：逗号串两问、只有一个问号、长度还不到 16 字。
+
+        修复前这条不放行（旧门槛只认连接词），27 题的放行率因此只有 3.7%。
+        """
+        self.assertTrue(AgenticRAGService._looks_multi_hop("试用期最长多久，经济补偿怎么算"))
+
+    def test_two_question_marks_are_let_through(self):
+        self.assertTrue(AgenticRAGService._looks_multi_hop("试用期最长多久？经济补偿怎么算？"))
+
+    def test_connection_words_are_still_let_through(self):
+        self.assertTrue(AgenticRAGService._looks_multi_hop("差旅报销标准以及审批流程是怎么规定的"))
+        self.assertTrue(AgenticRAGService._looks_multi_hop("年假与调休分别怎么计算，请一并说明"))
+
+    def test_choice_and_yes_no_clauses_are_let_through(self):
+        """选择问（"还是"）与正反问（"要不要"）同样是两个疑问子句。
+
+        实测里这两类写法在旧门槛下全部被挡住（27 题多跳集只放行 1 题，其中 6 题就卡在这里）。
+        """
+        self.assertTrue(
+            AgenticRAGService._looks_multi_hop("女职工在孕期产期哺乳期能不能被裁，无过失性辞退要提前通知还是可以额外付一个月工资")
+        )
+        self.assertTrue(AgenticRAGService._looks_multi_hop("公司拖欠工资要不要付经济补偿，员工可以解除合同吗"))
+        self.assertTrue(AgenticRAGService._looks_multi_hop("自然人作品的发表权保护期有多长，侵犯著作权要承担哪些民事责任"))
+
+    def test_single_question_is_not_let_through(self):
+        """只问一件事时连分解那次往返都不该发——这是门槛存在的全部理由。"""
+        self.assertFalse(AgenticRAGService._looks_multi_hop("加班费怎么算"))
+        # 用逗号交代背景、只有一个疑问子句，仍然不是多跳。
+        self.assertFalse(
+            AgenticRAGService._looks_multi_hop("我在公司工作了三年，公司突然辞退我，也没有支付经济补偿，该怎么办")
+        )
+
+    def test_blank_input_is_not_let_through(self):
+        self.assertFalse(AgenticRAGService._looks_multi_hop(""))
+        self.assertFalse(AgenticRAGService._looks_multi_hop("   "))
+        self.assertFalse(AgenticRAGService._looks_multi_hop(None))
+
+
+class SubQuestionBudgetTests(unittest.TestCase):
+    """合并阶段按子问题轮转取片，宽 top_k 下不能让第一个子问题吃光上下文预算。"""
+
+    @staticmethod
+    def _branch(index: int, count: int) -> dict:
+        return {
+            "index": index,
+            "sub_question": f"q{index}",
+            "chunks": [_chunk(f"b{index}-{i}", f"证据 {i}", i) for i in range(count)],
+        }
+
+    def test_each_branch_gets_a_share_of_a_tight_budget(self):
+        """两个分支各 8 条、预算 8：应 4/4 平分，而不是 8/0。"""
+        merged, kept = AgenticRAGService._merge_round_robin([self._branch(0, 8), self._branch(1, 8)], 8)
+        self.assertEqual(kept, [4, 4])
+        # 每个分支内部仍按相关度排序：入选的是各自的前 4 条。
+        self.assertEqual(
+            [chunk["id"] for chunk in merged],
+            ["b0-0", "b1-0", "b0-1", "b1-1", "b0-2", "b1-2", "b0-3", "b1-3"],
+        )
+
+    def test_short_branch_does_not_waste_the_others_turns(self):
+        """分支长度不齐时，短分支取完就跳过，长分支继续用自己的轮次。"""
+        merged, kept = AgenticRAGService._merge_round_robin([self._branch(0, 5), self._branch(1, 1)], 8)
+        self.assertEqual(kept, [5, 1])
+        self.assertEqual(len(merged), 6)
+
+    def test_duplicate_chunks_across_branches_are_kept_once(self):
+        """跨子问题命中的同一片段只保留一份，也不额外占用预算名额。"""
+        shared = _chunk("shared", "两个子问题都命中。", 0)
+        first = {"index": 0, "sub_question": "q0", "chunks": [shared, _chunk("a", "a", 1)]}
+        second = {"index": 1, "sub_question": "q1", "chunks": [shared, _chunk("b", "b", 2)]}
+        merged, kept = AgenticRAGService._merge_round_robin([first, second], 8)
+        self.assertEqual([chunk["id"] for chunk in merged], ["shared", "a", "b"])
+        self.assertEqual(kept, [2, 1])
+
+    def test_no_branches_yields_nothing(self):
+        self.assertEqual(AgenticRAGService._merge_round_robin([], 8), ([], []))
+
+
+class AssessEvidenceThresholdTests(unittest.IsolatedAsyncioTestCase):
+    """评估节点的门槛必须等于运行时配置：曾写作 max(config, 0.45)，静默抬高 0.1。"""
+
+    def setUp(self):
+        self.service = AgenticRAGService()
+
+    @staticmethod
+    def _state(*, confidence: float, threshold: float) -> dict:
+        return {
+            "question": "差旅报销多久内提交",
+            "runtime_config": {"confidence_threshold": threshold},
+            "latest_chunks": [{"id": "c1", "content": "差旅报销应在 30 日内提交。", "metadata": {}}],
+            "latest_confidence": confidence,
+            "round": 1,
+            "max_rounds": 2,
+            "trace": [],
+        }
+
+    async def test_evidence_above_the_configured_threshold_generates(self):
+        """0.40 的置信度在 0.35 门槛下够用——旧的下限 0.45 会把它误判成证据不足。"""
+        with _settings(self.service, AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED=False):
+            result = await self.service._workflow_assess_evidence(self._state(confidence=0.40, threshold=0.35))
+        self.assertTrue(result["evidence_ready"])
+        self.assertEqual(result["trace"][-1]["decision"], "generate")
+        self.assertEqual(result["trace"][-1]["threshold"], 0.35)
+
+    async def test_evidence_below_the_configured_threshold_still_refines(self):
+        with _settings(self.service, AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED=False):
+            result = await self.service._workflow_assess_evidence(self._state(confidence=0.30, threshold=0.35))
+        self.assertFalse(result["evidence_ready"])
+        self.assertEqual(result["trace"][-1]["decision"], "refine_or_refuse")
 
 
 if __name__ == "__main__":

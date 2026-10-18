@@ -45,6 +45,10 @@ class RAGSettings(BaseSettings):
     # BM25 召回条数不单独配置：与 dense 召回共用同一个候选上限
     # max(RAG_TOP_K × RAG_RECALL_MULTIPLIER, RAG_MIN_RECALL_CANDIDATES)。
     RAG_BM25_TTL_SECONDS: int = 300
+    # 法律条文混合检索的 RRF 融合常数（`1 / (RAG_RRF_K + rank)`，词级与稠密两路同权）。
+    # 默认 60 是 RRF 论文口径，也是本仓实测的稳健点：k=10/60/200 三档消融里
+    # Hit@5 与 MRR 完全一致（见 eval/results.md「混合检索消融」），故取无需调参的 60。
+    RAG_RRF_K: int = Field(default=60, ge=1, le=1000)
     RAG_LLM_RERANK_ENABLED: bool = False
     RAG_LLM_RERANK_TOP_N: int = 5
     RAG_LLM_RERANK_MAX_CHARS: int = 400
@@ -69,13 +73,15 @@ class RAGSettings(BaseSettings):
     #
     # 默认值有实测依据（27 题多跳法规问答 / 6 部法规 84 片段，
     # eval/run_agentic_rag_eval.py --corpus-kind statutes，结论见 eval/results.md）：
-    # - MULTI_HOP：分解本身在 top_k=5 能把证据覆盖率 0.963→1.000，但前置门槛
-    #   _looks_multi_hop 只放行 3.7% 的自然提问（要「以及/并且/同时」这类连接词），
-    #   照现状打开等于不生效；且 top_k=8 时子问题结果会把必需证据挤出
-    #   RAG_CONTEXT_MAX_CHUNKS 预算，覆盖率反降 16.7pt。要开先改门槛与预算分配。
+    # - MULTI_HOP：**开启**。原有两个前置问题（门槛只放行 3.7% 的自然提问；top_k=8 时子问题
+    #   结果被挤出 RAG_CONTEXT_MAX_CHUNKS 预算、覆盖率反降 16.7pt）已修复——门槛改为统计
+    #   「疑问子句」个数，合并改为按子问题轮转取片（每个子问题预留 1/N 预算）。按修复后口径
+    #   重跑（真实 text-embedding-v3 嵌入）：放行率 100%，top_k=5 覆盖率 0.9815→1.0000，
+    #   top_k=8 不再反降。代价是门槛放行时多 1 次 LLM 往返，96 题混合语料放行 10.4%（误判 1 题）。
+    #   注：评测里分解是脚本桩，收益是上界；真实分解器接上后需复测。
     # - EVIDENCE_JUDGE：top_k=5/8 零收益，只在 top_k=3 提 5.6pt，恒定 2 次 LLM 往返。
     # - FAITHFULNESS_CHECK：离线评测测不了（要真实生成），无数据支撑改默认。
-    AGENTIC_RAG_MULTI_HOP_ENABLED: bool = False
+    AGENTIC_RAG_MULTI_HOP_ENABLED: bool = True
     AGENTIC_RAG_MAX_SUB_QUESTIONS: int = Field(default=3, ge=2, le=4)
     AGENTIC_RAG_EVIDENCE_JUDGE_ENABLED: bool = False
     AGENTIC_RAG_FAITHFULNESS_CHECK_ENABLED: bool = False

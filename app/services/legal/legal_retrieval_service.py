@@ -219,13 +219,15 @@ class LegalRetrievalService:
             logger.info("Dense legal recall unavailable; using lexical recall (%s)", type(exc).__name__)
 
         # RRF combines independent rankings without assuming scores are calibrated.
+        # k 由 RAG_RRF_K 配置（默认 60，消融依据见 eval/results.md）。
+        rrf_k = settings.RAG_RRF_K
         fused = defaultdict(float)
         details: dict[int, dict] = defaultdict(lambda: {"keyword_hits": 0, "citation_hit": False, "dense_rank": None})
         for rank, (article_id, _, keyword_hits, citation_hit) in enumerate(lexical, start=1):
-            fused[article_id] += 1 / (60 + rank)
+            fused[article_id] += 1 / (rrf_k + rank)
             details[article_id].update(keyword_hits=keyword_hits, citation_hit=citation_hit)
         for rank, article_id in enumerate(dense_ids, start=1):
-            fused[article_id] += 1 / (60 + rank)
+            fused[article_id] += 1 / (rrf_k + rank)
             details[article_id]["dense_rank"] = rank
 
         # The graph only corroborates existing lexical/vector candidates. It

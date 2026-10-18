@@ -18,6 +18,11 @@ class LLMSettings(BaseSettings):
     LLM_MODEL: str = "qwen-plus"
     LLM_VISION_MODEL: str = ""
     EMBEDDING_MODEL: str = "text-embedding-v3"
+    # Embedding 可独立于聊天供应商：三项留空时回退复用 LLM_PROVIDER / LLM_API_BASE_URL / LLM_API_KEY，
+    # 行为与拆分前完全一致。用于聊天与向量来自不同平台的场景（如聊天走商汤、向量走 dashscope）。
+    EMBEDDING_PROVIDER: str = ""
+    EMBEDDING_API_BASE_URL: str = ""
+    EMBEDDING_API_KEY: str = ""
     # 简单请求优先走小模型；主模型服务不可用时可降级到小模型。
     # 小模型地址和密钥留空时复用 LLM_API_BASE_URL / LLM_API_KEY。
     LLM_MODEL_ROUTING_ENABLED: bool = True
