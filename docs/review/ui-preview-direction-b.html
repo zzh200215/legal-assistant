@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>律智检 · 视觉方向 B 预览（现代自信 · 靓蓝+青绿）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --brand:#4F46E5; --brand-600:#4338CA; --brand-weak:#EEF0FE; --brand-ring:rgba(79,70,229,.35);
+  --teal:#0D9488; --teal-weak:#CCFBF1;
+  --ink:#0F172A; --muted:#64748B; --faint:#94A3B8;
+  --bg:#F6F7FB; --surface:#FFFFFF; --line:#E6E9F0; --line-soft:#EEF1F6;
+  --ok:#16A34A; --ok-weak:#DCFCE7; --warn:#D97706; --warn-weak:#FEF3C7; --danger:#DC2626;
+  --r:16px; --r-sm:10px; --r-xs:7px;
+  --sh-1:0 1px 2px rgba(15,23,42,.04);
+  --sh-2:0 1px 3px rgba(15,23,42,.05), 0 10px 28px -14px rgba(15,23,42,.18);
+  --sh-3:0 20px 48px -20px rgba(79,70,229,.28);
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Plus Jakarta Sans","Noto Sans SC",system-ui,sans-serif;color:var(--ink);background:var(--bg);
+  font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+.app{display:grid;grid-template-columns:248px 1fr 380px;height:100vh;transition:grid-template-columns .28s cubic-bezier(.16,1,.3,1)}
+.app.collapsed{grid-template-columns:248px 1fr 56px}
+svg{display:block}
+.icon{width:18px;height:18px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+/* ---- 左导航 ---- */
+.nav{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:var(--s4) var(--s3)}
+.brand{display:flex;align-items:center;gap:10px;padding:var(--s2) var(--s2) var(--s5)}
+.brand .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--brand),var(--teal));
+  color:#fff;display:grid;place-items:center;font-weight:800;font-size:17px;box-shadow:var(--sh-3)}
+.brand .bt{font-weight:800;font-size:15px;letter-spacing:.2px}
+.brand .bs{font-size:11px;color:var(--faint);margin-top:1px}
+.nav-group{margin-top:var(--s4)}
+.nav-label{font-size:11px;font-weight:600;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;padding:0 var(--s2) var(--s2)}
+.nav-item{display:flex;align-items:center;gap:11px;width:100%;padding:9px var(--s2);border-radius:var(--r-sm);
+  color:var(--muted);font-weight:500;font-size:13.5px;margin-bottom:2px;transition:.15s}
+.nav-item:hover{background:var(--line-soft);color:var(--ink)}
+.nav-item.active{background:var(--brand-weak);color:var(--brand-600);font-weight:600}
+.nav-item.active .icon{stroke:var(--brand)}
+.nav-item .badge{margin-left:auto;background:var(--teal-weak);color:var(--teal);font-size:11px;font-weight:700;
+  padding:1px 7px;border-radius:999px}
+.nav-foot{margin-top:auto;padding-top:var(--s4);border-top:1px solid var(--line-soft)}
+.acct{display:flex;align-items:center;gap:10px;padding:var(--s2);border-radius:var(--r-sm)}
+.acct:hover{background:var(--line-soft)}
+.avatar{width:32px;height:32px;border-radius:9px;background:var(--brand-weak);color:var(--brand-600);
+  display:grid;place-items:center;font-weight:700}
+.acct .an{font-weight:600;font-size:13px}
+.acct .ar{font-size:11px;color:var(--faint)}
+/* ---- 中间：顶栏 + 内容 ---- */
+.main{display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+.topbar{display:flex;align-items:center;gap:var(--s4);padding:0 var(--s5);height:60px;
+  border-bottom:1px solid var(--line);background:rgba(255,255,255,.72);backdrop-filter:blur(8px);position:sticky;top:0;z-index:5}
+.crumb{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.crumb b{color:var(--ink);font-weight:600}
+.crumb .sep{color:var(--faint)}
+.search{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);
+  padding:8px 12px;border-radius:999px;color:var(--faint);width:230px;font-size:13px}
+.search input{border:none;background:none;outline:none;flex:1;color:var(--ink);font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:var(--r-sm);font-weight:600;font-size:13px;transition:.15s}
+.btn-primary{background:var(--brand);color:#fff;box-shadow:0 6px 16px -8px var(--brand-ring)}
+.btn-primary:hover{background:var(--brand-600)}
+.btn-ghost{color:var(--muted);border:1px solid var(--line)}
+.btn-ghost:hover{background:var(--surface);color:var(--ink)}
+.content{padding:var(--s5);overflow:auto;flex:1}
+.page-head{display:flex;align-items:flex-start;gap:var(--s4);margin-bottom:var(--s5)}
+.page-head h1{font-size:21px;font-weight:800;letter-spacing:-.01em}
+.page-head p{color:var(--muted);font-size:13px;margin-top:3px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh-2);padding:var(--s5)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4);margin-bottom:var(--s4)}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:var(--s4) var(--s5);box-shadow:var(--sh-1)}
+.stat .k{font-size:12px;color:var(--muted);font-weight:500}
+.stat .v{font-size:26px;font-weight:800;margin-top:4px;letter-spacing:-.02em}
+.stat .v small{font-size:13px;color:var(--teal);font-weight:700;margin-left:6px}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:999px}
+.tag-brand{background:var(--brand-weak);color:var(--brand-600)}
+.tag-teal{background:var(--teal-weak);color:var(--teal)}
+.consult h3{font-size:15px;font-weight:700;margin-bottom:var(--s3)}
+.consult .q{background:var(--brand-weak);color:var(--brand-600);padding:11px 14px;border-radius:12px 12px 12px 4px;
+  font-weight:600;font-size:13.5px;display:inline-block;margin-bottom:var(--s4)}
+.consult p{color:#334155;margin-bottom:var(--s3)}
+.cite{color:var(--brand);font-weight:700;cursor:pointer;font-size:12px;vertical-align:super}
+/* ---- 右侧 copilot ---- */
+.copilot{background:var(--surface);border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.app.collapsed .cop-body,.app.collapsed .cop-head .ct{display:none}
+.cop-head{display:flex;align-items:center;gap:10px;padding:var(--s4);border-bottom:1px solid var(--line-soft)}
+.cop-head .spark{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--teal));
+  color:#fff;display:grid;place-items:center;flex:none}
+.cop-head .ct b{font-weight:700;font-size:14px}
+.cop-head .ct span{display:block;font-size:11px;color:var(--faint)}
+.collapse{margin-left:auto;width:30px;height:30px;border-radius:8px;color:var(--muted);display:grid;place-items:center}
+.collapse:hover{background:var(--line-soft);color:var(--ink)}
+.app.collapsed .collapse{margin:0}
+.cop-body{padding:var(--s4);overflow:auto;display:flex;flex-direction:column;gap:var(--s4)}
+.ctx{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);background:var(--bg);
+  border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 11px}
+.ctx b{color:var(--ink);font-weight:600}
+.timeline{position:relative;padding-left:22px;display:flex;flex-direction:column;gap:11px}
+.timeline::before{content:"";position:absolute;left:7px;top:4px;bottom:4px;width:2px;background:var(--line)}
+.step{position:relative;font-size:12.5px;color:var(--ink)}
+.step::before{content:"";position:absolute;left:-21px;top:3px;width:12px;height:12px;border-radius:50%;
+  background:var(--surface);border:2px solid var(--ok)}
+.step.doing::before{border-color:var(--brand);box-shadow:0 0 0 4px var(--brand-ring)}
+.step .sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+.answer{font-size:13px;color:#1E293B;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:var(--s4)}
+.ev{border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;background:#FCFDFF}
+.ev .eh{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:700}
+.ev .et{color:var(--muted);font-weight:400;font-size:11.5px;margin-top:4px;line-height:1.55}
+.badge-ok{display:inline-flex;gap:4px;align-items:center;background:var(--ok-weak);color:var(--ok);font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.badge-warn{display:inline-flex;gap:4px;align-items:center;background:var(--warn-weak);color:var(--warn);font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.cop-input{border-top:1px solid var(--line-soft);padding:var(--s3) var(--s4);display:flex;gap:8px;align-items:center}
+.cop-input .box{flex:1;display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:9px 14px;color:var(--faint);font-size:13px}
+.cop-actions{display:flex;gap:8px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 12px}
+.chip:hover{background:var(--bg);color:var(--ink)}
+/* ---- 饱满内容区：主栏 + 副栏 ---- */
+.content-wrap{max-width:1240px;margin:0 auto}
+.cwork{display:grid;grid-template-columns:1fr 300px;gap:var(--s4);align-items:start}
+.col-main{display:flex;flex-direction:column;gap:var(--s4);min-width:0}
+.col-rail{display:flex;flex-direction:column;gap:var(--s4)}
+.rail-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh-1);padding:var(--s4)}
+.rail-card h4{font-size:13px;font-weight:700;margin-bottom:var(--s3);display:flex;align-items:center;gap:7px}
+.law-item{padding:9px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px}
+.law-item:last-child{border-bottom:none}
+.law-item .ln{font-weight:600;color:var(--ink)}
+.law-item .ld{color:var(--muted);font-size:11.5px;margin-top:2px}
+.risk{display:flex;gap:9px;align-items:flex-start;font-size:12.5px;padding:7px 0;color:#334155}
+.dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex:none}
+.tl{position:relative;padding-left:16px;font-size:12.5px}
+.tl .ti{position:relative;padding-bottom:14px}
+.tl .ti::before{content:"";position:absolute;left:-16px;top:3px;width:9px;height:9px;border-radius:50%;background:var(--brand-weak);border:2px solid var(--brand)}
+.tl .ti::after{content:"";position:absolute;left:-12px;top:12px;bottom:0;width:2px;background:var(--line)}
+.tl .ti:last-child::after{display:none}
+.tl .td{color:var(--faint);font-size:11px;margin-top:1px}
+.thread-item{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:12px 14px;cursor:pointer;transition:.15s}
+.thread-item:hover{border-color:var(--brand);box-shadow:var(--sh-1)}
+.thread-item .tq{font-weight:600;font-size:13px}
+.thread-item .tm{color:var(--faint);font-size:11.5px;margin-top:3px}
+.section-sub{font-size:11.5px;font-weight:700;color:var(--faint);letter-spacing:.04em;margin:var(--s3) 0 var(--s1)}
+@media(max-width:1180px){.cwork{grid-template-columns:1fr}.col-rail{flex-direction:row;flex-wrap:wrap}.col-rail .rail-card{flex:1;min-width:220px}}
+/* STYLE-APPEND */
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <!-- 左导航：精炼 + 分组 + active 高亮 -->
+  <aside class="nav">
+    <div class="brand">
+      <div class="logo">律</div>
+      <div><div class="bt">律智检</div><div class="bs">法律 AI 工作台</div></div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">工作区</div>
+      <button class="nav-item"><svg class="icon" viewBox="0 0 24 24"><path d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>工作台</button>
+      <button class="nav-item active"><svg class="icon" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>法律咨询<span class="badge">3</span></button>
+      <button class="nav-item"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg>合同审查</button>
+      <button class="nav-item"><svg class="icon" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>文书草稿</button>
+      <button class="nav-item"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/></svg>法律资料</button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">账户</div>
+      <button class="nav-item"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.3 1a7 7 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.3-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.3-1a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.3 1 2-3.5-2-1.5a7 7 0 0 0 .1-1z"/></svg>设置</button>
+    </div>
+    <div class="nav-foot">
+      <div class="acct"><div class="avatar">律</div><div><div class="an">demo_lawyer</div><div class="ar">执业律师</div></div></div>
+    </div>
+  </aside>
+  <!-- 中间：顶栏(面包屑+操作区，取代双 h1) + 内容(卡片化) -->
+  <main class="main">
+    <header class="topbar">
+      <nav class="crumb"><span>首页</span><span class="sep">/</span><span>法律咨询</span><span class="sep">/</span><b>张三劳动合同纠纷</b></nav>
+      <div class="search"><svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><input placeholder="搜索案件 / 法条 / 咨询"></div>
+      <button class="btn btn-primary"><svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新建咨询</button>
+    </header>
+    <div class="content">
+      <div class="content-wrap">
+      <div class="page-head">
+        <div><h1>张三劳动合同纠纷</h1><p>劳动争议 · 委托人 张三 · 对方 某科技有限公司</p></div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <span class="tag tag-teal">进行中</span><span class="tag tag-brand">AI 已分析</span>
+        </div>
+      </div>
+      <div class="cwork">
+        <div class="col-main">
+          <div class="grid2">
+            <div class="stat"><div class="k">本案咨询</div><div class="v">3<small>+1 今日</small></div></div>
+            <div class="stat"><div class="k">引用法条已核验</div><div class="v">8<small>/ 9</small></div></div>
+          </div>
+          <section class="card consult">
+            <h3>最新咨询结果</h3>
+            <span class="q">试用期最长多久？被辞退经济补偿怎么算？</span>
+            <div class="section-sub">结论</div>
+            <p>三年以上固定期限或无固定期限劳动合同，试用期不得超过<b>六个月</b><span class="cite">①</span>。用人单位违法解除的，应按经济补偿标准的<b>二倍</b>支付赔偿金<span class="cite">②</span>；经济补偿按工作年限每满一年支付一个月工资<span class="cite">③</span>。</p>
+            <div class="section-sub">事实要点</div>
+            <p>张三 2021-03 入职，合同期三年；2026-09 被公司以"试用期不合格"为由解除，但其试用期已满 8 个月。</p>
+            <div class="section-sub">建议</div>
+            <p style="margin-bottom:0">试用期已超法定上限，"试用期不合格"解除依据不成立，可主张违法解除赔偿金（2N）。</p>
+          </section>
+          <div>
+            <div class="section-sub">历史咨询</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div class="thread-item"><div class="tq">合同里的竞业限制条款有效吗？</div><div class="tm">2026-10-08 · 引用 3 条 · 已核验</div></div>
+              <div class="thread-item"><div class="tq">年休假没休完能折算工资吗？</div><div class="tm">2026-10-05 · 引用 2 条 · 已核验</div></div>
+            </div>
+          </div>
+        </div>
+        <aside class="col-rail">
+          <div class="rail-card">
+            <h4><svg class="icon" style="width:15px;height:15px;stroke:var(--brand)" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"/></svg>相关法条</h4>
+            <div class="law-item"><div class="ln">劳动合同法 第19条</div><div class="ld">试用期上限</div></div>
+            <div class="law-item"><div class="ln">劳动合同法 第47条</div><div class="ld">经济补偿标准</div></div>
+            <div class="law-item"><div class="ln">劳动合同法 第87条</div><div class="ld">违法解除赔偿金</div></div>
+          </div>
+          <div class="rail-card">
+            <h4><svg class="icon" style="width:15px;height:15px;stroke:var(--warn)" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>风险点</h4>
+            <div class="risk"><span class="dot" style="background:var(--danger)"></span><span>解除依据可能不成立，存在 2N 赔偿风险敞口</span></div>
+            <div class="risk"><span class="dot" style="background:var(--warn)"></span><span>地方补偿细则版本待核验</span></div>
+          </div>
+          <div class="rail-card">
+            <h4><svg class="icon" style="width:15px;height:15px;stroke:var(--teal)" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>案件时间线</h4>
+            <div class="tl">
+              <div class="ti"><div>入职</div><div class="td">2021-03-01</div></div>
+              <div class="ti"><div>被解除</div><div class="td">2026-09-20</div></div>
+              <div class="ti"><div>仲裁时效届满</div><div class="td">2027-09-19 前</div></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+      </div>
+    </div>
+  </main>
+  <!-- 右侧：常驻可收缩 copilot（四层：过程时间线 / 证据卡 / 逐句溯源 / 忠实度标记）-->
+  <aside class="copilot">
+    <div class="cop-head">
+      <div class="spark"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg></div>
+      <div class="ct"><b>法律助手</b><span>懂你当前在看的案件</span></div>
+      <button class="collapse" id="toggle" title="收起/展开"><svg class="icon" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+    </div>
+    <div class="cop-body">
+      <div class="ctx"><svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>当前：法律咨询 · <b>张三劳动合同纠纷</b></div>
+      <span class="q" style="background:var(--brand-weak);color:var(--brand-600);padding:10px 13px;border-radius:12px 12px 12px 4px;font-weight:600;font-size:13px">试用期最长多久？被辞退经济补偿怎么算？</span>
+      <div class="timeline">
+        <div class="step">检索法源<div class="sub">命中《劳动合同法》第 19、47、87 条</div></div>
+        <div class="step">拆解子问题<div class="sub">① 试用期上限　② 违法解除赔偿　③ 补偿标准</div></div>
+        <div class="step doing">生成答案并逐句核对引用…</div>
+      </div>
+      <div class="answer">三年以上合同试用期不超过<b>六个月</b>；违法解除按经济补偿<b>二倍</b>支付赔偿金，补偿按每满一年一个月工资计。</div>
+      <div class="ev">
+        <div class="eh"><span>① 劳动合同法 第19条</span><span class="badge-ok"><svg class="icon" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>已核验</span></div>
+        <div class="et">劳动合同期限三年以上固定期限和无固定期限的，试用期不得超过六个月。</div>
+      </div>
+      <div class="ev">
+        <div class="eh"><span>② 劳动合同法 第87条</span><span class="badge-ok"><svg class="icon" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>已核验</span></div>
+        <div class="et">用人单位违反本法规定解除或者终止劳动合同的，应当依照第四十七条规定的经济补偿标准的二倍向劳动者支付赔偿金。</div>
+      </div>
+      <div class="ev">
+        <div class="eh"><span>③ 地方补偿细则</span><span class="badge-warn"><svg class="icon" style="width:12px;height:12px" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>待核验</span></div>
+        <div class="et">该细则暂未入法源库，版本信息以官方发布为准。</div>
+      </div>
+      <div class="cop-actions">
+        <button class="chip"><svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14L21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>展开为整页</button>
+        <button class="chip"><svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>复制</button>
+        <button class="chip"><svg class="icon" style="width:14px;height:14px" viewBox="0 0 24 24"><path d="M7 11v10M15 5l-1 5h6l-2 9H7V11l4-9h2a2 2 0 0 1 2 2z"/></svg>有用</button>
+      </div>
+    </div>
+    <div class="cop-input"><div class="box"><svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>基于当前案件继续问…</div></div>
+  </aside>
+</div>
+<script>
+  const app = document.getElementById('app');
+  document.getElementById('toggle').addEventListener('click', () => app.classList.toggle('collapsed'));
+</script>
+</body>
+</html>

@@ -110,6 +110,28 @@ cd frontend && npm run test:e2e                         # Playwright e2e（需�
 python scripts/check_openapi_contract.py                # OpenAPI 契约（改契约后必须）
 ```
 
+## 3.1 分层测试节奏（日常增量 vs 收尾全量）
+
+全量门禁（§3）是**收尾动作**，不是每次小改动的动作。日常按下面两层跑，省时间也更快定位：
+
+**日常增量（每完成一个小改动 / 一个小模块）——只跑相关用例，能并行就并行：**
+
+```bash
+# 后端：只点相关测试文件（不要 tests/ 全量）
+python -m pytest tests/test_legal_attribution.py tests/test_legal_reference_verification.py -q
+
+# 前端：只 lint 改动文件 + 只跑相关 spec
+cd frontend && npx eslint src/components/legal/LegalSourcesTab.vue
+cd frontend && npx playwright test sources-flow copilot-dock --workers=1
+```
+
+**收尾全量（一轮 / 一个目标完成时跑一次）：** §3 的四条门禁（后端全量、build、eslint src、e2e 全量）。
+
+**并行的边界（实测踩过）：** 独立模块可以并行（subagent、后台 job），但**不要让 eslint / node --test / vite build
+这类重命令与 Playwright 同时跑**——它们与 Playwright 复用的 Vite dev server 抢资源，会把 dev server 挤掉，
+表现为一批用例 `connect ECONNREFUSED ::1:5173` 的**假失败**（2026-10-18 实测：并发时 8 failed，单独重跑 50 passed）。
+正确做法是：重命令先跑完，再跑 Playwright；或把 Playwright 放到后台 job 里独占。
+
 ## 4. 变更纪律（红线）
 
 1. 不改业务逻辑 / API 契约 / schema / 迁移历史；测试暴露真实缺陷时**先单独报告并获同意**再修。
