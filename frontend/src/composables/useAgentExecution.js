@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { useMutation } from '../query/useMutation.js'
 import { errorMessage } from '../api/errors'
 import api from '../api'

@@ -20,7 +20,7 @@ const formatDate = (value) => (value ? String(value).replace('T', ' ').slice(0, 
 <style scoped>
 .matter-activity { display: grid; margin: 0; padding: 0; list-style: none; }
 .activity-entry { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; padding: 0 0 17px; }
-.activity-marker { position: relative; width: 8px; height: 8px; margin: 5px 0 0 3px; border: 1px solid var(--color-primary); border-radius: 50%; background: #fff; }
+.activity-marker { position: relative; width: 8px; height: 8px; margin: 5px 0 0 3px; border: 1px solid var(--color-primary); border-radius: 50%; background: var(--color-surface); }
 .activity-entry:not(:last-child) .activity-marker::after { position: absolute; top: 8px; left: 2px; width: 1px; height: 30px; background: var(--color-border); content: ''; }
 .marker-contract_review { border-color: var(--color-warning); }
 .activity-copy { display: grid; gap: 3px; }

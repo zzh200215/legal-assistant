@@ -18,9 +18,9 @@ defineEmits(['select'])
 </script>
 
 <style scoped>
-.risk-issue { display: grid; width: 100%; gap: 8px; padding: 13px 14px; border: 0; border-bottom: 1px solid var(--color-border-light); background: #fff; color: var(--color-text); text-align: left; cursor: pointer; }
-.risk-issue:hover { background: #F7F9FB; }
-.risk-issue.selected { background: #EEF4F8; box-shadow: inset 3px 0 var(--color-primary); }
+.risk-issue { display: grid; width: 100%; gap: 8px; padding: 13px 14px; border: 0; border-bottom: 1px solid var(--color-border-light); background: var(--color-surface); color: var(--color-text); text-align: left; cursor: pointer; }
+.risk-issue:hover { background: var(--color-surface-hover); }
+.risk-issue.selected { background: var(--color-primary-light); box-shadow: inset 3px 0 var(--color-primary); }
 .risk-topline { display: flex; align-items: center; gap: 10px; }
 .risk-level { padding-left: 8px; border-left: 2px solid var(--color-info); color: var(--color-text-secondary); font-size: 11px; }
 .level-high { border-color: var(--color-danger); color: var(--color-danger); }

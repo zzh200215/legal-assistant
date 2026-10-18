@@ -1,10 +1,12 @@
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { useAsyncJob, toCeleryState } from './useAsyncJob.js'
 import { useMutation } from '../query/useMutation.js'
 import { qkPrefix } from '../query/keys'
 import { errorMessage } from '../api/errors'
 import api from '../api'
+import { asReferenceList } from '../utils/references'
 
 // 文档「分析长任务」领域模块：
 //  - 复用统一 Job 状态管理（WS 优先 / 指数退避轮询降级，useAsyncJob）
@@ -34,7 +36,7 @@ function normalizeResult(result) {
     todos: result?.todos || [],
     clauses: result?.clauses || [],
     structured_fields: normalizeStructuredFields(result?.structured_fields),
-    references: result?.references || [],
+    references: asReferenceList(result?.references),
   }
 }
 

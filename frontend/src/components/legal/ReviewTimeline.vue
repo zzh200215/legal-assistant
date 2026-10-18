@@ -22,7 +22,7 @@ const formatDate = (value) => (value ? String(value).replace('T', ' ').slice(0, 
 <style scoped>
 .review-timeline { display: grid; margin: 0; padding: 0; list-style: none; }
 .review-entry { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; padding-bottom: 16px; }
-.timeline-marker { position: relative; width: 8px; height: 8px; margin: 5px 0 0 3px; border: 1px solid var(--color-primary); border-radius: 50%; background: #fff; }
+.timeline-marker { position: relative; width: 8px; height: 8px; margin: 5px 0 0 3px; border: 1px solid var(--color-primary); border-radius: 50%; background: var(--color-surface); }
 .review-entry:not(:last-child) .timeline-marker::after { position: absolute; top: 8px; left: 2px; width: 1px; height: 30px; background: var(--color-border); content: ''; }
 .action-approve { border-color: var(--color-success); }
 .action-return { border-color: var(--color-warning); }

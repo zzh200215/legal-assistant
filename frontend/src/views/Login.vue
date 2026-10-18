@@ -271,7 +271,7 @@ const handleRegister = async () => {
   height: 36px;
   border-radius: var(--radius-xs);
   background: var(--color-primary);
-  color: #ffffff;
+  color: var(--color-text-inverse);
   display: inline-flex;
   align-items: center;
   justify-content: center;

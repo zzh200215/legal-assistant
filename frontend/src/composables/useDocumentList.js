@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { useQuery } from '../query/useQuery.js'
 import { useMutation } from '../query/useMutation.js'
 import { qk, qkPrefix } from '../query/keys'

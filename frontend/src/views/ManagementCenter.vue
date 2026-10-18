@@ -1,28 +1,31 @@
 <template>
   <div class="management-page">
-    <header class="management-heading">
-      <div>
-        <p class="management-kicker">管理中心</p>
-        <h1>平台设置与运营</h1>
-        <p>管理组织、质量、策略和平台运行状态。这里的设置会影响整个团队。</p>
+    <header class="app-page-head">
+      <div class="app-page-head-main">
+        <h1 class="app-page-title">平台设置与运营</h1>
+        <p class="app-page-sub">管理组织、质量、策略和平台运行状态。这里的设置会影响整个团队。</p>
       </div>
-      <span class="management-access">仅管理员可见</span>
+      <div class="app-page-head-actions">
+        <span class="app-tag is-info">仅管理员可见</span>
+      </div>
     </header>
 
     <div class="management-sections">
-      <section v-for="section in sections" :key="section.title" class="management-section">
-        <div class="management-section-heading">
+      <section v-for="section in sections" :key="section.title" class="app-card">
+        <div class="app-card-head">
           <h2>{{ section.title }}</h2>
-          <span>{{ section.description }}</span>
+          <span class="app-card-head-meta">{{ section.description }}</span>
         </div>
-        <div class="management-links">
-          <button v-for="item in section.items" :key="item.label" type="button" class="management-link" @click="go(item.path)">
-            <span class="management-link-copy">
-              <strong>{{ item.label }}</strong>
-              <small>{{ item.description }}</small>
-            </span>
-            <span class="management-link-arrow" aria-hidden="true">›</span>
-          </button>
+        <div class="app-card-body">
+          <div class="management-links">
+            <button v-for="item in section.items" :key="item.label" type="button" class="management-link" @click="go(item.path)">
+              <span class="management-link-copy">
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.description }}</small>
+              </span>
+              <span class="management-link-arrow" aria-hidden="true">›</span>
+            </button>
+          </div>
         </div>
       </section>
     </div>
@@ -59,23 +62,17 @@ const go = (path) => router.push(path)
 </script>
 
 <style scoped>
-.management-page { display: grid; gap: 30px; max-width: 1060px; }
-.management-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--color-border); }
-.management-kicker { margin: 0 0 7px; color: var(--color-primary); font-size: 11px; font-weight: 650; }
-.management-heading h1 { margin: 0; color: var(--color-text); font-size: 24px; line-height: 1.35; font-weight: 620; }
-.management-heading p:not(.management-kicker) { max-width: 620px; margin: 7px 0 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.65; }
-.management-access { flex: 0 0 auto; padding-top: 4px; color: var(--color-text-muted); font-size: 11px; }
-.management-sections { display: grid; gap: 32px; }
-.management-section { display: grid; gap: 12px; }
-.management-section-heading { display: flex; align-items: baseline; gap: 12px; }
-.management-section-heading h2 { margin: 0; color: var(--color-text); font-size: 15px; font-weight: 620; }
-.management-section-heading span { color: var(--color-text-muted); font-size: 12px; }
-.management-links { display: grid; border-top: 1px solid var(--color-border); }
-.management-link { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 70px; padding: 13px 6px; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }
+/* 页头与卡片骨架走 design-tokens.css 的 .app-page-head / .app-card，这里只排布入口列表 */
+.management-page { display: grid; gap: var(--space-6); max-width: 1060px; padding-bottom: var(--space-8); }
+.management-sections { display: grid; gap: var(--space-5); }
+.management-links { display: grid; gap: 2px; }
+.management-link { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 64px; padding: var(--space-3) var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text); text-align: left; cursor: pointer; transition: background var(--transition-fast); }
 .management-link:hover { background: var(--color-surface-hover); }
-.management-link-copy { display: grid; gap: 4px; }
-.management-link-copy strong { font-size: 13px; font-weight: 600; }
-.management-link-copy small { color: var(--color-text-muted); font-size: 12px; line-height: 1.55; }
-.management-link-arrow { color: var(--color-primary); font-size: 22px; line-height: 1; }
-@media (max-width: 600px) { .management-heading { flex-direction: column; gap: 8px; } .management-heading h1 { font-size: 21px; } .management-section-heading { align-items: flex-start; flex-direction: column; gap: 4px; } }
+.management-link-copy { display: grid; gap: 4px; min-width: 0; }
+.management-link-copy strong { font-size: var(--text-sm); font-weight: 600; }
+.management-link-copy small { color: var(--color-text-muted); font-size: var(--text-xs); line-height: 1.6; }
+.management-link-arrow { flex: 0 0 auto; color: var(--color-primary); font-size: var(--text-2xl); line-height: 1; }
+@media (max-width: 600px) {
+  .app-page-head-actions { width: 100%; }
+}
 </style>

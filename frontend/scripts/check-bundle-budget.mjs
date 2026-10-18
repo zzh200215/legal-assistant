@@ -20,6 +20,10 @@ const ASSETS = resolve(DIST, 'assets')
 // LegalWorkspace 面板已按需加载（defineAsyncComponent），prefill/refresh 时序依赖的 tab 保持静态。
 // 2026-10-10 吞错修复（M-13）后 NotificationBell 首次引入 ElMessage（操作反馈），入口 raw 重定 120：
 // 实测入口 118.5kB raw / 40.1kB gzip、最大页面 chunk 102.2kB、总资产 1581.4kB。
+// 2026-10-18 包体治理（step10）：修掉 32 个文件的 `import { ElMessage } from 'element-plus'` 桶导入、
+// 删掉 main.js 里零使用的组件注册、把最后两处 el-row/el-col 换成原生栅格后，
+// 实测入口 102.0kB raw / 35.8kB gzip、最大页面 chunk 121.8kB（System）、总资产 1579.0kB——四项全部达标，
+// 故本次**不下调也不放宽**预算：现有红线已被证明可达，保留其约束力（详见 docs/review/step10-bundle-budget.md）。
 const BUDGETS = {
   entryJsRawKB: Number(process.env.ENTRY_JS_RAW_KB || 120),
   entryJsGzipKB: Number(process.env.ENTRY_JS_GZIP_KB || 42),

@@ -1,37 +1,48 @@
 <template>
   <main class="developer-page">
-    <header><h2>开发者与安全管理</h2></header>
+    <header class="app-page-head">
+      <div class="app-page-head-main">
+        <h1 class="app-page-title">开发者与安全管理</h1>
+        <p class="app-page-sub">管理开发者应用密钥，查看后台任务与 Webhook 的运营状态。</p>
+      </div>
+    </header>
     <el-alert v-if="error" type="error" :title="error" :closable="false" />
-    <el-card shadow="never"><template #header>运营概览</template>
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="排队任务">{{ summary.queued_jobs || 0 }}</el-descriptions-item>
-        <el-descriptions-item label="失败任务">{{ summary.failed_jobs || 0 }}</el-descriptions-item>
-        <el-descriptions-item label="待投递 Webhook">{{ summary.pending_webhooks || 0 }}</el-descriptions-item>
-        <el-descriptions-item label="失败 Webhook">{{ summary.failed_webhooks || 0 }}</el-descriptions-item>
-        <el-descriptions-item label="API 调用">{{ summary.api_calls || 0 }}</el-descriptions-item>
-        <el-descriptions-item label="回调验签失败">{{ summary.callback_verification_failures || 0 }}</el-descriptions-item>
-      </el-descriptions>
-    </el-card>
-    <el-card shadow="never" class="section"><template #header>开发者应用</template>
-      <el-form inline @submit.prevent="createApp"><el-form-item><el-input v-model="name" placeholder="应用名称" /></el-form-item><el-button type="primary" @click="createApp">创建并显示一次性密钥</el-button></el-form>
-      <el-alert v-if="oneTimeKey" type="warning" :title="`请立即保存密钥：${oneTimeKey}`" :closable="false" />
-      <el-table :data="apps"><el-table-column prop="name" label="名称" /><el-table-column prop="status" label="状态" /><el-table-column label="操作"><template #default="{ row }"><el-button @click="rotate(row)">轮换密钥</el-button></template></el-table-column></el-table>
-    </el-card>
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>运营概览</h2>
+      </div>
+      <div class="app-card-body">
+        <div class="developer-metrics">
+          <div class="app-stat"><span class="k">排队任务</span><span class="v">{{ summary.queued_jobs || 0 }}</span></div>
+          <div class="app-stat"><span class="k">失败任务</span><span class="v">{{ summary.failed_jobs || 0 }}</span></div>
+          <div class="app-stat"><span class="k">待投递 Webhook</span><span class="v">{{ summary.pending_webhooks || 0 }}</span></div>
+          <div class="app-stat"><span class="k">失败 Webhook</span><span class="v">{{ summary.failed_webhooks || 0 }}</span></div>
+          <div class="app-stat"><span class="k">API 调用</span><span class="v">{{ summary.api_calls || 0 }}</span></div>
+          <div class="app-stat"><span class="k">回调验签失败</span><span class="v">{{ summary.callback_verification_failures || 0 }}</span></div>
+        </div>
+      </div>
+    </section>
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>开发者应用</h2>
+      </div>
+      <div class="app-card-body">
+        <el-form inline @submit.prevent="createApp"><el-form-item><el-input v-model="name" placeholder="应用名称" /></el-form-item><el-button type="primary" @click="createApp">创建并显示一次性密钥</el-button></el-form>
+        <el-alert v-if="oneTimeKey" type="warning" :title="`请立即保存密钥：${oneTimeKey}`" :closable="false" />
+        <el-table :data="apps"><el-table-column prop="name" label="名称" /><el-table-column prop="status" label="状态" /><el-table-column label="操作"><template #default="{ row }"><el-button @click="rotate(row)">轮换密钥</el-button></template></el-table-column></el-table>
+      </div>
+    </section>
   </main>
 </template>
 <script setup>
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElAlert } from 'element-plus/es/components/alert/index'
-import { ElCard } from 'element-plus/es/components/card/index'
-import { ElDescriptions, ElDescriptionsItem } from 'element-plus/es/components/descriptions/index'
 import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import 'element-plus/es/components/alert/style/css'
-import 'element-plus/es/components/card/style/css'
-import 'element-plus/es/components/descriptions/style/css'
-import 'element-plus/es/components/descriptions-item/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
@@ -70,4 +81,8 @@ async function rotate(row) {
 }
 onMounted(load)
 </script>
-<style scoped>.developer-page{max-width:1100px;margin:24px auto;padding:0 20px}.section{margin-top:16px}</style>
+<style scoped>
+/* 页头/卡片走 design-tokens.css 的 .app-page-head / .app-card，这里只排布指标格 */
+.developer-page { display: grid; gap: var(--space-5); max-width: 1100px; padding-bottom: var(--space-8); }
+.developer-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3); }
+</style>

@@ -1,54 +1,63 @@
 <template>
   <section class="legal-page notification-page">
-    <header class="legal-page-heading">
-      <div>
-        <h1>通知中心</h1>
-        <p>查看案件动作、审核和关键日期的处理提醒。</p>
+    <header class="app-page-head">
+      <div class="app-page-head-main">
+        <h1 class="app-page-title">通知中心</h1>
+        <p class="app-page-sub">查看案件动作、审核和关键日期的处理提醒。</p>
       </div>
-      <button v-if="unread > 0" class="notification-action" type="button" @click="markAllRead">全部标记已读</button>
+      <div class="app-page-head-actions">
+        <button v-if="unread > 0" class="notification-action" type="button" @click="markAllRead">全部标记已读</button>
+      </div>
     </header>
 
-    <div class="notification-toolbar" role="toolbar" aria-label="通知筛选">
-      <label>
-        <span>状态</span>
-        <select v-model="filters.status" @change="resetAndLoad">
-          <option value="all">全部</option>
-          <option value="unread">未读</option>
-          <option value="read">已读</option>
-        </select>
-      </label>
-      <label>
-        <span>类型</span>
-        <select v-model="filters.event_type" @change="resetAndLoad">
-          <option value="">全部类型</option>
-          <option v-for="item in eventTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
-      </label>
-      <label class="case-filter">
-        <span>案件编号</span>
-        <input v-model="filters.case_id" inputmode="numeric" placeholder="可选" @keyup.enter="resetAndLoad">
-      </label>
-      <button class="notification-refresh" type="button" :disabled="loading" @click="load">刷新</button>
-      <span class="notification-summary">未读 {{ unread }} · 共 {{ total }} 条</span>
-    </div>
-
-    <QueryStateView :status="listStatus" :error="loadError" empty-text="当前筛选下暂无通知。" min-height="0px" @retry="load">
-      <div class="notification-list">
-        <article v-for="item in items" :key="item.id" class="notification-row" :class="{ unread: isUnread(item) }">
-          <button class="notification-main" type="button" @click="openNotification(item)">
-            <span class="notification-row-heading">
-              <strong>{{ item.title }}</strong>
-              <span>{{ eventLabel(item.event_type) }}</span>
-            </span>
-            <span v-if="item.body" class="notification-body">{{ item.body }}</span>
-            <span class="notification-meta">
-              {{ item.case_id ? `案件 ${item.case_id}` : '工作台' }} · {{ formatTime(item.created_at) }}
-            </span>
-          </button>
-          <button v-if="isUnread(item)" class="notification-read" type="button" @click="markRead(item)">标记已读</button>
-        </article>
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>通知</h2>
+        <span class="app-card-head-meta">未读 {{ unread }} · 共 {{ total }} 条</span>
       </div>
-    </QueryStateView>
+      <div class="app-card-body">
+        <div class="notification-toolbar" role="toolbar" aria-label="通知筛选">
+          <label>
+            <span>状态</span>
+            <select v-model="filters.status" @change="resetAndLoad">
+              <option value="all">全部</option>
+              <option value="unread">未读</option>
+              <option value="read">已读</option>
+            </select>
+          </label>
+          <label>
+            <span>类型</span>
+            <select v-model="filters.event_type" @change="resetAndLoad">
+              <option value="">全部类型</option>
+              <option v-for="item in eventTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
+            </select>
+          </label>
+          <label class="case-filter">
+            <span>案件编号</span>
+            <input v-model="filters.case_id" inputmode="numeric" placeholder="可选" @keyup.enter="resetAndLoad">
+          </label>
+          <button class="notification-refresh" type="button" :disabled="loading" @click="load">刷新</button>
+        </div>
+
+        <QueryStateView :status="listStatus" :error="loadError" empty-text="当前筛选下暂无通知。" min-height="0px" @retry="load">
+          <div class="notification-list">
+            <article v-for="item in items" :key="item.id" class="notification-row" :class="{ unread: isUnread(item) }">
+              <button class="notification-main" type="button" @click="openNotification(item)">
+                <span class="notification-row-heading">
+                  <strong>{{ item.title }}</strong>
+                  <span>{{ eventLabel(item.event_type) }}</span>
+                </span>
+                <span v-if="item.body" class="notification-body">{{ item.body }}</span>
+                <span class="notification-meta">
+                  {{ item.case_id ? `案件 ${item.case_id}` : '工作台' }} · {{ formatTime(item.created_at) }}
+                </span>
+              </button>
+              <button v-if="isUnread(item)" class="notification-read" type="button" @click="markRead(item)">标记已读</button>
+            </article>
+          </div>
+        </QueryStateView>
+      </div>
+    </section>
 
     <footer v-if="total > pageSize" class="notification-pagination">
       <button type="button" :disabled="page <= 1 || loading" @click="page -= 1; load()">上一页</button>
@@ -163,23 +172,38 @@ onMounted(load)
 </script>
 
 <style scoped>
-.notification-page { padding-bottom: 28px; }
-.notification-action, .notification-refresh, .notification-read, .notification-pagination button { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: 12px; cursor: pointer; }
+/* 页头与卡片骨架走 design-tokens.css 的 .app-page-head / .app-card，这里只补本页特有的行与工具条 */
+.notification-page { display: grid; gap: var(--space-5); padding-bottom: var(--space-8); }
+.notification-action, .notification-refresh, .notification-read, .notification-pagination button { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: var(--text-sm); font-weight: 500; cursor: pointer; }
 .notification-action { padding: 0; }
-.notification-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; padding: 12px 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
-.notification-toolbar label { display: grid; gap: 4px; color: var(--color-text-muted); font-size: 11px; }
-.notification-toolbar select, .notification-toolbar input { min-width: 124px; height: 30px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: #fff; color: var(--color-text); font: inherit; font-size: 12px; }
+.notification-action:hover, .notification-refresh:hover:not(:disabled), .notification-read:hover { color: var(--color-primary-hover); text-decoration: underline; }
+.notification-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-3); padding-bottom: var(--space-4); border-bottom: 1px solid var(--color-border-light); }
+.notification-toolbar label { display: grid; gap: 4px; color: var(--color-text-muted); font-size: var(--text-xs); }
+.notification-toolbar select, .notification-toolbar input { min-width: 124px; height: 32px; padding: 0 var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--text-sm); }
+.notification-toolbar select:focus, .notification-toolbar input:focus { border-color: var(--color-primary); outline: 2px solid var(--color-primary-subtle); }
 .notification-toolbar input { width: 100px; min-width: 100px; }
-.notification-refresh { height: 30px; padding: 0 4px; }.notification-refresh:disabled { color: var(--color-text-muted); cursor: wait; }
-.notification-summary { margin-left: auto; color: var(--color-text-muted); font-size: 11px; }
+.notification-refresh { height: 32px; padding: 0 4px; margin-left: auto; }
+.notification-refresh:disabled { color: var(--color-text-muted); cursor: wait; }
 .notification-list { display: grid; }
-.notification-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; min-height: 74px; border-bottom: 1px solid var(--color-border-light); }
-.notification-row.unread { border-left: 3px solid var(--color-primary); padding-left: 10px; }
-.notification-main { display: grid; gap: 5px; min-width: 0; padding: 12px 0; border: 0; background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }
-.notification-main:hover { background: #F8FAFB; }
-.notification-row-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }.notification-row-heading strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.notification-row-heading span { flex: 0 0 auto; color: var(--color-text-muted); font-size: 11px; }
-.notification-body, .notification-meta { overflow: hidden; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }.notification-meta { color: var(--color-text-muted); font-size: 11px; }
+.notification-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-4); align-items: center; min-height: 72px; padding: 0 var(--space-2); border-bottom: 1px solid var(--color-border-light); border-radius: var(--radius-sm); transition: background var(--transition-fast); }
+.notification-row:last-child { border-bottom: 0; }
+/* 未读用左侧主色竖条 + 浅底，读过的行保持中性 */
+.notification-row.unread { border-left: 3px solid var(--color-primary); background: var(--color-surface-subtle); }
+.notification-row:hover { background: var(--color-surface-hover); }
+.notification-main { display: grid; gap: 5px; min-width: 0; padding: var(--space-3) 0; border: 0; background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }
+.notification-row-heading { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.notification-row-heading strong { overflow: hidden; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.notification-row-heading span { flex: 0 0 auto; color: var(--color-text-muted); font-size: var(--text-xs); }
+.notification-body, .notification-meta { overflow: hidden; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.notification-meta { color: var(--color-text-muted); font-size: var(--text-xs); }
 .notification-read { padding: 4px 0; white-space: nowrap; }
-.notification-pagination { display: flex; justify-content: center; align-items: center; gap: 16px; padding-top: 18px; color: var(--color-text-muted); font-size: 12px; }.notification-pagination button:disabled { color: var(--color-text-muted); cursor: not-allowed; }
-@media (max-width: 700px) { .notification-summary { width: 100%; margin-left: 0; }.notification-row { gap: 8px; }.notification-row-heading { display: grid; gap: 2px; }.notification-body { white-space: normal; }.notification-toolbar { align-items: stretch; }.notification-refresh { align-self: end; } }
+.notification-pagination { display: flex; justify-content: center; align-items: center; gap: var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); }
+.notification-pagination button:disabled { color: var(--color-text-muted); cursor: not-allowed; text-decoration: none; }
+@media (max-width: 700px) {
+  .notification-row { gap: var(--space-2); }
+  .notification-row-heading { display: grid; gap: 2px; }
+  .notification-body { white-space: normal; }
+  .notification-toolbar { align-items: stretch; }
+  .notification-refresh { align-self: end; margin-left: 0; }
+}
 </style>

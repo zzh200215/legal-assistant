@@ -1,53 +1,77 @@
 <template>
   <div class="contract-workspace">
-    <section v-if="!contractResult" class="contract-intake">
-      <div class="intake-heading">
-        <div><h2>开始合同审查</h2><p>导入合同或粘贴原文，审查结果会归档到当前案件。</p></div>
-      </div>
-      <label class="field-label" for="contract-title">合同名称</label>
-      <el-input id="contract-title" v-model="contractForm.title" placeholder="例如：技术服务合同" />
-      <label class="field-label" for="contract-content">合同原文</label>
-      <el-input id="contract-content" v-model="contractForm.content" type="textarea" :rows="13" placeholder="粘贴合同全文或主要条款..." maxlength="50000" show-word-limit />
-      <div class="intake-actions">
-        <el-upload :show-file-list="false" :before-upload="handleContractUpload" accept=".pdf,.docx,.doc,.txt,.md">
-          <el-button :loading="uploadLoading">上传合同文件</el-button>
-        </el-upload>
-        <el-button type="primary" :loading="contractLoading" @click="submitContractReview">开始审查</el-button>
-        <div v-if="contractLoading" class="staged-hint" aria-live="polite">{{ contractStageText }}</div>
-      </div>
-    </section>
+    <template v-if="!contractResult">
+      <!-- 录入态（方向 B）：页头 + 单卡片表单，上传 / 粘贴入口与行为不变 -->
+      <header class="app-page-head">
+        <div class="app-page-head-main">
+          <h2 class="app-page-title">开始合同审查</h2>
+          <p class="app-page-sub">导入合同或粘贴原文，审查结果会归档到当前案件。</p>
+        </div>
+      </header>
+
+      <section class="app-card contract-intake">
+        <div class="app-card-head">
+          <h2>合同信息</h2>
+          <span class="app-card-head-meta">上传文件或粘贴原文均可</span>
+        </div>
+        <div class="app-card-body intake-body">
+          <label class="field-label" for="contract-title">合同名称</label>
+          <el-input id="contract-title" v-model="contractForm.title" placeholder="例如：技术服务合同" />
+          <label class="field-label" for="contract-content">合同原文</label>
+          <el-input id="contract-content" v-model="contractForm.content" type="textarea" :rows="13" placeholder="粘贴合同全文或主要条款..." maxlength="50000" show-word-limit />
+          <div class="intake-actions">
+            <el-upload :show-file-list="false" :before-upload="handleContractUpload" accept=".pdf,.docx,.doc,.txt,.md">
+              <el-button :loading="uploadLoading">上传合同文件</el-button>
+            </el-upload>
+            <el-button type="primary" :loading="contractLoading" @click="submitContractReview">开始审查</el-button>
+            <div v-if="contractLoading" class="staged-hint" aria-live="polite">{{ contractStageText }}</div>
+          </div>
+        </div>
+      </section>
+    </template>
 
     <template v-else>
-      <header class="document-toolbar">
+      <!-- 结果态（方向 B）：页头承载返回、标题、状态标签与动作 -->
+      <header class="app-page-head">
         <div class="document-heading">
           <button class="back-action" type="button" aria-label="新建一次审查" title="新建一次审查" @click="startNewReview">‹</button>
-          <div class="document-title-group">
-            <h2>{{ contractResult.title || contractForm.title || '未命名合同' }}</h2>
+          <div class="app-page-head-main document-title-group">
+            <h2 class="app-page-title document-title">{{ contractResult.title || contractForm.title || '未命名合同' }}</h2>
             <div class="document-meta">
-              <span>{{ statusLabel(contractResult.status) }}</span>
-              <span>Version {{ contractResult.version || 1 }}</span>
-              <span v-if="contractResult.updated_at">{{ formatDate(contractResult.updated_at) }}</span>
+              <span class="app-tag" :class="statusTagClass(contractResult.status)">{{ statusLabel(contractResult.status) }}</span>
+              <span class="app-tag">Version {{ contractResult.version || 1 }}</span>
+              <span v-if="contractResult.updated_at" class="document-time">{{ formatDate(contractResult.updated_at) }}</span>
             </div>
           </div>
         </div>
-        <div class="document-actions">
+        <div class="app-page-head-actions">
           <el-button size="small" @click="exportReview">导出审查意见</el-button>
           <el-button size="small" type="primary" :loading="reviewSubmitting" :disabled="!canSubmitForReview" @click="submitForLawyerReview">提交律师审核</el-button>
         </div>
       </header>
 
-      <p v-if="contractResult.summary" class="review-summary">{{ contractResult.summary }}</p>
+      <section v-if="contractResult.summary" class="app-card review-summary">
+        <div class="app-card-body">
+          <h3 class="app-card-section-title">审查摘要</h3>
+          <p class="review-summary-text">{{ contractResult.summary }}</p>
+        </div>
+      </section>
 
       <div class="contract-review-split">
-        <section class="document-pane">
-          <div class="pane-heading"><h3>合同原文</h3><span>{{ documentParagraphCount }} 段</span></div>
-          <LegalDocumentViewer :content="documentContent" :highlighted-paragraph="highlightedParagraph" :highlighted-range="selectedRisk?.source_location" @paragraph-click="selectParagraph" />
+        <section class="app-card document-pane">
+          <div class="app-card-head">
+            <h2>合同原文</h2>
+            <span class="app-card-head-meta">{{ documentParagraphCount }} 段</span>
+          </div>
+          <div class="document-pane-body">
+            <LegalDocumentViewer :content="documentContent" :highlighted-paragraph="highlightedParagraph" :highlighted-range="selectedRisk?.source_location" @paragraph-click="selectParagraph" />
+          </div>
         </section>
 
-        <aside class="risk-pane">
-          <div class="pane-heading risk-pane-heading">
-            <h3>风险与问题</h3>
-            <span class="risk-counts"><span class="high-count">高 {{ riskCounts.high }}</span><span>中 {{ riskCounts.medium }}</span><span>低 {{ riskCounts.low }}</span></span>
+        <aside class="app-card risk-pane">
+          <div class="app-card-head">
+            <h2>风险与问题</h2>
+            <span class="app-card-head-meta risk-counts"><span class="high-count">高 {{ riskCounts.high }}</span><span>中 {{ riskCounts.medium }}</span><span>低 {{ riskCounts.low }}</span></span>
           </div>
           <div class="risk-filters">
             <el-select v-model="riskFilter.level" size="small" clearable placeholder="全部等级">
@@ -95,72 +119,99 @@
         <span v-if="quotaHint('review')" class="quota-note">{{ quotaHint('review') }}</span>
       </div>
 
-      <details class="version-details">
+      <!-- 折叠区（方向 B）：summary 是安静的一行，展开后是标准 .app-card -->
+      <details class="contract-fold version-details">
         <summary>版本记录 <span>Version {{ contractResult.version || 1 }} · {{ contractVersions.length }} 条历史</span></summary>
-        <DocumentVersion :versions="contractVersions" @set-base="setDiffBase" @set-target="setDiffTarget" />
-        <div v-if="diffBase || diffTarget" class="contract-compare-summary">
-          <span>对比起点：{{ diffBase ? `v${diffBase.version}` : '未选择' }}</span>
-          <span>对比终点：{{ diffTarget ? `v${diffTarget.version}` : '当前版本' }}</span>
-        </div>
-        <DocumentDiff v-if="diffBase || diffTarget" :before="diffBase?.content || ''" :after="diffTarget?.content || contractResult.content || ''" :before-version="diffBase?.version" :after-version="diffTarget?.version" />
-        <div v-if="revisionDraft !== null" class="revision-workspace">
-          <div class="revision-heading"><strong>修订稿</strong><span>修改将进入下一审查版本，原审查结果和版本记录保留。</span></div>
-          <el-input v-model="revisionDraft" type="textarea" :rows="10" maxlength="50000" show-word-limit aria-label="修订合同原文" />
-          <el-button v-if="contractResult.status === 'returned_for_facts'" type="primary" size="small" :loading="resubmitLoading[contractResult.id]" @click="submitRevisionDraft">提交修订版本并重新审查</el-button>
-          <el-button v-else-if="canSubmitForReview" size="small" @click="returnContractForRevision">提交审核并退回修改</el-button>
-        </div>
-        <div v-if="contractResult.status === 'returned_for_facts'" class="resubmit-editor">
-          <span>修订从上方修订稿提交，系统保留上一版本并重新执行审查。</span>
-        </div>
+        <section class="app-card fold-card">
+          <div class="app-card-head">
+            <h2>版本与修订</h2>
+            <span class="app-card-head-meta">{{ contractVersions.length }} 条版本</span>
+          </div>
+          <div class="app-card-body">
+            <DocumentVersion :versions="contractVersions" @set-base="setDiffBase" @set-target="setDiffTarget" />
+            <div v-if="diffBase || diffTarget" class="contract-compare-summary">
+              <span>对比起点：{{ diffBase ? `v${diffBase.version}` : '未选择' }}</span>
+              <span>对比终点：{{ diffTarget ? `v${diffTarget.version}` : '当前版本' }}</span>
+            </div>
+            <DocumentDiff v-if="diffBase || diffTarget" :before="diffBase?.content || ''" :after="diffTarget?.content || contractResult.content || ''" :before-version="diffBase?.version" :after-version="diffTarget?.version" />
+            <div v-if="revisionDraft !== null" class="revision-workspace">
+              <div class="revision-heading"><strong>修订稿</strong><span>修改将进入下一审查版本，原审查结果和版本记录保留。</span></div>
+              <el-input v-model="revisionDraft" type="textarea" :rows="10" maxlength="50000" show-word-limit aria-label="修订合同原文" />
+              <el-button v-if="contractResult.status === 'returned_for_facts'" type="primary" size="small" :loading="resubmitLoading[contractResult.id]" @click="submitRevisionDraft">提交修订版本并重新审查</el-button>
+              <el-button v-else-if="canSubmitForReview" size="small" @click="returnContractForRevision">提交审核并退回修改</el-button>
+            </div>
+            <div v-if="contractResult.status === 'returned_for_facts'" class="resubmit-editor">
+              <span>修订从上方修订稿提交，系统保留上一版本并重新执行审查。</span>
+            </div>
+          </div>
+        </section>
       </details>
 
-      <details class="history-details">
+      <details class="contract-fold history-details">
         <summary>历史审查 <span>{{ filteredContractReviews.length }} 条</span></summary>
-        <div class="history-filters">
-          <el-select v-model="reviewFilter.status" size="small" clearable placeholder="全部状态">
-            <el-option label="待审核" value="pending_review" /><el-option label="需律师审查" value="needs_lawyer_review" />
-            <el-option label="退回补充" value="returned_for_facts" /><el-option label="律师通过" value="lawyer_approved" />
-            <el-option label="转线下" value="offline_handled" /><el-option label="已关闭" value="closed" />
-          </el-select>
-          <el-select v-model="reviewFilter.risk" size="small" clearable placeholder="全部风险等级">
-            <el-option label="高风险" value="high" /><el-option label="中风险" value="medium" /><el-option label="低风险" value="low" />
-          </el-select>
-        </div>
-        <QueryStateView :status="historyStatus" :error="historyError" empty-text="暂无历史审查记录。" min-height="80px" @retry="loadContractReviews">
-          <div class="review-history-list">
-            <details v-for="item in filteredContractReviews" :key="item.id" class="history-item" @toggle="loadHistoryVersions($event, item)">
-              <summary><strong>{{ item.title || `合同审查 #${item.id}` }}</strong><span>v{{ item.version || 1 }}</span><span>{{ statusLabel(item.status) }}</span><span v-if="item.submitter_name">{{ item.submitter_name }}</span><time>{{ formatDate(item.created_at) }}</time></summary>
-              <div class="history-item-body">
-                <div v-if="item.status === 'returned_for_facts'" class="resubmit-editor">
-                  <label class="field-label" :for="`resubmit-history-${item.id}`">修订合同原文</label>
-                  <el-input :id="`resubmit-history-${item.id}`" v-model="resubmitDraftForm[item.id]" type="textarea" :rows="5" placeholder="修改合同内容后重新提交。" />
-                  <el-button size="small" type="primary" :loading="resubmitLoading[item.id]" @click="submitContractResubmit(item)">提交修订版本</el-button>
-                </div>
-                <DocumentVersion :versions="contractVersionMap[item.id] || []" />
-              </div>
-            </details>
+        <section class="app-card fold-card">
+          <div class="app-card-head">
+            <h2>历史审查记录</h2>
+            <span class="app-card-head-meta">{{ filteredContractReviews.length }} 条</span>
           </div>
-        </QueryStateView>
+          <div class="app-card-body">
+            <div class="history-filters">
+              <el-select v-model="reviewFilter.status" size="small" clearable placeholder="全部状态">
+                <el-option label="待审核" value="pending_review" /><el-option label="需律师审查" value="needs_lawyer_review" />
+                <el-option label="退回补充" value="returned_for_facts" /><el-option label="律师通过" value="lawyer_approved" />
+                <el-option label="转线下" value="offline_handled" /><el-option label="已关闭" value="closed" />
+              </el-select>
+              <el-select v-model="reviewFilter.risk" size="small" clearable placeholder="全部风险等级">
+                <el-option label="高风险" value="high" /><el-option label="中风险" value="medium" /><el-option label="低风险" value="low" />
+              </el-select>
+            </div>
+            <QueryStateView :status="historyStatus" :error="historyError" empty-text="暂无历史审查记录。" min-height="80px" @retry="loadContractReviews">
+              <div class="review-history-list">
+                <details v-for="item in filteredContractReviews" :key="item.id" class="history-item" @toggle="loadHistoryVersions($event, item)">
+                  <summary><strong>{{ item.title || `合同审查 #${item.id}` }}</strong><span class="app-tag">v{{ item.version || 1 }}</span><span class="app-tag" :class="statusTagClass(item.status)">{{ statusLabel(item.status) }}</span><span v-if="item.submitter_name" class="app-tag">{{ item.submitter_name }}</span><time>{{ formatDate(item.created_at) }}</time></summary>
+                  <div class="history-item-body">
+                    <div v-if="item.status === 'returned_for_facts'" class="resubmit-editor">
+                      <label class="field-label" :for="`resubmit-history-${item.id}`">修订合同原文</label>
+                      <el-input :id="`resubmit-history-${item.id}`" v-model="resubmitDraftForm[item.id]" type="textarea" :rows="5" placeholder="修改合同内容后重新提交。" />
+                      <el-button size="small" type="primary" :loading="resubmitLoading[item.id]" @click="submitContractResubmit(item)">提交修订版本</el-button>
+                    </div>
+                    <DocumentVersion :versions="contractVersionMap[item.id] || []" />
+                  </div>
+                </details>
+              </div>
+            </QueryStateView>
+          </div>
+        </section>
       </details>
     </template>
 
-    <details class="comparison-details">
+    <details class="contract-fold comparison-details">
       <summary>合同版本对比</summary>
-      <div class="comparison-content">
-        <div class="compare-grid">
-          <div><label class="field-label" for="contract-a-title">合同 A</label><el-input id="contract-a-title" v-model="compareForm.title_a" placeholder="合同名称" /><el-input v-model="compareForm.content_a" class="compare-input" type="textarea" :rows="6" placeholder="粘贴合同 A 原文" maxlength="50000" /></div>
-          <div><label class="field-label" for="contract-b-title">合同 B</label><el-input id="contract-b-title" v-model="compareForm.title_b" placeholder="合同名称" /><el-input v-model="compareForm.content_b" class="compare-input" type="textarea" :rows="6" placeholder="粘贴合同 B 原文" maxlength="50000" /></div>
+      <section class="app-card fold-card">
+        <div class="app-card-head">
+          <h2>版本对比录入</h2>
+          <span class="app-card-head-meta">粘贴两份文本后对比</span>
         </div>
-        <div class="compare-actions"><el-button type="primary" :loading="compareLoading" @click="submitCompare">开始对比</el-button><el-button v-if="compareResult" @click="exportCompare">导出对比结果</el-button></div>
-        <div v-if="compareResult" class="compare-result"><p>{{ compareResult.summary }}</p><div v-for="field in compareResult.fields || []" :key="field.label" class="compare-result-row"><strong>{{ field.label }}</strong><span>{{ field.value_a || '未提及' }}</span><span>{{ field.value_b || '未提及' }}</span><span>{{ field.note || (field.conflict ? '存在差异' : '一致') }}</span></div></div>
-      </div>
+        <div class="app-card-body">
+          <div class="compare-grid">
+            <div><label class="field-label" for="contract-a-title">合同 A</label><el-input id="contract-a-title" v-model="compareForm.title_a" placeholder="合同名称" /><el-input v-model="compareForm.content_a" class="compare-input" type="textarea" :rows="6" placeholder="粘贴合同 A 原文" maxlength="50000" /></div>
+            <div><label class="field-label" for="contract-b-title">合同 B</label><el-input id="contract-b-title" v-model="compareForm.title_b" placeholder="合同名称" /><el-input v-model="compareForm.content_b" class="compare-input" type="textarea" :rows="6" placeholder="粘贴合同 B 原文" maxlength="50000" /></div>
+          </div>
+          <div class="compare-actions"><el-button type="primary" :loading="compareLoading" @click="submitCompare">开始对比</el-button><el-button v-if="compareResult" @click="exportCompare">导出对比结果</el-button></div>
+          <div v-if="compareResult" class="compare-result"><p>{{ compareResult.summary }}</p><div v-for="field in compareResult.fields || []" :key="field.label" class="compare-result-row"><strong>{{ field.label }}</strong><span>{{ field.value_a || '未提及' }}</span><span>{{ field.value_b || '未提及' }}</span><span>{{ field.note || (field.conflict ? '存在差异' : '一致') }}</span></div></div>
+        </div>
+      </section>
     </details>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import 'element-plus/es/components/message-box/style/css'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
 import { ElUpload } from 'element-plus/es/components/upload/index'
@@ -186,6 +237,8 @@ import { useStagedProgress } from '../../composables/useStagedProgress'
 import QueryStateView from '../QueryStateView.vue'
 
 const props = defineProps({ caseId: { type: Number, default: null }, downloadText: { type: Function, default: null } })
+const route = useRoute()
+const router = useRouter()
 const { quotaHint, loadQuota } = useQuota()
 const { openSourceDetail } = useLegalSourceDetail()
 const {
@@ -227,6 +280,11 @@ const selectedStructuredRisk = computed(() => {
     || (item.category === selectedRisk.value.clause_type && item.summary === selectedRisk.value.description)) || null
 })
 const riskDispositionLabel = (status) => ({ open: '待处理', needs_review: '待审核', accepted: '已接受', mitigated: '已缓释', dismissed: '已忽略' }[status] || status || '待处理')
+// 审查状态 → .app-tag 语义变体（方向 B 标签统一浅底深字，不用 Element 实心色块）
+const statusTagClass = (status) => ({
+  lawyer_approved: 'is-ok', offline_handled: 'is-info',
+  pending_review: 'is-pending', needs_lawyer_review: 'is-pending', returned_for_facts: 'is-pending',
+}[status] || '')
 const isRiskResolved = (item) => ['accepted', 'mitigated', 'dismissed'].includes(item?.status)
 const reviewSubmitting = ref(false)
 const documentContent = computed(() => contractResult.value?.content || contractForm.value.content || '')
@@ -240,6 +298,13 @@ const selectedReferences = computed(() => selectedRisk.value?.references || sele
 const canSubmitForReview = computed(() => Boolean(contractResult.value?.id) && !['pending_review', 'needs_lawyer_review', 'lawyer_approved'].includes(contractResult.value?.status))
 
 watch(() => contractResult.value?.risks, (risks) => { selectedRisk.value = risks?.[0] || null }, { deep: true })
+// 把「当前正在审查的合同」写进 URL：右栏助手读 URL 就知道用户在看哪一份，
+// 刷新或直达也能回到同一份（与咨询 tab 的 consultation_id 同一套做法）。
+watch(() => contractResult.value?.id, (id) => {
+  const current = Number(route.query.contract_id) || null
+  if ((id ? Number(id) : null) === current) return
+  router.replace({ query: { ...route.query, contract_id: id ? String(id) : undefined } })
+})
 watch(() => contractResult.value?.id, (id) => { if (id) onExpandContractReview({ id }) })
 watch(() => contractResult.value?.id, async (id) => {
   structuredRiskItems.value = []
@@ -375,7 +440,10 @@ const submitReviewFeedback = async (score, note) => {
 const openLatestContractReview = async () => {
   await loadContractReviews()
   if (contractResult.value || !contractReviews.value.length) return
-  const latest = [...contractReviews.value].sort((a, b) => {
+  // 刷新或从别处带着 contract_id 进来时，回到同一份合同（右栏助手据此把这份合同交给后端）
+  const requestedId = Number(route.query.contract_id) || null
+  const requested = requestedId ? contractReviews.value.find((row) => Number(row.id) === requestedId) : null
+  const latest = requested || [...contractReviews.value].sort((a, b) => {
     const left = new Date(a.updated_at || a.created_at || 0).getTime() || Number(a.id) || 0
     const right = new Date(b.updated_at || b.created_at || 0).getTime() || Number(b.id) || 0
     return right - left
@@ -390,92 +458,101 @@ onMounted(openLatestContractReview)
 </script>
 
 <style scoped>
-.contract-workspace { display: grid; gap: 18px; min-width: 0; }
-.contract-intake { display: grid; gap: 10px; max-width: 950px; }
-.intake-heading { margin-bottom: 6px; }
-.intake-heading h2 { margin: 0; font-size: 17px; font-weight: 600; }
-.intake-heading p { margin: 5px 0 0; color: var(--color-text-muted); font-size: 13px; }
-.field-label { margin: 4px 0 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 550; }
-.intake-actions, .document-actions, .compare-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
-.intake-actions { justify-content: flex-end; padding-top: 6px; }
-.staged-hint { flex-basis: 100%; margin-top: 2px; text-align: right; color: var(--color-text-muted); font-size: 12px; }
-.document-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border); }
-.document-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.back-action { width: 30px; height: 30px; border: 1px solid var(--color-border); border-radius: 4px; background: white; color: var(--color-text-secondary); font-size: 21px; line-height: 1; cursor: pointer; }
+/* 方向 B：间距/圆角/色板一律走 design-tokens 令牌，组件内只做排版补充 */
+.contract-workspace { display: grid; gap: var(--space-4); min-width: 0; }
+
+/* 录入态 */
+.contract-intake { min-width: 0; }
+.intake-body { display: grid; gap: var(--space-2); }
+.field-label { margin: var(--space-1) 0 0; color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: 600; }
+.intake-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); padding-top: var(--space-2); }
+.staged-hint { flex-basis: 100%; margin-top: 2px; color: var(--color-text-muted); font-size: var(--text-xs); text-align: right; }
+
+/* 结果态页头 */
+.document-heading { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.back-action { width: 32px; height: 32px; flex: none; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-secondary); font-size: 21px; line-height: 1; cursor: pointer; transition: var(--transition-fast); }
+.back-action:hover { border-color: var(--color-border-hover); color: var(--color-text); }
 .document-title-group { min-width: 0; }
-.document-title-group h2 { overflow: hidden; margin: 0 0 5px; color: var(--color-text); font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.document-meta { display: flex; flex-wrap: wrap; gap: 10px; color: var(--color-text-muted); font-size: 11px; }
-.document-meta span + span::before { margin-right: 10px; color: var(--color-border-hover); content: '·'; }
-.review-summary { max-width: 1000px; margin: -5px 0 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.7; }
-.contract-review-split { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(340px, 0.82fr); min-height: 680px; border: 1px solid var(--color-border); background: white; }
-.document-pane, .risk-pane { display: grid; min-width: 0; grid-template-rows: auto minmax(0, 1fr); }
-.document-pane { border-right: 1px solid var(--color-border); }
-.pane-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 0 14px; border-bottom: 1px solid var(--color-border); background: #F8FAFB; }
-.pane-heading h3 { margin: 0; color: var(--color-text); font-size: 13px; font-weight: 600; }
-.pane-heading > span { color: var(--color-text-muted); font-size: 11px; }
-.risk-pane { grid-template-rows: auto auto minmax(180px, 0.8fr) auto minmax(130px, 0.5fr) auto; max-height: 850px; }
-.risk-pane-heading { background: #fff; }
-.risk-counts { display: flex; gap: 10px; white-space: nowrap; }
-.risk-counts span { color: var(--color-text-secondary); }
+.document-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.document-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.document-time { color: var(--color-text-muted); font-size: var(--text-xs); }
+
+/* 审查摘要 */
+.review-summary-text { margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.75; }
+
+/* 合同原文 / 风险双栏 */
+.contract-review-split { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(340px, 0.8fr); gap: var(--space-4); min-height: 680px; }
+.document-pane, .risk-pane { min-width: 0; }
+.document-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.document-pane-body { min-height: 0; overflow: hidden; }
+/* 风险栏用 flex 列：风险项详情可长可短（未选中时不渲染），弹性 + 独立滚动避免卡片 overflow:hidden 裁切 */
+.risk-pane { display: flex; flex-direction: column; max-height: 860px; }
+.risk-filters, .human-decision-note { flex: none; }
+.risk-counts { display: flex; gap: var(--space-2); white-space: nowrap; }
 .risk-counts .high-count { color: var(--color-danger); }
-.risk-filters { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--color-border-light); }
+.risk-filters { display: flex; gap: var(--space-2); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border-light); }
 .risk-filters .el-select { width: 50%; min-width: 0; }
-.risk-list { min-height: 0; overflow-y: auto; }
-.risk-empty, .no-evidence { padding: 15px; color: var(--color-text-muted); font-size: 12px; line-height: 1.6; }
-.risk-detail { overflow-y: auto; padding: 14px; border-top: 1px solid var(--color-border); }
-.detail-kicker { margin: 0 0 6px; color: var(--color-text-muted); font-size: 11px; }
-.risk-detail h4 { margin: 0 0 15px; color: var(--color-text); font-size: 13px; line-height: 1.65; font-weight: 600; }
-.detail-section + .detail-section { margin-top: 16px; }
-.detail-section h5 { margin: 0 0 6px; color: var(--color-text-muted); font-size: 11px; font-weight: 550; }
-.detail-section p { margin: 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.65; white-space: pre-line; }
-.detail-section .el-button { margin-top: 8px; padding-left: 0; }
-.evidence-section { padding-top: 13px; border-top: 1px solid var(--color-border-light); }
-.evidence-section .no-evidence { padding: 3px 0; }
-.human-decision-note { padding: 10px 14px; border-top: 1px solid var(--color-border-light); color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
-.risk-disposition { display: grid; gap: 8px; margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--color-border-light); color: var(--color-text-secondary); font-size: 11px; }
-.risk-disposition-actions { display: flex; flex-wrap: wrap; gap: 7px; }
-.resolution-note { margin: 0; color: var(--color-text-muted); font-size: 11px; }
-.review-footnote { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.quota-note { color: var(--color-text-muted); font-size: 11px; }
-.version-details, .history-details, .comparison-details { border-top: 1px solid var(--color-border); }
-.version-details > summary, .history-details > summary, .comparison-details > summary { padding: 13px 2px; color: var(--color-text); font-size: 13px; font-weight: 550; cursor: pointer; list-style-position: inside; }
-.version-details > summary span, .history-details > summary span { margin-left: 8px; color: var(--color-text-muted); font-size: 11px; font-weight: 400; }
-.resubmit-editor { display: grid; gap: 9px; margin-top: 16px; padding: 14px 0; border-top: 1px solid var(--color-border-light); }
-.contract-compare-summary { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; color: var(--color-text-muted); font-size: 11px; }
-.revision-workspace { display: grid; gap: 9px; margin-top: 16px; padding: 14px 0; border-top: 1px solid var(--color-border-light); }
-.revision-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 9px; }
-.revision-heading strong { color: var(--color-text); font-size: 13px; }
-.revision-heading span { color: var(--color-text-muted); font-size: 11px; }
-.history-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.risk-list { flex: 1 1 auto; min-height: 120px; overflow-y: auto; border-bottom: 1px solid var(--color-border-light); }
+.risk-empty, .no-evidence { padding: var(--space-4) var(--space-5); color: var(--color-text-muted); font-size: var(--text-xs); line-height: 1.6; }
+.risk-detail { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: var(--space-4) var(--space-5); }
+.detail-kicker { margin: 0 0 var(--space-1); color: var(--color-text-muted); font-size: var(--text-xs); }
+.risk-detail h4 { margin: 0 0 var(--space-4); color: var(--color-text); font-size: var(--text-sm); line-height: 1.65; font-weight: 600; }
+.detail-section + .detail-section { margin-top: var(--space-4); }
+.detail-section h5 { margin: 0 0 var(--space-1); color: var(--color-text-muted); font-size: var(--text-xs); font-weight: 600; }
+.detail-section p { margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.65; white-space: pre-line; }
+.detail-section .el-button { margin-top: var(--space-2); padding-left: 0; }
+.evidence-section { padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
+.evidence-section .no-evidence { padding: var(--space-1) 0; }
+.human-decision-note { padding: var(--space-3) var(--space-5); border-top: 1px solid var(--color-border-light); color: var(--color-text-muted); font-size: var(--text-xs); line-height: 1.5; }
+.risk-disposition { display: grid; gap: var(--space-2); margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); color: var(--color-text-secondary); font-size: var(--text-xs); }
+.risk-disposition-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.resolution-note { margin: 0; color: var(--color-text-muted); font-size: var(--text-xs); }
+
+/* 反馈行与折叠区 */
+.review-footnote { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
+.quota-note { color: var(--color-text-muted); font-size: var(--text-xs); }
+.contract-fold > summary { display: flex; align-items: baseline; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border-light); border-radius: var(--radius-lg); background: var(--color-surface); color: var(--color-text-secondary); font-size: var(--text-sm); font-weight: 600; cursor: pointer; list-style: none; transition: var(--transition-fast); }
+.contract-fold > summary::-webkit-details-marker { display: none; }
+.contract-fold > summary::before { color: var(--color-text-muted); content: '▸'; transition: var(--transition-fast); }
+.contract-fold[open] > summary::before { transform: rotate(90deg); }
+.contract-fold > summary:hover { border-color: var(--color-border-hover); color: var(--color-text); }
+.contract-fold > summary span { color: var(--color-text-muted); font-size: var(--text-xs); font-weight: 400; }
+.fold-card { margin-top: var(--space-3); }
+.contract-compare-summary { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-3); color: var(--color-text-muted); font-size: var(--text-xs); }
+.revision-workspace, .resubmit-editor { display: grid; gap: var(--space-2); margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
+.revision-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); }
+.revision-heading strong { color: var(--color-text); font-size: var(--text-sm); }
+.revision-heading span { color: var(--color-text-muted); font-size: var(--text-xs); }
+.history-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
 .history-item { border-bottom: 1px solid var(--color-border-light); }
-.history-item > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 11px 4px; color: var(--color-text-secondary); font-size: 12px; cursor: pointer; list-style: none; }
-.history-item > summary strong { flex: 1; min-width: 140px; color: var(--color-text); font-weight: 550; }
-.history-item > summary time { color: var(--color-text-muted); font-size: 11px; }
-.history-item-body { padding: 0 8px 14px; }
-.comparison-content { padding: 0 0 16px; }
-.compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.compare-grid > div { display: grid; gap: 8px; align-content: start; }
-.compare-input { margin-top: 3px; }
-.compare-actions { margin-top: 12px; }
-.compare-result { margin-top: 14px; }
-.compare-result p { color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
-.compare-result-row { display: grid; grid-template-columns: 100px repeat(3, minmax(0,1fr)); gap: 10px; padding: 9px 3px; border-bottom: 1px solid var(--color-border-light); font-size: 11px; }
+.history-item:last-child { border-bottom: 0; }
+.history-item > summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-1); color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer; }
+.history-item > summary strong { flex: 1; min-width: 140px; color: var(--color-text); font-weight: 600; }
+.history-item > summary time { color: var(--color-text-muted); font-size: var(--text-xs); }
+.history-item-body { padding: 0 var(--space-2) var(--space-4); }
+.compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.compare-grid > div { display: grid; gap: var(--space-2); align-content: start; }
+.compare-input { margin-top: var(--space-1); }
+.compare-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.compare-result { margin-top: var(--space-4); }
+.compare-result p { margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.6; }
+.compare-result-row { display: grid; grid-template-columns: 100px repeat(3, minmax(0, 1fr)); gap: var(--space-2); padding: var(--space-2) var(--space-1); border-bottom: 1px solid var(--color-border-light); font-size: var(--text-xs); }
 .compare-result-row strong { color: var(--color-text); }
 .compare-result-row span { color: var(--color-text-secondary); overflow-wrap: anywhere; }
 @media (max-width: 940px) {
-  .contract-review-split { grid-template-columns: minmax(0,1fr); }
-  .document-pane { min-height: 480px; border-right: 0; border-bottom: 1px solid var(--color-border); }
-  .risk-pane { max-height: none; grid-template-rows: auto auto minmax(200px, 0.5fr) auto minmax(140px, 0.4fr) auto; }
+  .contract-review-split { grid-template-columns: minmax(0, 1fr); }
+  .document-pane { min-height: 480px; }
+  .risk-pane { max-height: none; }
+  .risk-list { min-height: 200px; }
 }
 @media (max-width: 640px) {
-  .document-toolbar { align-items: flex-start; flex-direction: column; }
-  .document-actions { width: 100%; }
+  .document-heading { align-items: flex-start; }
   .contract-review-split { min-height: 0; }
   .document-pane { min-height: 420px; }
   .risk-filters { align-items: stretch; flex-direction: column; }
   .risk-filters .el-select { width: 100%; }
-  .risk-counts { gap: 6px; font-size: 10px; }
-  .compare-grid { grid-template-columns: minmax(0,1fr); }
-  .compare-result-row { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .risk-counts { gap: var(--space-1); }
+  .compare-grid { grid-template-columns: minmax(0, 1fr); }
+  .compare-result-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 </style>

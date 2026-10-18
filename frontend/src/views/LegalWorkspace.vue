@@ -1,12 +1,14 @@
 <template>
   <div class="legal-page workspace-page">
     <template v-if="view === 'cases'">
-      <header class="legal-page-heading">
-        <div>
-          <h1>案件</h1>
-          <p>按案件集中查看工作进展、咨询、审查与文书。</p>
+      <header class="app-page-head">
+        <div class="app-page-head-main">
+          <h1 class="app-page-title">案件</h1>
+          <p class="app-page-sub">按案件集中查看工作进展、咨询、审查与文书。</p>
         </div>
-        <button class="workspace-primary" type="button" :disabled="!hasOrg" :title="!hasOrg ? '你还未加入组织，暂无法创建案件' : undefined" @click="caseDialog?.open()">新建案件</button>
+        <div class="app-page-head-actions">
+          <button class="workspace-primary" type="button" :disabled="!hasOrg" :title="!hasOrg ? '你还未加入组织，暂无法创建案件' : undefined" @click="caseDialog?.open()">新建案件</button>
+        </div>
       </header>
 
       <div class="case-list-toolbar">
@@ -14,18 +16,19 @@
         <span class="legal-muted">{{ filteredCases.length }} 个案件</span>
       </div>
       <div class="case-list">
-        <button v-for="matter in filteredCases" :key="matter.id" class="case-list-row" type="button" @click="openMatter(matter)">
-          <span class="case-list-main">
-            <strong>{{ matter.title }}</strong>
-            <span>{{ matter.client_name || '未登记客户' }}<template v-if="matter.opposing_party"> · {{ matter.opposing_party }}</template></span>
+        <button v-for="matter in filteredCases" :key="matter.id" class="app-thread case-card" type="button" @click="openMatter(matter)">
+          <span class="case-card-top">
+            <strong class="app-thread-title">{{ matter.title }}</strong>
+            <span class="app-tag" :class="caseStatusTagClass(matter.status)">{{ caseStatusLabel(matter.status) }}</span>
           </span>
-          <span class="case-list-type">{{ categoryLabel(matter.case_type) }}</span>
-          <span class="case-list-counts">
-            咨询 {{ matter.item_counts?.consultations || 0 }} · 审查 {{ matter.item_counts?.reviews || 0 }} · 文书 {{ matter.item_counts?.drafts || 0 }}
+          <span class="app-thread-meta">
+            {{ matter.client_name || '未登记客户' }}<template v-if="matter.opposing_party"> · 对方 {{ matter.opposing_party }}</template>
           </span>
-          <span class="case-list-status" :class="`status-${matter.status}`">{{ caseStatusLabel(matter.status) }}</span>
+          <span class="app-thread-meta">
+            {{ categoryLabel(matter.case_type) }} · 咨询 {{ matter.item_counts?.consultations || 0 }} · 审查 {{ matter.item_counts?.reviews || 0 }} · 文书 {{ matter.item_counts?.drafts || 0 }}
+          </span>
         </button>
-        <div v-if="!filteredCases.length" class="legal-empty">
+        <div v-if="!filteredCases.length" class="legal-empty case-list-empty">
           {{ cases.length ? '没有符合条件的案件' : '还没有案件，创建一个案件以开始归档工作。' }}
           <button v-if="!cases.length" type="button" class="empty-cta" :disabled="!hasOrg" @click="caseDialog?.open()">新建案件</button>
         </div>
@@ -33,16 +36,17 @@
     </template>
 
     <template v-else-if="view === 'research'">
-      <header class="legal-page-heading">
-        <div><h1>法律资料</h1><p>查看法规、案例与业务模板。</p></div>
+      <header class="app-page-head">
+        <div class="app-page-head-main">
+          <h1 class="app-page-title">法律资料</h1>
+          <p class="app-page-sub">查看法规、案例与业务模板。</p>
+        </div>
       </header>
       <AsyncLegalSourcesTab />
     </template>
 
     <template v-else-if="view === 'review'">
-      <header class="legal-page-heading">
-        <div><h1>审核</h1><p>律师复核建议并作出最终处理决定。</p></div>
-      </header>
+      <!-- 页头由 LegalReviewTab 自带（含 SLA 指标），这里不再重复一层标题 -->
       <LegalReviewTab ref="reviewTabRef" />
     </template>
 
@@ -75,51 +79,75 @@
         </select>
       </nav>
 
-      <section v-if="activeCaseTab === 'overview'" class="matter-overview">
+      <section v-if="activeCaseTab === 'overview'" class="matter-overview app-workspace-body">
         <div class="matter-main-column">
-          <section class="legal-section matter-summary-section">
-            <div class="legal-section-heading"><h2>案情摘要</h2><span>{{ caseUpdatedLabel }}</span></div>
-            <p v-if="currentCase.description" class="matter-summary">{{ currentCase.description }}</p>
-            <p v-else class="legal-muted">尚未填写案情摘要。</p>
-          </section>
-
-          <section class="legal-section matter-activity-section">
-            <div class="legal-section-heading"><h2>最近活动</h2><button class="text-action" type="button" @click="setMatterTab('tasks')">查看全部</button></div>
-            <AsyncMatterActivity :items="caseActivities.slice(0, 6)" />
-          </section>
-
-          <section class="legal-section matter-materials-section">
-            <div class="legal-section-heading"><h2>关键文档与成果</h2><button class="text-action" type="button" @click="setMatterTab('documents')">打开文档</button></div>
-            <div v-if="keyMaterials.length" class="material-list">
-              <button v-for="item in keyMaterials.slice(0, 5)" :key="`${item.type}-${item.id}`" class="material-row" type="button" @click="openRecord(item)">
-                <span class="material-kind">{{ recordTypeLabel(item.type) }}</span>
-                <strong>{{ item.title }}</strong>
-                <span class="legal-muted">{{ caseStatusLabel(item.status) }}</span>
-              </button>
+          <section class="app-card">
+            <div class="app-card-head">
+              <h2>案情摘要</h2>
+              <span class="app-card-head-meta">{{ caseUpdatedLabel }}</span>
             </div>
-            <div v-else class="legal-empty inline-empty">还没有合同审查或文书成果。</div>
+            <div class="app-card-body">
+              <p v-if="currentCase.description" class="matter-summary">{{ currentCase.description }}</p>
+              <p v-else class="legal-muted">尚未填写案情摘要。</p>
+            </div>
+          </section>
+
+          <section class="app-card">
+            <div class="app-card-head">
+              <h2>最近活动</h2>
+              <button class="text-action" type="button" @click="setMatterTab('tasks')">查看全部</button>
+            </div>
+            <div class="app-card-body">
+              <AsyncMatterActivity :items="caseActivities.slice(0, 6)" />
+            </div>
+          </section>
+
+          <section class="app-card">
+            <div class="app-card-head">
+              <h2>关键文档与成果</h2>
+              <button class="text-action" type="button" @click="setMatterTab('documents')">打开文档</button>
+            </div>
+            <div class="app-card-body">
+              <div v-if="keyMaterials.length" class="material-list">
+                <button v-for="item in keyMaterials.slice(0, 5)" :key="`${item.type}-${item.id}`" class="material-row" type="button" @click="openRecord(item)">
+                  <span class="material-kind">{{ recordTypeLabel(item.type) }}</span>
+                  <strong>{{ item.title }}</strong>
+                  <span class="legal-muted">{{ caseStatusLabel(item.status) }}</span>
+                </button>
+              </div>
+              <div v-else class="legal-empty inline-empty">还没有合同审查或文书成果。</div>
+            </div>
           </section>
         </div>
 
-        <aside class="matter-side-column">
-          <section class="legal-section pending-section">
-            <div class="legal-section-heading"><h2>待处理事项</h2><span>{{ pendingItems.length }}</span></div>
-            <div v-if="pendingItems.length" class="pending-list">
-              <button v-for="item in pendingItems.slice(0, 5)" :key="`${item.type}-${item.id}`" class="pending-row" type="button" @click="openRecord(item)">
-                <span class="pending-mark" :class="`mark-${item.risk_level || 'normal'}`"></span>
-                <span><strong>{{ item.title }}</strong><small>{{ recordTypeLabel(item.type) }} · {{ caseStatusLabel(item.status) }}</small></span>
-              </button>
+        <aside class="matter-side-column app-rail">
+          <section class="app-card">
+            <div class="app-card-head">
+              <h2>待处理事项</h2>
+              <span class="app-card-head-meta">{{ pendingItems.length }}</span>
             </div>
-            <p v-else class="legal-muted pending-empty">目前没有待处理的咨询、审查或文书。</p>
+            <div class="app-card-body">
+              <div v-if="pendingItems.length" class="pending-list">
+                <button v-for="item in pendingItems.slice(0, 5)" :key="`${item.type}-${item.id}`" class="pending-row" type="button" @click="openRecord(item)">
+                  <span class="pending-mark" :class="`mark-${item.risk_level || 'normal'}`"></span>
+                  <span><strong>{{ item.title }}</strong><small>{{ recordTypeLabel(item.type) }} · {{ caseStatusLabel(item.status) }}</small></span>
+                </button>
+              </div>
+              <p v-else class="legal-muted pending-empty">目前没有待处理的咨询、审查或文书。</p>
+            </div>
           </section>
 
-          <section class="legal-section case-count-section">
-            <div class="legal-section-heading"><h2>案件工作流</h2></div>
-            <div class="workflow-list">
-              <button type="button" @click="setMatterTab('consultation')"><span>法律咨询</span><strong>{{ currentCase.item_counts?.consultations || 0 }}</strong></button>
-              <button type="button" @click="setMatterTab('contract')"><span>合同审查</span><strong>{{ currentCase.item_counts?.reviews || 0 }}</strong></button>
-              <button type="button" @click="setMatterTab('draft')"><span>文书</span><strong>{{ currentCase.item_counts?.drafts || 0 }}</strong></button>
-              <button type="button" @click="setMatterTab('review')"><span>律师审核</span><strong>{{ pendingReviewCount }}</strong></button>
+          <section class="app-card">
+            <div class="app-card-head">
+              <h2>案件工作流</h2>
+            </div>
+            <div class="app-card-body">
+              <div class="workflow-list">
+                <button type="button" @click="setMatterTab('consultation')"><span>法律咨询</span><strong>{{ currentCase.item_counts?.consultations || 0 }}</strong></button>
+                <button type="button" @click="setMatterTab('contract')"><span>合同审查</span><strong>{{ currentCase.item_counts?.reviews || 0 }}</strong></button>
+                <button type="button" @click="setMatterTab('draft')"><span>文书</span><strong>{{ currentCase.item_counts?.drafts || 0 }}</strong></button>
+                <button type="button" @click="setMatterTab('review')"><span>律师审核</span><strong>{{ pendingReviewCount }}</strong></button>
+              </div>
             </div>
           </section>
 
@@ -130,38 +158,51 @@
             :limit="5"
           />
 
-          <section class="legal-section dates-section">
-            <div class="legal-section-heading"><h2>关键日期</h2><button class="text-action" type="button" @click="setMatterTab('deadlines')">管理日期</button></div>
-            <p class="legal-muted">在案件日程中记录开庭、答辩与履行期限。</p>
+          <section class="app-card">
+            <div class="app-card-head">
+              <h2>关键日期</h2>
+              <button class="text-action" type="button" @click="setMatterTab('deadlines')">管理日期</button>
+            </div>
+            <div class="app-card-body">
+              <p class="legal-muted dates-hint">在案件日程中记录开庭、答辩与履行期限。</p>
+            </div>
           </section>
 
-          <section class="matter-assistant-strip">
+          <section class="app-card matter-assistant-strip">
             <div>
               <p class="assistant-kicker">案件助手</p>
               <strong>基于当前案件资料继续工作</strong>
               <span>分析案情、查找法源、准备文书，回答会保留在当前案件上下文中。</span>
             </div>
-            <button type="button" class="text-action" @click="router.push({ path: '/chat', query: { case_id: currentCaseId } })">打开助手</button>
+            <button type="button" class="text-action" @click="openCopilot()">打开助手</button>
           </section>
         </aside>
       </section>
 
       <section v-else-if="activeCaseTab === 'documents'" class="matter-panel">
+        <header class="app-page-head">
+          <div class="app-page-head-main">
+            <h2 class="app-page-title">文档</h2>
+            <p class="app-page-sub">案件材料、合同台账与相关工作记录。</p>
+          </div>
+        </header>
         <AsyncCaseDocumentsPanel :case-id="currentCaseId" />
         <AsyncLegalContracts :org-id="currentOrgId" :case-id="currentCaseId" />
-        <div class="legal-section related-records">
-          <div class="legal-section-heading"><h2>相关工作记录</h2></div>
-          <div v-if="caseActivities.length" class="compact-record-list">
-            <button v-for="item in caseActivities" :key="`${item.type}-${item.id}`" type="button" @click="openRecord(item)">
-              <span>{{ recordTypeLabel(item.type) }}</span><strong>{{ item.title }}</strong><time>{{ formatDate(item.created_at) }}</time>
-            </button>
+        <section class="app-card related-records">
+          <div class="app-card-head"><h2>相关工作记录</h2></div>
+          <div class="app-card-body">
+            <div v-if="caseActivities.length" class="compact-record-list">
+              <button v-for="item in caseActivities" :key="`${item.type}-${item.id}`" type="button" @click="openRecord(item)">
+                <span>{{ recordTypeLabel(item.type) }}</span><strong>{{ item.title }}</strong><time>{{ formatDate(item.created_at) }}</time>
+              </button>
+            </div>
+            <div v-else class="legal-empty">案件暂无工作记录。</div>
           </div>
-          <div v-else class="legal-empty">案件暂无工作记录。</div>
-        </div>
+        </section>
       </section>
 
       <section v-else-if="activeCaseTab === 'consultation'" class="matter-panel">
-        <div class="legal-section-heading"><h2>案件法律咨询</h2></div>
+        <!-- 咨询 tab 自带卡片标题（法律咨询 / 咨询结果 / 历史咨询），这里不再重复一层大标题 -->
         <AsyncLegalConsultationsTab :key="`consultation-${currentCaseId}`" :case-id="currentCaseId" :initial-consultation-id="consultationFocusId" :on-review-submitted="refreshReviewQueue" @go-to-draft="handleGoToDraftFromConsult" @go-to-review="handleGoToReviewFromConsult" />
       </section>
 
@@ -170,17 +211,27 @@
       </section>
 
       <section v-else-if="activeCaseTab === 'draft'" class="matter-panel">
-        <div class="legal-section-heading"><h2>案件文书</h2></div>
+        <header class="app-page-head">
+          <div class="app-page-head-main"><h2 class="app-page-title">案件文书</h2></div>
+        </header>
         <LegalDraftsTab :key="`draft-${currentCaseId}`" ref="draftsTabRef" :case-id="currentCaseId" :download-text="downloadText" />
       </section>
 
       <section v-else-if="activeCaseTab === 'review'" class="matter-panel">
-        <div class="legal-section-heading"><div><h2>律师审核</h2><span>审核律师对专业意见作最终决定。</span></div></div>
+        <!-- 标题由 LegalReviewTab 自带，避免与外层 h2 重复 -->
         <LegalReviewTab :key="`review-${currentCaseId}`" ref="reviewTabRef" :case-id="currentCaseId" />
       </section>
 
       <section v-else-if="activeCaseTab === 'tasks'" class="matter-panel">
-        <div class="legal-section-heading"><div><h2>案件工作记录</h2><span>按时间查看咨询、合同审查与文书处理。</span></div><button class="text-action" type="button" @click="router.push({ path: '/tasks', query: { case_id: currentCaseId } })">打开任务中心</button></div>
+        <header class="app-page-head">
+          <div class="app-page-head-main">
+            <h2 class="app-page-title">案件工作记录</h2>
+            <p class="app-page-sub">按时间查看咨询、合同审查与文书处理。</p>
+          </div>
+          <div class="app-page-head-actions">
+            <button class="text-action" type="button" @click="router.push({ path: '/tasks', query: { case_id: currentCaseId } })">打开任务中心</button>
+          </div>
+        </header>
         <AsyncWorkflowRunsPanel :case-id="currentCaseId" :workflow-id="route.query.workflow_id" title="案件执行进度" description="异步处理、审查和文档任务的实时状态。" />
         <div class="compact-record-list">
           <button v-for="item in caseActivities" :key="`${item.type}-${item.id}`" type="button" @click="openRecord(item)">
@@ -191,24 +242,37 @@
       </section>
 
       <section v-else-if="activeCaseTab === 'deadlines'" class="matter-panel">
-        <div class="legal-section-heading"><h2>关键日期</h2></div>
+        <header class="app-page-head">
+          <div class="app-page-head-main"><h2 class="app-page-title">关键日期</h2></div>
+        </header>
         <AsyncLegalDeadlines :org-id="currentOrgId" :case-id="currentCaseId" />
       </section>
 
       <section v-else-if="activeCaseTab === 'sources'" class="matter-panel">
-        <div class="legal-section-heading"><h2>法律资料</h2></div><AsyncLegalSourcesTab :case-id="currentCaseId" />
+        <header class="app-page-head">
+          <div class="app-page-head-main"><h2 class="app-page-title">法律资料</h2></div>
+        </header><AsyncLegalSourcesTab :case-id="currentCaseId" />
       </section>
 
       <section v-else-if="activeCaseTab === 'billing'" class="matter-panel">
-        <div class="legal-section-heading"><h2>计时计费</h2></div><AsyncLegalBilling :org-id="currentOrgId" :case-id="currentCaseId" />
+        <header class="app-page-head">
+          <div class="app-page-head-main"><h2 class="app-page-title">计时计费</h2></div>
+        </header>
+        <AsyncLegalBilling :org-id="currentOrgId" :case-id="currentCaseId" />
       </section>
 
       <section v-else-if="activeCaseTab === 'contracts'" class="matter-panel">
-        <div class="legal-section-heading"><h2>合同台账</h2></div><AsyncLegalContracts :org-id="currentOrgId" :case-id="currentCaseId" />
+        <header class="app-page-head">
+          <div class="app-page-head-main"><h2 class="app-page-title">合同台账</h2></div>
+        </header>
+        <AsyncLegalContracts :org-id="currentOrgId" :case-id="currentCaseId" />
       </section>
 
       <section v-else-if="activeCaseTab === 'portal'" class="matter-panel">
-        <div class="legal-section-heading"><h2>客户门户</h2></div><AsyncLegalPortalTab :organization-id="currentOrgId" :case-id="currentCaseId" />
+        <header class="app-page-head">
+          <div class="app-page-head-main"><h2 class="app-page-title">客户门户</h2></div>
+        </header>
+        <AsyncLegalPortalTab :organization-id="currentOrgId" :case-id="currentCaseId" />
       </section>
 
       <section v-else class="matter-panel"><div class="legal-empty">未找到案件工作页面。</div></section>
@@ -229,16 +293,18 @@
       @open-documents="router.push('/documents')"
       @open-research="goToView('research')"
       @open-tasks="router.push('/tasks')"
-      @open-chat="router.push('/chat')"
+      @open-chat="openCopilot()"
     />
 
     <CaseCreateDialog ref="caseDialog" :org-id="currentOrgId" @created="handleCaseCreated" />
+    <SourceDetailDialog />
   </div>
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
 import 'element-plus/es/components/select/style/css'
 import { useRoute, useRouter } from 'vue-router'
@@ -246,12 +312,15 @@ import { legalWorkspace } from '../api'
 import { useQuery } from '../query/useQuery'
 import { qk } from '../query/keys'
 import CaseCreateDialog from '../components/legal/CaseCreateDialog.vue'
+import SourceDetailDialog from '../components/legal/SourceDetailDialog.vue'
 import CaseHeader from '../components/legal/CaseHeader.vue'
 import LegalContractTab from '../components/legal/LegalContractTab.vue'
 import LegalDraftsTab from '../components/legal/LegalDraftsTab.vue'
 import LegalReviewTab from '../components/legal/LegalReviewTab.vue'
 import WorkbenchHome from '../components/legal/WorkbenchHome.vue'
 import { categoryLabel, statusLabel } from '../composables/useLegalWorkspacePresentation'
+import { clearWorkspaceCrumbs, setWorkspaceCrumbs } from '../composables/workspaceBreadcrumb'
+import { useCopilotDock } from '../composables/useCopilotDock'
 
 const AsyncLegalBilling = defineAsyncComponent(() => import('./LegalBilling.vue'))
 const AsyncLegalDeadlines = defineAsyncComponent(() => import('./LegalDeadlines.vue'))
@@ -267,6 +336,8 @@ const AsyncWorkflowRunsPanel = defineAsyncComponent(() => import('../components/
 
 const route = useRoute()
 const router = useRouter()
+// 助手入口收敛：这里不再跳 /chat，而是打开右侧面板（案件上下文由 URL 提供，面板自行解析）
+const { openCopilot } = useCopilotDock()
 const caseDialog = ref(null)
 const currentCaseId = ref(route.query.case_id ? Number(route.query.case_id) : null)
 const caseSearch = ref('')
@@ -365,15 +436,32 @@ const filteredCases = computed(() => {
 
 const recordTypeLabel = (type) => ({ consultation: '咨询', contract_review: '审查', draft: '文书' }[type] || '记录')
 const caseStatusLabel = (status) => ({ in_progress: '进行中', closed: '已结案', archived: '已归档' }[status] || statusLabel(status) || '处理中')
+const caseStatusTagClass = (status) => ({ in_progress: 'is-ok', archived: 'is-pending' }[status] || '')
 const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '时间未记录'
+
+// 顶栏面包屑由外壳渲染，这里登记当前上下文：案件标题来自接口，只有本页知道；
+// 没有案件上下文时留空，外壳回退到栏目名（工作台 / 案件 / 法律资料 / 审核）。
+const crumbItems = computed(() => {
+  if (view.value === 'cases') return [{ label: '案件' }]
+  if (view.value === 'research') return [{ label: '法律资料' }]
+  if (view.value === 'review') return [{ label: '审核' }]
+  if (currentCase.value) return [{ label: '案件', path: '/cases' }, { label: currentCase.value.title }]
+  return []
+})
+watch(crumbItems, (items) => setWorkspaceCrumbs(items), { immediate: true })
+onUnmounted(() => clearWorkspaceCrumbs())
 
 const setMatterTab = (tab) => {
   router.replace({ query: { ...route.query, view: undefined, tab: tab || undefined } })
 }
 const goToView = (nextView) => router.push({ path: '/legal-workspace', query: { view: nextView } })
 const handleCaseSelect = (caseId) => {
-  // 切换案件时清掉上一案件的咨询焦点，避免新案件 tab 自动恢复无关结果卡
-  router.replace({ query: { ...route.query, view: undefined, case_id: caseId, tab: activeCaseTab.value === 'overview' ? undefined : activeCaseTab.value, consultation_id: undefined } })
+  // 切换案件时清掉上一案件的焦点：咨询结果卡、合同审查、文书草稿都不能跨案件残留
+  router.replace({ query: {
+    ...route.query, view: undefined, case_id: caseId,
+    tab: activeCaseTab.value === 'overview' ? undefined : activeCaseTab.value,
+    consultation_id: undefined, contract_id: undefined, draft_id: undefined,
+  } })
 }
 const openMatter = (matter) => router.push({ path: '/legal-workspace', query: { case_id: matter.id } })
 const handleCaseCreated = async (caseId) => {
@@ -429,90 +517,78 @@ const downloadText = (filename, content) => {
 
 <style scoped>
 .workspace-page { display: grid; gap: 0; }
-.matter-toolbar { display: flex; align-items: center; gap: 10px; min-height: 38px; margin-bottom: 18px; }
-.matter-select { width: min(360px, 55vw); }
-.quiet-action, .text-action { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: 12px; cursor: pointer; }
+
+/* 案件切换条留在标题上方一行；标题区（CaseHeader）只放标题、状态与主操作 */
+.matter-toolbar { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.matter-select { width: min(300px, 55vw); }
+.quiet-action, .text-action { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: var(--text-sm); font-weight: 500; cursor: pointer; }
 .quiet-action:hover, .text-action:hover { color: var(--color-primary-hover); text-decoration: underline; }
 .new-matter { margin-left: auto; }
-.legal-matter-tabs { margin-top: 18px; }
-.matter-tools-select { flex: 0 0 auto; min-height: 30px; margin: auto 0 7px auto; border: 0; background: transparent; color: var(--color-text-muted); font: inherit; font-size: 12px; cursor: pointer; }
-.matter-overview { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.8fr); gap: 36px; padding-top: 24px; }
-.matter-main-column, .matter-side-column { display: grid; align-content: start; gap: 26px; min-width: 0; }
-.matter-main-column > .legal-section + .legal-section, .matter-side-column > .legal-section + .legal-section { padding-top: 18px; border-top: 1px solid var(--color-border); }
-.matter-summary { max-width: 820px; margin: 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.8; white-space: pre-line; }
-.inline-empty { padding: 8px 0; text-align: left; }
-.material-list { display: grid; }
-.material-row { display: grid; grid-template-columns: 82px minmax(0,1fr) auto; align-items: center; gap: 12px; min-height: 42px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; text-align: left; cursor: pointer; }
-.material-row:hover, .pending-row:hover, .workflow-list button:hover { background: #F8FAFB; }
-.material-kind { color: var(--color-text-muted); font-size: 11px; }
-.material-row strong { overflow: hidden; color: var(--color-text); font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.pending-list { display: grid; }
-.pending-row { display: grid; grid-template-columns: 8px minmax(0,1fr); gap: 10px; width: 100%; padding: 11px 4px; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; text-align: left; cursor: pointer; }
-.pending-row > span:last-child { display: grid; gap: 4px; }
-.pending-row strong { overflow: hidden; font-size: 12px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.pending-row small { color: var(--color-text-muted); font-size: 11px; }
-.pending-mark { width: 6px; height: 6px; margin-top: 4px; border-radius: 50%; background: var(--color-primary); }
+.legal-matter-tabs { margin-top: var(--space-4); }
+.matter-tools-select { flex: 0 0 auto; min-height: 30px; margin: auto 0 7px auto; border: 0; background: transparent; color: var(--color-text-muted); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+/* 概览：主栏卡片 + 右栏 rail（列宽由全局 .app-workspace-body 决定，≤1100px 自动堆叠） */
+.matter-overview { padding-top: var(--space-6); }
+.matter-main-column { display: grid; align-content: start; gap: var(--space-4); min-width: 0; }
+.matter-side-column { min-width: 0; }
+.app-card-head .text-action { margin-left: auto; }
+.matter-summary { margin: 0; color: var(--color-text-secondary); font-size: var(--text-base); line-height: 1.85; white-space: pre-line; }
+.inline-empty { padding: var(--space-2) 0; text-align: left; }
+.material-list, .pending-list, .workflow-list { display: grid; }
+.material-row { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; align-items: center; gap: var(--space-3); min-height: 40px; padding: 8px 6px; border: 0; border-bottom: 1px solid var(--color-border-light); border-radius: var(--radius-sm); background: transparent; text-align: left; cursor: pointer; transition: background var(--transition-fast); }
+.material-row:last-child, .pending-row:last-child, .workflow-list button:last-child { border-bottom: 0; }
+.material-row:hover, .pending-row:hover, .workflow-list button:hover { background: var(--color-surface-hover); }
+.material-kind { color: var(--color-text-muted); font-size: var(--text-xs); }
+.material-row strong { overflow: hidden; color: var(--color-text); font-size: var(--text-sm); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.pending-row { display: grid; grid-template-columns: 8px minmax(0,1fr); gap: 10px; width: 100%; padding: 10px 6px; border: 0; border-bottom: 1px solid var(--color-border-light); border-radius: var(--radius-sm); background: transparent; text-align: left; cursor: pointer; transition: background var(--transition-fast); }
+.pending-row > span:last-child { display: grid; gap: 3px; }
+.pending-row strong { overflow: hidden; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pending-row small { color: var(--color-text-muted); font-size: var(--text-xs); }
+.pending-mark { width: 7px; height: 7px; margin-top: 5px; border-radius: var(--radius-full); background: var(--color-primary); }
 .mark-high { background: var(--color-danger); }
 .mark-medium { background: var(--color-warning); }
 .pending-empty { margin: 0; line-height: 1.7; }
-.workflow-list { display: grid; }
-.workflow-list button { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 5px 4px; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; }
-.workflow-list span { font-size: 12px; }
-.workflow-list strong { color: var(--color-text); font-size: 12px; font-weight: 550; }
-.dates-section .legal-muted { margin: 0; line-height: 1.65; }
-.matter-assistant-strip { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 14px; padding-top: 18px; border-top: 1px solid var(--color-border); }
+.workflow-list button { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 6px; border: 0; border-bottom: 1px solid var(--color-border-light); border-radius: var(--radius-sm); background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; transition: background var(--transition-fast); }
+.workflow-list span { font-size: var(--text-sm); }
+.workflow-list strong { color: var(--color-text); font-size: var(--text-base); font-weight: 600; }
+.dates-hint { margin: 0; line-height: 1.65; }
+
+/* 案件助手入口：既是卡片也是双列说明条 */
+.matter-assistant-strip { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5); }
 .matter-assistant-strip > div { display: grid; gap: 4px; }
-.assistant-kicker { margin: 0; color: var(--color-primary); font-size: 11px; font-weight: 600; }
-.matter-assistant-strip strong { color: var(--color-text); font-size: 12px; font-weight: 600; }
-.matter-assistant-strip span { color: var(--color-text-muted); font-size: 11px; line-height: 1.55; }
-.matter-panel { min-width: 0; padding-top: 22px; }
-.matter-panel > .legal-section-heading { margin-bottom: 16px; }
-.matter-panel .legal-section-heading h2 { margin: 0; font-size: 16px; }
-.matter-panel .legal-section-heading span { display: block; margin-top: 4px; }
-.related-records { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--color-border); }
+.assistant-kicker { margin: 0; color: var(--color-primary); font-size: var(--text-xs); font-weight: 600; }
+.matter-assistant-strip strong { color: var(--color-text); font-size: var(--text-sm); font-weight: 600; }
+.matter-assistant-strip span { color: var(--color-text-muted); font-size: var(--text-xs); line-height: 1.6; }
+.matter-panel { display: grid; gap: var(--space-4); min-width: 0; padding-top: var(--space-5); }
+.matter-panel > .app-page-head { margin-bottom: 0; }
+.related-records { margin-top: 0; }
+.related-records .app-card-body { padding-top: var(--space-2); }
 .compact-record-list { display: grid; }
-.compact-record-list button { display: grid; grid-template-columns: 74px minmax(0, 1fr) minmax(110px, auto) auto; align-items: center; gap: 14px; min-height: 44px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; }
-.compact-record-list button:hover { background: #F8FAFB; }
-.compact-record-list span, .compact-record-list time, .compact-record-list em { color: var(--color-text-muted); font-size: 11px; font-style: normal; }
-.compact-record-list strong { color: var(--color-text); font-size: 12px; font-weight: 550; }
-.case-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
-.case-list-toolbar input { width: min(420px, 100%); height: 36px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: 4px; background: white; color: var(--color-text); font: inherit; font-size: 13px; }
+.compact-record-list button { display: grid; grid-template-columns: 74px minmax(0, 1fr) minmax(110px, auto) auto; align-items: center; gap: var(--space-3); min-height: 44px; padding: 8px 6px; border: 0; border-bottom: 1px solid var(--color-border-light); border-radius: var(--radius-sm); background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; transition: background var(--transition-fast); }
+.compact-record-list button:hover { background: var(--color-surface-hover); }
+.compact-record-list span, .compact-record-list time, .compact-record-list em { color: var(--color-text-muted); font-size: var(--text-xs); font-style: normal; }
+.compact-record-list strong { color: var(--color-text); font-size: var(--text-sm); font-weight: 550; }
+
+/* 案件列表：卡片网格（方向 B 的内容卡片化） */
+.case-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin: var(--space-6) 0 var(--space-4); }
+.case-list-toolbar input { width: min(420px, 100%); height: 38px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--text-sm); }
 .case-list-toolbar input:focus { border-color: var(--color-primary); outline: 2px solid var(--color-primary-subtle); }
-.case-list { border-top: 1px solid var(--color-border); }
-.case-list-row { display: grid; width: 100%; grid-template-columns: minmax(220px, 1.4fr) minmax(110px, .7fr) minmax(220px, 1fr) auto; align-items: center; gap: 16px; min-height: 66px; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--color-border); background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }
-.case-list-row:hover { background: white; }
-.case-list-main { display: grid; gap: 4px; min-width: 0; }
-.case-list-main strong { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.case-list-main span, .case-list-type, .case-list-counts { color: var(--color-text-muted); font-size: 12px; }
-.case-list-status { padding-left: 9px; border-left: 2px solid var(--color-success); color: var(--color-text-secondary); font-size: 12px; white-space: nowrap; }
-.status-closed { border-color: var(--color-info); }
-.status-archived { border-color: var(--color-warning); }
-.workspace-primary { min-height: 36px; padding: 0 14px; border: 1px solid var(--color-primary); border-radius: 4px; background: var(--color-primary); color: white; font: inherit; font-size: 13px; cursor: pointer; }
-.workspace-primary:hover { background: var(--color-primary-hover); }
-.no-matters { display: grid; justify-items: start; align-content: center; min-height: 52vh; padding: 24px; border-top: 1px solid var(--color-border); }
-.no-matters h1 { margin: 0; font-size: 22px; }
-.no-matters p { max-width: 540px; margin: 8px 0 20px; color: var(--color-text-secondary); line-height: 1.7; }
+.case-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-3); }
+.case-card { gap: 6px; }
+.case-card-top { display: flex; align-items: center; gap: var(--space-2); }
+.case-card-top .app-thread-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.case-list-empty { grid-column: 1 / -1; }
+/* .workspace-primary 已统一到 design-tokens.css（全局类），这里不再重复定义 */
+
 @media (max-width: 900px) {
-  .matter-overview { grid-template-columns: minmax(0, 1fr); gap: 26px; }
-  .matter-side-column { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px 24px; }
-  .matter-side-column > .legal-section + .legal-section { padding-top: 0; border-top: 0; }
-  .case-list-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .case-list-type, .case-list-counts { grid-column: 1; }
-  .case-list-status { grid-column: 2; grid-row: 1; }
+  .matter-side-column { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 600px) {
   .matter-toolbar { gap: 6px; flex-wrap: wrap; }
   .matter-select { width: 100%; }
-  .new-matter { margin-left: auto; }
-  .matter-overview { padding-top: 18px; }
-  .matter-side-column { grid-template-columns: minmax(0,1fr); }
-  .matter-side-column > .legal-section + .legal-section { padding-top: 16px; border-top: 1px solid var(--color-border); }
-  .material-row { grid-template-columns: 66px minmax(0, 1fr); }
+  .material-row { grid-template-columns: 62px minmax(0, 1fr); }
   .material-row > .legal-muted { grid-column: 2; }
   .compact-record-list button { grid-template-columns: 65px minmax(0, 1fr); gap: 5px 10px; }
   .compact-record-list time, .compact-record-list em { grid-column: 2; }
-  .case-list-row { gap: 5px 12px; padding: 11px 6px; }
-  .case-list-counts { font-size: 10px; }
   .matter-assistant-strip { align-items: flex-start; grid-template-columns: minmax(0,1fr); }
 }
 </style>

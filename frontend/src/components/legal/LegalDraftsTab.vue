@@ -1,31 +1,16 @@
 <template>
   <div class="draft-workspace">
-    <section class="draft-builder">
-      <div class="draft-sidebar">
-        <div class="draft-sidebar-heading"><h3>文书结构</h3><span>字段</span></div>
-        <label class="draft-field-label">文书类型</label>
-        <el-select v-model="draftForm.document_type" placeholder="选择文书类型" class="draft-type-select">
-          <el-option v-for="template in templates" :key="template.key" :label="template.label" :value="template.key" />
-        </el-select>
-        <div class="draft-field-list">
-          <div v-for="field in currentDraftFields" :key="field" class="draft-field">
-            <label :for="`draft-field-${field}`">{{ field }}<span v-if="isDraftFieldRequired(field)">*</span></label>
-            <el-input :id="`draft-field-${field}`" v-model="draftForm.fields[field]" :placeholder="isDraftFieldRequired(field) ? `请输入${field}` : '可选'" />
-            <small v-if="isDraftFieldRequired(field) && !draftForm.fields[field]">生成后会标记为待补充</small>
+    <div class="app-workspace-body">
+      <!-- 主栏：文书正文。标题由卡片头自带（LegalWorkspace 只挂载 tab，不再重复外层大标题） -->
+      <section class="app-card draft-editor-pane">
+        <header class="app-card-head draft-editor-header">
+          <div class="draft-editor-title">
+            <h2>{{ draftResult?.title || '新建文书草稿' }}</h2>
+            <span v-if="draftResult" class="draft-editor-sub">Version {{ draftResult.version || 1 }}</span>
+            <span v-if="draftResult && draftCollaboration?.updated_at" class="draft-editor-sub">最近更新 {{ formatDate(draftCollaboration.updated_at) }}</span>
           </div>
-          <p v-if="!currentDraftFields.length" class="draft-sidebar-empty">选择文书类型后填写事实字段。</p>
-        </div>
-        <el-button class="generate-button" type="primary" :loading="draftLoading" @click="submitDraft">生成草稿</el-button>
-        <div v-if="draftLoading" class="staged-hint" aria-live="polite">{{ draftStageText }}</div>
-      </div>
-
-      <section class="draft-editor-pane">
-        <header class="draft-editor-header">
-          <div><p class="draft-kicker">案件文书</p><h2>{{ draftResult?.title || '新建文书草稿' }}</h2></div>
           <div class="draft-editor-actions">
-            <span v-if="draftResult" class="draft-version-label">Version {{ draftResult.version || 1 }}</span>
-            <span v-if="draftResult" class="draft-save-state" :class="`is-${draftSaveState}`">{{ draftSaveStateLabel }}</span>
-            <span v-if="draftCollaboration?.updated_at" class="draft-collaboration-state">最近更新 {{ formatDate(draftCollaboration.updated_at) }}</span>
+            <span v-if="draftResult" class="app-tag" :class="draftSaveStateTagClass">{{ draftSaveStateLabel }}</span>
             <el-input v-if="draftResult" v-model="versionNote" class="version-note-input" size="small" placeholder="版本说明（可选）" maxlength="512" />
             <el-button v-if="draftResult" size="small" :loading="versionSaveLoading || resubmitLoading[draftResult.id]" @click="saveDraftVersion">保存版本</el-button>
             <el-button v-if="draftResult" size="small" @click="exportDraft">导出</el-button>
@@ -33,55 +18,103 @@
           </div>
         </header>
 
-        <div v-if="draftResult?.missing_fields?.length" class="missing-facts"><strong>待补充事实</strong><span v-for="field in draftResult.missing_fields" :key="field">{{ field }}</span></div>
-        <el-input v-if="draftResult" v-model="editableContent" class="draft-editor" type="textarea" :rows="24" placeholder="文书正文将在这里生成，也可以直接编辑。" />
-        <div v-else class="draft-editor-empty"><span>生成草稿后，正文会出现在这里。</span><small>AI 负责起草，最终内容由你编辑和确认。</small></div>
-
-    <section v-if="draftResult" class="draft-evidence-section">
-          <div class="draft-subheading"><h3>法律依据</h3><span>{{ draftResult.references?.length || 0 }} 条</span></div>
-          <EvidenceReference v-for="reference in draftResult.references || []" :key="reference.source_id || reference.title" :reference="reference" @open="openSourceDetail" />
-      <p v-if="!draftResult.references?.length" class="draft-muted">暂无引用依据。</p>
-    </section>
-
-        <section v-if="draftResult && draftVersions.length" class="draft-version-section">
-          <div class="draft-subheading"><h3>版本记录</h3><span>点击版本查看差异</span></div>
-          <DocumentVersion :versions="draftVersions" @select="selectVersion" @set-base="setDiffBase" @set-target="setDiffTarget" />
-          <div v-if="selectedVersion" class="draft-version-actions">
-            <span>已选择 Version {{ selectedVersion.version || 1 }}</span>
-            <el-button size="small" :loading="restoreLoading" @click="restoreSelectedVersion">恢复此版本</el-button>
+        <div class="app-card-body draft-editor-body">
+          <div v-if="draftResult?.missing_fields?.length" class="missing-facts">
+            <strong>待补充事实</strong>
+            <span v-for="field in draftResult.missing_fields" :key="field" class="app-tag is-pending">{{ field }}</span>
           </div>
-          <div v-if="diffBase || diffTarget" class="draft-compare-summary">
-            <span>对比起点：{{ diffBase ? `Version ${diffBase.version}` : '未选择' }}</span>
-            <span>对比终点：{{ diffTarget ? `Version ${diffTarget.version}` : '当前正文' }}</span>
+          <el-input v-if="draftResult" v-model="editableContent" class="draft-editor" type="textarea" :rows="24" placeholder="文书正文将在这里生成，也可以直接编辑。" />
+          <div v-else class="draft-editor-empty">
+            <span>生成草稿后，正文会出现在这里。</span>
+            <small>AI 负责起草，最终内容由你编辑和确认。</small>
           </div>
-          <DocumentDiff v-if="selectedVersion || remoteDiff" :before="remoteDiff?.from?.content || selectedVersion?.content" :after="remoteDiff?.to?.content || editableContent" :before-version="remoteDiff?.from?.version || selectedVersion?.version" :after-version="remoteDiff?.to?.version" :rows="remoteDiff?.rows || null" />
-        </section>
 
-        <section v-if="draftResult" class="draft-comments-section">
-          <div class="draft-subheading"><h3>批注</h3><span>{{ openCommentCount }} 条待处理</span></div>
-          <div class="comment-compose">
-            <el-input v-model="commentBody" type="textarea" :rows="2" maxlength="4000" placeholder="针对正文添加批注，可说明事实缺口、修改意见或审核问题。" />
-            <div class="comment-compose-actions">
-              <span>正文行号（可选）</span>
-              <input v-model.number="commentLineStart" type="number" min="1" placeholder="起始" />
-              <input v-model.number="commentLineEnd" type="number" min="1" placeholder="结束" />
-              <el-button size="small" type="primary" :loading="commentLoading" @click="submitComment">添加批注</el-button>
+          <section v-if="draftResult" class="app-card-section draft-section">
+            <div class="draft-section-head">
+              <h3 class="app-card-section-title">法律依据</h3>
+              <span class="draft-section-meta">{{ draftReferences.length }} 条</span>
+            </div>
+            <EvidenceReference v-for="reference in draftReferences" :key="reference.source_id || reference.title" :reference="reference" @open="openSourceDetail" />
+            <p v-if="!draftReferences.length" class="app-empty-note">暂无引用依据。</p>
+          </section>
+
+          <section v-if="draftResult && draftVersions.length" class="app-card-section draft-section draft-version-section">
+            <div class="draft-section-head">
+              <h3 class="app-card-section-title">版本记录</h3>
+              <span class="draft-section-meta">点击版本查看差异</span>
+            </div>
+            <DocumentVersion :versions="draftVersions" @select="selectVersion" @set-base="setDiffBase" @set-target="setDiffTarget" />
+            <div v-if="selectedVersion" class="draft-version-actions">
+              <span>已选择 Version {{ selectedVersion.version || 1 }}</span>
+              <el-button size="small" :loading="restoreLoading" @click="restoreSelectedVersion">恢复此版本</el-button>
+            </div>
+            <div v-if="diffBase || diffTarget" class="draft-compare-summary">
+              <span>对比起点：{{ diffBase ? `Version ${diffBase.version}` : '未选择' }}</span>
+              <span>对比终点：{{ diffTarget ? `Version ${diffTarget.version}` : '当前正文' }}</span>
+            </div>
+            <DocumentDiff v-if="selectedVersion || remoteDiff" :before="remoteDiff?.from?.content || selectedVersion?.content" :after="remoteDiff?.to?.content || editableContent" :before-version="remoteDiff?.from?.version || selectedVersion?.version" :after-version="remoteDiff?.to?.version" :rows="remoteDiff?.rows || null" />
+          </section>
+
+          <section v-if="draftResult" class="app-card-section draft-section draft-comments-section">
+            <div class="draft-section-head">
+              <h3 class="app-card-section-title">批注</h3>
+              <span class="draft-section-meta">{{ openCommentCount }} 条待处理</span>
+            </div>
+            <div class="comment-compose">
+              <el-input v-model="commentBody" type="textarea" :rows="2" maxlength="4000" placeholder="针对正文添加批注，可说明事实缺口、修改意见或审核问题。" />
+              <div class="comment-compose-actions">
+                <span>正文行号（可选）</span>
+                <input v-model.number="commentLineStart" type="number" min="1" placeholder="起始" />
+                <input v-model.number="commentLineEnd" type="number" min="1" placeholder="结束" />
+                <el-button size="small" type="primary" :loading="commentLoading" @click="submitComment">添加批注</el-button>
+              </div>
+            </div>
+            <div v-if="draftComments.length" class="comment-list">
+              <article v-for="comment in draftComments" :key="comment.id" class="comment-item" :class="{ 'is-resolved': comment.status === 'resolved' }">
+                <div class="comment-meta"><strong>{{ comment.author_name || '协作者' }}</strong><span>Version {{ comment.version || draftResult.version }}</span><span v-if="comment.line_start">第 {{ comment.line_start }}{{ comment.line_end && comment.line_end !== comment.line_start ? `-${comment.line_end}` : '' }} 行</span><time>{{ formatDate(comment.created_at) }}</time></div>
+                <p>{{ comment.body }}</p>
+                <button type="button" @click="toggleComment(comment)">{{ comment.status === 'resolved' ? '重新打开' : '标记已处理' }}</button>
+              </article>
+            </div>
+            <p v-else class="app-empty-note">还没有批注。对事实、风险或修改意见留下可追踪的说明。</p>
+          </section>
+        </div>
+      </section>
+
+      <!-- 右栏：文书结构与事实字段（窄屏时排到正文之前） -->
+      <aside class="app-rail draft-form-rail">
+        <section class="app-card">
+          <div class="app-card-head">
+            <h2>文书结构</h2>
+            <span class="app-card-head-meta">{{ currentDraftFields.length }} 个字段</span>
+          </div>
+          <div class="app-card-body draft-form">
+            <label class="draft-field-label">文书类型</label>
+            <el-select v-model="draftForm.document_type" class="draft-type-select" placeholder="选择文书类型">
+              <el-option v-for="template in templates" :key="template.key" :label="template.label" :value="template.key" />
+            </el-select>
+            <div class="draft-field-list">
+              <div v-for="field in currentDraftFields" :key="field" class="draft-field">
+                <label :for="`draft-field-${field}`">{{ field }}<span v-if="isDraftFieldRequired(field)">*</span></label>
+                <el-input :id="`draft-field-${field}`" v-model="draftForm.fields[field]" :placeholder="isDraftFieldRequired(field) ? `请输入${field}` : '可选'" />
+                <small v-if="isDraftFieldRequired(field) && !draftForm.fields[field]">生成后会标记为待补充</small>
+              </div>
+              <p v-if="!currentDraftFields.length" class="app-empty-note">选择文书类型后填写事实字段。</p>
+            </div>
+            <div class="draft-submit">
+              <el-button class="generate-button" type="primary" :loading="draftLoading" @click="submitDraft">生成草稿</el-button>
+              <div v-if="draftLoading" class="staged-hint" aria-live="polite">{{ draftStageText }}</div>
             </div>
           </div>
-          <div v-if="draftComments.length" class="comment-list">
-            <article v-for="comment in draftComments" :key="comment.id" class="comment-item" :class="{ 'is-resolved': comment.status === 'resolved' }">
-              <div class="comment-meta"><strong>{{ comment.author_name || '协作者' }}</strong><span>Version {{ comment.version || draftResult.version }}</span><span v-if="comment.line_start">第 {{ comment.line_start }}{{ comment.line_end && comment.line_end !== comment.line_start ? `-${comment.line_end}` : '' }} 行</span><time>{{ formatDate(comment.created_at) }}</time></div>
-              <p>{{ comment.body }}</p>
-              <button type="button" @click="toggleComment(comment)">{{ comment.status === 'resolved' ? '重新打开' : '标记已处理' }}</button>
-            </article>
-          </div>
-          <p v-else class="draft-muted">还没有批注。对事实、风险或修改意见留下可追踪的说明。</p>
         </section>
-      </section>
-    </section>
+      </aside>
+    </div>
 
-    <details class="draft-history">
-      <summary>文书版本 <span>{{ drafts.length }} 份历史草稿</span></summary>
+    <details class="app-card draft-history">
+      <summary class="app-card-head draft-history-summary">
+        <h2>文书版本</h2>
+        <span class="app-card-head-meta">{{ drafts.length }} 份历史草稿</span>
+      </summary>
       <QueryStateView :status="draftsStatus" :error="draftsError" empty-text="还没有历史文书。" min-height="80px" @retry="loadDrafts">
         <div class="draft-history-list">
           <button v-for="draft in drafts" :key="draft.id" class="draft-history-row" type="button" @click="selectDraft(draft)">
@@ -98,7 +131,9 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
 import { ElButton } from 'element-plus/es/components/button/index'
@@ -115,10 +150,13 @@ import { useLegalDrafts } from '../../composables/useLegalDrafts'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
 import { useStagedProgress } from '../../composables/useStagedProgress'
+import { asReferenceList } from '../../utils/references'
 import QueryStateView from '../QueryStateView.vue'
 import { statusLabel } from '../../composables/useLegalWorkspacePresentation'
 
 const props = defineProps({ caseId: { type: Number, default: null }, downloadText: { type: Function, default: null } })
+const route = useRoute()
+const router = useRouter()
 const DRAFT_REQUIRED_KEYWORDS = ['申请人', '被申请人', '原告', '被告', '姓名', '身份', '金额', '日期', '地址', '请求', '证据', '投诉人', '被投诉']
 const isDraftFieldRequired = (field) => DRAFT_REQUIRED_KEYWORDS.some((keyword) => field.includes(keyword))
 const { loadQuota } = useQuota()
@@ -164,9 +202,15 @@ const lastSavedContent = ref('')
 const lastSavedFields = ref({})
 let autosaveTimer = null
 const draftVersions = computed(() => (draftResult.value?.id ? draftVersionMap.value[draftResult.value.id] || [] : []))
+// 模型产出的 references 可能混入 null/空条目，渲染前统一过滤（否则整块卡片报错）
+const draftReferences = computed(() => asReferenceList(draftResult.value?.references))
 const draftSaveStateLabel = computed(() => ({
   saved: '已保存', dirty: '待保存', saving: '保存中', conflict: '存在冲突', error: '保存失败',
 }[draftSaveState.value] || ''))
+// 方向 B：保存状态并入共享 .app-tag 变体（成功/进行中/异常三档）
+const draftSaveStateTagClass = computed(() => ({
+  saved: 'is-ok', dirty: 'is-pending', saving: 'is-pending', conflict: 'is-danger', error: 'is-danger',
+}[draftSaveState.value] || 'is-pending'))
 const openCommentCount = computed(() => draftComments.value.filter((item) => item.status !== 'resolved').length)
 const fieldsSnapshot = () => JSON.stringify(draftForm.value.fields || {})
 const markSaved = (row) => {
@@ -209,6 +253,13 @@ const scheduleAutosave = () => {
 }
 watch(editableContent, scheduleAutosave)
 watch(() => draftForm.value.fields, scheduleAutosave, { deep: true })
+// 把「当前正在编辑的草稿」写进 URL：右栏助手读 URL 就知道用户在看哪一份，
+// 刷新或直达也能回到同一份（与咨询 tab 的 consultation_id 同一套做法）。
+watch(() => draftResult.value?.id, (id) => {
+  const current = Number(route.query.draft_id) || null
+  if ((id ? Number(id) : null) === current) return
+  router.replace({ query: { ...route.query, draft_id: id ? String(id) : undefined } })
+})
 const submitDraft = async () => {
   await runDraftSubmit()
   if (draftResult.value) {
@@ -368,7 +419,11 @@ const submitDraftFeedback = async (score, note) => {
 }
 const openLatestDraft = async () => {
   await loadDrafts()
-  if (!draftResult.value && drafts.value.length) await selectDraft(drafts.value[0])
+  if (draftResult.value || !drafts.value.length) return
+  // 刷新或带着 draft_id 进来时，回到同一份草稿（右栏助手据此把这份文书交给后端）
+  const requestedId = Number(route.query.draft_id) || null
+  const requested = requestedId ? drafts.value.find((row) => Number(row.id) === requestedId) : null
+  await selectDraft(requested || drafts.value[0])
 }
 onMounted(() => {
   setTemplateFields({
@@ -383,63 +438,78 @@ defineExpose({ prefill(documentType, fields) { if (documentType) draftForm.value
 </script>
 
 <style scoped>
-.draft-workspace { display: grid; gap: 20px; }
-.draft-builder { display: grid; grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr); min-height: 640px; border: 1px solid var(--color-border); background: #fff; }
-.draft-sidebar { display: grid; align-content: start; gap: 10px; padding: 18px 16px; border-right: 1px solid var(--color-border); background: #F8FAFB; }
-.draft-sidebar-heading, .draft-subheading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.draft-sidebar-heading h3, .draft-subheading h3 { margin: 0; font-size: 13px; font-weight: 600; }
-.draft-sidebar-heading span, .draft-subheading span, .draft-version-label { color: var(--color-text-muted); font-size: 11px; }
-.draft-save-state { color: var(--color-text-muted); font-size: 11px; }
-.draft-save-state.is-saving, .draft-save-state.is-dirty { color: var(--color-warning); }
-.draft-save-state.is-conflict, .draft-save-state.is-error { color: var(--color-danger); }
-.draft-collaboration-state { color: var(--color-text-muted); font-size: 11px; }
-.version-note-input { width: 150px; }
-.draft-field-label { margin-top: 6px; color: var(--color-text-secondary); font-size: 11px; }
+.draft-workspace { display: grid; gap: var(--space-4); }
+
+/* 右栏：文书结构（类型 + 事实字段 + 生成） */
+.draft-form-rail { align-content: start; }
+.draft-form { display: grid; gap: var(--space-2); }
+.draft-field-label { color: var(--color-text-secondary); font-size: var(--text-xs); }
 .draft-type-select { width: 100%; }
-.draft-field-list { display: grid; gap: 11px; margin-top: 5px; }
-.draft-field { display: grid; gap: 4px; }
-.draft-field label { color: var(--color-text-secondary); font-size: 12px; }
-.draft-field label span { color: var(--color-danger); }
-.draft-field small { color: var(--color-warning); font-size: 10px; line-height: 1.45; }
-.draft-sidebar-empty, .draft-muted { margin: 4px 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.6; }
-.generate-button { width: 100%; margin-top: 8px; }
-.staged-hint { margin-top: 8px; color: var(--color-text-muted); font-size: 12px; text-align: center; }
-.draft-editor-pane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-width: 0; padding: 18px 22px; }
-.draft-editor-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border-light); }
-.draft-kicker { margin: 0 0 4px; color: var(--color-text-muted); font-size: 11px; }
-.draft-editor-header h2 { overflow: hidden; margin: 0; font-size: 18px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.draft-editor-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.missing-facts { display: flex; flex-wrap: wrap; gap: 6px; padding: 11px 0; color: var(--color-warning); font-size: 11px; }
-.missing-facts span { padding: 2px 6px; border: 1px solid #E9D5B0; border-radius: 3px; background: #FFF9EE; }
-.draft-editor { width: 100%; min-height: 400px; margin-top: 12px; }
-.draft-editor :deep(textarea) { height: 100%; min-height: 390px; padding: 17px 19px; border-color: var(--color-border-light); color: var(--color-text); font-family: var(--font-family); font-size: 14px; line-height: 1.9; resize: vertical; }
-.draft-editor-empty { display: grid; place-items: center; align-content: center; min-height: 440px; color: var(--color-text-muted); font-size: 13px; text-align: center; }
-.draft-editor-empty small { margin-top: 7px; font-size: 11px; }
-.draft-evidence-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border-light); }
-.draft-version-section { display: grid; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border-light); }
-.draft-version-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--color-text-muted); font-size: 11px; }
-.draft-compare-summary { display: flex; flex-wrap: wrap; gap: 12px; color: var(--color-text-muted); font-size: 11px; }
-.draft-comments-section { display: grid; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border-light); }
-.comment-compose { display: grid; gap: 8px; }
-.comment-compose-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--color-text-muted); font-size: 11px; }
-.comment-compose-actions input { width: 62px; padding: 5px 6px; border: 1px solid var(--color-border); border-radius: 3px; color: var(--color-text); font-size: 11px; }
-.comment-list { display: grid; gap: 8px; }
-.comment-item { padding: 10px 11px; border-left: 2px solid var(--color-primary); background: #F8FAFB; }
+.draft-field-list { display: grid; gap: var(--space-3); margin-top: var(--space-1); }
+.draft-field { display: grid; gap: var(--space-1); }
+.draft-field label { color: var(--color-text-secondary); font-size: var(--text-sm); }
+.draft-field label span { margin-left: 2px; color: var(--color-danger); }
+.draft-field small { color: var(--color-warning); font-size: var(--text-xs); line-height: 1.45; }
+.draft-submit { display: grid; gap: var(--space-2); margin-top: var(--space-1); }
+.generate-button { width: 100%; }
+.staged-hint { color: var(--color-text-muted); font-size: var(--text-xs); text-align: center; }
+
+/* 主栏：文书正文与分段 */
+.draft-editor-pane { min-width: 0; }
+.draft-editor-header { flex-wrap: wrap; row-gap: var(--space-2); }
+.draft-editor-title { display: grid; gap: 2px; min-width: 0; }
+.draft-editor-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-editor-sub { color: var(--color-text-muted); font-size: var(--text-xs); }
+.draft-editor-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2); margin-left: auto; }
+.version-note-input { width: 150px; }
+.draft-editor-body { display: grid; gap: var(--space-3); }
+.missing-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--color-warning); font-size: var(--text-xs); }
+.draft-editor { width: 100%; }
+.draft-editor :deep(textarea) { min-height: 390px; padding: 17px 19px; border-color: var(--color-border-light); color: var(--color-text); font-family: var(--font-family); font-size: var(--text-base); line-height: 1.9; resize: vertical; }
+.draft-editor-empty { display: grid; place-items: center; align-content: center; gap: var(--space-2); min-height: 440px; color: var(--color-text-muted); font-size: var(--text-sm); text-align: center; }
+.draft-editor-empty small { font-size: var(--text-xs); }
+
+.draft-section { padding-top: var(--space-4); border-top: 1px solid var(--color-border-light); }
+.draft-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.draft-section-head .app-card-section-title { margin: 0; }
+.draft-section-meta { color: var(--color-text-muted); font-size: var(--text-xs); }
+.draft-version-section { display: grid; gap: var(--space-3); }
+.draft-version-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); color: var(--color-text-muted); font-size: var(--text-xs); }
+.draft-compare-summary { display: flex; flex-wrap: wrap; gap: var(--space-3); color: var(--color-text-muted); font-size: var(--text-xs); }
+.draft-comments-section { display: grid; gap: var(--space-3); }
+.comment-compose { display: grid; gap: var(--space-2); }
+.comment-compose-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--color-text-muted); font-size: var(--text-xs); }
+.comment-compose-actions input { width: 62px; padding: 5px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-xs); background: var(--color-surface); color: var(--color-text); font-family: var(--font-family); font-size: var(--text-xs); }
+.comment-list { display: grid; gap: var(--space-2); }
+.comment-item { padding: 10px 12px; border: 1px solid var(--color-border-light); border-left: 3px solid var(--color-primary); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
 .comment-item.is-resolved { border-left-color: var(--color-border); opacity: .72; }
-.comment-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--color-text-muted); font-size: 10px; }
+.comment-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); color: var(--color-text-muted); font-size: var(--text-xs); }
 .comment-meta strong { color: var(--color-text); font-weight: 600; }
 .comment-meta time { margin-left: auto; }
-.comment-item p { margin: 6px 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
-.comment-item > button { padding: 0; border: 0; background: transparent; color: var(--color-primary); font-size: 11px; cursor: pointer; }
-.draft-history { border-top: 1px solid var(--color-border); }
-.draft-history > summary { padding: 13px 2px; color: var(--color-text); font-size: 13px; font-weight: 550; cursor: pointer; list-style-position: inside; }
-.draft-history > summary span { margin-left: 8px; color: var(--color-text-muted); font-size: 11px; font-weight: 400; }
+.comment-item p { margin: 6px 0; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.6; white-space: pre-wrap; }
+.comment-item > button { padding: 0; border: 0; background: transparent; color: var(--color-primary); font-family: var(--font-family); font-size: var(--text-xs); cursor: pointer; }
+
+/* 历史草稿：可折叠卡片（summary 复用卡片头版式） */
+.draft-history { overflow: hidden; }
+.draft-history-summary { border-bottom-color: transparent; cursor: pointer; user-select: none; }
+.draft-history-summary::after { content: '展开'; margin-left: var(--space-2); color: var(--color-text-muted); font-size: var(--text-xs); font-weight: 500; }
+.draft-history[open] .draft-history-summary { border-bottom-color: var(--color-border-light); }
+.draft-history[open] .draft-history-summary::after { content: '收起'; }
 .draft-history-list { display: grid; }
-.draft-history-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 90px; align-items: center; gap: 14px; min-height: 48px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; color: var(--color-text-secondary); text-align: left; cursor: pointer; }
-.draft-history-row:hover { background: #F8FAFB; }
+.draft-history-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 90px; align-items: center; gap: var(--space-3); min-height: 48px; padding: var(--space-2) 0; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; color: var(--color-text-secondary); font-family: var(--font-family); text-align: left; cursor: pointer; }
+.draft-history-row:hover { background: var(--color-surface-hover); }
 .draft-history-row > span:first-child { display: grid; gap: 3px; }
-.draft-history-row strong { color: var(--color-text); font-size: 12px; font-weight: 550; }
-.draft-history-row small, .draft-history-row span:nth-child(2), .draft-history-row em { color: var(--color-text-muted); font-size: 11px; font-style: normal; }
-@media (max-width: 820px) { .draft-builder { grid-template-columns: minmax(0,1fr); } .draft-sidebar { border-right: 0; border-bottom: 1px solid var(--color-border); } .draft-editor-pane { min-height: 600px; padding: 16px; } }
-@media (max-width: 540px) { .draft-editor-header { flex-direction: column; } .draft-editor-actions { justify-content: flex-start; } .draft-history-row { grid-template-columns: minmax(0,1fr) auto; } .draft-history-row em { grid-column: 2; } .version-note-input { width: 100%; } .comment-meta time { margin-left: 0; } }
+.draft-history-row strong { color: var(--color-text); font-size: var(--text-sm); font-weight: 600; }
+.draft-history-row small, .draft-history-row span:nth-child(2), .draft-history-row em { color: var(--color-text-muted); font-size: var(--text-xs); font-style: normal; }
+
+@media (max-width: 1100px) {
+  .draft-form-rail { order: -1; }
+}
+@media (max-width: 540px) {
+  .draft-editor-actions { justify-content: flex-start; margin-left: 0; }
+  .draft-history-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .draft-history-row em { grid-column: 2; }
+  .version-note-input { width: 100%; }
+  .comment-meta time { margin-left: 0; }
+}
 </style>

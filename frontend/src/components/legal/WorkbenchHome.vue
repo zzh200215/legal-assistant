@@ -1,76 +1,128 @@
 <template>
   <section class="workbench-home">
-    <header class="workbench-heading">
-      <div>
-        <p class="workbench-kicker">法律工作台</p>
-        <h1>今天先处理什么？</h1>
-        <p class="workbench-subtitle">从待审核事项、最近案件和关键动作继续工作。</p>
+    <!-- 方向 B 页头：28px 标题 + 说明，动作区右对齐（替代原“双 h1 + 下划线”版式） -->
+    <header class="app-page-head">
+      <div class="app-page-head-main">
+        <h1 class="app-page-title">今天先处理什么？</h1>
+        <p class="app-page-sub">从待审核事项、最近案件和关键动作继续工作。</p>
       </div>
-      <button type="button" class="workspace-primary" :disabled="orgMissing" :title="orgMissing ? '你还未加入组织，暂无法创建案件' : undefined" @click="$emit('create-case')">新建案件</button>
+      <div class="app-page-head-actions">
+        <button type="button" class="workspace-primary" :disabled="orgMissing" :title="orgMissing ? '你还未加入组织，暂无法创建案件' : undefined" @click="$emit('create-case')">新建案件</button>
+      </div>
     </header>
 
-    <div v-if="orgMissing" class="workbench-org-alert" role="alert">
+    <div v-if="orgMissing" class="workbench-alert is-warning" role="alert">
       <strong>你还未加入任何组织</strong>
       <p>案件、咨询与文书都以组织为单位工作，暂时无法创建内容。请联系系统管理员将你加入组织（或为你创建组织）后刷新本页。</p>
     </div>
 
-    <div v-if="!authStore.currentUser?.onboarded_at" class="workbench-org-alert">
-      <strong>刚开始使用？完成三步上手</strong>
-      <p>选择你的角色，按引导创建第一个案件。<button type="button" class="text-action" @click="router.push('/legal-onboarding')">开始使用引导</button></p>
-    </div>
-
-    <section class="workbench-summary" aria-label="工作台摘要">
-      <div><span>进行中案件</span><strong>{{ activeCaseCount }}</strong><button type="button" @click="$emit('open-cases')">查看案件</button></div>
-      <div><span>待审核</span><strong>{{ reviewItems.length }}</strong><button type="button" @click="$emit('open-review')">打开审核</button></div>
-      <div><span>法律咨询</span><strong>{{ overview?.counts?.consultations || 0 }}</strong><small>已归档咨询</small></div>
-      <div><span>合同审查</span><strong>{{ overview?.counts?.contract_reviews || 0 }}</strong><small>已归档审查</small></div>
-    </section>
-
-    <div class="workbench-grid">
-      <section class="workbench-section workbench-review">
-        <div class="workbench-section-head"><div><h2>待处理审核</h2><p>需要律师作出决定的工作项</p></div><button type="button" @click="$emit('open-review')">查看全部</button></div>
-        <!-- 三态区分（ux-audit P1-3/M-13）：加载失败不再是"空数据"假象 -->
-        <QueryStateView :status="reviewStatus" :error="reviewError" min-height="0px" @retry="loadReviewItems">
-          <template #empty><div class="workbench-empty">当前没有待审核事项。</div></template>
-          <div class="workbench-list">
-            <button v-for="item in reviewItems.slice(0, 6)" :key="`${item.target_type}-${item.id}`" type="button" class="review-row" @click="$emit('open-review')">
-              <span class="review-type">{{ reviewTypeLabel(item.target_type) }}</span>
-              <span class="review-main"><strong>{{ item.title || item.question || '待审核记录' }}</strong><small>{{ item.case_title || '未关联案件' }} · {{ statusLabel(item.status) }}</small></span>
-              <span class="review-date">{{ formatDate(item.created_at) }}</span>
-            </button>
-          </div>
-        </QueryStateView>
-      </section>
-
-      <section class="workbench-section workbench-cases">
-        <div class="workbench-section-head"><div><h2>最近案件</h2><p>按最近更新排列</p></div><button type="button" @click="$emit('open-cases')">全部案件</button></div>
-        <QueryStateView :status="casesStatus" :error="casesError" min-height="0px" @retry="$emit('retry-cases')">
-          <template #empty>
-            <div class="workbench-empty">
-              还没有案件，先创建一个案件开始归档工作。
-              <button type="button" class="workspace-primary empty-cta" :disabled="orgMissing" @click="$emit('create-case')">新建案件</button>
-            </div>
-          </template>
-          <div class="workbench-list">
-            <button v-for="matter in recentCases" :key="matter.id" type="button" class="case-row" @click="$emit('open-case', matter)">
-              <span class="case-status-mark" :class="`status-${matter.status}`"></span>
-              <span class="case-main"><strong>{{ matter.title }}</strong><small>{{ matter.client_name || '未登记客户' }} · {{ caseStatusLabel(matter.status) }}</small></span>
-              <span class="case-count">{{ caseRecordCount(matter) }} 项</span>
-            </button>
-          </div>
-        </QueryStateView>
-      </section>
-    </div>
-
-    <section class="workbench-actions">
-      <div class="workbench-section-head"><div><h2>常用入口</h2><p>直接进入下一项法律工作</p></div></div>
-      <div class="action-list">
-        <button type="button" @click="$emit('open-documents')"><strong>文档</strong><span>查看合同、证据和案件材料</span></button>
-        <button type="button" @click="$emit('open-research')"><strong>法律研究</strong><span>查找法规、案例和业务模板</span></button>
-        <button type="button" @click="$emit('open-tasks')"><strong>任务</strong><span>跟进案件协作和处理进度</span></button>
-        <button type="button" @click="$emit('open-chat')"><strong>案件助手</strong><span>基于案件资料继续提问</span></button>
+    <!-- 四项摘要通栏铺开：主栏只有 ~420px，塞进两栏里会把 small 文案挤断 -->
+    <div class="app-metric-grid-4">
+      <div class="app-stat">
+        <span class="app-stat-label">进行中案件</span>
+        <div class="app-stat-value">{{ activeCaseCount }}<small>共 {{ cases.length }} 件</small></div>
       </div>
-    </section>
+      <div class="app-stat">
+        <span class="app-stat-label">待审核</span>
+        <div class="app-stat-value">{{ reviewItems.length }}<small>项待决定</small></div>
+      </div>
+      <div class="app-stat">
+        <span class="app-stat-label">法律咨询</span>
+        <div class="app-stat-value">{{ overview?.counts?.consultations || 0 }}<small>已归档</small></div>
+      </div>
+      <div class="app-stat">
+        <span class="app-stat-label">合同审查</span>
+        <div class="app-stat-value">{{ overview?.counts?.contract_reviews || 0 }}<small>已归档</small></div>
+      </div>
+    </div>
+
+    <div class="app-workspace-body">
+      <div class="workbench-main">
+        <section class="app-card workbench-review">
+          <div class="app-card-head">
+            <span>待处理审核</span>
+            <span class="app-card-head-meta">{{ reviewLoading ? '加载中' : `${reviewItems.length} 项待决定` }}</span>
+            <button type="button" class="card-action" @click="$emit('open-review')">查看全部</button>
+          </div>
+          <div class="app-card-body">
+            <!-- 三态区分（ux-audit P1-3/M-13）：加载失败不再是"空数据"假象 -->
+            <QueryStateView :status="reviewStatus" :error="reviewError" min-height="0px" @retry="loadReviewItems">
+              <template #empty><p class="workbench-empty">当前没有待审核事项。</p></template>
+              <div class="thread-stack">
+                <button v-for="item in reviewItems.slice(0, 6)" :key="`${item.target_type}-${item.id}`" type="button" class="app-thread" @click="$emit('open-review')">
+                  <span class="app-thread-title">{{ item.title || item.question || '待审核记录' }}</span>
+                  <span class="app-thread-meta">
+                    <span class="app-tag is-info">{{ reviewTypeLabel(item.target_type) }}</span>
+                    <span class="thread-snippet">{{ item.case_title || '未关联案件' }} · {{ statusLabel(item.status) }}</span>
+                    <span class="thread-time">{{ formatDate(item.created_at) }}</span>
+                  </span>
+                </button>
+              </div>
+            </QueryStateView>
+          </div>
+        </section>
+
+        <section class="app-card workbench-cases">
+          <div class="app-card-head">
+            <span>最近案件</span>
+            <span class="app-card-head-meta">{{ casesLoading ? '加载中' : `${recentCases.length} 个` }}</span>
+            <button type="button" class="card-action" @click="$emit('open-cases')">全部案件</button>
+          </div>
+          <div class="app-card-body">
+            <QueryStateView :status="casesStatus" :error="casesError" min-height="0px" @retry="$emit('retry-cases')">
+              <template #empty>
+                <div class="workbench-empty">
+                  <p>还没有案件，先创建一个案件开始归档工作。</p>
+                  <button type="button" class="workspace-primary is-compact" :disabled="orgMissing" @click="$emit('create-case')">新建案件</button>
+                </div>
+              </template>
+              <div class="thread-stack">
+                <button v-for="matter in recentCases" :key="matter.id" type="button" class="app-thread" @click="$emit('open-case', matter)">
+                  <span class="app-thread-title">{{ matter.title }}</span>
+                  <span class="app-thread-meta">
+                    <span class="app-tag" :class="caseStatusClass(matter.status)">{{ caseStatusLabel(matter.status) }}</span>
+                    <span class="thread-snippet">{{ matter.client_name || '未登记客户' }} · {{ caseRecordCount(matter) }} 项工作</span>
+                    <span class="thread-time">{{ formatDate(matter.updated_at) }}</span>
+                  </span>
+                </button>
+              </div>
+            </QueryStateView>
+          </div>
+        </section>
+      </div>
+
+      <aside class="app-rail">
+        <section class="app-card">
+          <div class="app-card-head"><span>常用入口</span></div>
+          <div class="app-card-body rail-actions">
+            <button type="button" class="app-thread" @click="$emit('open-documents')">
+              <span class="app-thread-title">文档</span>
+              <span class="app-thread-meta">查看合同、证据和案件材料</span>
+            </button>
+            <button type="button" class="app-thread" @click="$emit('open-research')">
+              <span class="app-thread-title">法律研究</span>
+              <span class="app-thread-meta">查找法规、案例和业务模板</span>
+            </button>
+            <button type="button" class="app-thread" @click="$emit('open-tasks')">
+              <span class="app-thread-title">任务</span>
+              <span class="app-thread-meta">跟进案件协作和处理进度</span>
+            </button>
+            <button type="button" class="app-thread" @click="$emit('open-chat')">
+              <span class="app-thread-title">案件助手</span>
+              <span class="app-thread-meta">基于案件资料继续提问</span>
+            </button>
+          </div>
+        </section>
+
+        <section v-if="!authStore.currentUser?.onboarded_at" class="app-card">
+          <div class="app-card-head"><span>刚开始使用？完成三步上手</span></div>
+          <div class="app-card-body">
+            <p class="rail-note">选择你的角色，按引导创建第一个案件。</p>
+            <button type="button" class="card-action" @click="router.push('/legal-onboarding')">开始使用引导</button>
+          </div>
+        </section>
+      </aside>
+    </div>
   </section>
 </template>
 
@@ -101,6 +153,8 @@ const recentCases = computed(() => [...props.cases].sort((a, b) => String(b.upda
 const reviewTypeLabel = (type) => ({ consultation: '咨询', contract_review: '审查', draft: '文书' }[type] || '审核')
 const statusLabel = (status) => ({ pending_review: '待审核', needs_lawyer_review: '需律师审核', needs_facts: '待补充事实' }[status] || status || '处理中')
 const caseStatusLabel = (status) => ({ in_progress: '进行中', closed: '已结案', archived: '已归档' }[status] || status || '处理中')
+// 标签配色：只有“进行中”用强调色，其余保持中性，避免一屏彩色标签
+const caseStatusClass = (status) => (status === 'in_progress' ? 'is-accent' : '')
 const caseRecordCount = (matter) => (matter.item_counts?.consultations || 0) + (matter.item_counts?.reviews || 0) + (matter.item_counts?.drafts || 0)
 const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '时间未记录'
 
@@ -136,52 +190,35 @@ onMounted(loadReviewItems)
 </script>
 
 <style scoped>
-.workbench-home { display: grid; gap: 28px; padding: 8px 0 36px; }
-.workbench-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--color-border); }
-.workbench-org-alert { display: grid; gap: 6px; margin-top: 20px; padding: 14px 16px; border: 1px solid var(--color-border); border-left: 3px solid var(--color-primary); border-radius: 6px; background: #F7FAFC; }
-.workbench-org-alert strong { color: var(--color-text); font-size: 13px; font-weight: 600; }
-.workbench-org-alert p { margin: 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.7; }
-.workbench-org-alert .text-action { border: 0; background: transparent; padding: 0; color: var(--color-primary); font: inherit; font-size: 12px; cursor: pointer; }
-.workbench-org-alert .text-action:hover { text-decoration: underline; }
-.workbench-kicker { margin: 0 0 7px; color: var(--color-primary); font-size: 12px; font-weight: 600; }
-.workbench-heading h1 { margin: 0; color: var(--color-text); font-size: clamp(26px, 3vw, 36px); font-weight: 620; letter-spacing: 0; }
-.workbench-subtitle { margin: 8px 0 0; color: var(--color-text-secondary); font-size: 14px; }
-.workbench-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--color-border); }
-.workbench-summary > div { display: grid; gap: 5px; min-height: 96px; padding: 0 22px 18px 0; border-right: 1px solid var(--color-border-light); }
-.workbench-summary > div + div { padding-left: 22px; }
-.workbench-summary > div:last-child { border-right: 0; }
-.workbench-summary span, .workbench-summary small { color: var(--color-text-muted); font-size: 12px; }
-.workbench-summary strong { color: var(--color-text); font-size: 26px; line-height: 1; font-weight: 620; }
-.workbench-summary button { width: max-content; padding: 0; border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: 12px; cursor: pointer; }
-.workbench-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 38px; }
-.workbench-section, .workbench-actions { min-width: 0; }
-.workbench-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--color-border); }
-.workbench-section-head h2 { margin: 0; color: var(--color-text); font-size: 16px; font-weight: 620; }
-.workbench-section-head p { margin: 4px 0 0; color: var(--color-text-muted); font-size: 12px; }
-.workbench-section-head > button { flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: 12px; cursor: pointer; }
-.workbench-list { display: grid; }
-.review-row, .case-row { display: grid; align-items: center; width: 100%; min-height: 62px; padding: 11px 4px; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }
-.review-row { grid-template-columns: 52px minmax(0, 1fr) auto; gap: 12px; }
-.case-row { grid-template-columns: 8px minmax(0, 1fr) auto; gap: 12px; }
-.review-row:hover, .case-row:hover, .action-list button:hover { background: #F8FAFB; }
-.review-type, .review-date, .case-count { color: var(--color-text-muted); font-size: 11px; }
-.review-main, .case-main { display: grid; gap: 4px; min-width: 0; }
-.review-main strong, .case-main strong { overflow: hidden; color: var(--color-text); font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.review-main small, .case-main small { color: var(--color-text-muted); font-size: 11px; }
-.case-status-mark { width: 6px; height: 30px; background: var(--color-border); }
-.case-status-mark.status-in_progress { background: var(--color-primary); }
-.case-status-mark.status-closed { background: #78A889; }
-.case-status-mark.status-archived { background: #A6AFB8; }
-.workbench-empty { padding: 28px 4px; color: var(--color-text-muted); font-size: 13px; }
-.workbench-empty .empty-cta { margin-top: 12px; font-size: 13px; padding: 8px 18px; border-radius: 6px; border: 0; background: var(--color-primary); color: #fff; cursor: pointer; }
-.workbench-empty .empty-cta:disabled { background: var(--color-border); color: var(--color-text-muted); cursor: not-allowed; }
-.workbench-empty .empty-cta:hover { background: var(--color-primary-hover); }
-.workbench-actions { padding-top: 8px; }
-.action-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.action-list button { display: grid; gap: 7px; min-height: 92px; padding: 16px 18px 16px 0; border: 0; border-bottom: 1px solid var(--color-border-light); background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }
-.action-list button + button { padding-left: 18px; border-left: 1px solid var(--color-border-light); }
-.action-list strong { font-size: 14px; font-weight: 600; }
-.action-list span { color: var(--color-text-muted); font-size: 12px; line-height: 1.5; }
-@media (max-width: 900px) { .workbench-grid { grid-template-columns: 1fr; gap: 28px; } .action-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action-list button:nth-child(3) { padding-left: 0; border-left: 0; } }
-@media (max-width: 640px) { .workbench-heading { align-items: flex-start; flex-direction: column; } .workbench-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 0; } .workbench-summary > div:nth-child(2) { border-right: 0; } .workbench-summary > div:nth-child(3) { padding-left: 0; } .review-row { grid-template-columns: 44px minmax(0, 1fr); } .review-date { grid-column: 2; } .action-list { grid-template-columns: 1fr; } .action-list button + button { padding-left: 0; border-left: 0; } }
+/* 版式骨架全部取自 design-tokens.css 的 .app-* 类；这里只补页面级排布与动作样式，颜色/间距/圆角一律走令牌 */
+.workbench-home { display: grid; gap: var(--space-6); padding-bottom: var(--space-10); }
+.workbench-main { display: grid; gap: var(--space-4); min-width: 0; }
+.workbench-alert { display: grid; gap: 6px; padding: var(--space-4) var(--space-5); border: 1px solid var(--color-border); border-left: 3px solid var(--color-primary); border-radius: var(--radius-lg); background: var(--color-surface); }
+.workbench-alert strong { color: var(--color-text); font-size: var(--text-base); font-weight: 600; }
+.workbench-alert p { margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.7; }
+.workbench-alert.is-warning { border-color: var(--color-warning-light); border-left-color: var(--color-warning); background: var(--color-warning-light); }
+
+/* 主按钮 .workspace-primary 已在 design-tokens.css 里统一（全局类，本组件直接用） */
+
+/* 卡片头右侧的文字动作（查看全部 / 全部案件） */
+.card-action { flex: 0 0 auto; border: 0; padding: 0; background: none; color: var(--color-primary); font: inherit; font-size: var(--text-xs); font-weight: 600; cursor: pointer; }
+.card-action:hover { color: var(--color-primary-hover); text-decoration: underline; }
+
+/* 列表：卡片内可点击行，标题 + 元信息，与预览 .thread-item 同构 */
+.thread-stack { display: grid; gap: var(--space-2); }
+.thread-snippet { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-time { margin-left: auto; flex: 0 0 auto; color: var(--color-text-muted); font-size: var(--text-xs); }
+
+/* 三态空态：文案 + 可执行动作 */
+.workbench-empty { display: grid; gap: var(--space-3); justify-items: start; margin: 0; padding: var(--space-2) 0; color: var(--color-text-muted); font-size: var(--text-sm); line-height: 1.7; }
+.workbench-empty p { margin: 0; }
+
+/* 右栏：常用入口 + 上手引导 */
+.rail-actions { display: grid; gap: var(--space-2); }
+.rail-note { margin: 0 0 var(--space-3); color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.7; }
+
+@media (max-width: 640px) {
+  .app-page-head-actions { width: 100%; margin-left: 0; }
+  .app-page-head-actions .workspace-primary { width: 100%; }
+}
 </style>

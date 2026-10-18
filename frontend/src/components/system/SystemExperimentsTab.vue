@@ -1,11 +1,9 @@
 <template>
   <template v-if="!isAdmin">
-    <el-card class="system-panel-card">
-      <div class="app-readonly-banner">
-        <strong>仅管理员可见</strong>
-        <span>实验观测面板包含 Prompt 灰度与评测数据，当前账号无权限查看。</span>
-      </div>
-    </el-card>
+    <div class="app-readonly-banner system-panel-card">
+      <strong>仅管理员可见</strong>
+      <span>实验观测面板包含 Prompt 灰度与评测数据，当前账号无权限查看。</span>
+    </div>
   </template>
   <template v-else>
     <div class="app-section-intro tab-intro">
@@ -13,139 +11,144 @@
       <span>评估 Prompt 版本效果、流量覆盖情况和基线回退风险。</span>
     </div>
 
-    <el-card class="system-panel-card">
-      <div class="app-toolbar">
-        <span>流量窗口：</span>
-        <el-radio-group v-model="experimentDays" @change="fetchExperimentOverview">
-          <el-radio-button :value="7">近 7 天</el-radio-button>
-          <el-radio-button :value="30">近 30 天</el-radio-button>
-          <el-radio-button :value="90">近 90 天</el-radio-button>
-        </el-radio-group>
-        <div class="app-toolbar-right">
-          <el-button :loading="experimentLoading" @click="fetchExperimentOverview">刷新</el-button>
+    <section class="app-card system-panel-card">
+      <div class="app-card-body">
+        <div class="app-filter-bar">
+          <span class="app-filter-label">流量窗口：</span>
+          <el-radio-group v-model="experimentDays" @change="fetchExperimentOverview">
+            <el-radio-button :value="7">近 7 天</el-radio-button>
+            <el-radio-button :value="30">近 30 天</el-radio-button>
+            <el-radio-button :value="90">近 90 天</el-radio-button>
+          </el-radio-group>
+          <div class="app-filter-bar-actions">
+            <el-button :loading="experimentLoading" @click="fetchExperimentOverview">刷新</el-button>
+          </div>
         </div>
       </div>
-    </el-card>
+    </section>
 
-    <el-row :gutter="16" style="margin-bottom: 16px">
-      <el-col :span="6">
-        <el-card shadow="hover">
-          <el-statistic title="评测样本数" :value="experimentSummary.dataset_size || 0" />
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
-          <el-statistic title="实验数量" :value="experimentSummary.experiment_count || 0" />
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
-          <el-statistic title="回退风险实验" :value="experimentSummary.degraded_experiment_count || 0" />
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover">
-          <el-statistic title="灰度中的 Prompt" :value="rolloutSummary.active_rollout_count || 0" />
-        </el-card>
-      </el-col>
-    </el-row>
+    <div class="app-metric-grid-4 experiment-metric-grid">
+      <div class="app-stat">
+        <span class="app-stat-label">评测样本数</span>
+        <strong class="app-stat-value">{{ experimentSummary.dataset_size || 0 }}</strong>
+      </div>
+      <div class="app-stat">
+        <span class="app-stat-label">实验数量</span>
+        <strong class="app-stat-value">{{ experimentSummary.experiment_count || 0 }}</strong>
+      </div>
+      <div class="app-stat">
+        <span class="app-stat-label">回退风险实验</span>
+        <strong class="app-stat-value">{{ experimentSummary.degraded_experiment_count || 0 }}</strong>
+      </div>
+      <div class="app-stat">
+        <span class="app-stat-label">灰度中的 Prompt</span>
+        <strong class="app-stat-value">{{ rolloutSummary.active_rollout_count || 0 }}</strong>
+      </div>
+    </div>
 
-    <el-card style="margin-bottom: 16px">
-      <template #header>评测产物状态</template>
-      <el-descriptions :column="4" border>
-        <el-descriptions-item label="输出目录">{{ experimentArtifacts.output_dir || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Baseline">{{ experimentSummary.baseline_experiment || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Bundle">{{ experimentSummary.bundle_meta?.bundle_name || '默认样例集' }}</el-descriptions-item>
-        <el-descriptions-item label="Summary 产物">{{ experimentArtifacts.summary?.exists ? '已生成' : '未生成' }}</el-descriptions-item>
-        <el-descriptions-item label="Summary 更新时间">{{ experimentArtifacts.summary?.updated_at || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="Baseline 快照">{{ experimentArtifacts.baseline_snapshot?.exists ? '已生成' : '未生成' }}</el-descriptions-item>
-        <el-descriptions-item label="快照更新时间">{{ experimentArtifacts.baseline_snapshot?.updated_at || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="当前基线 Citation">{{ formatRate(experimentSummary.baseline_snapshot?.summary?.citation_accuracy) }}</el-descriptions-item>
-      </el-descriptions>
-    </el-card>
+    <section class="app-card system-panel-card">
+      <div class="app-card-head">
+        <h2>评测产物状态</h2>
+        <span class="app-card-head-meta">共 {{ experimentArtifactRows.length }} 项</span>
+      </div>
+      <div class="app-card-body">
+        <div class="app-metric-grid-4 artifact-grid">
+          <div v-for="item in experimentArtifactRows" :key="item.key" class="app-stat">
+            <span class="app-stat-label">{{ item.label }}</span>
+            <span class="app-stat-value" :class="{ 'app-num': item.mono }">
+              <span v-if="item.tagged" class="app-tag" :class="item.ok ? 'is-ok' : 'is-pending'">{{ item.text }}</span>
+              <template v-else>{{ item.text }}</template>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
 
-    <el-row :gutter="16" style="margin-bottom: 16px">
-      <el-col :span="15">
-        <el-card>
-          <template #header>实验结果</template>
-          <QueryStateView :status="experimentStatus" :error="experimentError" empty-text="暂无实验" min-height="200px" @retry="fetchExperimentOverview">
-          <el-table :data="experimentRows" v-loading="experimentLoading" border size="small" max-height="420">
-            <el-table-column prop="name" label="实验" width="150" show-overflow-tooltip />
-            <el-table-column prop="prompt_label" label="Prompt" width="140" show-overflow-tooltip />
-            <el-table-column prop="top_k" label="TopK" width="70" />
-            <el-table-column prop="citation_accuracy_text" label="Citation" width="100" />
-            <el-table-column prop="hit_at_k_text" label="Hit@K" width="90" />
-            <el-table-column prop="refusal_accuracy_text" label="Refusal" width="90" />
-            <el-table-column prop="badcase_count" label="Badcase" width="90" />
-            <el-table-column label="对基线">
-              <template #default="{ row }">
-                <el-tag v-if="row.regression_metrics?.length" type="danger" size="small">
-                  {{ row.regression_metrics.join(', ') }}
-                </el-tag>
-                <span v-else style="color: var(--color-success)">无回退</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="配置漂移" width="90">
-              <template #default="{ row }">{{ row.config_drift_count }}</template>
-            </el-table-column>
-          </el-table>
-          </QueryStateView>
-        </el-card>
-      </el-col>
-      <el-col :span="9">
-        <el-card>
-          <template #header>灰度发布</template>
-          <el-table :data="rolloutRows" v-loading="experimentLoading" border size="small" max-height="420">
+    <section class="app-card system-panel-card">
+      <div class="app-card-head">
+        <h2>实验结果</h2>
+        <span class="app-card-head-meta">共 {{ experimentRows.length }} 个实验 · 近 {{ experimentDays }} 天</span>
+      </div>
+      <div class="app-card-body">
+        <QueryStateView :status="experimentStatus" :error="experimentError" empty-text="暂无实验" min-height="200px" @retry="fetchExperimentOverview">
+          <div class="app-table-wrap">
+            <el-table v-loading="experimentLoading" :data="experimentRows" border size="small" max-height="420">
+              <el-table-column prop="name" label="实验" width="150" show-overflow-tooltip />
+              <el-table-column prop="prompt_label" label="Prompt" width="140" show-overflow-tooltip />
+              <el-table-column prop="top_k" label="TopK" width="70" class-name="app-num" />
+              <el-table-column prop="citation_accuracy_text" label="Citation" width="100" class-name="app-num" />
+              <el-table-column prop="hit_at_k_text" label="Hit@K" width="90" class-name="app-num" />
+              <el-table-column prop="refusal_accuracy_text" label="Refusal" width="90" class-name="app-num" />
+              <el-table-column prop="badcase_count" label="Badcase" width="90" class-name="app-num" />
+              <el-table-column label="对基线">
+                <template #default="{ row }">
+                  <span v-if="row.regression_metrics?.length" class="app-tag is-danger">{{ row.regression_metrics.join(', ') }}</span>
+                  <span v-else class="app-tag is-ok">无回退</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="配置漂移" width="90">
+                <template #default="{ row }"><span class="app-num">{{ row.config_drift_count }}</span></template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </QueryStateView>
+      </div>
+    </section>
+
+    <section class="app-card system-panel-card">
+      <div class="app-card-head">
+        <h2>灰度发布</h2>
+        <span class="app-card-head-meta">共 {{ rolloutRows.length }} 个模板</span>
+      </div>
+      <div class="app-card-body is-flush">
+        <div class="app-table-wrap">
+          <el-table v-loading="experimentLoading" :data="rolloutRows" border size="small" max-height="420">
             <el-table-column prop="name" label="模板" min-width="150" show-overflow-tooltip />
-            <el-table-column prop="stable_version" label="稳定版" width="80" />
-            <el-table-column prop="rollout_version" label="灰度版" width="80" />
-            <el-table-column prop="percentage_text" label="比例" width="80" />
+            <el-table-column prop="stable_version" label="稳定版" width="80" class-name="app-num" />
+            <el-table-column prop="rollout_version" label="灰度版" width="80" class-name="app-num" />
+            <el-table-column prop="percentage_text" label="比例" width="80" class-name="app-num" />
             <el-table-column prop="started_at" label="开始时间" width="180" />
           </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
+        </div>
+      </div>
+    </section>
 
-    <el-card>
-      <template #header>Prompt 实际流量覆盖</template>
-      <el-table :data="promptTrafficRows" v-loading="experimentLoading" border size="small" max-height="420">
-        <el-table-column prop="prompt_template" label="Prompt" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="prompt_version" label="版本" width="80">
-          <template #default="{ row }">v{{ row.prompt_version }}</template>
-        </el-table-column>
-        <el-table-column prop="calls" label="调用数" width="90" />
-        <el-table-column prop="failed_calls" label="失败数" width="90" />
-        <el-table-column prop="success_rate_text" label="成功率" width="90" />
-        <el-table-column prop="last_called_at" label="最近命中" width="180" />
-      </el-table>
-    </el-card>
+    <section class="app-card system-panel-card">
+      <div class="app-card-head">
+        <h2>Prompt 实际流量覆盖</h2>
+        <span class="app-card-head-meta">共 {{ promptTrafficRows.length }} 个 Prompt</span>
+      </div>
+      <div class="app-card-body is-flush">
+        <div class="app-table-wrap">
+          <el-table v-loading="experimentLoading" :data="promptTrafficRows" border size="small" max-height="420">
+            <el-table-column prop="prompt_template" label="Prompt" min-width="160" show-overflow-tooltip />
+            <el-table-column prop="prompt_version" label="版本" width="80">
+              <template #default="{ row }"><span class="app-num">v{{ row.prompt_version }}</span></template>
+            </el-table-column>
+            <el-table-column prop="calls" label="调用数" width="90" class-name="app-num" />
+            <el-table-column prop="failed_calls" label="失败数" width="90" class-name="app-num" />
+            <el-table-column prop="success_rate_text" label="成功率" width="90" class-name="app-num" />
+            <el-table-column prop="last_called_at" label="最近命中" width="180" />
+          </el-table>
+        </div>
+      </div>
+    </section>
   </template>
 </template>
 
 <script setup>
 import { computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElButton } from 'element-plus/es/components/button/index'
-import { ElCard } from 'element-plus/es/components/card/index'
-import { ElCol } from 'element-plus/es/components/col/index'
-import { ElDescriptions, ElDescriptionsItem } from 'element-plus/es/components/descriptions/index'
 import { ElRadioButton, ElRadioGroup } from 'element-plus/es/components/radio/index'
-import { ElRow } from 'element-plus/es/components/row/index'
-import { ElStatistic } from 'element-plus/es/components/statistic/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
-import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/button/style/css'
-import 'element-plus/es/components/card/style/css'
-import 'element-plus/es/components/col/style/css'
-import 'element-plus/es/components/descriptions/style/css'
-import 'element-plus/es/components/descriptions-item/style/css'
+import 'element-plus/es/components/radio/style/css'
 import 'element-plus/es/components/radio-button/style/css'
 import 'element-plus/es/components/radio-group/style/css'
-import 'element-plus/es/components/row/style/css'
-import 'element-plus/es/components/statistic/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
-import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemObservability } from '../../composables/useSystemObservability'
 import { useAuthStore } from '../../stores/auth'
@@ -203,6 +206,22 @@ const promptTrafficRows = computed(() => {
   }))
 })
 
+// 评测产物状态：等价替代原 el-descriptions（8 项，标签与取值口径不变）
+const experimentArtifactRows = computed(() => {
+  const artifacts = experimentArtifacts.value
+  const summary = experimentSummary.value
+  return [
+    { key: 'output_dir', label: '输出目录', text: artifacts.output_dir || '-', mono: true },
+    { key: 'baseline', label: 'Baseline', text: summary.baseline_experiment || '-' },
+    { key: 'bundle', label: 'Bundle', text: summary.bundle_meta?.bundle_name || '默认样例集' },
+    { key: 'summary', label: 'Summary 产物', text: artifacts.summary?.exists ? '已生成' : '未生成', tagged: true, ok: Boolean(artifacts.summary?.exists) },
+    { key: 'summary_updated_at', label: 'Summary 更新时间', text: artifacts.summary?.updated_at || '-', mono: true },
+    { key: 'baseline_snapshot', label: 'Baseline 快照', text: artifacts.baseline_snapshot?.exists ? '已生成' : '未生成', tagged: true, ok: Boolean(artifacts.baseline_snapshot?.exists) },
+    { key: 'snapshot_updated_at', label: '快照更新时间', text: artifacts.baseline_snapshot?.updated_at || '-', mono: true },
+    { key: 'baseline_citation', label: '当前基线 Citation', text: formatRate(summary.baseline_snapshot?.summary?.citation_accuracy), mono: true },
+  ]
+})
+
 // 三态（ux-audit M-13）：仅包裹主结果表 experimentRows；多表共用一次 fetch，保留原有 message.error 以覆盖其它表
 const experimentStatus = computed(() => {
   if (experimentLoading.value && !experimentRows.value.length) return 'loading'
@@ -228,5 +247,27 @@ onMounted(async () => {
 }
 .system-panel-card {
   margin-top: var(--space-4);
+}
+.experiment-metric-grid {
+  margin-top: var(--space-4);
+}
+/* 评测产物状态是键值读数（含路径与时间戳），用 text-sm 单行不撑破卡片 */
+.artifact-grid .app-stat-value {
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-lh);
+  font-weight: 600;
+  word-break: break-all;
+}
+/* 只读横幅不再包在卡片里（避免卡中卡），这里补上与 .app-section-intro 一致的堆叠排版 */
+.app-readonly-banner {
+  display: grid;
+  gap: 6px;
+}
+/* 令牌里的 .app-metric-grid-4 在 1100px 以下直接收成一列，四个读数用两列更合适 */
+@media (max-width: 1100px) {
+  .experiment-metric-grid,
+  .artifact-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

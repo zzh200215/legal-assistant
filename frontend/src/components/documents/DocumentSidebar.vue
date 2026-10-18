@@ -251,7 +251,7 @@ const docsError = computed(() => (documentsQuery.isError.value ? documentsQuery.
   padding: var(--space-4);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
-  background: #ffffff;
+  background: var(--color-surface);
   box-shadow: var(--shadow-xs);
 }
 .current-doc {
@@ -332,7 +332,7 @@ const docsError = computed(() => (documentsQuery.isError.value ? documentsQuery.
 .download-governance {
   margin-top: var(--space-3);
   padding-top: var(--space-3);
-  border-top: 1px dashed rgba(29, 78, 216, 0.22);
+  border-top: 1px dashed var(--color-border);
   display: grid;
   gap: var(--space-3);
 }

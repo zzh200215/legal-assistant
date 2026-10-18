@@ -33,6 +33,12 @@ const USER_CAPS = [
   // 任务中心对全部登录用户开放（后端 /tasks/* 为 get_current_user 权限），
   // 导航入口按产品规则仅管理员显示，但直接路由访问不被前端拦截
   CAPABILITY.TASK_VIEW,
+  // Agent 入口同样对全部登录用户开放：后端 /agent/* 只有 get_current_user，
+  // 运行、日志、检查点、审批都按 user_id 隔离（app/api/agent/agent_api.py），
+  // 普通用户看到的是自己的运行记录；仅 mcp_api 的 sql_query_tool 在后端按 admin 拦截。
+  CAPABILITY.AGENT_VIEW,
+  CAPABILITY.AGENT_RUN,
+  CAPABILITY.AGENT_CANCEL,
 ]
 
 const DEPT_ADMIN_CAPS = [
@@ -43,12 +49,8 @@ const DEPT_ADMIN_CAPS = [
 
 const ADMIN_CAPS = [
   ...DEPT_ADMIN_CAPS,
-  CAPABILITY.AGENT_VIEW,
-  CAPABILITY.AGENT_RUN,
-  CAPABILITY.AGENT_CANCEL,
   CAPABILITY.SYSTEM_VIEW,
   CAPABILITY.SYSTEM_MANAGE,
-  CAPABILITY.TASK_VIEW,
   CAPABILITY.ORG_MANAGE,
 ]
 

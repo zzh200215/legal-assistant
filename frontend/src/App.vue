@@ -5,7 +5,7 @@
     </transition>
   </router-view>
 
-  <div v-else class="app-shell">
+  <div v-else class="app-shell" :class="{ 'copilot-collapsed': !copilotOpen }">
     <aside class="topbar">
       <div class="topbar-brand">
         <div class="topbar-logo">律</div>
@@ -16,6 +16,7 @@
       </div>
 
       <nav class="top-nav" aria-label="主导航">
+        <div class="nav-group-label">工作区</div>
         <button
           v-for="item in visibleNavItems(navItems)"
           :key="item.path"
@@ -72,26 +73,35 @@
     </aside>
 
     <div class="app-workspace">
+    <header class="workspace-topbar">
+      <nav class="app-crumbs" aria-label="面包屑">
+        <button class="app-crumbs-link" @click="onMenuSelect('/legal-workspace')">首页</button>
+        <template v-for="(crumb, index) in breadcrumbs" :key="`${index}-${crumb.label}`">
+          <span class="app-crumbs-sep" aria-hidden="true">/</span>
+          <button v-if="crumb.path" class="app-crumbs-link" @click="onMenuSelect(crumb.path)">{{ crumb.label }}</button>
+          <span v-else class="app-crumbs-current">{{ crumb.label }}</span>
+        </template>
+      </nav>
+      <p v-if="!pageCrumbs.length" class="workspace-topbar-note">{{ currentSection.description }}</p>
+    </header>
     <OfflineBanner />
-    <section v-if="!isLegalWorkspaceRoute" class="section-strip">
-      <div class="section-heading">
-        <h1>{{ currentSection.label }}</h1>
-        <p>{{ currentSection.description }}</p>
-      </div>
-    </section>
 
     <main class="main-content">
-      <div v-if="routeAccess === 'loading'" class="route-loading" role="status">
-        <div class="route-loading-card">正在加载…</div>
+      <div class="content-stage">
+        <div v-if="routeAccess === 'loading'" class="route-loading" role="status">
+          <div class="route-loading-card">正在加载…</div>
+        </div>
+        <ForbiddenState v-else-if="routeAccess === 'deny'" :required="route.meta?.capability" />
+        <router-view v-else v-slot="{ Component }">
+          <transition name="page-fade" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
       </div>
-      <ForbiddenState v-else-if="routeAccess === 'deny'" :required="route.meta?.capability" />
-      <router-view v-else v-slot="{ Component }">
-        <transition name="page-fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
-      </router-view>
     </main>
     </div>
+
+    <CopilotDock :collapsed="!copilotOpen" @toggle="toggleCopilot" />
 
     <nav class="mobile-nav" aria-label="移动端导航">
       <button
@@ -109,7 +119,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Check, Cpu, DataLine, Files, House, List, Notebook, Reading, ScaleToOriginal, Tickets } from '@element-plus/icons-vue'
 import api from './api'
@@ -118,12 +128,17 @@ import { clearQueryCache } from './query/cache'
 import OfflineBanner from './components/OfflineBanner.vue'
 import ForbiddenState from './components/ForbiddenState.vue'
 import NotificationBell from './components/legal/NotificationBell.vue'
+import CopilotDock from './components/CopilotDock.vue'
+import { clearWorkspaceCrumbs, useWorkspaceCrumbs } from './composables/workspaceBreadcrumb'
+import { useCopilotDock } from './composables/useCopilotDock'
 import { useAuthStore } from './stores/auth'
 
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const user = ref(null)
+// 面板开合是全局状态：业务页面（案件工作台「打开助手」、工作台快捷入口）也要能把它打开
+const { open: copilotOpen, toggleCopilot } = useCopilotDock()
 const isPublicRoute = computed(() => route.meta?.public === true)
 
 // 路由级 capability 门禁：权限未知（auth 未就绪）默认不放行，直接访问受保护路由显示 403 状态
@@ -141,6 +156,9 @@ const navItems = [
   { path: '/legal-workspace?view=research', label: '法律研究', caption: '法规、案例与业务资料', icon: Reading, match: (r) => r.path === '/legal-workspace' && r.query.view === 'research' },
   { path: '/legal-workspace?view=review', label: '审核', caption: '待处理律师审核', icon: Check, match: (r) => r.path === '/legal-workspace' && r.query.view === 'review' },
   { path: '/tasks', label: '任务', caption: '案件协作事项与处理进度', icon: List },
+  // Agent 入口对全部登录用户可见（与 /tasks 同理）：后端 /agent/* 只有 get_current_user，
+  // 运行记录按 user_id 隔离，非管理员看到的是自己的运行，不涉及平台级数据。
+  { path: '/agent', label: 'Agent', caption: '自动化执行与运行记录', icon: Cpu },
 ]
 
 const navGroups = [
@@ -149,7 +167,6 @@ const navGroups = [
     items: [
       { path: '/management', label: '管理中心', caption: '平台设置与运营', icon: DataLine, adminOnly: true },
       { path: '/system', label: '系统', caption: '组织、权限与平台运行', icon: DataLine, adminOnly: true, match: (r) => r.path === '/system' && r.query.tab !== 'experiments' },
-      { path: '/agent', label: 'Agent', caption: '自动化执行与运行记录', icon: Cpu, adminOnly: true },
       { path: '/system?tab=experiments', label: '评测与审计', caption: '质量评测与操作记录', icon: Notebook, adminOnly: true, match: (r) => r.path === '/system' && r.query.tab === 'experiments' },
       { path: '/pricing', label: '计费', caption: '订阅方案与使用情况', icon: ScaleToOriginal, adminOnly: true },
     ],
@@ -173,7 +190,6 @@ const sectionMeta = {
   '/management': { label: '管理中心', description: '平台设置、质量与运营' },
 }
 
-const isLegalWorkspaceRoute = computed(() => route.path === '/legal-workspace')
 const currentSection = computed(() => {
   if (route.path === '/legal-workspace') {
     const view = route.query.view
@@ -184,6 +200,12 @@ const currentSection = computed(() => {
   }
   return sectionMeta[route.path] || { label: '律智检', description: '法律工作台' }
 })
+
+// 顶栏面包屑：页面登记的上下文优先（如「案件 / 张三劳动合同纠纷」），否则回退到栏目名。
+// 路由一变就先清空，页面拿到数据后再登记，避免上一页的案件标题残留在新页面顶部。
+const pageCrumbs = useWorkspaceCrumbs()
+const breadcrumbs = computed(() => (pageCrumbs.value.length ? pageCrumbs.value : [{ label: currentSection.value.label }]))
+watch(() => route.fullPath, () => clearWorkspaceCrumbs(), { immediate: true })
 const visibleNavGroups = computed(() =>
   navGroups
     .map((group) => ({ ...group, items: visibleNavItems(group.items) }))
@@ -234,9 +256,14 @@ onMounted(async () => {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  --copilot-w: 380px;
+  grid-template-columns: 248px minmax(0, 1fr) var(--copilot-w);
   background: var(--color-bg);
+  transition: grid-template-columns var(--transition-slow);
 }
+
+/* 收起态保持 52px：copilot-dock.spec.js:113 把它当契约断言（预览稿是 56px，差 4px 不值得改测试） */
+.app-shell.copilot-collapsed { --copilot-w: 52px; }
 
 .topbar {
   display: flex;
@@ -262,17 +289,19 @@ onMounted(async () => {
 }
 
 .topbar-logo {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-xs);
-  background: var(--color-primary);
-  color: #ffffff;
-  font-size: var(--text-sm);
-  font-weight: 600;
+  border-radius: var(--radius-md);
+  /* 全站唯一的品牌渐变：34px 身份标记，不铺面、不加光晕 */
+  background: var(--gradient-brand-mark);
+  color: var(--color-text-inverse);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .topbar-title {
@@ -309,24 +338,25 @@ onMounted(async () => {
 }
 
 .nav-group-label {
-  padding: 18px var(--space-2) 6px;
+  padding: 16px var(--space-2) 6px;
   color: var(--color-text-muted);
   font-size: var(--text-xs);
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .nav-entry {
-  height: 34px; justify-content: flex-start;
+  min-height: 36px; justify-content: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 var(--space-2);
+  gap: 10px;
+  padding: 8px var(--space-2);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: var(--text-base);
-  font-weight: 400;
+  font-size: var(--text-sm);
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -341,7 +371,7 @@ onMounted(async () => {
 .nav-entry.active {
   color: var(--color-primary);
   background: var(--color-primary-light);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .nav-entry .el-icon {
@@ -467,34 +497,31 @@ onMounted(async () => {
   color: var(--color-danger);
 }
 
-.section-strip {
+/* 顶栏：面包屑 + 当前栏目说明（方向 B 的页面顶栏，取代原先的 section-strip 大标题） */
+.workspace-topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sidebar, 100);
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-6);
-  padding: var(--space-6) var(--space-8) var(--space-4);
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 56px;
+  padding: 0 var(--space-8);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.section-heading {
-  min-width: 0;
-}
-
-.section-strip h1 {
-  margin: 0 0 2px;
-  color: var(--color-text);
-  font-size: var(--text-xl);
-  line-height: var(--text-xl-lh);
-  font-weight: 600;
-}
-
-.section-strip p {
-  margin: 0;
+.workspace-topbar-note {
+  margin: 0 0 0 auto;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .main-content {
-  padding: var(--space-4) var(--space-8) var(--space-10);
+  padding: var(--space-6) var(--space-8) var(--space-10);
   background: transparent;
   min-height: calc(100vh - 180px);
 }
@@ -515,7 +542,7 @@ onMounted(async () => {
 
 .content-stage {
   width: 100%;
-  max-width: 1600px;
+  max-width: 1280px;
   margin: 0 auto;
 }
 
@@ -532,6 +559,8 @@ onMounted(async () => {
 }
 
 @media (max-width: 1024px) {
+  /* copilot 在窄屏改为右侧浮层（样式见 CopilotDock.vue 同一断点），不再占用栅格列：
+     768-1024px 区间固定预留 68px + 380px 会把正文挤到约 452px（375px 手机尤为紧张）。 */
   .app-shell { grid-template-columns: 68px minmax(0, 1fr); }
   .topbar-title, .nav-entry span, .utility-label, .account-meta, .nav-group-label { display: none; }
   .topbar { align-items: center; }
@@ -554,19 +583,17 @@ onMounted(async () => {
   }
   .utility-row, .account-row { flex-direction: row; padding: 0; }
 
-  .section-strip {
-    align-items: flex-start;
-    flex-direction: column;
-    padding: var(--space-4) var(--space-4) var(--space-3);
+  .workspace-topbar {
+    min-height: 48px;
+    padding: 0 var(--space-4);
+  }
+
+  .workspace-topbar-note {
+    display: none;
   }
 
   .main-content {
     padding: var(--space-3) var(--space-4) var(--space-8);
-  }
-
-  .section-strip h1 {
-    font-size: var(--text-lg);
-    line-height: var(--text-lg-lh);
   }
 }
 

@@ -1,22 +1,16 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { ElButton } from 'element-plus/es/components/button/index'
-import { ElAside, ElContainer, ElHeader, ElMain } from 'element-plus/es/components/container/index'
 import { ElIcon } from 'element-plus/es/components/icon/index'
 import { ElLoadingDirective } from 'element-plus/es/components/loading/index'
-import { ElMenu, ElMenuItem } from 'element-plus/es/components/menu/index'
 import './styles/tailwind.css'
 import './styles/design-tokens.css'
 import './styles/legal-workspace.css'
 import './styles/element-overrides.css'
-import 'element-plus/es/components/aside/style/css'
+// 只保留外壳真正用到的组件样式：容器/菜单系列（el-container / el-aside / el-header / el-main /
+// el-menu / el-menu-item）全仓 0 处使用，注册与样式一并删除，避免把整库样式拖进入口 bundle。
 import 'element-plus/es/components/button/style/css'
-import 'element-plus/es/components/container/style/css'
-import 'element-plus/es/components/header/style/css'
 import 'element-plus/es/components/icon/style/css'
-import 'element-plus/es/components/main/style/css'
-import 'element-plus/es/components/menu/style/css'
-import 'element-plus/es/components/menu-item/style/css'
 import 'element-plus/es/components/loading/style/css'
 import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
@@ -64,9 +58,9 @@ const showRuntimeError = (error) => {
       'padding:16px',
       'overflow:auto',
       'white-space:pre-wrap',
-      'background:#fff1f2',
-      'color:#991b1b',
-      'border:1px solid #fecdd3',
+      'background:var(--color-danger-light)',
+      'color:var(--color-danger)',
+      'border:1px solid var(--color-danger)',
       'border-radius:8px',
       'font:13px/1.6 Consolas, monospace',
     ].join(';')
@@ -98,14 +92,8 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 ;[
-  ElAside,
   ElButton,
-  ElContainer,
-  ElHeader,
   ElIcon,
-  ElMain,
-  ElMenu,
-  ElMenuItem,
 ].forEach((component) => {
   app.component(component.name, component)
 })

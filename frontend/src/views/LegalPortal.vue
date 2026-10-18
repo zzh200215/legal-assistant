@@ -1,186 +1,270 @@
 <template>
   <div class="legal-portal">
-    <div v-if="errorState" class="portal-error">
-      <el-card shadow="never">
+    <!-- 公开路由无应用外壳，品牌标识由门户自己承担（34px 品牌方块是全站唯一允许的渐变用法） -->
+    <header class="portal-masthead">
+      <div class="portal-masthead-brand">
+        <span class="portal-logo-mark" aria-hidden="true">律</span>
+        <span class="portal-masthead-text">
+          <span class="portal-masthead-name">律智检</span>
+          <span class="portal-masthead-sub">客户案件门户</span>
+        </span>
+      </div>
+      <!-- 机构身份：内容步取门户品牌数据；验证码步 portalContent 仍为空，自然不渲染 -->
+      <div
+        v-if="portalContent.organization && (portalContent.organization.portal_logo_url || portalContent.organization.name)"
+        class="portal-masthead-org"
+      >
+        <img
+          v-if="portalContent.organization.portal_logo_url"
+          class="portal-org-logo"
+          :src="portalContent.organization.portal_logo_url"
+          alt="机构标识"
+        />
+        <span v-if="portalContent.organization.name" class="portal-org-name">{{ portalContent.organization.name }}</span>
+      </div>
+    </header>
+
+    <section v-if="errorState" class="app-card portal-state-card">
+      <div class="app-card-body portal-error">
         <el-empty :description="errorState" :image-size="80" />
         <p class="portal-error-hint">请联系您的律师重新生成门户链接。</p>
-      </el-card>
-    </div>
+      </div>
+    </section>
 
-    <div v-else-if="step === 'otp'" class="portal-otp">
-      <el-card shadow="never">
-        <template #header>
-          <div class="otp-header">
-            <span class="card-title">案件查询验证</span>
-            <span v-if="organizationName" class="otp-org-name">{{ organizationName }}</span>
-          </div>
-        </template>
-        <el-alert v-if="otpError" type="error" :closable="false" show-icon class="otp-error-alert">
-          <template #title>{{ otpError }}</template>
-          <p class="otp-error-hint">请稍后点击下方"重新发送"重试；若多次失败，请联系您的律师协助。</p>
-        </el-alert>
-        <el-alert v-else-if="maskedEmail" type="info" :closable="false" show-icon style="margin-bottom:16px">
-          <template #title>验证码已发送至 {{ maskedEmail }}</template>
-        </el-alert>
-        <el-form label-position="top" @submit.prevent="verifyOtp">
-          <el-form-item label="6位验证码">
-            <el-input v-model="otpCode" maxlength="6" placeholder="输入邮件中的 6 位数字验证码" class="otp-input" @input="otpCode = otpCode.replace(/\D/g, '')" />
-          </el-form-item>
-          <div class="otp-actions">
-            <el-button type="primary" :loading="verifyLoading" @click="verifyOtp">验证</el-button>
-            <el-button :loading="resendLoading" :disabled="resendCooldown > 0" @click="resendOtp">
-              {{ resendCooldown > 0 ? `${resendCooldown}s 后重发` : '重新发送' }}
-            </el-button>
-          </div>
-        </el-form>
-      </el-card>
-    </div>
-
-    <div v-else-if="step === 'content'" class="portal-content">
-      <div v-if="portalContent.organization && (portalContent.organization.portal_logo_url || portalContent.organization.portal_welcome_message || portalContent.organization.name)" class="portal-brand">
-        <img v-if="portalContent.organization.portal_logo_url" :src="portalContent.organization.portal_logo_url" class="portal-logo" alt="logo" />
-        <div class="portal-brand-text">
-          <div v-if="portalContent.organization.portal_welcome_message" class="portal-welcome">{{ portalContent.organization.portal_welcome_message }}</div>
-          <div v-if="portalContent.organization.name" class="portal-org-name">{{ portalContent.organization.name }}</div>
+    <template v-else-if="step === 'otp'">
+      <div class="app-page-head portal-page-head">
+        <div class="app-page-head-main">
+          <h1 class="app-page-title">案件查询验证</h1>
+          <p class="app-page-sub">为保护委托信息，请输入我们发送到您邮箱的 6 位验证码。</p>
+        </div>
+        <div v-if="organizationName" class="app-page-head-actions">
+          <span class="app-tag is-info">{{ organizationName }}</span>
         </div>
       </div>
-      <el-card shadow="never">
-        <template #header>
-          <div class="result-header">
-            <span class="card-title">案件进展</span>
-          </div>
-        </template>
-        <div v-if="progressUpdates.length" class="progress-timeline">
-          <div v-for="u in progressUpdates" :key="u.id" class="timeline-item">
-            <div class="timeline-dot"></div>
-            <div class="timeline-body">
-              <div class="progress-header">
-                <strong>{{ u.title }}</strong>
-                <div class="progress-meta">
-                  <el-tag v-if="u.status === 'published'" size="small" type="success" effect="plain">已发布</el-tag>
-                  <span class="muted">{{ formatDate(u.published_at || u.created_at) }}</span>
+
+      <section class="app-card">
+        <div class="app-card-head">
+          <h2>邮箱验证码</h2>
+        </div>
+        <div class="app-card-body">
+          <el-alert v-if="otpError" type="error" :closable="false" show-icon class="otp-error-alert">
+            <template #title>{{ otpError }}</template>
+            <p class="otp-error-hint">请稍后点击下方"重新发送"重试；若多次失败，请联系您的律师协助。</p>
+          </el-alert>
+          <el-alert v-else-if="maskedEmail" type="info" :closable="false" show-icon class="otp-sent-alert">
+            <template #title>验证码已发送至 {{ maskedEmail }}</template>
+          </el-alert>
+          <el-form label-position="top" @submit.prevent="verifyOtp">
+            <el-form-item label="6位验证码">
+              <el-input v-model="otpCode" maxlength="6" placeholder="输入邮件中的 6 位数字验证码" class="otp-input" @input="otpCode = otpCode.replace(/\D/g, '')" />
+            </el-form-item>
+            <div class="otp-actions">
+              <el-button type="primary" :loading="verifyLoading" @click="verifyOtp">验证</el-button>
+              <el-button :loading="resendLoading" :disabled="resendCooldown > 0" @click="resendOtp">
+                {{ resendCooldown > 0 ? `${resendCooldown}s 后重发` : '重新发送' }}
+              </el-button>
+            </div>
+          </el-form>
+        </div>
+      </section>
+    </template>
+
+    <template v-else-if="step === 'content'">
+      <div class="app-page-head portal-page-head">
+        <div class="app-page-head-main">
+          <h1 class="app-page-title">{{ portalContent.organization?.portal_welcome_message || '案件进展' }}</h1>
+          <p class="app-page-sub">律师为您同步的案件进展与交付物，仅供查看。</p>
+        </div>
+        <div class="app-page-head-actions">
+          <span class="app-tag is-ok">邮箱已验证</span>
+        </div>
+      </div>
+
+      <section class="app-card">
+        <div class="app-card-head">
+          <h2>进展更新</h2>
+          <span class="app-card-head-meta">{{ progressUpdates.length ? `共 ${progressUpdates.length} 条` : '暂无更新' }}</span>
+        </div>
+        <div class="app-card-body">
+          <ol v-if="progressUpdates.length" class="app-timeline">
+            <li v-for="u in progressUpdates" :key="u.id" class="app-timeline-item" :class="{ 'is-done': u.status === 'published' }">
+              <span class="app-timeline-dot" aria-hidden="true"></span>
+              <div class="timeline-item-body">
+                <div class="progress-header">
+                  <strong class="progress-title">{{ u.title }}</strong>
+                  <div class="progress-meta">
+                    <span v-if="u.status === 'published'" class="app-tag is-ok">已发布</span>
+                    <span class="muted">{{ formatDate(u.published_at || u.created_at) }}</span>
+                  </div>
+                </div>
+                <p class="progress-body">{{ u.body }}</p>
+                <div v-if="u.next_steps" class="progress-next">
+                  <strong>后续步骤：</strong>
+                  <p>{{ u.next_steps }}</p>
                 </div>
               </div>
-              <p class="progress-body">{{ u.body }}</p>
-              <div v-if="u.next_steps" class="progress-next">
-                <strong>后续步骤：</strong>
-                <p>{{ u.next_steps }}</p>
+            </li>
+          </ol>
+          <p v-else class="app-empty-note">暂无进展更新</p>
+        </div>
+      </section>
+
+      <section v-if="publishedDocs.length" class="app-card">
+        <div class="app-card-head">
+          <h2>公开文档</h2>
+          <span class="app-card-head-meta">共 {{ publishedDocs.length }} 份</span>
+        </div>
+        <div class="app-card-body">
+          <!-- 桌面表格 / 移动端卡片行（375px 专项 M-10）：窄屏表格截断依赖 tooltip，触屏不可用 -->
+          <el-table class="desktop-table" :data="publishedDocs" stripe size="small">
+            <el-table-column prop="id" label="ID" width="60" />
+            <el-table-column prop="title" label="文档名称" show-overflow-tooltip />
+            <el-table-column label="操作" width="120">
+              <template #default="{ row }">
+                <el-button size="small" text type="primary" @click="downloadDoc(row)">下载</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="mobile-item-list">
+            <div v-for="d in publishedDocs" :key="d.id" class="mobile-item-row">
+              <span class="mobile-item-title">{{ d.title }}</span>
+              <el-button size="small" text type="primary" @click="downloadDoc(d)">下载</el-button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="portalContent.billing || portalContent.invoice" class="app-card">
+        <div class="app-card-head">
+          <h2>账单与收款</h2>
+          <span v-if="billingInvoices.length" class="app-card-head-meta">{{ billingInvoices.length }} 张费用通知单</span>
+        </div>
+        <div class="app-card-body">
+          <div v-if="billingSummary" class="billing-summary">
+            <div class="app-stat">
+              <span class="app-stat-label">账单总额</span>
+              <div class="app-stat-value">{{ money(billingSummary.total_invoiced) }}</div>
+            </div>
+            <div class="app-stat">
+              <span class="app-stat-label">已收金额</span>
+              <div class="app-stat-value billing-paid">{{ money(billingSummary.total_paid) }}</div>
+            </div>
+            <div class="app-stat">
+              <span class="app-stat-label">待收金额</span>
+              <div class="app-stat-value billing-outstanding">{{ money(billingSummary.total_outstanding) }}</div>
+            </div>
+          </div>
+          <div v-for="invoice in billingInvoices" :key="invoice.id || invoice.invoice_number" class="portal-invoice">
+            <div class="portal-invoice-heading">
+              <div>
+                <strong>{{ invoice.invoice_number }}</strong>
+                <span class="invoice-meta">{{ invoice.issue_date || '开具日期未记录' }}</span>
+              </div>
+              <div>
+                <span class="app-tag" :class="invoiceStatusTagClass(invoice.status)">{{ invoiceStatusLabel(invoice.status) }}</span>
+                <span v-if="invoice.due_date" class="invoice-meta">应付款日 {{ invoice.due_date }}</span>
+              </div>
+            </div>
+            <dl class="portal-invoice-facts">
+              <div><dt>账期</dt><dd>{{ invoice.period_start || '-' }} ~ {{ invoice.period_end || '-' }}</dd></div>
+              <div><dt>含税金额</dt><dd>{{ money(invoice.total_amount, invoice.currency) }}</dd></div>
+              <div><dt>已收</dt><dd>{{ money(invoice.paid_amount, invoice.currency) }}</dd></div>
+              <div><dt>待收</dt><dd>{{ money(invoice.outstanding_amount, invoice.currency) }}</dd></div>
+            </dl>
+            <table v-if="invoice.items?.length" class="portal-invoice-items">
+              <thead>
+                <tr><th>项目</th><th>数量</th><th>单价</th><th>金额</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in invoice.items" :key="`${invoice.id}-${item.title}-${item.amount}`">
+                  <td>{{ item.title }}</td>
+                  <td>{{ item.quantity }}</td>
+                  <td>{{ money(item.unit_price, invoice.currency) }}</td>
+                  <td>{{ money(item.amount, invoice.currency) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="invoice.payments?.length" class="portal-payment-list">
+              <span class="billing-subheading">收款记录</span>
+              <div v-for="payment in invoice.payments" :key="`${invoice.id}-${payment.recorded_at}-${payment.amount}`">
+                <span>{{ payment.recorded_at || '时间未记录' }}</span>
+                <strong>{{ money(payment.amount, payment.currency) }}</strong>
               </div>
             </div>
           </div>
         </div>
-        <el-empty v-else description="暂无进展更新" :image-size="60" />
-      </el-card>
+      </section>
 
-      <el-card v-if="publishedDocs.length" shadow="never" style="margin-top:20px">
-        <template #header><span class="card-title">公开文档</span></template>
-        <!-- 桌面表格 / 移动端卡片行（375px 专项 M-10）：窄屏表格截断依赖 tooltip，触屏不可用 -->
-        <el-table class="desktop-table" :data="publishedDocs" stripe size="small">
-          <el-table-column prop="id" label="ID" width="60" />
-          <el-table-column prop="title" label="文档名称" show-overflow-tooltip />
-          <el-table-column label="操作" width="120">
-            <template #default="{ row }">
-              <el-button size="small" text type="primary" @click="downloadDoc(row)">下载</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <div class="mobile-item-list">
-          <div v-for="d in publishedDocs" :key="d.id" class="mobile-item-row">
-            <span class="mobile-item-title">{{ d.title }}</span>
-            <el-button size="small" text type="primary" @click="downloadDoc(d)">下载</el-button>
+      <section class="app-card">
+        <div class="app-card-head">
+          <h2>服务反馈</h2>
+        </div>
+        <div class="app-card-body">
+          <div v-if="feedbackDone" class="feedback-done">
+            <span class="app-tag" :class="feedbackValue === 1 ? 'is-ok' : 'is-pending'">
+              {{ feedbackValue === 1 ? '已收到反馈：有帮助' : '已收到反馈：待改进' }}
+            </span>
+            <span class="muted">感谢您的评价。</span>
           </div>
-        </div>
-      </el-card>
-
-      <el-card v-if="portalContent.billing || portalContent.invoice" shadow="never" style="margin-top:20px">
-        <template #header><span class="card-title">账单与收款</span></template>
-        <div v-if="billingSummary" class="billing-summary">
-          <div><span>账单总额</span><strong>{{ money(billingSummary.total_invoiced) }}</strong></div>
-          <div><span>已收金额</span><strong class="billing-paid">{{ money(billingSummary.total_paid) }}</strong></div>
-          <div><span>待收金额</span><strong class="billing-outstanding">{{ money(billingSummary.total_outstanding) }}</strong></div>
-        </div>
-        <div v-for="invoice in billingInvoices" :key="invoice.id || invoice.invoice_number" class="portal-invoice">
-          <div class="portal-invoice-heading">
-            <div><strong>{{ invoice.invoice_number }}</strong><span>{{ invoice.issue_date || '开具日期未记录' }}</span></div>
-            <div><el-tag size="small" :type="invoiceStatusType(invoice.status)">{{ invoiceStatusLabel(invoice.status) }}</el-tag><span v-if="invoice.due_date">应付款日 {{ invoice.due_date }}</span></div>
-          </div>
-          <dl class="portal-invoice-facts">
-            <div><dt>账期</dt><dd>{{ invoice.period_start || '-' }} ~ {{ invoice.period_end || '-' }}</dd></div>
-            <div><dt>含税金额</dt><dd>{{ money(invoice.total_amount, invoice.currency) }}</dd></div>
-            <div><dt>已收</dt><dd>{{ money(invoice.paid_amount, invoice.currency) }}</dd></div>
-            <div><dt>待收</dt><dd>{{ money(invoice.outstanding_amount, invoice.currency) }}</dd></div>
-          </dl>
-          <table v-if="invoice.items?.length" class="portal-invoice-items">
-            <thead><tr><th>项目</th><th>数量</th><th>单价</th><th>金额</th></tr></thead>
-            <tbody><tr v-for="item in invoice.items" :key="`${invoice.id}-${item.title}-${item.amount}`"><td>{{ item.title }}</td><td>{{ item.quantity }}</td><td>{{ money(item.unit_price, invoice.currency) }}</td><td>{{ money(item.amount, invoice.currency) }}</td></tr></tbody>
-          </table>
-          <div v-if="invoice.payments?.length" class="portal-payment-list"><span class="billing-subheading">收款记录</span><div v-for="payment in invoice.payments" :key="`${invoice.id}-${payment.recorded_at}-${payment.amount}`"><span>{{ payment.recorded_at || '时间未记录' }}</span><strong>{{ money(payment.amount, payment.currency) }}</strong></div></div>
-        </div>
-      </el-card>
-
-      <el-card shadow="never" style="margin-top:20px">
-        <template #header><span class="card-title">服务反馈</span></template>
-        <div v-if="feedbackDone" class="feedback-done">
-          <el-tag size="small" :type="feedbackValue === 1 ? 'success' : 'info'" effect="plain">
-            {{ feedbackValue === 1 ? '已收到反馈：有帮助' : '已收到反馈：待改进' }}
-          </el-tag>
-          <span class="muted">感谢您的评价。</span>
-        </div>
-        <div v-else class="feedback-row">
-          <span class="feedback-label">本次服务对您有帮助吗？</span>
-          <el-button size="small" type="success" plain :loading="feedbackSubmitting === 1" @click="submitFeedback(1)">有帮助</el-button>
-          <el-button size="small" type="warning" plain :loading="feedbackSubmitting === -1" @click="submitFeedback(-1)">待改进</el-button>
-          <div v-if="feedbackNoteOpen" class="feedback-panel">
-            <el-input v-model="feedbackNote" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="补充说明（可选，最多500字）" />
-            <div class="feedback-actions">
-              <el-button size="small" type="primary" @click="confirmFeedback">提交反馈</el-button>
-              <el-button size="small" @click="feedbackNoteOpen = false; feedbackNote = ''">取消</el-button>
+          <div v-else class="feedback-row">
+            <span class="feedback-label">本次服务对您有帮助吗？</span>
+            <el-button size="small" type="success" plain :loading="feedbackSubmitting === 1" @click="submitFeedback(1)">有帮助</el-button>
+            <el-button size="small" type="warning" plain :loading="feedbackSubmitting === -1" @click="submitFeedback(-1)">待改进</el-button>
+            <div v-if="feedbackNoteOpen" class="feedback-panel">
+              <el-input v-model="feedbackNote" type="textarea" :rows="2" maxlength="500" show-word-limit placeholder="补充说明（可选，最多500字）" />
+              <div class="feedback-actions">
+                <el-button size="small" type="primary" @click="confirmFeedback">提交反馈</el-button>
+                <el-button size="small" @click="feedbackNoteOpen = false; feedbackNote = ''">取消</el-button>
+              </div>
             </div>
           </div>
         </div>
-      </el-card>
+      </section>
 
-      <el-card v-if="portalContent.sign_requests?.length" shadow="never" style="margin-top:20px">
-        <template #header><span class="card-title">签署请求</span></template>
-        <el-table class="desktop-table" :data="portalContent.sign_requests" stripe size="small">
-          <el-table-column prop="id" label="ID" width="60" />
-          <el-table-column prop="title" label="文档" show-overflow-tooltip />
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 'pending' ? 'warning' : 'success'" size="small">{{ row.status === 'pending' ? '待签署' : '已签署' }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="100">
-            <template #default="{ row }">
+      <section v-if="portalContent.sign_requests?.length" class="app-card">
+        <div class="app-card-head">
+          <h2>签署请求</h2>
+          <span class="app-card-head-meta">共 {{ portalContent.sign_requests.length }} 份</span>
+        </div>
+        <div class="app-card-body">
+          <el-table class="desktop-table" :data="portalContent.sign_requests" stripe size="small">
+            <el-table-column prop="id" label="ID" width="60" />
+            <el-table-column prop="title" label="文档" show-overflow-tooltip />
+            <el-table-column prop="status" label="状态" width="100">
+              <template #default="{ row }">
+                <span class="app-tag" :class="row.status === 'pending' ? 'is-pending' : 'is-ok'">{{ row.status === 'pending' ? '待签署' : '已签署' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100">
+              <template #default="{ row }">
+                <el-button v-if="row.status === 'pending'" size="small" text type="primary" @click="openSignLink(row)">前往签署</el-button>
+                <span v-else class="muted">已完成</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div class="mobile-item-list">
+            <div v-for="row in portalContent.sign_requests" :key="row.id" class="mobile-item-row">
+              <span class="mobile-item-title">{{ row.title }}</span>
+              <span class="app-tag" :class="row.status === 'pending' ? 'is-pending' : 'is-ok'">{{ row.status === 'pending' ? '待签署' : '已签署' }}</span>
               <el-button v-if="row.status === 'pending'" size="small" text type="primary" @click="openSignLink(row)">前往签署</el-button>
-              <span v-else class="muted">已完成</span>
-            </template>
-          </el-table-column>
-        </el-table>
-        <div class="mobile-item-list">
-          <div v-for="row in portalContent.sign_requests" :key="row.id" class="mobile-item-row">
-            <span class="mobile-item-title">{{ row.title }}</span>
-            <el-tag :type="row.status === 'pending' ? 'warning' : 'success'" size="small">{{ row.status === 'pending' ? '待签署' : '已签署' }}</el-tag>
-            <el-button v-if="row.status === 'pending'" size="small" text type="primary" @click="openSignLink(row)">前往签署</el-button>
+            </div>
           </div>
         </div>
-      </el-card>
-    </div>
+      </section>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { ElCard } from 'element-plus/es/components/card/index'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElEmpty } from 'element-plus/es/components/empty/index'
 import { ElAlert } from 'element-plus/es/components/alert/index'
 import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
-import { ElTag } from 'element-plus/es/components/tag/index'
-import 'element-plus/es/components/card/style/css'
 import 'element-plus/es/components/empty/style/css'
 import 'element-plus/es/components/alert/style/css'
 import 'element-plus/es/components/form/style/css'
@@ -188,7 +272,6 @@ import 'element-plus/es/components/form-item/style/css'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
-import 'element-plus/es/components/tag/style/css'
 import api from '../api'
 
 const route = useRoute()
@@ -342,7 +425,8 @@ const openSignLink = (req) => {
 }
 
 const invoiceStatusLabel = (s) => ({ draft: '草稿', sent: '已发送', paid: '已支付', overdue: '逾期', voided: '已作废' }[s] || s)
-const invoiceStatusType = (s) => ({ paid: 'success', sent: 'warning', overdue: 'danger', voided: 'info' }[s] || 'info')
+// 方向 B：状态一律用 .app-tag 胶囊，不再走 el-tag 的 type 映射
+const invoiceStatusTagClass = (s) => ({ paid: 'is-ok', sent: 'is-pending', overdue: 'is-danger', voided: 'is-info' }[s] || '')
 const money = (value, currency = 'CNY') => `${currency === 'CNY' ? '¥' : currency + ' '}${Number(value || 0).toFixed(2)}`
 const billingSummary = computed(() => portalContent.value.billing || (portalContent.value.invoice ? {
   total_invoiced: portalContent.value.invoice.total_amount,
@@ -369,10 +453,124 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 公开页自成一屏：无外壳，因此自带页边距与块间距（方向 B 的卡片流） */
 .legal-portal {
-  max-width: 800px;
-  margin: 40px auto;
+  display: grid;
+  gap: var(--space-5);
+  align-content: start;
+  max-width: 880px;
   min-height: 60vh;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5) var(--space-10);
+}
+
+/* ─── 品牌头 ─── */
+.portal-masthead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.portal-masthead-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.portal-logo-mark {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  /* 全站唯一的品牌渐变：34px 身份标记，不铺面、不加光晕 */
+  background: var(--gradient-brand-mark);
+  color: var(--color-text-inverse);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.portal-masthead-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.portal-masthead-name {
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.portal-masthead-sub {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.portal-masthead-org {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-left: auto;
+}
+
+.portal-org-logo {
+  max-width: 132px;
+  max-height: 34px;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+}
+
+.portal-org-name {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* ─── 链接失效态 ─── */
+.portal-state-card {
+  align-self: start;
+}
+
+.portal-error {
+  display: grid;
+  min-height: 240px;
+  align-content: center;
+  justify-items: center;
+  padding: var(--space-8) var(--space-5);
+}
+
+.portal-error-hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+/* ─── 页头与验证码卡 ─── */
+.portal-page-head {
+  min-width: 0;
+}
+
+.otp-sent-alert,
+.otp-error-alert {
+  margin-bottom: var(--space-4);
+}
+
+.otp-error-hint {
+  margin: 6px 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.6;
 }
 
 .otp-input {
@@ -380,256 +578,334 @@ onUnmounted(() => {
   width: min(240px, 100%);
 }
 
-.otp-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.otp-org-name {
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-.otp-error-alert {
-  margin-bottom: 16px;
-}
-
-.otp-error-hint {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.portal-error-hint {
-  margin: -8px 0 4px;
-  text-align: center;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-.card-title {
-  font-weight: 700;
-  font-size: 15px;
-}
-
-.muted {
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-.result-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.portal-error {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 40vh;
-}
-
-.portal-brand {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 20px;
-  padding: 18px 20px;
-  background: var(--color-bg-card, #fff);
-  border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-.portal-logo {
-  max-height: 56px;
-  max-width: 140px;
-  object-fit: contain;
-  border-radius: 6px;
-}
-.portal-brand-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.portal-welcome {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-.portal-org-name {
-  font-size: 13px;
-  color: var(--color-text-muted);
-}
-
-.billing-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--el-border-color-lighter); }
-.billing-summary div { display: grid; gap: 4px; }
-.billing-summary span, .portal-invoice-facts dt, .billing-subheading { color: var(--color-text-muted); font-size: 11px; }
-.billing-summary strong { color: var(--color-text); font-size: 18px; font-weight: 600; }
-.billing-summary .billing-paid { color: var(--color-success); }.billing-summary .billing-outstanding { color: var(--color-warning); }
-.portal-invoice { padding: 14px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
-.portal-invoice:last-child { border-bottom: 0; padding-bottom: 0; }
-.portal-invoice-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.portal-invoice-heading > div { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
-.portal-invoice-heading strong { color: var(--color-text); font-size: 13px; }.portal-invoice-heading span { color: var(--color-text-muted); font-size: 11px; }
-.portal-invoice-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
-.portal-invoice-facts div { display: grid; gap: 4px; min-width: 0; }.portal-invoice-facts dd { margin: 0; color: var(--color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
-.portal-invoice-items { width: 100%; border-collapse: collapse; color: var(--color-text-secondary); font-size: 12px; table-layout: fixed; }
-.portal-invoice-items th, .portal-invoice-items td { padding: 7px 8px; border-bottom: 1px solid var(--el-border-color-lighter); text-align: left; }.portal-invoice-items th:first-child, .portal-invoice-items td:first-child { overflow-wrap: anywhere; }.portal-invoice-items th { color: var(--color-text-muted); font-size: 11px; font-weight: 500; }.portal-invoice-items th:nth-child(n+2), .portal-invoice-items td:nth-child(n+2) { width: 18%; text-align: right; white-space: nowrap; }
-.portal-payment-list { display: grid; gap: 6px; margin-top: 14px; }.billing-subheading { font-weight: 600; }.portal-payment-list > div { display: flex; justify-content: space-between; gap: 12px; color: var(--color-text-secondary); font-size: 11px; }
-
 .otp-actions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
+  flex-wrap: wrap;
 }
 
-.progress-timeline {
-  position: relative;
-  padding-left: 20px;
-}
-
-.progress-timeline::before {
-  content: '';
-  position: absolute;
-  left: 5px;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  background: var(--el-border-color-lighter);
-}
-
-.timeline-item {
-  position: relative;
-  padding: 12px 0;
-}
-
-.timeline-item:not(:last-child) {
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.timeline-dot {
-  position: absolute;
-  left: -20px;
-  top: 18px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--el-color-primary);
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 2px var(--el-color-primary-light-5);
+/* ─── 进展时间线（骨架用 .app-timeline*，这里只补文字层级） ─── */
+.timeline-item-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
 
 .progress-header {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.progress-title {
+  color: var(--color-text);
+  font-size: var(--text-base);
+  font-weight: 600;
 }
 
 .progress-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .progress-body {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--color-text-secondary);
   margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.7;
 }
 
 .progress-next {
-  margin-top: 8px;
-  font-size: 13px;
+  display: grid;
+  gap: 2px;
+  margin-top: var(--space-2);
+  padding: 10px var(--space-3);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.progress-next strong {
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  font-weight: 600;
 }
 
 .progress-next p {
-  margin: 4px 0 0;
-  line-height: 1.6;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.7;
 }
 
+.muted {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ─── 账单与收款 ─── */
+.billing-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+/* 三列并排的金额串较长，按共享 .app-stat 的 28px 会溢出单元格，这里降到 22px */
+.billing-summary .app-stat-value {
+  font-size: var(--text-2xl);
+}
+
+.billing-summary .billing-paid {
+  color: var(--color-success);
+}
+
+.billing-summary .billing-outstanding {
+  color: var(--color-warning);
+}
+
+.portal-invoice {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.portal-invoice:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.portal-invoice-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.portal-invoice-heading > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.portal-invoice-heading strong {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.invoice-meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.portal-invoice-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+}
+
+.portal-invoice-facts div {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.portal-invoice-facts dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.portal-invoice-facts dd {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.portal-invoice-items {
+  width: 100%;
+  margin-top: var(--space-4);
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.portal-invoice-items th,
+.portal-invoice-items td {
+  padding: 7px var(--space-2);
+  border-bottom: 1px solid var(--color-border-light);
+  text-align: left;
+}
+
+.portal-invoice-items th {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.portal-invoice-items th:first-child,
+.portal-invoice-items td:first-child {
+  overflow-wrap: anywhere;
+}
+
+.portal-invoice-items th:nth-child(n + 2),
+.portal-invoice-items td:nth-child(n + 2) {
+  width: 18%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.portal-payment-list {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--space-4);
+}
+
+.billing-subheading {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.portal-payment-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* ─── 服务反馈 ─── */
 .feedback-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
 .feedback-label {
-  font-size: 13px;
   color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }
 
 .feedback-done {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .feedback-panel {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
-  padding: 12px;
-  background: var(--el-fill-color-light);
-  border-radius: 8px;
-  margin-top: 4px;
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
 }
 
 .feedback-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 /* 375px 专项 M-10：文档/签署双布局——桌面表格、窄屏卡片行 */
-.mobile-item-list { display: none; }
+.mobile-item-list {
+  display: none;
+}
+
 .mobile-item-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   padding: 11px 0;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid var(--color-border-light);
 }
-.mobile-item-row:last-child { border-bottom: 0; }
+
+.mobile-item-row:last-child {
+  border-bottom: 0;
+}
+
 .mobile-item-title {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
   color: var(--color-text);
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {
   .legal-portal {
     max-width: 100%;
-    margin: 16px auto;
-    padding: 0 12px;
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-3) var(--space-8);
   }
 
   /* 触控目标：small 按钮仅 24px 高，移动端抬到 40px（ux-audit M-10） */
-  .legal-portal .el-button { min-height: 40px; }
+  .legal-portal .el-button {
+    min-height: 40px;
+  }
 
-  .desktop-table { display: none; }
-  .mobile-item-list { display: grid; }
+  .portal-masthead-org {
+    margin-left: 0;
+  }
 
-  .billing-summary, .portal-invoice-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .portal-invoice-heading { flex-direction: column; gap: 8px; }
+  .desktop-table {
+    display: none;
+  }
+
+  .mobile-item-list {
+    display: grid;
+  }
+
+  .billing-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-invoice-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .portal-invoice-heading {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
 
   /* 375px 专项：行项目表数字列过窄，金额被 overflow-wrap 从中间折断——缩小字号 + 收紧内边距 + 窄化数量列 */
-  .portal-invoice-items { font-size: 10px; }
-  .portal-invoice-items th, .portal-invoice-items td { padding: 6px 4px; }
-  .portal-invoice-items th:nth-child(2), .portal-invoice-items td:nth-child(2) { width: 12%; }
-  .portal-invoice-items th:nth-child(n+3), .portal-invoice-items td:nth-child(n+3) { width: 23%; }
+  .portal-invoice-items {
+    font-size: var(--text-xs);
+  }
+
+  .portal-invoice-items th,
+  .portal-invoice-items td {
+    padding: 6px 4px;
+  }
+
+  .portal-invoice-items th:nth-child(2),
+  .portal-invoice-items td:nth-child(2) {
+    width: 12%;
+  }
+
+  .portal-invoice-items th:nth-child(n + 3),
+  .portal-invoice-items td:nth-child(n + 3) {
+    width: 23%;
+  }
 
   .progress-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    gap: var(--space-1);
   }
 }
 </style>

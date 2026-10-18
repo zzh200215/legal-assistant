@@ -1,194 +1,257 @@
 <template>
   <div class="legal-billing">
-    <div v-if="noCase" class="no-case-hint">当前未选择案件。「工时计时」「手动录入」「工时记录」需在顶部案件选择器中选择案件后使用。</div>
-    <el-card shadow="never">
-      <template #header><span class="card-title">工时计时器</span></template>
-      <div class="timer-section">
-        <div v-if="runningEntry" class="timer-running">
-          <div class="timer-display">
-            <el-tag type="danger" size="large" effect="dark">{{ formatDuration(elapsedSeconds) }}</el-tag>
-            <span class="muted">{{ runningEntry.description || '未命名计时' }}</span>
-          </div>
-          <div class="timer-actions">
-            <el-button v-if="runningEntry.status === 'running'" type="warning" size="small" @click="pauseTimer">暂停</el-button>
-            <el-button v-if="runningEntry.status === 'paused'" type="success" size="small" @click="resumeTimer">继续</el-button>
-            <el-button type="danger" size="small" @click="stopTimer">完成</el-button>
-          </div>
-        </div>
-        <div v-else class="timer-start">
-          <el-input v-model="timerDescription" placeholder="计时描述" style="width:300px" />
-          <el-button type="primary" @click="startTimer">开始计时</el-button>
+    <!-- 未选案件提示：底色/边框/字号全部沿用全局 .app-readonly-banner 口径，不再自造一套 -->
+    <div v-if="noCase" class="no-case-hint app-readonly-banner">
+      <strong>当前未选择案件</strong>
+      <span>「工时计时」「手动录入」「工时记录」需在顶部案件选择器中选择案件后使用。</span>
+    </div>
+
+    <!-- 计费概览（方向 B 磁贴）：读数优先，替代原先的表格化呈现。
+         读数全部由已加载列表推导，不新增任何接口调用；金额随列表分页口径，故以「本页」标注 -->
+    <section class="app-metric-grid-4" aria-label="计费概览">
+      <div class="app-stat">
+        <span class="app-stat-label">未结金额</span>
+        <div class="app-stat-value">
+          <span class="money">{{ formatMoney(outstandingAmount) }}</span>
+          <small>本页 {{ outstandingInvoices.length }} 张待收</small>
         </div>
       </div>
-    </el-card>
-
-    <el-card shadow="never" style="margin-top:20px">
-      <template #header><span class="card-title">手动录入工时</span></template>
-      <el-form :model="manualForm" inline @submit.prevent="submitManualEntry">
-        <el-form-item label="描述">
-          <el-input v-model="manualForm.description" placeholder="工作内容描述" style="width:240px" />
-        </el-form-item>
-        <el-form-item label="时长（分钟）">
-          <el-input-number v-model="manualForm.duration_minutes" :min="1" :max="1440" style="width:140px" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="manualLoading" @click="submitManualEntry">录入</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <el-card shadow="never" style="margin-top:20px">
-      <template #header><span class="card-title">工时记录</span></template>
-      <QueryStateView :status="entriesStatus" :error="entriesError" empty-text="暂无工时记录" min-height="160px" @retry="loadTimeEntries">
-      <el-table :data="timeEntries" stripe size="small">
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="description" label="描述" show-overflow-tooltip />
-        <el-table-column label="时长" width="100">
-          <template #default="{ row }">{{ formatEntryDuration(row) }}</template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="entryStatusType(row.status)" size="small">{{ entryStatusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="可计费" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.billable ? 'success' : 'info'" size="small">{{ row.billable ? '是' : '否' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="160">
-          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="240">
-          <template #default="{ row }">
-            <el-button v-if="row.status === 'running'" size="small" text type="warning" @click="patchEntry(row.id, { action: 'pause' })">暂停</el-button>
-            <el-button v-if="row.status === 'paused'" size="small" text type="success" @click="patchEntry(row.id, { action: 'resume' })">继续</el-button>
-            <el-button v-if="row.status === 'running' || row.status === 'paused'" size="small" text type="danger" @click="patchEntry(row.id, { action: 'complete' })">完成</el-button>
-            <el-button v-if="row.status === 'running' || row.status === 'paused'" size="small" text @click="patchEntry(row.id, { action: 'void' })">作废</el-button>
-            <el-button v-if="row.status === 'completed' && !row.billable" size="small" text type="primary" @click="patchEntry(row.id, { billable: 1 })">确认计费</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      </QueryStateView>
-      <div class="pagination-row">
-        <el-pagination
-          v-model:current-page="entryPage"
-          :page-size="entryPageSize"
-          :total="entryTotal"
-          layout="total, prev, pager, next"
-          small
-          @current-change="loadTimeEntries"
-        />
+      <div class="app-stat">
+        <span class="app-stat-label">已收款</span>
+        <div class="app-stat-value">
+          <span class="money">{{ formatMoney(paidAmount) }}</span>
+          <small>本页 {{ paidInvoices.length }} 张已结</small>
+        </div>
       </div>
-    </el-card>
+      <div class="app-stat">
+        <span class="app-stat-label">费用通知单</span>
+        <div class="app-stat-value">
+          {{ invoiceTotal }}
+          <small>张 · 逾期 {{ overdueCount }} 张</small>
+        </div>
+      </div>
+      <div class="app-stat">
+        <span class="app-stat-label">工时记录</span>
+        <div class="app-stat-value">
+          {{ entryTotal }}
+          <small>条 · 计费规则 {{ billingRules.length }} 条</small>
+        </div>
+      </div>
+    </section>
 
-    <el-divider />
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>工时计时器</h2>
+        <span class="app-card-head-meta">
+          {{ runningEntry ? (runningEntry.status === 'running' ? '计时中' : '已暂停') : '未开始计时' }}
+        </span>
+      </div>
+      <div class="app-card-body">
+        <div class="timer-section">
+          <div v-if="runningEntry" class="timer-running">
+            <div class="timer-display">
+              <span class="timer-clock">{{ formatDuration(elapsedSeconds) }}</span>
+              <span class="muted">{{ runningEntry.description || '未命名计时' }}</span>
+            </div>
+            <div class="timer-actions">
+              <el-button v-if="runningEntry.status === 'running'" size="small" @click="pauseTimer">暂停</el-button>
+              <el-button v-if="runningEntry.status === 'paused'" size="small" @click="resumeTimer">继续</el-button>
+              <el-button size="small" @click="stopTimer">完成</el-button>
+            </div>
+          </div>
+          <div v-else class="timer-start">
+            <el-input v-model="timerDescription" placeholder="计时描述" style="width:300px" />
+            <button class="workspace-primary" type="button" @click="startTimer">开始计时</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
-    <el-card shadow="never">
-      <template #header><span class="card-title">计费规则</span></template>
-      <el-form :model="ruleForm" inline @submit.prevent="submitBillingRule" style="margin-bottom:16px">
-        <el-form-item label="规则名称">
-          <el-input v-model="ruleForm.name" placeholder="如：标准咨询费" style="width:160px" />
-        </el-form-item>
-        <el-form-item label="计费模式">
-          <el-select v-model="ruleForm.billing_mode" style="width:140px">
-            <el-option label="按小时" value="hourly" />
-            <el-option label="固定阶段" value="fixed_stage" />
-            <el-option label="混合" value="hybrid" />
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>手动录入工时</h2>
+        <span class="app-card-head-meta">按分钟补录，提交后写入工时记录</span>
+      </div>
+      <div class="app-card-body">
+        <el-form :model="manualForm" inline @submit.prevent="submitManualEntry">
+          <el-form-item label="描述">
+            <el-input v-model="manualForm.description" placeholder="工作内容描述" style="width:240px" />
+          </el-form-item>
+          <el-form-item label="时长（分钟）">
+            <el-input-number v-model="manualForm.duration_minutes" :min="1" :max="1440" style="width:140px" />
+          </el-form-item>
+          <el-form-item>
+            <button class="workspace-primary" type="button" :disabled="manualLoading" @click="submitManualEntry">录入</button>
+          </el-form-item>
+        </el-form>
+      </div>
+    </section>
+
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>工时记录</h2>
+        <span class="app-card-head-meta">共 {{ entryTotal }} 条</span>
+      </div>
+      <div class="app-card-body">
+        <QueryStateView :status="entriesStatus" :error="entriesError" empty-text="暂无工时记录" min-height="160px" @retry="loadTimeEntries">
+        <el-table :data="timeEntries" stripe size="small">
+          <el-table-column prop="id" label="ID" width="60" />
+          <el-table-column prop="description" label="描述" show-overflow-tooltip />
+          <el-table-column label="时长" width="100">
+            <template #default="{ row }"><span class="money">{{ formatEntryDuration(row) }}</span></template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <span class="app-tag" :class="entryStatusTagClass(row.status)">{{ entryStatusLabel(row.status) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="可计费" width="80">
+            <template #default="{ row }">
+              <span class="app-tag" :class="row.billable ? 'is-ok' : ''">{{ row.billable ? '是' : '否' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="创建时间" width="160">
+            <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="240">
+            <template #default="{ row }">
+              <el-button v-if="row.status === 'running'" size="small" text type="warning" @click="patchEntry(row.id, { action: 'pause' })">暂停</el-button>
+              <el-button v-if="row.status === 'paused'" size="small" text type="success" @click="patchEntry(row.id, { action: 'resume' })">继续</el-button>
+              <el-button v-if="row.status === 'running' || row.status === 'paused'" size="small" text type="danger" @click="patchEntry(row.id, { action: 'complete' })">完成</el-button>
+              <el-button v-if="row.status === 'running' || row.status === 'paused'" size="small" text @click="patchEntry(row.id, { action: 'void' })">作废</el-button>
+              <el-button v-if="row.status === 'completed' && !row.billable" size="small" text type="primary" @click="patchEntry(row.id, { billable: 1 })">确认计费</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        </QueryStateView>
+        <div class="app-pagination-end">
+          <el-pagination
+            v-model:current-page="entryPage"
+            :page-size="entryPageSize"
+            :total="entryTotal"
+            layout="total, prev, pager, next"
+            small
+            @current-change="loadTimeEntries"
+          />
+        </div>
+      </div>
+    </section>
+
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>计费规则</h2>
+        <span class="app-card-head-meta">共 {{ billingRules.length }} 条</span>
+      </div>
+      <div class="app-card-body">
+        <el-form :model="ruleForm" inline class="rule-form" @submit.prevent="submitBillingRule">
+          <el-form-item label="规则名称">
+            <el-input v-model="ruleForm.name" placeholder="如：标准咨询费" style="width:160px" />
+          </el-form-item>
+          <el-form-item label="计费模式">
+            <el-select v-model="ruleForm.billing_mode" style="width:140px">
+              <el-option label="按小时" value="hourly" />
+              <el-option label="固定阶段" value="fixed_stage" />
+              <el-option label="混合" value="hybrid" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="ruleForm.billing_mode === 'hourly' || ruleForm.billing_mode === 'hybrid'" label="时薪">
+            <el-input-number v-model="ruleForm.hourly_rate" :min="0" :precision="2" style="width:130px" />
+          </el-form-item>
+          <el-form-item v-if="ruleForm.billing_mode === 'fixed_stage' || ruleForm.billing_mode === 'hybrid'" label="固定金额">
+            <el-input-number v-model="ruleForm.fixed_amount" :min="0" :precision="2" style="width:130px" />
+          </el-form-item>
+          <el-form-item>
+            <button class="workspace-primary" type="button" :disabled="ruleLoading" @click="submitBillingRule">创建规则</button>
+          </el-form-item>
+        </el-form>
+        <QueryStateView :status="rulesStatus" :error="rulesError" empty-text="暂无计费规则" min-height="160px" @retry="loadBillingRules">
+        <el-table :data="billingRules" stripe size="small">
+          <el-table-column prop="id" label="ID" width="60" />
+          <el-table-column prop="name" label="规则名称" show-overflow-tooltip />
+          <el-table-column prop="billing_mode" label="模式" width="120">
+            <template #default="{ row }">{{ modeLabel(row.billing_mode) }}</template>
+          </el-table-column>
+          <el-table-column label="时薪" width="100">
+            <template #default="{ row }">
+              <span class="money">{{ row.hourly_rate != null ? `¥${row.hourly_rate}` : '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="固定金额" width="100">
+            <template #default="{ row }">
+              <span class="money">{{ row.fixed_amount != null ? `¥${row.fixed_amount}` : '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="80">
+            <template #default="{ row }">
+              <span class="app-tag" :class="row.status === 'active' ? 'is-ok' : ''">{{ row.status === 'active' ? '启用' : '停用' }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        </QueryStateView>
+      </div>
+    </section>
+
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>费用通知单</h2>
+        <span class="app-card-head-meta">共 {{ invoiceTotal }} 张</span>
+        <button class="workspace-primary is-compact" type="button" @click="invoiceDialogVisible = true">创建费用通知单</button>
+      </div>
+      <div class="app-card-body">
+        <div class="app-toolbar billing-toolbar">
+          <el-select v-model="invoiceFilter" placeholder="按状态筛选" clearable size="small" style="width:140px" @change="loadInvoices">
+            <el-option label="草稿" value="draft" />
+            <el-option label="已发送" value="sent" />
+            <el-option label="已支付" value="paid" />
+            <el-option label="逾期" value="overdue" />
+            <el-option label="已作废" value="voided" />
           </el-select>
-        </el-form-item>
-        <el-form-item v-if="ruleForm.billing_mode === 'hourly' || ruleForm.billing_mode === 'hybrid'" label="时薪">
-          <el-input-number v-model="ruleForm.hourly_rate" :min="0" :precision="2" style="width:130px" />
-        </el-form-item>
-        <el-form-item v-if="ruleForm.billing_mode === 'fixed_stage' || ruleForm.billing_mode === 'hybrid'" label="固定金额">
-          <el-input-number v-model="ruleForm.fixed_amount" :min="0" :precision="2" style="width:130px" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="ruleLoading" @click="submitBillingRule">创建规则</el-button>
-        </el-form-item>
-      </el-form>
-      <QueryStateView :status="rulesStatus" :error="rulesError" empty-text="暂无计费规则" min-height="160px" @retry="loadBillingRules">
-      <el-table :data="billingRules" stripe size="small">
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" label="规则名称" show-overflow-tooltip />
-        <el-table-column prop="billing_mode" label="模式" width="120">
-          <template #default="{ row }">{{ modeLabel(row.billing_mode) }}</template>
-        </el-table-column>
-        <el-table-column label="时薪" width="100">
-          <template #default="{ row }">{{ row.hourly_rate != null ? `¥${row.hourly_rate}` : '-' }}</template>
-        </el-table-column>
-        <el-table-column label="固定金额" width="100">
-          <template #default="{ row }">{{ row.fixed_amount != null ? `¥${row.fixed_amount}` : '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
-      </QueryStateView>
-    </el-card>
-
-    <el-divider />
-
-    <el-card shadow="never">
-      <template #header>
-        <div class="result-header">
-          <span class="card-title">费用通知单</span>
-          <el-button size="small" type="primary" style="margin-left:auto" @click="invoiceDialogVisible = true">创建费用通知单</el-button>
         </div>
-      </template>
-      <div class="filter-row">
-        <el-select v-model="invoiceFilter" placeholder="按状态筛选" clearable size="small" style="width:140px" @change="loadInvoices">
-          <el-option label="草稿" value="draft" />
-          <el-option label="已发送" value="sent" />
-          <el-option label="已支付" value="paid" />
-          <el-option label="逾期" value="overdue" />
-          <el-option label="已作废" value="voided" />
-        </el-select>
+        <QueryStateView :status="invoicesStatus" :error="invoicesError" empty-text="暂无费用通知单" min-height="160px" @retry="loadInvoices">
+        <el-table :data="invoices" stripe size="small">
+          <el-table-column prop="id" label="ID" width="60" />
+          <el-table-column prop="invoice_no" label="通知单号" width="140" />
+          <el-table-column prop="client_display_name" label="客户" show-overflow-tooltip />
+          <el-table-column label="金额" width="120">
+            <template #default="{ row }"><span class="money">¥{{ row.total_amount }}</span></template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <span class="app-tag" :class="invoiceStatusTagClass(row.status)">{{ invoiceStatusLabel(row.status) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="账期" width="200">
+            <template #default="{ row }">{{ row.billing_period_start }} ~ {{ row.billing_period_end }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="200">
+            <template #default="{ row }">
+              <el-button v-if="row.status === 'draft'" size="small" text type="primary" @click="sendInvoice(row.id)">发送</el-button>
+              <el-button v-if="row.status !== 'voided'" size="small" text type="danger" @click="voidInvoiceHandler(row)">作废</el-button>
+              <el-button v-if="row.status === 'sent' || row.status === 'overdue'" size="small" text type="success" @click="openPaymentDialog(row)">收款</el-button>
+              <el-button v-if="row.status === 'paid'" size="small" text type="warning" @click="openRefundDialog(row)">退款</el-button>
+              <el-button size="small" text @click="viewInvoiceDetail(row)">详情</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        </QueryStateView>
+        <div class="app-pagination-end">
+          <el-pagination
+            v-model:current-page="invoicePage"
+            :page-size="invoicePageSize"
+            :total="invoiceTotal"
+            layout="total, prev, pager, next"
+            small
+            @current-change="loadInvoices"
+          />
+        </div>
       </div>
-      <QueryStateView :status="invoicesStatus" :error="invoicesError" empty-text="暂无费用通知单" min-height="160px" @retry="loadInvoices">
-      <el-table :data="invoices" stripe size="small" style="margin-top:12px">
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="invoice_no" label="通知单号" width="140" />
-        <el-table-column prop="client_display_name" label="客户" show-overflow-tooltip />
-        <el-table-column label="金额" width="120">
-          <template #default="{ row }">¥{{ row.total_amount }}</template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="invoiceStatusType(row.status)" size="small">{{ invoiceStatusLabel(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="账期" width="200">
-          <template #default="{ row }">{{ row.billing_period_start }} ~ {{ row.billing_period_end }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="200">
-          <template #default="{ row }">
-            <el-button v-if="row.status === 'draft'" size="small" text type="primary" @click="sendInvoice(row.id)">发送</el-button>
-            <el-button v-if="row.status !== 'voided'" size="small" text type="danger" @click="voidInvoiceHandler(row)">作废</el-button>
-            <el-button v-if="row.status === 'sent' || row.status === 'overdue'" size="small" text type="success" @click="openPaymentDialog(row)">收款</el-button>
-            <el-button v-if="row.status === 'paid'" size="small" text type="warning" @click="openRefundDialog(row)">退款</el-button>
-            <el-button size="small" text @click="viewInvoiceDetail(row)">详情</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      </QueryStateView>
-      <div class="pagination-row">
-        <el-pagination
-          v-model:current-page="invoicePage"
-          :page-size="invoicePageSize"
-          :total="invoiceTotal"
-          layout="total, prev, pager, next"
-          small
-          @current-change="loadInvoices"
-        />
-      </div>
-    </el-card>
+    </section>
 
     <el-dialog v-model="invoiceDialogVisible" title="创建费用通知单" width="540px">
       <el-form :model="invoiceForm" label-width="100px" size="small">
-        <el-alert title="费用通知单不提供税务发票开具" type="info" :closable="false" show-icon style="margin-bottom:16px" />
+        <div class="app-state-banner dialog-note">
+          <span>费用通知单不提供税务发票开具</span>
+        </div>
         <el-form-item label="客户名称" required>
           <el-input v-model="invoiceForm.client_display_name" placeholder="客户名称" />
         </el-form-item>
@@ -203,8 +266,10 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="invoiceDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="invoiceCreating" @click="submitInvoice">创建</el-button>
+        <div class="dialog-actions">
+          <el-button @click="invoiceDialogVisible = false">取消</el-button>
+          <button class="workspace-primary" type="button" :disabled="invoiceCreating" @click="submitInvoice">创建</button>
+        </div>
       </template>
     </el-dialog>
 
@@ -226,8 +291,10 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="paymentDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="paymentSaving" @click="submitPayment">确认收款</el-button>
+        <div class="dialog-actions">
+          <el-button @click="paymentDialogVisible = false">取消</el-button>
+          <button class="workspace-primary" type="button" :disabled="paymentSaving" @click="submitPayment">确认收款</button>
+        </div>
       </template>
     </el-dialog>
 
@@ -241,26 +308,44 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="refundDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="refundSaving" @click="submitRefund">确认退款</el-button>
+        <div class="dialog-actions">
+          <el-button @click="refundDialogVisible = false">取消</el-button>
+          <button class="workspace-primary" type="button" :disabled="refundSaving" @click="submitRefund">确认退款</button>
+        </div>
       </template>
     </el-dialog>
 
     <el-dialog v-model="detailDialogVisible" title="费用通知单详情" width="600px">
-      <el-descriptions v-if="detailInvoice" :column="2" border size="small">
-        <el-descriptions-item label="通知单号">{{ detailInvoice.invoice_no }}</el-descriptions-item>
-        <el-descriptions-item label="客户">{{ detailInvoice.client_display_name }}</el-descriptions-item>
-        <el-descriptions-item label="金额">¥{{ detailInvoice.total_amount }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="invoiceStatusType(detailInvoice.status)" size="small">{{ invoiceStatusLabel(detailInvoice.status) }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="账期" :span="2">{{ detailInvoice.billing_period_start }} ~ {{ detailInvoice.billing_period_end }}</el-descriptions-item>
-      </el-descriptions>
-      <el-divider content-position="left">收款记录</el-divider>
+      <!-- 详情字段用键值栅格，不再使用 el-descriptions 的表格化外观 -->
+      <div v-if="detailInvoice" class="invoice-facts">
+        <div class="invoice-fact">
+          <span class="invoice-fact-label">通知单号</span>
+          <span class="invoice-fact-value money">{{ detailInvoice.invoice_no }}</span>
+        </div>
+        <div class="invoice-fact">
+          <span class="invoice-fact-label">客户</span>
+          <span class="invoice-fact-value">{{ detailInvoice.client_display_name }}</span>
+        </div>
+        <div class="invoice-fact">
+          <span class="invoice-fact-label">金额</span>
+          <span class="invoice-fact-value money">¥{{ detailInvoice.total_amount }}</span>
+        </div>
+        <div class="invoice-fact">
+          <span class="invoice-fact-label">状态</span>
+          <span class="invoice-fact-value">
+            <span class="app-tag" :class="invoiceStatusTagClass(detailInvoice.status)">{{ invoiceStatusLabel(detailInvoice.status) }}</span>
+          </span>
+        </div>
+        <div class="invoice-fact is-wide">
+          <span class="invoice-fact-label">账期</span>
+          <span class="invoice-fact-value money">{{ detailInvoice.billing_period_start }} ~ {{ detailInvoice.billing_period_end }}</span>
+        </div>
+      </div>
+      <h3 class="app-card-section-title detail-section-title">收款记录</h3>
       <el-table :data="detailPayments" stripe size="small">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column label="金额" width="100">
-          <template #default="{ row }">¥{{ row.amount }}</template>
+          <template #default="{ row }"><span class="money">¥{{ row.amount }}</span></template>
         </el-table-column>
         <el-table-column prop="payment_method" label="支付方式" width="120" />
         <el-table-column prop="note" label="备注" show-overflow-tooltip />
@@ -275,27 +360,20 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import 'element-plus/es/components/message-box/style/css'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
-import { ElAlert } from 'element-plus/es/components/alert/index'
-import { ElCard } from 'element-plus/es/components/card/index'
-import { ElDescriptions, ElDescriptionsItem } from 'element-plus/es/components/descriptions/index'
 import { ElDialog } from 'element-plus/es/components/dialog/index'
-import { ElDivider } from 'element-plus/es/components/divider/index'
 import { ElEmpty } from 'element-plus/es/components/empty/index'
 import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElInputNumber } from 'element-plus/es/components/input-number/index'
 import { ElPagination } from 'element-plus/es/components/pagination/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
-import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/alert/style/css'
-import 'element-plus/es/components/card/style/css'
-import 'element-plus/es/components/descriptions/style/css'
-import 'element-plus/es/components/descriptions-item/style/css'
 import 'element-plus/es/components/dialog/style/css'
-import 'element-plus/es/components/divider/style/css'
 import 'element-plus/es/components/empty/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/input/style/css'
@@ -303,7 +381,6 @@ import 'element-plus/es/components/input-number/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
-import 'element-plus/es/components/tag/style/css'
 import api from '../api'
 import QueryStateView from '../components/QueryStateView.vue'
 import { normalizeError } from '../api/errors.js'
@@ -530,6 +607,14 @@ const loadInvoices = async () => {
   }
 }
 
+// 概览磁贴读数：只消费已加载列表，不额外请求接口（列表接口不返回汇总金额）
+const outstandingInvoices = computed(() => invoices.value.filter(row => row.status === 'sent' || row.status === 'overdue'))
+const paidInvoices = computed(() => invoices.value.filter(row => row.status === 'paid'))
+const overdueCount = computed(() => invoices.value.filter(row => row.status === 'overdue').length)
+const sumAmount = (rows) => rows.reduce((total, row) => total + Number(row.total_amount || 0), 0)
+const outstandingAmount = computed(() => sumAmount(outstandingInvoices.value))
+const paidAmount = computed(() => sumAmount(paidInvoices.value))
+
 const invoiceDialogVisible = ref(false)
 const invoiceCreating = ref(false)
 const invoiceForm = ref({ client_display_name: '', issue_date: '', billing_period_start: '', billing_period_end: '' })
@@ -669,10 +754,14 @@ const elapsedSecondsForEntry = (entry) => {
 
 const formatEntryDuration = (entry) => formatDuration(elapsedSecondsForEntry(entry))
 
-const entryStatusType = (s) => ({ running: 'danger', paused: 'warning', completed: 'success', voided: 'info' }[s] || 'info')
+// 概览金额展示口径：只做两位以内取整，不改变任何金额计算结果
+const formatMoney = (value) => `¥${Math.round(Number(value || 0) * 100) / 100}`
+
+// 状态一律映射到全局 .app-tag 变体（方向 B 只在浅底上做颜色区分）
+const entryStatusTagClass = (s) => ({ running: 'is-info', paused: 'is-pending', completed: 'is-ok', voided: '' }[s] || '')
 const entryStatusLabel = (s) => ({ running: '计时中', paused: '已暂停', completed: '已完成', voided: '已作废' }[s] || s)
 const modeLabel = (m) => ({ hourly: '按小时', fixed_stage: '固定阶段', hybrid: '混合' }[m] || m)
-const invoiceStatusType = (s) => ({ draft: 'info', sent: 'warning', paid: 'success', overdue: 'danger', voided: 'info' }[s] || 'info')
+const invoiceStatusTagClass = (s) => ({ draft: 'is-info', sent: 'is-pending', paid: 'is-ok', overdue: 'is-danger', voided: '' }[s] || '')
 const invoiceStatusLabel = (s) => ({ draft: '草稿', sent: '已发送', paid: '已支付', overdue: '逾期', voided: '已作废' }[s] || s)
 const formatDate = (v) => {
   if (!v) return ''
@@ -691,47 +780,29 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 版式：方向 B —— 磁贴读数 + .app-card 分组；区块间距交给 grid gap，不再逐个写 margin-top */
 .legal-billing {
+  display: grid;
+  gap: var(--space-5);
   max-width: 1200px;
   margin: 0 auto;
 }
 
+/* 未选案件提示：底色/边框/字号来自 .app-readonly-banner，这里只管两行文案的排布 */
 .no-case-hint {
-  background: var(--color-warning-light);
-  border: 1px solid #F0E2CC;
-  color: var(--color-warning);
-  border-radius: 6px;
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  font-size: 13px;
-}
-
-.card-title {
-  font-weight: 700;
-  font-size: 15px;
+  display: grid;
+  gap: 4px;
 }
 
 .muted {
   color: var(--color-text-muted);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
-.result-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.filter-row {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.pagination-row {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
+/* 金额、时长等数值读数统一等宽，逐行对齐不跳动 */
+.money {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .timer-section {
@@ -742,24 +813,91 @@ onUnmounted(() => {
 .timer-running {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-4);
   width: 100%;
 }
 
 .timer-display {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
+}
+
+/* 计时读数：主色浅底块，替代原来的实心 danger 标签 */
+.timer-clock {
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-primary-light);
+  color: var(--color-primary-active);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .timer-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
+  margin-left: auto;
 }
 
 .timer-start {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
+}
+
+/* 表格上方工具条与表尾分页 */
+.billing-toolbar {
+  margin-bottom: var(--space-3);
+}
+
+.rule-form {
+  margin-bottom: var(--space-4);
+}
+
+/* 对话框：页脚动作区与详情键值栅格 */
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.dialog-note {
+  margin-bottom: var(--space-4);
+}
+
+.invoice-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.invoice-fact {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.invoice-fact.is-wide {
+  grid-column: 1 / -1;
+}
+
+.invoice-fact-label {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.invoice-fact-value {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.detail-section-title {
+  margin-top: var(--space-5);
 }
 </style>

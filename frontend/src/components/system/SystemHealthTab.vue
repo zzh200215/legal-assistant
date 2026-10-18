@@ -4,55 +4,37 @@
     <span>查看核心服务可用性、依赖提供方状态和最近一次健康检查时间。</span>
   </div>
 
-  <el-card class="system-panel-card">
-    <div class="app-toolbar">
-      <div>
-        <strong>系统状态：</strong>
-        <el-tag :type="healthStatusTagType(healthData.status)" style="margin-left: 8px">
-          {{ healthStatusLabel(healthData.status) }}
-        </el-tag>
-        <span v-if="healthData.timestamp" style="margin-left: 12px; color: var(--color-text-muted)">
-          {{ healthData.timestamp }}
+  <!-- 状态条不再套卡片：一行标签 + 刷新，直接贴在内容区顶部 -->
+  <div class="health-status-bar">
+    <strong>系统状态</strong>
+    <span class="app-tag" :class="healthStatusTone(healthData.status)">{{ healthStatusLabel(healthData.status) }}</span>
+    <span v-if="healthData.timestamp" class="health-status-time">{{ healthData.timestamp }}</span>
+    <el-button class="health-refresh" :loading="healthLoading" @click="fetchHealthData">刷新</el-button>
+  </div>
+
+  <div class="app-panel-grid-3 health-check-grid">
+    <section v-for="(check, name) in (healthData.checks || {})" :key="name" class="app-card">
+      <div class="app-card-head">
+        <h3>{{ healthCheckLabel(name) }}</h3>
+        <span class="app-tag" :class="check.status === 'ok' ? 'is-ok' : 'is-danger'">
+          {{ check.status === 'ok' ? '正常' : '异常' }}
         </span>
       </div>
-      <el-button :loading="healthLoading" @click="fetchHealthData">刷新</el-button>
-    </div>
-  </el-card>
-
-  <el-row :gutter="16" class="system-block-row">
-    <el-col :span="8" v-for="(check, name) in (healthData.checks || {})" :key="name">
-      <el-card shadow="hover">
-        <template #header>
-          <div style="display: flex; justify-content: space-between; align-items: center">
-            <span>{{ healthCheckLabel(name) }}</span>
-            <el-tag :type="check.status === 'ok' ? 'success' : 'danger'" size="small">
-              {{ check.status === 'ok' ? '正常' : '异常' }}
-            </el-tag>
-          </div>
-        </template>
-        <div style="display: grid; gap: 8px; color: var(--color-text-secondary)">
-          <div v-if="check.provider"><strong>服务提供方：</strong> {{ check.provider }}</div>
-          <div v-if="check.message" style="color: var(--color-danger); white-space: pre-wrap">{{ check.message }}</div>
-          <div v-if="!check.message" style="color: var(--color-success)">连接正常</div>
-        </div>
-      </el-card>
-    </el-col>
-  </el-row>
+      <div class="app-card-body health-check-body">
+        <div v-if="check.provider"><strong>服务提供方：</strong> {{ check.provider }}</div>
+        <div v-if="check.message" class="health-check-error">{{ check.message }}</div>
+        <div v-else class="health-check-ok">连接正常</div>
+      </div>
+    </section>
+  </div>
 </template>
 
 <script setup>
 import { computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElButton } from 'element-plus/es/components/button/index'
-import { ElCard } from 'element-plus/es/components/card/index'
-import { ElCol } from 'element-plus/es/components/col/index'
-import { ElRow } from 'element-plus/es/components/row/index'
-import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/button/style/css'
-import 'element-plus/es/components/card/style/css'
-import 'element-plus/es/components/col/style/css'
-import 'element-plus/es/components/row/style/css'
-import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemObservability } from '../../composables/useSystemObservability'
 import { useAuthStore } from '../../stores/auth'
@@ -75,11 +57,12 @@ const healthStatusLabel = (status) => ({
   error: '异常',
 }[status] || '未知')
 
-const healthStatusTagType = (status) => ({
-  ok: 'success',
-  degraded: 'warning',
-  error: 'danger',
-}[status] || 'info')
+// 方向 B 的标签口径：正常 / 待确认（降级）/ 异常
+const healthStatusTone = (status) => ({
+  ok: 'is-ok',
+  degraded: 'is-pending',
+  error: 'is-danger',
+}[status] || '')
 
 onMounted(async () => {
   await authStore.loadMe()
@@ -91,11 +74,37 @@ onMounted(async () => {
 .tab-intro {
   margin-top: var(--space-5);
 }
-.system-panel-card {
+.health-status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-4);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+.health-status-time {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+.health-refresh {
+  margin-left: auto;
+}
+.health-check-grid {
   margin-top: var(--space-4);
 }
-.system-block-row {
-  margin-top: var(--space-4);
-  margin-bottom: 0;
+.health-check-body {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.health-check-error {
+  color: var(--color-danger);
+  white-space: pre-wrap;
+}
+.health-check-ok {
+  color: var(--color-success);
 }
 </style>

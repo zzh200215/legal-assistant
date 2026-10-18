@@ -6,112 +6,117 @@
 
   <WorkflowOperationsPanel />
 
-  <el-card class="system-panel-card">
-    <div class="app-toolbar">
-      <span>统计周期：</span>
-      <el-radio-group v-model="taskDays" @change="resetTaskRunPagination">
-        <el-radio-button :value="7">近 7 天</el-radio-button>
-        <el-radio-button :value="30">近 30 天</el-radio-button>
-        <el-radio-button :value="90">近 90 天</el-radio-button>
-      </el-radio-group>
-      <template v-if="isAdmin">
-        <span style="margin-left: 12px">范围：</span>
-        <el-radio-group v-model="taskScope" @change="resetTaskRunPagination">
-          <el-radio-button value="mine">我的</el-radio-button>
-          <el-radio-button value="all">全部用户</el-radio-button>
+  <section class="app-card system-panel-card">
+    <div class="app-card-body">
+      <div class="app-filter-bar">
+        <span class="app-filter-label">统计周期：</span>
+        <el-radio-group v-model="taskDays" @change="resetTaskRunPagination">
+          <el-radio-button :value="7">近 7 天</el-radio-button>
+          <el-radio-button :value="30">近 30 天</el-radio-button>
+          <el-radio-button :value="90">近 90 天</el-radio-button>
         </el-radio-group>
-      </template>
-      <span style="margin-left: 12px">来源：</span>
-      <el-select v-model="taskSource" clearable placeholder="全部" style="width: 140px" @change="resetTaskRunPagination">
-        <el-option label="异步任务" value="async_task" />
-        <el-option label="Agent" value="agent" />
-      </el-select>
-      <span>状态：</span>
-      <el-select v-model="taskStatus" clearable placeholder="全部" style="width: 140px" @change="resetTaskRunPagination">
-        <el-option label="排队中" value="pending" />
-        <el-option label="执行中" value="running" />
-        <el-option label="已完成" value="succeeded" />
-        <el-option label="失败" value="failed" />
-      </el-select>
-      <div class="app-toolbar-right">
-        <el-button @click="fetchTaskRuns">刷新</el-button>
+        <template v-if="isAdmin">
+          <span class="app-filter-label">范围：</span>
+          <el-radio-group v-model="taskScope" @change="resetTaskRunPagination">
+            <el-radio-button value="mine">我的</el-radio-button>
+            <el-radio-button value="all">全部用户</el-radio-button>
+          </el-radio-group>
+        </template>
+        <span class="app-filter-label">来源：</span>
+        <el-select v-model="taskSource" clearable placeholder="全部" class="system-filter-select" @change="resetTaskRunPagination">
+          <el-option label="异步任务" value="async_task" />
+          <el-option label="Agent" value="agent" />
+        </el-select>
+        <span class="app-filter-label">状态：</span>
+        <el-select v-model="taskStatus" clearable placeholder="全部" class="system-filter-select" @change="resetTaskRunPagination">
+          <el-option label="排队中" value="pending" />
+          <el-option label="执行中" value="running" />
+          <el-option label="已完成" value="succeeded" />
+          <el-option label="失败" value="failed" />
+        </el-select>
+        <div class="app-filter-bar-actions">
+          <el-button @click="fetchTaskRuns">刷新</el-button>
+        </div>
       </div>
     </div>
-  </el-card>
+  </section>
 
-  <el-row :gutter="16" style="margin-bottom: 16px">
-    <el-col :span="6">
-      <el-card shadow="hover">
-        <el-statistic title="任务总数" :value="taskRuns.length" />
-      </el-card>
-    </el-col>
-    <el-col :span="6">
-      <el-card shadow="hover">
-        <el-statistic title="执行中" :value="runningTaskCount" />
-      </el-card>
-    </el-col>
-    <el-col :span="6">
-      <el-card shadow="hover">
-        <el-statistic title="失败任务" :value="failedTaskCount" />
-      </el-card>
-    </el-col>
-    <el-col :span="6">
-      <el-card shadow="hover">
-        <el-statistic title="可重试" :value="retryableTaskCount" />
-      </el-card>
-    </el-col>
-  </el-row>
+  <div class="app-metric-grid-4 task-metric-grid">
+    <div class="app-stat">
+      <span class="app-stat-label">任务总数</span>
+      <strong class="app-stat-value">{{ taskRuns.length }}</strong>
+    </div>
+    <div class="app-stat">
+      <span class="app-stat-label">执行中</span>
+      <strong class="app-stat-value">{{ runningTaskCount }}</strong>
+    </div>
+    <div class="app-stat">
+      <span class="app-stat-label">失败任务</span>
+      <strong class="app-stat-value">{{ failedTaskCount }}</strong>
+    </div>
+    <div class="app-stat">
+      <span class="app-stat-label">可重试</span>
+      <strong class="app-stat-value">{{ retryableTaskCount }}</strong>
+    </div>
+  </div>
 
-  <el-card class="system-panel-card">
-    <template #header>任务列表</template>
-    <QueryStateView :status="taskRunsStatus" :error="taskError" empty-text="暂无任务运行记录" min-height="200px" @retry="fetchTaskRuns">
-    <el-table :data="taskRuns" v-loading="taskLoading" border size="small" max-height="560">
-      <el-table-column prop="source" label="来源" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.source === 'agent' ? 'danger' : 'warning'" size="small">
-            {{ row.source === 'agent' ? 'Agent' : '异步任务' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="title" label="任务类型" width="120" />
-      <el-table-column prop="status" label="状态" width="100">
-        <template #default="{ row }">
-          <StatusTag kind="task_run" :status="row.status" size="small" />
-        </template>
-      </el-table-column>
-      <el-table-column prop="target_type" label="目标类型" width="100" />
-      <el-table-column prop="target_id" label="目标 ID" width="90" />
-      <el-table-column prop="message" label="详情" show-overflow-tooltip />
-      <el-table-column prop="updated_at" label="最近更新时间" width="180" />
-      <el-table-column label="操作" width="220" fixed="right">
-        <template #default="{ row }">
-          <el-space wrap>
-            <el-button text type="primary" @click="openTaskTarget(row)">查看</el-button>
-            <el-button
-              v-if="row.retryable"
-              text
-              type="warning"
-              :loading="retryingTaskKey === `${row.source}:${row.task_key}`"
-              @click="retryTask(row)"
-            >
-              重试
-            </el-button>
-            <el-button text @click="showTaskDetail(row)">详情</el-button>
-          </el-space>
-        </template>
-      </el-table-column>
-    </el-table>
-    </QueryStateView>
-    <el-pagination
-      background
-      layout="total, prev, pager, next"
-      :current-page="taskRunPage"
-      :page-size="taskRunPageSize"
-      :total="taskRunTotal"
-      class="app-pagination-end"
-      @current-change="handleTaskRunPageChange"
-    />
-  </el-card>
+  <section class="app-card system-panel-card">
+    <div class="app-card-head">
+      <h2>任务列表</h2>
+      <span class="app-card-head-meta">共 {{ taskRunTotal }} 条</span>
+    </div>
+    <div class="app-card-body">
+      <div class="app-table-wrap">
+      <QueryStateView :status="taskRunsStatus" :error="taskError" empty-text="暂无任务运行记录" min-height="200px" @retry="fetchTaskRuns">
+      <el-table v-loading="taskLoading" :data="taskRuns" border size="small" max-height="560">
+        <el-table-column prop="source" label="来源" width="100">
+          <template #default="{ row }">
+            <span class="app-tag" :class="row.source === 'agent' ? 'is-accent' : 'is-info'">
+              {{ row.source === 'agent' ? 'Agent' : '异步任务' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="title" label="任务类型" width="120" />
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <StatusTag kind="task_run" :status="row.status" size="small" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="target_type" label="目标类型" width="100" />
+        <el-table-column prop="target_id" label="目标 ID" width="90" />
+        <el-table-column prop="message" label="详情" show-overflow-tooltip />
+        <el-table-column prop="updated_at" label="最近更新时间" width="180" />
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="{ row }">
+            <el-space wrap>
+              <el-button text type="primary" @click="openTaskTarget(row)">查看</el-button>
+              <el-button
+                v-if="row.retryable"
+                text
+                type="warning"
+                :loading="retryingTaskKey === `${row.source}:${row.task_key}`"
+                @click="retryTask(row)"
+              >
+                重试
+              </el-button>
+              <el-button text @click="showTaskDetail(row)">详情</el-button>
+            </el-space>
+          </template>
+        </el-table-column>
+      </el-table>
+      </QueryStateView>
+      </div>
+      <el-pagination
+        background
+        layout="total, prev, pager, next"
+        :current-page="taskRunPage"
+        :page-size="taskRunPageSize"
+        :total="taskRunTotal"
+        class="app-pagination-end"
+        @current-change="handleTaskRunPageChange"
+      />
+    </div>
+  </section>
 
   <el-dialog v-model="taskDetailVisible" title="任务详情" width="760px" class="system-dialog" append-to-body>
     <div v-if="selectedTaskDetail">
@@ -132,14 +137,14 @@
           <span>{{ selectedTaskDetail.target_id || '-' }}</span>
         </div>
       </div>
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="来源">{{ selectedTaskDetail.source }}</el-descriptions-item>
-        <el-descriptions-item label="任务类型">{{ selectedTaskDetail.title }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ getStatusLabel('task_run', selectedTaskDetail.status) }}</el-descriptions-item>
-        <el-descriptions-item label="目标">{{ selectedTaskDetail.target_type }} / {{ selectedTaskDetail.target_id || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="任务 Key">{{ selectedTaskDetail.task_key }}</el-descriptions-item>
-        <el-descriptions-item label="最近更新时间">{{ selectedTaskDetail.updated_at || '-' }}</el-descriptions-item>
-      </el-descriptions>
+      <dl class="dialog-kv">
+        <div><dt>来源</dt><dd>{{ selectedTaskDetail.source }}</dd></div>
+        <div><dt>任务类型</dt><dd>{{ selectedTaskDetail.title }}</dd></div>
+        <div><dt>状态</dt><dd>{{ getStatusLabel('task_run', selectedTaskDetail.status) }}</dd></div>
+        <div><dt>目标</dt><dd>{{ selectedTaskDetail.target_type }} / {{ selectedTaskDetail.target_id || '-' }}</dd></div>
+        <div><dt>任务 Key</dt><dd class="app-num">{{ selectedTaskDetail.task_key }}</dd></div>
+        <div><dt>最近更新时间</dt><dd class="app-num">{{ selectedTaskDetail.updated_at || '-' }}</dd></div>
+      </dl>
       <div class="dialog-section">
         <strong>消息：</strong>
         <div class="dialog-pre">{{ selectedTaskDetail.message || '无' }}</div>
@@ -167,37 +172,25 @@
 <script setup>
 import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElButton } from 'element-plus/es/components/button/index'
-import { ElCard } from 'element-plus/es/components/card/index'
-import { ElCol } from 'element-plus/es/components/col/index'
-import { ElDescriptions, ElDescriptionsItem } from 'element-plus/es/components/descriptions/index'
 import { ElDialog } from 'element-plus/es/components/dialog/index'
 import { ElPagination } from 'element-plus/es/components/pagination/index'
 import { ElRadioButton, ElRadioGroup } from 'element-plus/es/components/radio/index'
-import { ElRow } from 'element-plus/es/components/row/index'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
 import { ElSpace } from 'element-plus/es/components/space/index'
-import { ElStatistic } from 'element-plus/es/components/statistic/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
-import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/button/style/css'
-import 'element-plus/es/components/card/style/css'
-import 'element-plus/es/components/col/style/css'
-import 'element-plus/es/components/descriptions/style/css'
-import 'element-plus/es/components/descriptions-item/style/css'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/radio-button/style/css'
 import 'element-plus/es/components/radio-group/style/css'
-import 'element-plus/es/components/row/style/css'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/space/style/css'
-import 'element-plus/es/components/statistic/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
-import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import StatusTag from '../StatusTag.vue'
 import { getStatusLabel } from '../../utils/status'
@@ -249,6 +242,36 @@ watch(
 .system-panel-card {
   margin-top: var(--space-4);
 }
+.task-metric-grid {
+  margin-top: var(--space-4);
+}
+.system-filter-select {
+  width: 140px;
+}
+.dialog-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+}
+.dialog-kv div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.dialog-kv dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+.dialog-kv dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  word-break: break-all;
+}
 .dialog-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -258,7 +281,7 @@ watch(
 .dialog-metric {
   padding: var(--space-4) var(--space-4);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--color-surface);
   border: 1px solid var(--color-border-light);
   display: grid;
   gap: var(--space-1);
@@ -299,6 +322,9 @@ watch(
 }
 @media (max-width: 1100px) {
   .dialog-metrics {
+    grid-template-columns: 1fr;
+  }
+  .dialog-kv {
     grid-template-columns: 1fr;
   }
 }

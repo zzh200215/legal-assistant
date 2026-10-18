@@ -10,13 +10,13 @@
 
 html:root {
   /* 主色梯度按 Element 的 mix(white, base, N*10%) 口径由 #3B5BDB 推导 */
-  --el-color-primary: #3B5BDB;
-  --el-color-primary-light-3: #768CE6;
-  --el-color-primary-light-5: #9DADED;
-  --el-color-primary-light-7: #C4CEF4;
-  --el-color-primary-light-8: #D8DEF8;
-  --el-color-primary-light-9: #EEF1FB;
-  --el-color-primary-dark-2: #2F49AF;
+  --el-color-primary: #4F46E5;
+  --el-color-primary-light-3: #847EED;
+  --el-color-primary-light-5: #A7A3F2;
+  --el-color-primary-light-7: #CAC8F7;
+  --el-color-primary-light-8: #DCDAFA;
+  --el-color-primary-light-9: #EDEDFC;
+  --el-color-primary-dark-2: #3F38B7;
 
   --el-color-success: #15803D;
   --el-color-success-light-3: #5BA677;
@@ -57,8 +57,8 @@ html:root {
   --el-bg-color-page: #F7F8FA;
   --el-bg-color-overlay: #FFFFFF;
 
-  --el-border-radius-base: 6px;
-  --el-border-radius-small: 4px;
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
 
   /* 弹层阴影同样改为中性紧实，避免下拉/气泡带彩色光晕 */
   --el-box-shadow-lighter: var(--shadow-xs);

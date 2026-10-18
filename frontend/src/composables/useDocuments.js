@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import api from '../api'
 import { buildAgentDemoRouteQuery } from '../utils/agentDemo'
 import { useDocumentList } from './useDocumentList'

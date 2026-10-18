@@ -4,158 +4,172 @@
     <span>聚合审查、法源与外发风险，按来源、分类和级别快速筛查。</span>
   </div>
 
-  <el-card class="system-panel-card">
-    <div class="app-toolbar">
-      <span>统计周期：</span>
-      <el-radio-group v-model="alertDays" @change="resetAlertPagination">
-        <el-radio-button :value="7">近 7 天</el-radio-button>
-        <el-radio-button :value="30">近 30 天</el-radio-button>
-        <el-radio-button :value="90">近 90 天</el-radio-button>
-      </el-radio-group>
-      <template v-if="isAdmin">
-        <span style="margin-left: 12px">范围：</span>
-        <el-radio-group v-model="alertScope" @change="resetAlertPagination">
-          <el-radio-button value="mine">我的</el-radio-button>
-          <el-radio-button value="all">全部用户</el-radio-button>
+  <section class="app-card system-panel-card">
+    <div class="app-card-body">
+      <div class="app-filter-bar">
+        <span class="app-filter-label">统计周期：</span>
+        <el-radio-group v-model="alertDays" @change="resetAlertPagination">
+          <el-radio-button :value="7">近 7 天</el-radio-button>
+          <el-radio-button :value="30">近 30 天</el-radio-button>
+          <el-radio-button :value="90">近 90 天</el-radio-button>
         </el-radio-group>
-      </template>
-      <span style="margin-left: 12px">来源：</span>
-      <el-select v-model="alertSource" clearable placeholder="全部" style="width: 140px" @change="resetAlertPagination">
-        <el-option label="异步任务" value="async_task" />
-        <el-option label="Agent" value="agent" />
-        <el-option label="计划任务" value="scheduler" />
-        <el-option label="法源同步" value="mailbox" />
-        <el-option label="外发文书" value="outbound_email" />
-      </el-select>
-      <span>分类：</span>
-      <el-select v-model="alertCategory" clearable placeholder="全部" style="width: 180px" @change="resetAlertPagination">
-        <el-option v-for="item in alertCategoryOptions" :key="item.value" :label="item.label" :value="item.value" />
-      </el-select>
-      <span>级别：</span>
-      <el-select v-model="alertSeverity" clearable placeholder="全部" style="width: 140px" @change="resetAlertPagination">
-        <el-option label="高" value="high" />
-        <el-option label="中" value="medium" />
-        <el-option label="低" value="low" />
-      </el-select>
-      <div class="app-toolbar-right">
-        <el-button @click="fetchAlerts">刷新</el-button>
+        <template v-if="isAdmin">
+          <span class="app-filter-label">范围：</span>
+          <el-radio-group v-model="alertScope" @change="resetAlertPagination">
+            <el-radio-button value="mine">我的</el-radio-button>
+            <el-radio-button value="all">全部用户</el-radio-button>
+          </el-radio-group>
+        </template>
+        <span class="app-filter-label">来源：</span>
+        <el-select v-model="alertSource" clearable placeholder="全部" class="alerts-source-select" @change="resetAlertPagination">
+          <el-option label="异步任务" value="async_task" />
+          <el-option label="Agent" value="agent" />
+          <el-option label="计划任务" value="scheduler" />
+          <el-option label="法源同步" value="mailbox" />
+          <el-option label="外发文书" value="outbound_email" />
+        </el-select>
+        <span class="app-filter-label">分类：</span>
+        <el-select v-model="alertCategory" clearable placeholder="全部" class="alerts-category-select" @change="resetAlertPagination">
+          <el-option v-for="item in alertCategoryOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+        <span class="app-filter-label">级别：</span>
+        <el-select v-model="alertSeverity" clearable placeholder="全部" class="alerts-severity-select" @change="resetAlertPagination">
+          <el-option label="高" value="high" />
+          <el-option label="中" value="medium" />
+          <el-option label="低" value="low" />
+        </el-select>
+        <div class="app-filter-bar-actions">
+          <el-button @click="fetchAlerts">刷新</el-button>
+        </div>
       </div>
     </div>
-  </el-card>
+  </section>
 
-  <el-row :gutter="16" class="system-block-row">
-    <el-col :span="6">
-      <el-card shadow="hover">
-        <el-statistic title="告警总数" :value="alertStats.total || 0" />
-      </el-card>
-    </el-col>
-    <el-col :span="6">
-      <el-card shadow="hover">
-        <el-statistic title="计划任务风险" :value="alertStats.by_source?.scheduler || 0" />
-      </el-card>
-    </el-col>
-    <el-col :span="6">
-      <el-card shadow="hover">
-        <el-statistic title="法源同步失败" :value="alertStats.by_source?.mailbox || 0" />
-      </el-card>
-    </el-col>
-    <el-col :span="6">
-      <el-card shadow="hover">
-        <el-statistic title="外发文书风险" :value="alertStats.by_source?.outbound_email || 0" />
-      </el-card>
-    </el-col>
-  </el-row>
+  <div class="app-metric-grid-4 alerts-metric-grid">
+    <div class="app-stat">
+      <span class="app-stat-label">告警总数</span>
+      <span class="app-stat-value">{{ alertStats.total || 0 }}</span>
+    </div>
+    <div class="app-stat">
+      <span class="app-stat-label">计划任务风险</span>
+      <span class="app-stat-value">{{ alertStats.by_source?.scheduler || 0 }}</span>
+    </div>
+    <div class="app-stat">
+      <span class="app-stat-label">法源同步失败</span>
+      <span class="app-stat-value">{{ alertStats.by_source?.mailbox || 0 }}</span>
+    </div>
+    <div class="app-stat">
+      <span class="app-stat-label">外发文书风险</span>
+      <span class="app-stat-value">{{ alertStats.by_source?.outbound_email || 0 }}</span>
+    </div>
+  </div>
 
-  <el-row :gutter="16" class="system-block-row">
-    <el-col :span="12">
-      <el-card>
-        <template #header>分类分布</template>
-        <el-table :data="alertCategoryRows" border size="small" max-height="260">
-          <el-table-column prop="label" label="分类" />
-          <el-table-column prop="count" label="数量" width="100" />
+  <div class="app-panel-grid-2 alerts-breakdown-grid">
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>分类分布</h2>
+        <span class="app-card-head-meta">共 {{ alertCategoryRows.length }} 项</span>
+      </div>
+      <div class="app-card-body">
+        <div class="app-table-wrap">
+          <el-table :data="alertCategoryRows" border size="small" max-height="260">
+            <el-table-column prop="label" label="分类" />
+            <el-table-column prop="count" label="数量" width="100">
+              <template #default="{ row }"><span class="app-num">{{ row.count }}</span></template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
+    </section>
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>每日告警趋势</h2>
+        <span class="app-card-head-meta">近 {{ alertDays }} 天</span>
+      </div>
+      <div class="app-card-body">
+        <div class="app-table-wrap">
+          <el-table :data="alertDateRows" border size="small" max-height="260">
+            <el-table-column prop="date" label="日期" width="140">
+              <template #default="{ row }"><span class="app-num">{{ row.date }}</span></template>
+            </el-table-column>
+            <el-table-column prop="count" label="告警数" width="100">
+              <template #default="{ row }"><span class="app-num">{{ row.count }}</span></template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="app-card system-panel-card">
+    <div class="app-card-head">
+      <h2>告警列表</h2>
+      <span class="app-card-head-meta">共 {{ alertTotal }} 条</span>
+    </div>
+    <div class="app-card-body">
+      <div class="app-table-wrap">
+        <QueryStateView :status="alertStatus" :error="alertError" empty-text="暂无告警" min-height="200px" @retry="fetchAlerts">
+        <el-table v-loading="alertLoading" :data="alerts" border size="small" max-height="520">
+          <el-table-column prop="source" label="来源" width="110">
+            <template #default="{ row }">
+              <span class="app-tag" :class="alertSourceTagClass(row.source)">
+                {{ row.source_label || row.source }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="severity" label="级别" width="90">
+            <template #default="{ row }">
+              <span class="app-tag" :class="alertSeverityTagClass(row.severity)">
+                {{ alertSeverityLabel(row.severity) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="category" label="分类" width="150">
+            <template #default="{ row }">
+              {{ alertCategoryLabel(row.category) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="title" label="事件" width="220" show-overflow-tooltip />
+          <el-table-column prop="error_type" label="错误类型" width="160" show-overflow-tooltip />
+          <el-table-column prop="target_type" label="目标类型" width="100" />
+          <el-table-column prop="target_id" label="目标 ID" width="90" />
+          <el-table-column prop="message" label="详情" show-overflow-tooltip />
+          <el-table-column prop="created_at" label="时间" width="180">
+            <template #default="{ row }"><span class="app-num">{{ row.created_at }}</span></template>
+          </el-table-column>
         </el-table>
-      </el-card>
-    </el-col>
-    <el-col :span="12">
-      <el-card>
-        <template #header>每日告警趋势</template>
-        <el-table :data="alertDateRows" border size="small" max-height="260">
-          <el-table-column prop="date" label="日期" width="140" />
-          <el-table-column prop="count" label="告警数" width="100" />
-        </el-table>
-      </el-card>
-    </el-col>
-  </el-row>
-
-  <el-card class="system-panel-card">
-    <template #header>告警列表</template>
-    <QueryStateView :status="alertStatus" :error="alertError" empty-text="暂无告警" min-height="200px" @retry="fetchAlerts">
-    <el-table :data="alerts" v-loading="alertLoading" border size="small" max-height="520">
-      <el-table-column prop="source" label="来源" width="110">
-        <template #default="{ row }">
-          <el-tag :type="alertSourceTagType(row.source)" size="small">
-            {{ row.source_label || row.source }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="severity" label="级别" width="90">
-        <template #default="{ row }">
-          <el-tag :type="alertSeverityTagType(row.severity)" size="small">
-            {{ alertSeverityLabel(row.severity) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="category" label="分类" width="150">
-        <template #default="{ row }">
-          {{ alertCategoryLabel(row.category) }}
-        </template>
-      </el-table-column>
-      <el-table-column prop="title" label="事件" width="220" show-overflow-tooltip />
-      <el-table-column prop="error_type" label="错误类型" width="160" show-overflow-tooltip />
-      <el-table-column prop="target_type" label="目标类型" width="100" />
-      <el-table-column prop="target_id" label="目标 ID" width="90" />
-      <el-table-column prop="message" label="详情" show-overflow-tooltip />
-      <el-table-column prop="created_at" label="时间" width="180" />
-    </el-table>
-    </QueryStateView>
-    <el-pagination
-      background
-      layout="total, prev, pager, next"
-      :current-page="alertPage"
-      :page-size="alertPageSize"
-      :total="alertTotal"
-      class="app-pagination-end"
-      @current-change="handleAlertPageChange"
-    />
-  </el-card>
+        </QueryStateView>
+      </div>
+      <el-pagination
+        background
+        layout="total, prev, pager, next"
+        :current-page="alertPage"
+        :page-size="alertPageSize"
+        :total="alertTotal"
+        class="app-pagination-end"
+        @current-change="handleAlertPageChange"
+      />
+    </div>
+  </section>
 </template>
 
 <script setup>
 import { computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElButton } from 'element-plus/es/components/button/index'
-import { ElCard } from 'element-plus/es/components/card/index'
-import { ElCol } from 'element-plus/es/components/col/index'
 import { ElPagination } from 'element-plus/es/components/pagination/index'
 import { ElRadioButton, ElRadioGroup } from 'element-plus/es/components/radio/index'
-import { ElRow } from 'element-plus/es/components/row/index'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
-import { ElStatistic } from 'element-plus/es/components/statistic/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
-import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/button/style/css'
-import 'element-plus/es/components/card/style/css'
-import 'element-plus/es/components/col/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/radio-button/style/css'
 import 'element-plus/es/components/radio-group/style/css'
-import 'element-plus/es/components/row/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/statistic/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
-import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { useSystemActivity } from '../../composables/useSystemActivity'
 import { useAuthStore } from '../../stores/auth'
@@ -231,19 +245,20 @@ const alertSeverityLabel = (severity) => ({
   low: '低',
 }[severity] || severity || '未知')
 
-const alertSeverityTagType = (severity) => ({
-  high: 'danger',
-  medium: 'warning',
-  low: 'info',
-}[severity] || 'info')
+// 方向 B：语义色只从 .app-tag 变体里选（is-danger / is-pending / is-info）
+const alertSeverityTagClass = (severity) => ({
+  high: 'is-danger',
+  medium: 'is-pending',
+  low: 'is-info',
+}[severity] || 'is-info')
 
-const alertSourceTagType = (source) => ({
-  agent: 'danger',
-  async_task: 'warning',
-  scheduler: 'danger',
-  mailbox: 'warning',
-  outbound_email: 'warning',
-}[source] || 'info')
+const alertSourceTagClass = (source) => ({
+  agent: 'is-danger',
+  async_task: 'is-pending',
+  scheduler: 'is-danger',
+  mailbox: 'is-pending',
+  outbound_email: 'is-pending',
+}[source] || 'is-info')
 
 onMounted(async () => {
   await authStore.loadMe()
@@ -258,8 +273,18 @@ onMounted(async () => {
 .system-panel-card {
   margin-top: var(--space-4);
 }
-.system-block-row {
+.alerts-metric-grid,
+.alerts-breakdown-grid {
   margin-top: var(--space-4);
-  margin-bottom: 0;
+}
+/* 筛选下拉沿用原来的宽度（内联 style 收进 scoped 类） */
+.alerts-source-select {
+  width: 140px;
+}
+.alerts-category-select {
+  width: 180px;
+}
+.alerts-severity-select {
+  width: 140px;
 }
 </style>

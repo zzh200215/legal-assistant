@@ -46,13 +46,13 @@ const rows = computed(() => props.rows || computedRows.value)
 </script>
 
 <style scoped>
-.document-diff { border: 1px solid var(--color-border); background: #fff; }
+.document-diff { border: 1px solid var(--color-border); background: var(--color-surface); }
 .diff-toolbar { display: flex; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--color-border-light); color: var(--color-text-muted); font-size: 11px; }
 .diff-toolbar strong { color: var(--color-text); font-weight: 600; }
 .diff-lines { max-height: 360px; margin: 0; padding: 8px 0; overflow: auto; list-style: none; font-family: var(--font-mono); font-size: 12px; line-height: 1.65; }
 .diff-line { display: grid; grid-template-columns: 24px minmax(0, 1fr); padding: 2px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff-mark { color: var(--color-text-muted); user-select: none; }
-.diff-added { background: #eef8f0; color: #216b36; }.diff-added .diff-mark { color: #278344; }
-.diff-removed { background: #fff1f0; color: #9d3028; }.diff-removed .diff-mark { color: #bd3b32; }
+.diff-added { background: var(--color-success-light); color: var(--color-success); }.diff-added .diff-mark { color: var(--color-success); }
+.diff-removed { background: var(--color-danger-light); color: var(--color-danger); }.diff-removed .diff-mark { color: var(--color-danger); }
 .diff-empty { padding: 14px 12px; color: var(--color-text-muted); font-size: 12px; }
 </style>

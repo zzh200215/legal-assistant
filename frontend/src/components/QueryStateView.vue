@@ -119,7 +119,7 @@ const errorText = computed(() => (props.error ? errorMessage(props.error) : '加
   height: 24px;
   border-radius: var(--radius-full);
   background: var(--el-color-danger);
-  color: #fff;
+  color: var(--color-text-inverse);
   font-weight: 600;
   display: grid;
   place-items: center;

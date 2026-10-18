@@ -117,16 +117,16 @@ const goForgot = () => router.push({ path: '/login', query: { tab: 'forgot' } })
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--color-bg-canvas, #F5F7FA);
+  background: var(--color-bg);
 }
 
 .reset-card {
   width: min(420px, 100%);
   padding: 40px 36px;
-  background: #fff;
-  border: 1px solid var(--color-border-light, #E4E8EE);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
   border-radius: 10px;
-  box-shadow: 0 8px 30px rgba(15, 30, 60, 0.06);
+  box-shadow: var(--shadow-sm);
 }
 
 .reset-header {

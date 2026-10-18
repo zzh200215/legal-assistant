@@ -239,7 +239,7 @@ onUnmounted(() => {
   justify-content: center;
   border-radius: var(--radius-full);
   background: var(--color-danger);
-  color: #ffffff;
+  color: var(--color-text-inverse);
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
@@ -251,10 +251,10 @@ onUnmounted(() => {
   top: -4px;
   width: 320px;
   z-index: var(--z-topbar, 200);
-  background: #ffffff;
+  background: var(--color-surface);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-md, 10px);
-  box-shadow: 0 12px 32px rgba(30, 41, 59, 0.16);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 

@@ -1,4 +1,5 @@
 <template>
+  <!-- 薄容器：页面级方向 B 页头（.app-page-head）与概览数据卡都在 AgentHeader 内 -->
   <div class="agent-page">
     <AgentHeader />
     <AgentCommandCenter />

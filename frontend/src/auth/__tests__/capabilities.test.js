@@ -11,13 +11,16 @@ test('admin 拥有系统/Agent/任务权限', () => {
   assert.ok(caps.includes(CAPABILITY.WORKSPACE_MANAGE))
 })
 
-test('user 可查看任务但无管理员权限', () => {
+test('user 可查看任务与 Agent，但没有管理员权限', () => {
   const caps = capabilitiesForRole('user')
   assert.ok(caps.includes(CAPABILITY.DOCUMENT_READ))
   assert.ok(caps.includes(CAPABILITY.WORKSPACE_MANAGE))
   assert.ok(caps.includes(CAPABILITY.TASK_VIEW))
+  // 入口收敛：Agent 对普通用户开放（后端按 user_id 隔离），系统级能力仍仅管理员
+  assert.ok(caps.includes(CAPABILITY.AGENT_VIEW))
+  assert.ok(caps.includes(CAPABILITY.AGENT_RUN))
   assert.ok(!caps.includes(CAPABILITY.SYSTEM_VIEW))
-  assert.ok(!caps.includes(CAPABILITY.AGENT_VIEW))
+  assert.ok(!caps.includes(CAPABILITY.ORG_MANAGE))
 })
 
 test('dept_admin 介于两者之间', () => {

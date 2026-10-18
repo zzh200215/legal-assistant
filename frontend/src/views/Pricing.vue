@@ -1,8 +1,14 @@
 <template>
   <div class="pricing-page">
-    <div v-if="myPlan" class="pricing-header">
-      <el-tag size="small" type="success" effect="plain">当前方案：{{ myPlan.name }}（{{ myPlan.status }}）</el-tag>
-    </div>
+    <header class="app-page-head">
+      <div class="app-page-head-main">
+        <h1 class="app-page-title">订阅与计费</h1>
+        <p class="app-page-sub">查看订阅方案、配额与结算状态。</p>
+      </div>
+      <div class="app-page-head-actions">
+        <el-tag v-if="myPlan" size="small" type="success" effect="plain">当前方案：{{ myPlan.name }}（{{ myPlan.status }}）</el-tag>
+      </div>
+    </header>
 
     <div class="plan-grid" v-if="plans.length">
       <div v-for="plan in plans" :key="plan.id" class="plan-card" :class="{ current: isCurrent(plan) }">
@@ -36,7 +42,6 @@
       type="warning"
       show-icon
       :closable="false"
-      style="margin-top: 20px"
     />
   </div>
 </template>
@@ -94,28 +99,30 @@ onMounted(load)
 </script>
 
 <style scoped>
+/* 页头走 design-tokens.css 的 .app-page-head，这里只排布方案卡网格 */
 .pricing-page {
   display: grid;
-  gap: var(--space-4);
-}
-.pricing-header {
-  margin: 0;
+  gap: var(--space-5);
+  padding-bottom: var(--space-8);
 }
 .plan-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
+  gap: var(--space-4);
 }
+/* 方案卡与 .app-card 同口径：1px 中性边框 + 16px 圆角 + 贴合阴影；当前方案只用主色描边区分 */
 .plan-card {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-5);
   display: flex;
   flex-direction: column;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
 }
 .plan-card.current {
-  border-color: var(--color-success);
-  box-shadow: 0 0 0 1px var(--color-success);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary-subtle), var(--shadow-sm);
 }
 .plan-card-head {
   display: flex;
@@ -124,13 +131,13 @@ onMounted(load)
 }
 .plan-name {
   font-weight: 600;
-  font-size: 15px;
+  font-size: var(--text-lg);
 }
 .plan-price {
-  margin: 12px 0 4px;
+  margin: var(--space-3) 0 var(--space-1);
 }
 .price-num {
-  font-size: 26px;
+  font-size: var(--text-3xl);
   font-weight: 700;
 }
 .price-unit {
@@ -139,17 +146,17 @@ onMounted(load)
 }
 .plan-desc {
   color: var(--color-text-secondary);
-  font-size: 12px;
+  font-size: var(--text-xs);
   min-height: 32px;
 }
 .plan-quotas {
+  flex: 1;
   padding-left: 18px;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.9;
-  flex: 1;
 }
 .plan-actions {
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 </style>

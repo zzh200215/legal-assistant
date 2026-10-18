@@ -1,27 +1,35 @@
 <template>
   <div class="legal-contracts">
-    <div class="toolbar">
-      <el-button type="primary" @click="createVisible = true">新建合同</el-button>
-      <el-button :loading="loading" @click="loadContracts">刷新</el-button>
-    </div>
-
-    <el-table :data="contracts" stripe size="small" v-loading="loading">
-      <el-table-column prop="contract_no" label="合同编号" width="150" />
-      <el-table-column prop="title" label="合同名称" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="counterparty" label="相对方" min-width="140" show-overflow-tooltip />
-      <el-table-column prop="status" label="状态" width="100" />
-      <el-table-column label="操作" width="230">
-        <template #default="{ row }">
-          <el-button size="small" text type="primary" @click="openVersions(row)">版本</el-button>
-          <el-button size="small" text @click="openMilestones(row)">关键节点</el-button>
-          <el-button size="small" text @click="openDiff(row)">版本对比</el-button>
-          <el-tooltip v-if="!signingEnabled" content="电子签署服务未配置（试点暂不开放）" placement="top">
-            <span><el-button size="small" text type="info" disabled>签署</el-button></span>
-          </el-tooltip>
-          <el-button v-else size="small" text type="success" @click="openSigning(row)">签署</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- 方向 B：单卡片台账 —— 卡片头（标题 / 数量 / 操作）+ 卡片体表格；表格与弹窗行为不变 -->
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>合同列表</h2>
+        <span class="app-card-head-meta">{{ contracts.length }} 份</span>
+        <div class="contract-actions">
+          <el-button size="small" :loading="loading" @click="loadContracts">刷新</el-button>
+          <el-button size="small" type="primary" @click="createVisible = true">新建合同</el-button>
+        </div>
+      </div>
+      <div class="app-card-body">
+        <el-table v-loading="loading" :data="contracts" stripe size="small">
+          <el-table-column prop="contract_no" label="合同编号" width="150" />
+          <el-table-column prop="title" label="合同名称" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="counterparty" label="相对方" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column label="操作" width="230">
+            <template #default="{ row }">
+              <el-button size="small" text type="primary" @click="openVersions(row)">版本</el-button>
+              <el-button size="small" text @click="openMilestones(row)">关键节点</el-button>
+              <el-button size="small" text @click="openDiff(row)">版本对比</el-button>
+              <el-tooltip v-if="!signingEnabled" content="电子签署服务未配置（试点暂不开放）" placement="top">
+                <span><el-button size="small" text type="info" disabled>签署</el-button></span>
+              </el-tooltip>
+              <el-button v-else size="small" text type="success" @click="openSigning(row)">签署</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </section>
 
     <el-dialog v-model="createVisible" title="新建合同" width="560px">
       <el-form :model="createForm" label-width="86px">
@@ -38,7 +46,7 @@
         <el-input v-model="versionText" type="textarea" :rows="4" placeholder="粘贴本次合同文本快照" />
         <el-button type="primary" :disabled="!versionText.trim()" :loading="saving" @click="createVersion">保存新版本</el-button>
       </div>
-      <el-table :data="versions" size="small" style="margin-top:12px">
+      <el-table :data="versions" size="small" class="dialog-table">
         <el-table-column prop="version_no" label="版本" width="80" />
         <el-table-column prop="parse_status" label="解析状态" width="130" />
         <el-table-column prop="version_note" label="说明" show-overflow-tooltip />
@@ -62,12 +70,12 @@
 
     <el-dialog v-model="signingVisible" :title="`${selected?.title || ''} - 电子签署`" width="680px">
       <el-form :model="signForm" label-width="120px">
-        <el-form-item label="合同版本"><el-select v-model="signForm.contract_version_id" style="width:100%"><el-option v-for="v in versions" :key="v.id" :label="`V${v.version_no}`" :value="v.id" /></el-select></el-form-item>
-        <el-alert title="签署服务由组织配置的法大大沙箱提供" type="info" :closable="false" show-icon style="margin-bottom:16px" />
+        <el-form-item label="合同版本"><el-select v-model="signForm.contract_version_id" class="signing-version"><el-option v-for="v in versions" :key="v.id" :label="`V${v.version_no}`" :value="v.id" /></el-select></el-form-item>
+        <el-alert title="签署服务由组织配置的法大大沙箱提供" type="info" :closable="false" show-icon class="signing-alert" />
         <el-form-item label="签署方姓名"><el-input v-model="signForm.party_name" maxlength="128" /></el-form-item>
         <el-form-item label="已核验手机号"><el-input v-model="signForm.phone_masked" placeholder="例如 138****0000" maxlength="32" /></el-form-item>
       </el-form>
-      <el-table :data="signRequests" size="small" style="margin-top:12px"><el-table-column prop="provider" label="服务商" /><el-table-column prop="provider_request_id" label="签署单号" /><el-table-column prop="status" label="状态" /></el-table>
+      <el-table :data="signRequests" size="small" class="dialog-table"><el-table-column prop="provider" label="服务商" /><el-table-column prop="provider_request_id" label="签署单号" /><el-table-column prop="status" label="状态" /></el-table>
       <template #footer><el-button @click="signingVisible = false">关闭</el-button><el-button type="primary" :loading="saving" @click="createAndSendSignRequest">创建并发送</el-button></template>
     </el-dialog>
   </div>
@@ -75,7 +83,8 @@
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
 import { ElAlert } from 'element-plus/es/components/alert/index'
 import { ElDialog } from 'element-plus/es/components/dialog/index'
@@ -119,7 +128,15 @@ onMounted(loadFeatures)
 </script>
 
 <style scoped>
-.toolbar,.diff-controls,.version-create { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
-.version-create { align-items:flex-start; }.version-create .el-textarea { flex:1; }
-.diff-result { max-height:360px; overflow:auto; padding:12px; background:var(--color-surface-subtle); white-space:pre-wrap; }
+/* 方向 B：间距/圆角/色板一律走 design-tokens 令牌，卡片头与表格皮肤由 .app-card 体系提供 */
+.legal-contracts { display: grid; gap: var(--space-4); min-width: 0; }
+.contract-actions { display: flex; align-items: center; gap: var(--space-2); }
+.dialog-table { margin-top: var(--space-4); }
+.version-create { display: flex; align-items: flex-start; gap: var(--space-3); }
+.version-create .el-textarea { flex: 1; }
+.diff-controls { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+.diff-controls .el-select { width: 160px; }
+.diff-result { max-height: 360px; margin: 0; overflow: auto; padding: var(--space-4); border: 1px solid var(--color-border-light); border-radius: var(--radius-lg); background: var(--color-surface-subtle); color: var(--color-text-secondary); font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.7; white-space: pre-wrap; }
+.signing-version { width: 100%; }
+.signing-alert { margin-bottom: var(--space-4); }
 </style>

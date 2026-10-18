@@ -1,44 +1,65 @@
 <template>
-  <div class="system-overview">
-    <div class="overview-tile">
-      <span>运行任务</span>
-      <strong>{{ runningTaskCount }}</strong>
+  <!-- 方向 B：数据块走 .app-stat / .app-metric-grid-4，状态走 .app-tag 变体 -->
+  <div class="app-metric-grid-4 system-overview">
+    <div class="app-stat">
+      <span class="app-stat-label">运行任务</span>
+      <strong class="app-stat-value">{{ runningTaskCount }}</strong>
     </div>
-    <div class="overview-tile">
-      <span>失败任务</span>
-      <strong>{{ failedTaskCount }}</strong>
+    <div class="app-stat">
+      <span class="app-stat-label">失败任务</span>
+      <strong class="app-stat-value">{{ failedTaskCount }}</strong>
     </div>
-    <div class="overview-tile">
-      <span>待重试</span>
-      <strong>{{ retryableTaskCount }}</strong>
+    <div class="app-stat">
+      <span class="app-stat-label">待重试</span>
+      <strong class="app-stat-value">{{ retryableTaskCount }}</strong>
     </div>
-    <div class="overview-tile">
-      <span>Agent 成功率</span>
-      <strong>{{ Math.round(agentSuccessRate * 100) }}%</strong>
+    <div class="app-stat">
+      <span class="app-stat-label">Agent 成功率</span>
+      <strong class="app-stat-value">{{ Math.round(agentSuccessRate * 100) }}<small>%</small></strong>
     </div>
   </div>
 
   <div class="system-command-bar">
-    <div class="command-chips">
-      <span class="command-chip">当前标签：{{ activeTab }}</span>
-      <span class="command-chip">失败任务：{{ failedTaskCount }}</span>
-      <span class="command-chip">待审批：{{ approvalStats.pending || 0 }}</span>
-    </div>
+    <span class="app-tag">当前标签：{{ activeTabLabel }}</span>
+    <span class="app-tag" :class="failedTaskCount ? 'is-danger' : 'is-ok'">失败任务：{{ failedTaskCount }}</span>
+    <span class="app-tag" :class="pendingApprovalCount ? 'is-pending' : 'is-ok'">待审批：{{ pendingApprovalCount }}</span>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import 'element-plus/es/components/message/style/css'
 import api from '../../api'
 import { useSystemTaskMonitor } from '../../composables/useSystemTaskMonitor'
 import { useSystemApprovals } from '../../composables/useSystemApprovals'
 import { useAuthStore } from '../../stores/auth'
 
-defineProps({
+const props = defineProps({
   activeTab: { type: String, default: 'health' },
 })
+
+// 与 System.vue 的 tab 名一一对应；状态条上显示中文标签而不是内部 key
+const TAB_LABELS = {
+  health: '健康检查',
+  funnel: '用户漏斗',
+  event_funnel: '事件漏斗',
+  retention: '留存与北极星',
+  tokens: 'Token 统计',
+  oplogs: '操作日志',
+  alerts: '异常告警',
+  experiments: '实验观测',
+  feedback: '反馈闭环',
+  tool_health: '工具健康',
+  approvals: '审批台',
+  knowledge: '知识库',
+  orgs: '组织架构',
+  sensitivity: '敏感治理',
+  tasks: '任务中心',
+}
+
+const activeTabLabel = computed(() => TAB_LABELS[props.activeTab] || props.activeTab)
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -46,80 +67,22 @@ const isAdmin = computed(() => authStore.isAdmin)
 
 const { runningTaskCount, failedTaskCount, retryableTaskCount, agentSuccessRate } = useSystemTaskMonitor({ client: api, message: ElMessage, router, isAdmin })
 const { approvalStats } = useSystemApprovals({ client: api, message: ElMessage })
+const pendingApprovalCount = computed(() => approvalStats.value?.pending || 0)
 </script>
 
 <style scoped>
-.system-overview {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-4);
-}
-
-.section-eyebrow {
-  margin-bottom: 4px;
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text-muted);
-}
-.overview-tile {
-  padding: var(--space-5) var(--space-5);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border-light);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-xs);
-  display: grid;
-  gap: var(--space-1);
-  transition: all var(--transition-fast);
-}
-.overview-tile:hover {
-  box-shadow: var(--shadow-card-hover);
-  border-color: var(--color-border-hover);
-}
-.overview-tile span {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-.overview-tile strong {
-  font-size: var(--text-3xl);
-  line-height: var(--text-3xl-lh);
-  color: var(--color-text);
-  font-weight: 600;
-}
-
+/* 状态条不再套卡片：只留一行标签，避免和下方 tab 内容形成卡中卡 */
 .system-command-bar {
   display: flex;
-  justify-content: flex-start;
-  gap: var(--space-4);
   align-items: center;
-  flex-wrap: wrap;
-  padding: var(--space-4) var(--space-5);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-xl);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-xs);
-}
-
-.command-chips {
-  display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
 }
-.command-chip {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-full);
-  background: var(--color-primary-light);
-  border: 1px solid var(--color-border);
-  color: var(--color-primary);
-  font-size: var(--text-xs);
-  font-weight: 600;
-}
 
 @media (max-width: 1100px) {
+  /* 令牌里的 .app-metric-grid-4 在 1100px 以下直接收成一列，四个读数用两列更合适 */
   .system-overview {
-    grid-template-columns: 1fr 1fr;
-  }
-  .system-command-bar {
-    align-items: flex-start;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

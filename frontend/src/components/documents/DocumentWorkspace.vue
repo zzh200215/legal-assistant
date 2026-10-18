@@ -396,11 +396,28 @@ const {
 </script>
 
 <style scoped>
+/* 卡片头：标题与操作按钮同行。窄栏（1440px 下 copilot 展开时中栏约 380-890px）里
+   原来的 flex 不换行会把标题压成竖排单字，这里允许换行并让标题块先占位。 */
 .card-header-inline {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+.card-header-inline > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-header-inline > :last-child {
+  flex: 0 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 .section-eyebrow {
   margin-bottom: 4px;
@@ -416,9 +433,11 @@ const {
   display: grid;
   gap: var(--space-6);
 }
+/* 三块摘要瓦片：容器宽度随「左目录 + copilot 展开」浮动，固定 3 等分会把标题挤成竖排；
+   改成按最小宽度自适应列数（≥160px 一列），窄栏自动变 2 列/1 列。 */
 .workspace-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: var(--space-4);
 }
 .workspace-tile {
@@ -438,6 +457,7 @@ const {
 .workspace-tile span {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 .workspace-tile strong {
   color: var(--color-text);

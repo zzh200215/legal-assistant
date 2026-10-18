@@ -346,7 +346,7 @@ onUnmounted(() => {
 .chat-page :deep(.ui-card) {
   border-color: var(--color-border-light);
   border-radius: var(--radius-xl);
-  background: #ffffff;
+  background: var(--color-surface);
   box-shadow: var(--shadow-xs);
 }
 
@@ -437,15 +437,15 @@ onUnmounted(() => {
 .case-assistant-context span { color: var(--color-text-muted); }
 .case-assistant-context strong { display: block; margin-top: 3px; color: var(--color-text); font-size: 14px; }
 .citation-link { display: block; width: 100%; cursor: pointer; transition: border-color .15s ease, background .15s ease; }
-.citation-link:hover { border-color: var(--color-primary); background: #f2f6fa; }
-.assistant-actions button { padding: 5px 8px; border: 1px solid var(--color-border); border-radius: 3px; background: #fff; color: var(--color-primary); font-size: 11px; cursor: pointer; }
+.citation-link:hover { border-color: var(--color-primary); background: var(--color-primary-light); }
+.assistant-actions button { padding: 5px 8px; border: 1px solid var(--color-border); border-radius: 3px; background: var(--color-surface); color: var(--color-primary); font-size: 11px; cursor: pointer; }
 .assistant-actions button:hover { border-color: var(--color-primary); background: var(--color-primary-light); }
 
 :deep(.chat-input .el-textarea__inner) {
   min-height: 56px !important;
   border-radius: var(--radius-lg);
   box-shadow: 0 0 0 1px var(--color-border-light) inset !important;
-  background: #ffffff;
+  background: var(--color-surface);
 }
 
 @keyframes blink {

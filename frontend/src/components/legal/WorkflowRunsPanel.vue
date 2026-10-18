@@ -209,7 +209,7 @@ watch(() => [props.caseId, props.limit, props.workflowId], loadRuns)
 .workflow-run-list { display: grid; margin-top: 10px; }
 .workflow-run-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 58px; border-bottom: 1px solid var(--color-border-light); }
 .workflow-run-main { display: grid; grid-template-columns: minmax(150px, 1.2fr) minmax(160px, 1fr) minmax(100px, .7fr); align-items: center; gap: 14px; min-width: 0; padding: 8px 0; border: 0; background: transparent; color: var(--color-text); text-align: left; cursor: pointer; }
-.workflow-run-main:hover { background: #F8FAFB; }
+.workflow-run-main:hover { background: var(--color-surface-hover); }
 .workflow-run-title, .workflow-run-meta { display: grid; gap: 3px; min-width: 0; }
 .workflow-run-title strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-run-title span, .workflow-run-meta span, .workflow-run-meta time { overflow: hidden; color: var(--color-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -227,7 +227,7 @@ watch(() => [props.caseId, props.limit, props.workflowId], loadRuns)
 .workflow-detail-heading strong { font-size: 13px; }.workflow-detail-heading span { margin-left: 7px; color: var(--color-text-muted); font-size: 11px; }
 .workflow-events { display: grid; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
 .workflow-events li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; padding-bottom: 11px; }
-.event-dot { width: 6px; height: 6px; margin: 4px 0 0 3px; border: 1px solid var(--color-primary); border-radius: 50%; background: #fff; }
+.event-dot { width: 6px; height: 6px; margin: 4px 0 0 3px; border: 1px solid var(--color-primary); border-radius: 50%; background: var(--color-surface); }
 .workflow-events li:not(:last-child) .event-dot::after { display: block; width: 1px; height: 20px; margin: 6px 0 0 2px; background: var(--color-border); content: ''; }
 .workflow-events li div { display: grid; gap: 2px; }.workflow-events strong { font-size: 12px; font-weight: 550; }.workflow-events span, .workflow-events time { color: var(--color-text-muted); font-size: 11px; }
 .compact .workflow-runs-heading p { display: none; }.compact .workflow-run-main { grid-template-columns: minmax(130px, 1fr) minmax(100px, .8fr) minmax(85px, .6fr); }.compact .workflow-run-row { min-height: 50px; }
