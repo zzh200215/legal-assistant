@@ -23,6 +23,7 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
     if (method === 'POST' && path === '/auth/login') return route.fulfill({ json: success({ access_token: 'review-upload-e2e-token' }) })
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success({ id: 15, username: 'pilot01-lawyer', role: 'dept_admin', status: 'active', organization_id: 5 }) })
     if (method === 'GET' && path === '/developer/onboarding') return route.fulfill({ json: success({ user_role: 'solo_lawyer', completed_steps_json: '[]' }) })
+    if (method === 'POST' && path === '/auth/complete-onboarding') return route.fulfill({ json: success({ completed: true }) })
     if (method === 'GET' && path === '/legal/overview') return route.fulfill({ json: success({ organization_id: 5, brand: '律智检' }) })
     if (method === 'GET' && path === '/legal/orgs/5/cases') return route.fulfill({ json: success([{ id: 3, title: '联调测试案件', status: 'in_progress', organization_id: 5 }]) })
     if (method === 'GET' && path === '/billing/subscriptions/quota') return route.fulfill({ json: success({ consultation: { quota: 8, remaining: 8 }, review: { quota: 8, remaining: 8 }, draft: { quota: 8, remaining: 8 } }) })
@@ -30,6 +31,12 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
     if (method === 'GET' && path === '/legal/review-stats') return route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
     // 通知铃铛首屏加载（US-002）
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+
+    // 案件工作区新增的读取（api/legalWorkspace.js:18/27/107/113）
+    if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/matters/3/activity') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/contract-reviews/1/versions') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/contract-reviews/1/risk-items') return route.fulfill({ json: success([]) })
 
     if (method === 'POST' && path === '/legal/contract-reviews/upload') {
       requests.upload = request.postDataBuffer().toString('utf8')
@@ -49,10 +56,11 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
   await expect(page).toHaveURL(/\/legal-onboarding/)
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
-  await page.getByRole('tab', { name: '合同审查', exact: true }).click()
+  // 案件工作区 tab 现由 URL query 驱动（LegalWorkspace.vue:289）
+  await page.goto('/legal-workspace?case_id=3&tab=contract')
 
   // 上传文件 → multipart POST
-  await page.locator('#pane-contract input[type="file"]').setInputFiles({
+  await page.locator('.contract-workspace input[type="file"]').setInputFiles({
     name: '联调合同.txt',
     mimeType: 'text/plain',
     buffer: Buffer.from('甲乙双方就技术服务事宜达成如下协议，本合同自双方签署之日起生效。', 'utf8'),

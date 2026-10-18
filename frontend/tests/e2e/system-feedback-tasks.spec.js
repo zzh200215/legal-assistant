@@ -72,6 +72,12 @@ test('System 反馈处理 + 任务重试', async ({ page }) => {
       return route.fulfill({ json: success({ source: 'async_task', task_key: 'doc-parse-10' }) })
     }
 
+    // 任务中心工作流面板（SystemTasksTab → WorkflowOperationsPanel）新增的合法请求
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/analytics/workflows/overview') {
+      return route.fulfill({ json: success({ days: 7, organization_id: 5, runs: { total: 0, active: 0, failed: 0, cancelled: 0, by_status: {} }, outbox: { pending: 0, sending: 0, failed: 0, delivered: 0 } }) })
+    }
+
     unexpected.push(`${method} ${path}`)
     await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
   })

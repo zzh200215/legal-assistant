@@ -68,13 +68,13 @@ test('客户门户：发送验证码→掩码邮箱→验证→查看进度→�
 
   await page.goto(`/portal/c/${TOKEN}`)
 
-  // OTP 表单 + 掩码邮箱显示（修复断言）
-  await expect(page.getByPlaceholder('请输入验证码')).toBeVisible()
+  // OTP 表单 + 掩码邮箱显示（修复断言）；placeholder 已改为邮件验证码文案（LegalPortal.vue:27）
+  await expect(page.getByPlaceholder('输入邮件中的 6 位数字验证码')).toBeVisible()
   await expect(page.getByText('验证码已发送至 por***@example.com')).toBeVisible()
   expect(requests.sendOtp).toBe(true)
 
   // 验证 → 内容
-  await page.getByPlaceholder('请输入验证码').fill('123456')
+  await page.getByPlaceholder('输入邮件中的 6 位数字验证码').fill('123456')
   await page.getByRole('button', { name: /验证|进入/ }).first().click()
   await expect(page.getByText('联调门户进度')).toBeVisible()
   await expect(page.getByText('案件进入庭审准备阶段。')).toBeVisible()

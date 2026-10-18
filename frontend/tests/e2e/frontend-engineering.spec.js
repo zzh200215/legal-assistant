@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 // P1/P2 前端工程化验收（全 mock，锁定前端行为，不依赖真实后端）：
-// 1) Capability 门禁：非管理员看不到系统中心入口、直达 /system 显示 403 状态；管理员正常进入。
+// 1) Capability 门禁：非管理员看不到系统入口、直达 /system 显示 403 状态；管理员正常进入。
 // 2) 离线状态：离线横幅出现，页面继续展示缓存内容。
 // 3) 幂等写：上传按钮连点只发一次 POST 且携带 Idempotency-Key（useMutation 合并 + 幂等键）。
 
@@ -57,21 +57,24 @@ test('capability：非管理员直达 /system 显示 403 状态且导航无系�
   await mockApi(page, 'user')
   await page.goto('/system')
   await expect(page.getByText('无权访问')).toBeVisible()
-  await expect(page.locator('.top-nav').getByText('系统中心')).toHaveCount(0)
-  await expect(page.locator('.top-nav').getByText('Agent配置')).toHaveCount(0)
+  // 导航标签在 HEAD 已改名（App.vue '系统' / 'Agent'）；系统级入口仍 adminOnly，
+  // 而 Agent 入口自 2026-10-18「入口收敛」起对全部登录用户开放（后端 /agent/* 按 user_id 隔离）
+  await expect(page.locator('.top-nav .nav-entry', { hasText: '系统' })).toHaveCount(0)
+  await expect(page.locator('.top-nav .nav-entry', { hasText: 'Agent' })).toHaveCount(1)
 })
 
 test('capability：管理员可进入系统中心', async ({ page }) => {
   await mockApi(page, 'admin')
   await page.goto('/system')
   await expect(page.getByRole('tab', { name: '健康检查' })).toBeVisible()
-  await expect(page.locator('.top-nav').getByText('系统中心')).toHaveCount(1)
+  await expect(page.locator('.top-nav .nav-entry', { hasText: '系统' })).toHaveCount(1)
 })
 
 test('offline：断网时展示离线横幅并保留缓存内容', async ({ page, context }) => {
   await mockApi(page, 'user')
   await page.goto('/documents')
-  await expect(page.getByRole('heading', { name: '法律知识库', level: 1 })).toBeVisible()
+  // 页面 h1 已从「法律知识库」改为「文档」（Documents.vue:10）；应用壳另有同名 h1（App.vue:78 + sectionMeta 171），故按页面容器限定
+  await expect(page.locator('.page-header').getByRole('heading', { name: '文档', level: 1 })).toBeVisible()
   await expect(page.locator('.doc-item', { hasText: '测试法规.txt' })).toBeVisible()
   await context.setOffline(true)
   await expect(page.getByText('网络不可用，已暂停刷新与同步。恢复网络后自动继续。')).toBeVisible()

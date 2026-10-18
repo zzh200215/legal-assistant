@@ -75,7 +75,10 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
     if (method === 'GET' && path === '/auth/me') {
-      await route.fulfill({ json: success({ id: 7, username: 'pilot_lawyer', email: 'pilot@example.com', role: 'user', status: 'active' }) })
+      // Step 4 需要「审核决定」按钮：canReview = workspace.review capability 或 legal_role∈{admin,reviewer}
+      // （LegalReviewTab.vue:100，DEPT_ADMIN_CAPS 见 capabilities.js:38-42）；
+      // 门户面板同样只看 legal_role（LegalPortalTab.vue:206-207 canManagePortal），故一并给出 reviewer
+      await route.fulfill({ json: success({ id: 7, username: 'pilot_lawyer', email: 'pilot@example.com', role: 'dept_admin', legal_role: 'reviewer', status: 'active' }) })
       return
     }
     if (method === 'GET' && path === '/developer/onboarding') {
@@ -154,7 +157,9 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
     if (method === 'GET' && path === '/legal/contract-reviews') {
-      await route.fulfill({ json: success([CONTRACT_ROW]) })
+      // 新 UI 在挂载时自动展开最新一条审查记录（LegalContractTab.vue:377-389 openLatestContractReview），
+      // 有记录时不再渲染录入表单（同文件:3 v-if="!contractResult"）；这里按「创建前后」返回，保持与新契约一致。
+      await route.fulfill({ json: success(requests.contract ? [CONTRACT_ROW] : []) })
       return
     }
     if (method === 'GET' && path === '/legal/drafts') {
@@ -177,6 +182,11 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       await route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
       return
     }
+    if (method === 'GET' && path === '/legal/review-queue/reviewers') {
+      // only canReview 账号才会加载审核人列表（LegalReviewTab.vue:185，canReview 见 capabilities.js:16/:38-42）
+      await route.fulfill({ json: success([{ user_id: 7, name: 'pilot_lawyer', role: 'reviewer' }]) })
+      return
+    }
     if (method === 'GET' && path === '/legal/review-queue/consultation/991/history') {
       await route.fulfill({ json: success({ history: [] }) })
       return
@@ -196,6 +206,46 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
 
+    // HEAD 工作台在案件/合同/文书/门户面板上的既有只读请求（与 pilot-workflow.spec.js 同一组）：
+    // 概览条目与案件动态（LegalWorkspace.vue:325-337）、合同版本与风险项（LegalContractTab.vue:243-249）、
+    // 文书版本/批注/协作（useLegalDrafts.js）、门户访问分析（LegalPortalTab.vue:272）、引导自动完成（LegalOnboarding.vue:67）
+    if (method === 'POST' && path === '/auth/complete-onboarding') {
+      await route.fulfill({ json: success({ completed: true }) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') {
+      await route.fulfill({ json: success({ consultations: [CONSULT_ROW], contract_reviews: [CONTRACT_ROW], drafts: [DRAFT_ROW] }) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/matters/3/activity') {
+      await route.fulfill({ json: success({ items: [] }) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/contract-reviews/992/versions') {
+      await route.fulfill({ json: success([{ id: 992, version: 1, content: CONTRACT_ROW.content, created_at: '2026-01-01T00:00:00Z' }]) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/contract-reviews/992/risk-items') {
+      await route.fulfill({ json: success(CONTRACT_ROW.risks) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/drafts/993/versions') {
+      await route.fulfill({ json: success([{ id: 993, version: 1, content: DRAFT_ROW.content, created_at: '2026-01-01T00:00:00Z' }]) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/drafts/993/comments') {
+      await route.fulfill({ json: success([]) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/drafts/993/collaboration') {
+      await route.fulfill({ json: success({}) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/orgs/5/cases/3/portal-analytics') {
+      await route.fulfill({ json: success({ summary: { visits: 0, unique_visitors: 0, active_links: 0, denied: 0 }, daily: [] }) })
+      return
+    }
+
     unexpectedApiRequests.push(`${method} ${path}`)
     await route.fulfill({ status: 500, json: { detail: `Unhandled E2E API request: ${method} ${path}` } })
   })
@@ -210,12 +260,10 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
 
-  // 选择案件（咨询/审查/文书归档到案件 3）
-  await page.locator('.case-bar .el-select').click()
-  await page.getByRole('option', { name: /联调测试案件/ }).click()
+  // 案件工作区由 URL query 驱动（LegalWorkspace.vue:289/:308-323）：直达案件 3 的法律咨询
+  await page.goto('/legal-workspace?case_id=3&tab=consultation')
 
   // Step 1: 咨询 → 提交律师审核
-  await page.getByRole('tab', { name: '法律咨询', exact: true }).click()
   await page.getByPlaceholder(/例如：我在公司工作了3年/).fill(CONSULT_ROW.question)
   await page.getByRole('button', { name: '提交咨询', exact: true }).click()
   await expect(page.getByText('公司单方解除劳动合同应依法支付经济补偿。')).toBeVisible()
@@ -227,8 +275,8 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   expect(requests.consultSubmitReview).toEqual({ action: 'submit_review', note: '用户提交审核' })
 
   // Step 2: 合同审查（自动进入审核队列）
-  await page.getByRole('tab', { name: '合同审查', exact: true }).click()
-  await page.getByRole('textbox', { name: '合同标题' }).fill(CONTRACT_ROW.title)
+  await page.locator('.legal-matter-tab', { hasText: '合同审查' }).click()
+  await page.getByRole('textbox', { name: '合同名称' }).fill(CONTRACT_ROW.title)
   await page.getByPlaceholder(/粘贴合同全文或主要条款/).fill(CONTRACT_ROW.content)
   await page.getByRole('button', { name: '开始审查', exact: true }).click()
   await expect(page.getByText('付款条款存在高风险，需人工复核。')).toBeVisible()
@@ -236,23 +284,27 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   expect(requests.contract).toEqual({ title: CONTRACT_ROW.title, content: CONTRACT_ROW.content, case_id: 3 })
 
   // Step 3: 文书起草
-  await page.getByRole('tab', { name: '文书草稿', exact: true }).click()
+  await page.locator('.legal-matter-tab', { hasText: '文书' }).click()
   await page.locator('.el-select:has-text("选择文书类型")').click()
   await page.getByRole('option', { name: '劳动争议仲裁申请书' }).click()
+  // 字段随文书类型动态渲染（LegalDraftsTab.vue:11-13），必填字段 placeholder 为「请输入X」、可选字段为「可选」，
+  // 故按 label 关联的 id 定位（字段清单见同文件 labor_arbitration_application 的默认定义）。
   const fieldValues = {
-    '【必填】请输入申请人': '张三',
-    '【必填】请输入被申请人': '某科技公司',
-    '请输入劳动关系起止时间': '2020-01-01 至 2026-07-31',
-    '【必填】请输入仲裁请求': '支付经济补偿金 30000 元',
-    '请输入事实与理由': '无故辞退',
-    '【必填】请输入证据清单': '劳动合同、工资流水',
+    申请人: '张三',
+    被申请人: '某科技公司',
+    劳动关系起止时间: '2020-01-01 至 2026-07-31',
+    仲裁请求: '支付经济补偿金 30000 元',
+    事实与理由: '无故辞退',
+    证据清单: '劳动合同、工资流水',
   }
-  for (const [placeholder, value] of Object.entries(fieldValues)) {
-    await page.getByPlaceholder(placeholder).fill(value)
+  for (const [field, value] of Object.entries(fieldValues)) {
+    await page.locator(`#draft-field-${field}`).fill(value)
   }
   await page.getByRole('button', { name: '生成草稿', exact: true }).click()
   await expect(page.getByText('劳动争议仲裁申请书（U3探针）').first()).toBeVisible()
-  await expect(page.getByText('字段完整')).toBeVisible()
+  // 旧 UI 的「字段完整」徽标在 HEAD 已移除（源码中无此文案）；新 UI 只在缺字段时渲染「待补充事实」
+  // （LegalDraftsTab.vue:36），因此以「不出现待补充事实」等价断言字段齐全，字段取值仍由下面的载荷深比较覆盖。
+  await expect(page.locator('.missing-facts')).toHaveCount(0)
   expect(requests.draft).toEqual({
     document_type: 'labor_arbitration_application',
     fields: {
@@ -262,11 +314,12 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
     case_id: 3,
   })
 
-  // Step 4: 审核队列通过
-  await page.getByRole('tab', { name: '律师审核', exact: true }).click()
-  const consultRow = page.locator('tr', { hasText: CONSULT_ROW.question }).filter({ visible: true })
-  await consultRow.click()
-  await consultRow.locator('button', { hasText: '通过' }).click()
+  // Step 4: 审核队列通过（新 UI 的队列项是 .queue-item 按钮并自动选中首项，决定按钮在详情 footer：
+  // LegalReviewTab.vue:28 列表、:174-183 自动选中、:71 通过按钮）
+  await page.locator('.legal-matter-tab', { hasText: '审核' }).click()
+  await expect(page.locator('.queue-item', { hasText: CONSULT_ROW.question })).toBeVisible()
+  await expect(page.locator('.review-actions')).toBeVisible()
+  await page.locator('.review-actions').getByRole('button', { name: '通过', exact: true }).click()
   const promptDialog = page.getByRole('dialog')
   await promptDialog.locator('input, textarea').last().fill('事实清楚，予以通过')
   await promptDialog.getByRole('button', { name: '确认' }).click()
@@ -274,9 +327,11 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   expect(requests.consultApprove).toEqual({ action: 'approve', note: '事实清楚，予以通过' })
 
   // 门户 tab 按需加载：点开后 branding 请求使用正确 org 5（而非默认 org 1）
-  await page.getByRole('tab', { name: '客户门户', exact: true }).click()
+  // 客户门户在「更多案件工具」下拉里（LegalWorkspace.vue:70-75，非 tab 按钮）
+  await page.locator('.matter-tools-select').selectOption('portal')
   await expect.poll(() => requests.portalBranding).toBe('/legal/orgs/5/portal-branding')
-  await expect(page.getByText('负责人')).toBeVisible()
+  // CaseHeader（LegalWorkspace.vue:58）也渲染「负责人」，限定在门户面板内断言
+  await expect(page.locator('.matter-panel').getByText('负责人')).toBeVisible()
 
   expect(unexpectedApiRequests).toEqual([])
   expect(failedResponses).toEqual([])

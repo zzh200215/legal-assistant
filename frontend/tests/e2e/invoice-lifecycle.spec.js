@@ -35,6 +35,10 @@ test('发票状态机：发送/作废/收款/退款/详情', async ({ page }) =>
     if (method === 'GET' && path === '/billing/subscriptions/quota') return route.fulfill({ json: success({ consultation: { quota: 8, remaining: 8 }, review: { quota: 8, remaining: 8 }, draft: { quota: 8, remaining: 8 } }) })
     if (method === 'GET' && ['/legal/consultations', '/legal/contract-reviews', '/legal/drafts', '/legal/document-templates', '/legal/sources', '/legal/review-queue'].includes(path)) return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/review-stats') return route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
+    // 案件工作区新增的读取（api/auth.js:9 completeOnboarding、api/legalWorkspace.js:18/27）
+    if (method === 'POST' && path === '/auth/complete-onboarding') return route.fulfill({ json: success({ completed: true }) })
+    if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/matters/3/activity') return route.fulfill({ json: success([]) })
 
     // 计时计费 tab
     if (method === 'GET' && path === '/legal/orgs/5/cases/3/time-entries') return route.fulfill({ json: success({ items: [], total: 0, page: 1, page_size: 20 }) })
@@ -76,7 +80,8 @@ test('发票状态机：发送/作废/收款/退款/详情', async ({ page }) =>
   await expect(page).toHaveURL(/\/legal-onboarding/)
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
-  await page.getByRole('tab', { name: '计时计费', exact: true }).click()
+  // 案件工作区 tab 现由 URL query 驱动（LegalWorkspace.vue:289）
+  await page.goto('/legal-workspace?case_id=3&tab=billing')
 
   // 发票列表渲染
   await expect(page.getByText('草稿客户')).toBeVisible()

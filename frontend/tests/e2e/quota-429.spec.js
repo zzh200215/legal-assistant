@@ -44,6 +44,10 @@ async function setup(page, { quota, consultStatus }) {
     if (method === 'GET' && path === '/billing/subscriptions/quota') return route.fulfill({ json: success(QUOTA(quota)) })
     if (method === 'GET' && ['/legal/consultations', '/legal/contract-reviews', '/legal/drafts', '/legal/document-templates', '/legal/sources', '/legal/review-queue'].includes(path)) return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/review-stats') return route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
+    // 案件工作区新增的读取（api/auth.js:9 completeOnboarding、api/legalWorkspace.js:18/27）
+    if (method === 'POST' && path === '/auth/complete-onboarding') return route.fulfill({ json: success({ completed: true }) })
+    if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/matters/3/activity') return route.fulfill({ json: success([]) })
     if (method === 'POST' && path === '/legal/consultations') {
       requests.consult = request.postDataJSON()
       if (consultStatus === 429) {
@@ -66,6 +70,8 @@ async function loginToWorkspace(page) {
   await expect(page).toHaveURL(/\/legal-onboarding/)
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
+  // 咨询表单已迁入案件工作区（LegalWorkspace.vue:163-166），tab 由 URL query 驱动（:289）
+  await page.goto('/legal-workspace?case_id=3&tab=consultation')
 }
 
 test('配额耗尽 429：咨询提交被拒并透出升级提示', async ({ page }) => {

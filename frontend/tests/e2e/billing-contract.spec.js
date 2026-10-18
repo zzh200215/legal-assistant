@@ -82,6 +82,19 @@ test('计费契约：计时器暂停用 action 载荷、发票用 client_display
       await route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
       return
     }
+    // 案件工作区新增的读取（api/auth.js:9 completeOnboarding、api/legalWorkspace.js:18/27）
+    if (method === 'POST' && path === '/auth/complete-onboarding') {
+      await route.fulfill({ json: success({ completed: true }) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') {
+      await route.fulfill({ json: success([]) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/matters/3/activity') {
+      await route.fulfill({ json: success([]) })
+      return
+    }
 
     // 计时计费 tab：运行中的计时 + 规则 + 发票列表
     if (method === 'GET' && path === '/legal/orgs/5/cases/3/time-entries') {
@@ -124,11 +137,10 @@ test('计费契约：计时器暂停用 action 载荷、发票用 client_display
   await expect(page).toHaveURL(/\/legal-onboarding/)
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
-  await page.locator('.case-bar .el-select').click()
-  await page.getByRole('option', { name: /联调测试案件/ }).click()
+  // 案件工作区 tab 现由 URL query 驱动（LegalWorkspace.vue:289；计时计费在 .matter-tools-select 里）
+  await page.goto('/legal-workspace?case_id=3&tab=billing')
 
   // 计时器：运行中的条目显示「暂停」，点击后必须发 action 载荷
-  await page.getByRole('tab', { name: '计时计费', exact: true }).click()
   const timerCard = page.locator('.timer-running')
   await expect(timerCard.getByText('联调契约计时')).toBeVisible()
   await timerCard.getByRole('button', { name: '暂停', exact: true }).click()

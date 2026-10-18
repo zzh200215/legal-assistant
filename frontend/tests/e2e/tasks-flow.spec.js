@@ -52,6 +52,7 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
     if (method === 'GET' && path === '/tasks/101/comments') return route.fulfill({ json: success(comments) })
     if (method === 'GET' && path === '/tasks/101/logs') return route.fulfill({ json: success([{ id: 1, task_id: 101, action: 'task.created', detail: '创建任务', created_at: '2026-08-06T09:00:00' }]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [{ id: 501, goal: '完成合同审查', status: 'completed', created_at: '2026-08-06T11:00:00', total_steps: 3 }], total: 1 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'POST' && path === '/tasks/101/comments') {
       const body = route.request().postDataJSON()
       expect(body).toEqual({ content: '阻塞项：需要法务确认' })
@@ -75,7 +76,8 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
   await page.goto('/tasks')
   await expect(page.getByText('起草合同初稿')).toBeVisible()
   await expect(page.getByText('共享任务-案件归档')).toBeVisible()
-  await expect(page.getByText('任务总数')).toBeVisible()
+  await expect(page.getByText('共享任务-案件归档')).toBeVisible()
+  await expect(page.locator('.task-brief')).toContainText('2 项任务')
   // 初始列表请求带默认 scope=all 与分页参数
   expect(requests.some((r) => r.startsWith('GET /tasks/?page=1&page_size=12&scope=all'))).toBe(true)
 
@@ -134,6 +136,7 @@ test('共享任务只读 + 新建任务 + scope 筛选', async ({ page }) => {
     if (method === 'GET' && path === '/tasks/202/comments') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/tasks/202/logs') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'POST' && path === '/tasks/') {
       requests.taskCreate = route.request().postDataJSON()
       return route.fulfill({ json: success(ownerTask({ id: 304, title: requests.taskCreate.title, status: 'todo' })) })
@@ -197,6 +200,7 @@ test('路由 taskId 深链：不在列表中的任务经 GET /tasks/{id} 拉取�
     if (method === 'GET' && path === '/tasks/999/comments') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/tasks/999/logs') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
 
     await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
   })

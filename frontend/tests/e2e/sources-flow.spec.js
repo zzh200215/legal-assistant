@@ -68,6 +68,12 @@ test('法源管理：列表→检索测试→新建→状态→编辑→删除',
       }) })
     }
 
+    // HEAD 新增的只读请求：法源条文（LegalSourcesTab.vue:433-439）、导入资料表的文档列表（同文件:447-457）、
+    // 引导页自动完成（LegalOnboarding.vue:67）
+    if (method === 'GET' && /^\/legal\/sources\/\d+\/articles$/.test(path)) return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/documents/') return route.fulfill({ json: success({ items: [], total: 0, page: 1, page_size: 100 }) })
+    if (method === 'POST' && path === '/auth/complete-onboarding') return route.fulfill({ json: success({ completed: true }) })
+
     unexpected.push(`${method} ${path}`)
     await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
   })
@@ -80,16 +86,21 @@ test('法源管理：列表→检索测试→新建→状态→编辑→删除',
   await expect(page).toHaveURL(/\/legal-onboarding/)
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
-  await page.getByRole('tab', { name: '法源管理', exact: true }).click()
+  // 法源管理是工作区的独立 view（LegalWorkspace.vue:35-40，?view=research），非案件 tab
+  await page.goto('/legal-workspace?view=research')
 
   // 列表（挂载即加载）渲染
   await expect(page.getByText('民法典合同编示范条款').first()).toBeVisible()
   await expect(page.getByText('民法典第470条').first()).toBeVisible()
 
-  // 检索测试 → POST + 结果渲染
-  await page.getByPlaceholder('输入问题').fill('合同解除的条件是什么')
-  await page.getByRole('button', { name: '测试召回', exact: true }).click()
-  await expect(page.getByText('共 1 条法源，召回 1 条有效匹配')).toBeVisible()
+  // 导入/搜索/资料库维护收纳在折叠区（LegalSourcesTab.vue:105），需先展开
+  const maintenance = page.locator('.source-maintenance')
+  await maintenance.locator('summary').click()
+
+  // 检索测试 → POST + 结果渲染（LegalSourcesTab.vue:148-156 文案已改为「资料」）
+  await maintenance.getByPlaceholder('搜索法规、案例、合同模板或文书模板...').fill('合同解除的条件是什么')
+  await maintenance.getByRole('button', { name: '搜索', exact: true }).click()
+  await expect(page.getByText('共 1 条资料，找到 1 条相关结果')).toBeVisible()
   expect(requests.retrieval).toEqual({ question: '合同解除的条件是什么' })
 
   // 新建法源 → POST（pydantic 忽略 keywordsInput 等额外字段，按 matchObject 断言）

@@ -39,6 +39,10 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
     if (method === 'GET' && path === '/billing/subscriptions/quota') return route.fulfill({ json: success({ consultation: { quota: 8, remaining: 8 }, review: { quota: 8, remaining: 8 }, draft: { quota: 8, remaining: 8 } }) })
     if (method === 'GET' && ['/legal/consultations', '/legal/contract-reviews', '/legal/drafts', '/legal/document-templates', '/legal/sources', '/legal/review-queue'].includes(path)) return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/review-stats') return route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
+    // 案件工作区新增的读取（api/auth.js:9 completeOnboarding、api/legalWorkspace.js:18/27）
+    if (method === 'POST' && path === '/auth/complete-onboarding') return route.fulfill({ json: success({ completed: true }) })
+    if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/matters/3/activity') return route.fulfill({ json: success([]) })
 
     // 合同台账 tab
     if (method === 'GET' && path === '/legal/features') return route.fulfill({ json: success({ signing_enabled: false }) })
@@ -75,7 +79,8 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
   await expect(page).toHaveURL(/\/legal-onboarding/)
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
-  await page.getByRole('tab', { name: '合同台账', exact: true }).click()
+  // 案件工作区 tab 现由 URL query 驱动（LegalWorkspace.vue:289）
+  await page.goto('/legal-workspace?case_id=3&tab=contracts')
 
   // 列表（带 case 过滤）+ 签署禁用（特性开关 false）
   await expect(page.getByText('劳动合同模板联调')).toBeVisible()
@@ -105,7 +110,7 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
 
   // Diff：选版本 → 对比 → GET 参数（ESC 关闭版本对话框）
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'Diff', exact: true }).first().click()
+  await page.getByRole('button', { name: '版本对比', exact: true }).first().click()
   const diffDialog = page.locator('.el-dialog:visible')
   await diffDialog.locator('.el-select', { hasText: '基准版本' }).click()
   await page.getByRole('option', { name: 'V1', exact: true }).click()

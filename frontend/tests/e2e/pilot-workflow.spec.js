@@ -41,6 +41,9 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
           username: 'pilot_lawyer',
           email: 'pilot@example.com',
           role: 'user',
+          // 个人版执业律师＝个人组织的组织管理员（app/models/org.py:15、app/services/org/personal_org_service.py:54）；
+          // /auth/me 会下发 legal_role（app/api/auth/auth_api.py:327），期限/门户等操作按它判据（views/LegalDeadlines.vue:181）
+          legal_role: 'admin',
           status: 'active',
         }),
       })
@@ -138,12 +141,40 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
     }
 
     if (method === 'GET' && path === '/legal/overview') {
-      await route.fulfill({ json: success({}) })
+      // 案件工作区从 overview.organization_id 取 org（LegalWorkspace.vue:280-282）
+      await route.fulfill({ json: success({ organization_id: 1 }) })
       return
     }
 
     if (method === 'GET' && path === '/legal/review-stats') {
       await route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
+      return
+    }
+
+    // HEAD 新增/演进的只读请求：工作台概览（LegalWorkspace.vue:325-337）、合同审查展开（useContractReviews.js:91-95）、
+    // 合同风险项（LegalContractTab.vue:248-249）、门户统计（LegalPortalTab.vue:273）、引导页自动完成（LegalOnboarding.vue:67）
+    if (method === 'POST' && path === '/auth/complete-onboarding') {
+      await route.fulfill({ json: success({ completed: true }) })
+      return
+    }
+
+    if (method === 'GET' && path === '/legal/orgs/1/cases/1/items') {
+      await route.fulfill({ json: success({ consultations: [], contract_reviews: [], drafts: [] }) })
+      return
+    }
+
+    if (method === 'GET' && path === '/legal/matters/1/activity') {
+      await route.fulfill({ json: success({ items: [] }) })
+      return
+    }
+
+    if (method === 'GET' && path === '/legal/orgs/1/cases/1/portal-analytics') {
+      await route.fulfill({ json: success({ summary: { visits: 0, unique_visitors: 0, active_links: 0, denied: 0 }, daily: [] }) })
+      return
+    }
+
+    if (method === 'GET' && ['/legal/contract-reviews/101/versions', '/legal/contract-reviews/101/risk-items'].includes(path)) {
+      await route.fulfill({ json: success([]) })
       return
     }
 
@@ -161,8 +192,9 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
 
-  await page.getByRole('tab', { name: '合同审查', exact: true }).click()
-  await page.getByRole('textbox', { name: '合同标题' }).fill('试点技术服务合同')
+  // 案件工作区 tab 由 URL query 驱动（LegalWorkspace.vue:289/:308-323）
+  await page.goto('/legal-workspace?case_id=1&tab=contract')
+  await page.getByRole('textbox', { name: '合同名称' }).fill('试点技术服务合同')
   await page.getByPlaceholder('粘贴合同全文或主要条款...').fill('付款应以阶段验收完成为前提。')
   await page.getByRole('button', { name: '开始审查', exact: true }).click()
   await expect(page.getByText('付款与验收条款存在高风险，需要人工复核。')).toBeVisible()
@@ -172,7 +204,7 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
     case_id: 1,
   })
 
-  await page.getByRole('tab', { name: '关键日期', exact: true }).click()
+  await page.locator('.legal-matter-tab', { hasText: '关键日期' }).click()
   await page.getByPlaceholder('YYYY-MM-DD').fill('2026-08-15')
   // EP 2.8+ el-select 的 placeholder 是 <span> 而非 input 属性，getByPlaceholder 匹配不到
   await page.locator('.el-select:has-text("选择负责人")').click()
@@ -186,7 +218,8 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
   expect(requests.deadline).not.toHaveProperty('type')
   expect(requests.deadline).not.toHaveProperty('deadline_date')
 
-  await page.getByRole('tab', { name: '客户门户', exact: true }).click()
+  // 客户门户在「更多案件工具」下拉里（LegalWorkspace.vue:70-75，非 tab 按钮）
+  await page.locator('.matter-tools-select').selectOption('portal')
   await page.getByRole('button', { name: '创建门户链接', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '创建客户门户链接' })
   await dialog.getByPlaceholder('客户邮箱（用于验证码）').fill('client@example.com')

@@ -51,8 +51,10 @@ test('开发者视图从 /auth/me 解析 org，创建应用走正确组织', asy
   await page.goto('/legal-developer')
   await page.getByText('创建并显示一次性密钥').waitFor({ timeout: 8000 })
 
-  expect(requests).toContain('GET /developer/orgs/5/apps')
-  expect(requests).toContain('GET /developer/orgs/5/operations/summary')
+  // 两个请求在 onMounted 里 Promise.all 并发发出：UI 先渲染、请求后被拦截，
+  // 直接断言会与 Vite 冷启动的模块转换抢时间（历史 flake 的根因），改为轮询等待。
+  await expect.poll(() => requests, { timeout: 15_000 }).toContain('GET /developer/orgs/5/apps')
+  await expect.poll(() => requests, { timeout: 15_000 }).toContain('GET /developer/orgs/5/operations/summary')
   expect(requests.some((r) => r.includes('/orgs/1/'))).toBe(false)
 
   // 创建应用必须 POST 到正确组织

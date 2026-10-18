@@ -25,6 +25,7 @@ test('文书草稿：生成 → 导出 docx（走后端 API）', async ({ page }
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success({ id: 15, username: 'pilot01-lawyer', role: 'dept_admin', status: 'active', organization_id: 5 }) })
     if (method === 'GET' && path === '/developer/onboarding') return route.fulfill({ json: success({ user_role: 'solo_lawyer', completed_steps_json: '[]' }) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'POST' && path === '/auth/complete-onboarding') return route.fulfill({ json: success({ completed: true }) })
     if (method === 'GET' && path === '/legal/overview') return route.fulfill({ json: success({ organization_id: 5, brand: '律智检' }) })
     if (method === 'GET' && path === '/legal/orgs/5/cases') return route.fulfill({ json: success([{ id: 3, title: '联调测试案件', status: 'in_progress', organization_id: 5 }]) })
     if (method === 'GET' && path === '/billing/subscriptions/quota') return route.fulfill({ json: success({ consultation: { quota: 8, remaining: 8 }, review: { quota: 8, remaining: 8 }, draft: { quota: 8, remaining: 8 } }) })
@@ -32,6 +33,11 @@ test('文书草稿：生成 → 导出 docx（走后端 API）', async ({ page }
     if (method === 'GET' && path === '/legal/review-stats') return route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
     if (method === 'GET' && path === '/legal/document-templates') return route.fulfill({ json: success([{ key: 'labor_arbitration_application', label: '劳动仲裁申请书' }]) })
     if (method === 'GET' && path === '/legal/drafts') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/drafts/1/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/drafts/1/collaboration') return route.fulfill({ json: success({}) })
+    // 案件工作区新增的读取（api/legalWorkspace.js:18/27）
+    if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/matters/3/activity') return route.fulfill({ json: success([]) })
 
     if (method === 'POST' && path === '/legal/drafts') {
       requests.draftCreate = request.postDataJSON()
@@ -56,13 +62,14 @@ test('文书草稿：生成 → 导出 docx（走后端 API）', async ({ page }
   await expect(page).toHaveURL(/\/legal-onboarding/)
   await page.getByRole('button', { name: /进入工作台/ }).click()
   await expect(page).toHaveURL(/\/legal-workspace/)
-  await page.getByRole('tab', { name: '文书草稿', exact: true }).click()
+  // 案件工作区 tab 现由 URL query 驱动（LegalWorkspace.vue:289）
+  await page.goto('/legal-workspace?case_id=3&tab=draft')
 
   // 选文书类型 → 填必填字段 → 生成草稿
   await page.locator('.el-select', { hasText: '选择文书类型' }).click()
   await page.getByRole('option', { name: '劳动仲裁申请书', exact: true }).click()
-  await page.getByPlaceholder('【必填】请输入申请人').fill('张三')
-  await page.getByPlaceholder('【必填】请输入被申请人').fill('某公司')
+  await page.getByPlaceholder('请输入申请人').fill('张三')
+  await page.getByPlaceholder('请输入被申请人').fill('某公司')
   await page.getByRole('button', { name: '生成草稿', exact: true }).click()
   await expect.poll(() => requests.draftCreate, { timeout: 5000 }).not.toBeUndefined()
   expect(requests.draftCreate).toMatchObject({ document_type: 'labor_arbitration_application', case_id: 3 })
@@ -70,7 +77,7 @@ test('文书草稿：生成 → 导出 docx（走后端 API）', async ({ page }
 
   // 导出草稿 → GET docx blob → 下载
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: '导出草稿', exact: true }).click()
+  await page.getByRole('button', { name: '导出', exact: true }).click()
   const download = await downloadPromise
   expect(download.suggestedFilename()).toContain('.docx')
   expect(requests.docxExport).toBe(true)
