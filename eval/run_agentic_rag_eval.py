@@ -1,9 +1,10 @@
 """Agentic-RAG 消融评测：多跳分解 / 判分驱动的补检索，各自带来多少证据覆盖率。
 
 衡量对象是**交给生成节点的证据集合**，不是答案质量——答案要评就得真调 LLM，那不属于
-这个脚本。三条臂共用同一份确定性嵌入（复用 run_document_rag_eval 的字符双字袋，两个评测
-的数字因此可比）与真实混合检索管线；分解与判分是脚本桩（真实实现是 LLM 往返），桩只决定
-「什么时候再查一轮 / 拆成哪几个子问题」，覆盖率的变化来自真实检索。
+这个脚本。三条臂共用同一份嵌入（默认是确定性字符双字袋桩，复用 run_document_rag_eval
+的实现，两个评测的数字因此可比；加 ``--real-embedding`` 换成真实向量供应商）与真实混合
+检索管线；分解与判分是脚本桩（真实实现是 LLM 往返），桩只决定「什么时候再查一轮 / 拆成
+哪几个子问题」，覆盖率的变化来自真实检索。
 
     single_hop                原问题检索一次（基线）
     multi_hop                 按数据集给定的子问题扇出，合并去重后的证据
@@ -44,6 +45,7 @@ import chromadb
 
 import app.services.rag.agentic_rag_service as agentic_module
 import app.services.rag.rag_service as rag_module
+from app.core.config import get_settings
 from app.services.documents.document_parsing import _split_text
 from app.services.rag.agentic_rag_service import AgenticRAGService
 from app.services.rag.vector_store import ChromaVectorStoreCollection
@@ -105,12 +107,18 @@ ARM_SETTINGS: dict[str, dict[str, bool]] = {
 FORCED_GATE_ARMS = frozenset({"multi_hop_forced"})
 
 
-def build_pipeline(corpus: list[dict], searched: list[str]) -> Any:
+def build_pipeline(corpus: list[dict], searched: list[str], *, real_embedding: bool = False) -> Any:
     """把 RAG 单例接到临时 collection 上，并给检索计一次数（成本列要用）。
 
     改的是模块单例而不是新实例：agentic 图的节点用的就是这个单例。
+
+    ``real_embedding=False``（默认）用确定性字符双字袋桩嵌入：离线可跑、与 document RAG
+    评测的数字可比。``True`` 时**不替换** ``llm_client.embed``，走向真实向量供应商
+    （``EMBEDDING_PROVIDER / EMBEDDING_API_BASE_URL / EMBEDDING_API_KEY``）——数字才是真实
+    管线，但每次运行要真花额度、且不可离线复现。两种口径在报告里用 ``embedding`` 字段区分。
     """
-    rag_module.llm_client.embed = _embed
+    if not real_embedding:
+        rag_module.llm_client.embed = _embed
     rag = rag_module.rag_service
     rag.collection = ChromaVectorStoreCollection(
         chromadb.EphemeralClient().get_or_create_collection("eval_agentic_rag")
@@ -122,7 +130,14 @@ def build_pipeline(corpus: list[dict], searched: list[str]) -> Any:
         for chunk in chunks:
             chunk["id"] = None
             chunk["embedding_id"] = f"doc{doc['id']}_chunk{chunk['chunk_index']}"
+        if real_embedding:
+            # index_document 是同步函数，内部 run_async 每次都新起线程+新事件循环；
+            # 缓存下来的 httpx 客户端会被钉在上一个已关闭的循环上（RuntimeError: Event loop is closed）。
+            rag_module.llm_client._clients.clear()
         rag.index_document(doc["id"], chunks, user_id=1)
+    if real_embedding:
+        # 索引阶段的临时循环已结束，清空以免后续查询复用失效客户端（查询都在主循环内，可正常缓存）。
+        rag_module.llm_client._clients.clear()
 
     real_search = rag.search_async
 
@@ -277,12 +292,14 @@ async def run_arm(
     }
 
 
-async def run_eval(cases: list[dict], corpus: list[dict], *, top_ks: list[int]) -> dict:
+async def run_eval(
+    cases: list[dict], corpus: list[dict], *, top_ks: list[int], real_embedding: bool = False
+) -> dict:
     problems = validate_cases(cases, corpus)
     if problems:
         raise SystemExit(f"案例的必需证据在语料里找不到，评测无意义：{json.dumps(problems, ensure_ascii=False)}")
     searched: list[str] = []
-    _, captured = build_pipeline(corpus, searched)
+    _, captured = build_pipeline(corpus, searched, real_embedding=real_embedding)
     service = AgenticRAGService()
     sweep: dict[str, Any] = {}
     for top_k in top_ks:
@@ -309,7 +326,8 @@ async def run_eval(cases: list[dict], corpus: list[dict], *, top_ks: list[int]) 
     return {
         "eval": "agentic_rag_ablation",
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "offline_deterministic_embedding_with_stubbed_judges",
+        "mode": ("real_embedding_with_stubbed_judges" if real_embedding
+                 else "offline_deterministic_embedding_with_stubbed_judges"),
         "total_cases": len(cases),
         # 前置门槛的放行率：多跳默认开也只对这部分问题生效，是「开关值不值得开」的另一半。
         "multi_hop_gate_hit_rate": round(
@@ -317,11 +335,28 @@ async def run_eval(cases: list[dict], corpus: list[dict], *, top_ks: list[int]) 
         ),
         "corpus": {"documents": len(corpus), "chunks": sum(chunk_counts),
                    "titles": [doc["title"] for doc in corpus]},
+        "embedding": "real" if real_embedding else "stub:char-bigram",
+        "reranker": "disabled",
         "top_k_sweep": top_ks,
         "sweep": sweep,
         "limitations": "只衡量送进生成节点的证据覆盖率；分解与判分为脚本桩（真实实现各多一次 LLM 往返，"
                        "见 avg_llm_calls），桩总能给出正确的子问题与 missing，因此是收益上界。",
     }
+
+
+def _lift_llm_limits() -> None:
+    """把本进程的 LLM 限流与当日预算抬到评测量级。
+
+    真实嵌入每次检索一次网络往返：27 题 × 4 臂 × top_k 远超默认的
+    20 次/60s 与当日 200 次预算，不抬就只有 429。只改进程内配置对象，
+    不写回 .env，也不影响部署。
+    """
+    settings = get_settings()
+    settings.LLM_DAILY_REQUEST_LIMIT = 1_000_000
+    settings.LLM_DAILY_TOKEN_LIMIT = 1_000_000_000
+    settings.LLM_RATE_LIMIT_MAX_REQUESTS = 1_000_000
+    settings.LLM_RATE_LIMIT_CONFIG_JSON = '{"embedding": {"window_seconds": 60, "max_requests": 1000000}}'
+    settings.LLM_BUDGET_LIMITS_JSON = '{"embedding": {"daily_requests": 1000000, "daily_tokens": 1000000000}}'
 
 
 def main() -> None:
@@ -331,9 +366,13 @@ def main() -> None:
     parser.add_argument("--cases-path", default=None)
     parser.add_argument("--corpus-path", default=None)
     parser.add_argument("--top-k", type=int, nargs="+", default=[1, 2, 3])
+    parser.add_argument("--real-embedding", action="store_true",
+                        help="走真实 embedding 供应商（默认用确定性双字袋桩，离线可复现）")
     parser.add_argument("--output", default=None)
     parser.add_argument("--pretty", action="store_true")
     args = parser.parse_args()
+    if args.real_embedding:
+        _lift_llm_limits()
 
     if args.corpus_kind == "statutes":
         cases = load_json(Path(args.cases_path or LEGAL_CASES_PATH))
@@ -341,7 +380,9 @@ def main() -> None:
     else:
         cases = load_json(Path(args.cases_path or DEFAULT_CASES_PATH))
         corpus = load_json(Path(args.corpus_path or DEFAULT_CORPUS_PATH))
-    report = asyncio.run(run_eval(cases, corpus, top_ks=list(args.top_k)))
+    report = asyncio.run(
+        run_eval(cases, corpus, top_ks=list(args.top_k), real_embedding=args.real_embedding)
+    )
     report["corpus_kind"] = args.corpus_kind
     text = json.dumps(report, ensure_ascii=False, indent=2 if args.pretty else None)
     if args.output:

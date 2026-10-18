@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -229,6 +230,22 @@ def _build_category_summary(cases: list[dict]) -> dict[str, dict]:
     return categories
 
 
+def _pace_between_cases() -> None:
+    """可选的题间节流：免费额度网关按「每分钟请求数」限流，逐题连发会撞 429。
+
+    默认 0（不改变既有行为）；需要时用 ``EVAL_CASE_PAUSE_SECONDS=2.5`` 放慢节奏。
+    """
+    raw = os.environ.get("EVAL_CASE_PAUSE_SECONDS", "").strip()
+    if not raw:
+        return
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return
+    if seconds > 0:
+        time.sleep(seconds)
+
+
 def run_eval(
     dataset: list[dict],
     *,
@@ -275,6 +292,7 @@ def run_eval(
         should_refuse = bool(item.get("should_refuse"))
         expected_keywords = _normalize_expected_keywords(item)
         expected_evidence = _normalize_expected_evidence(item)
+        _pace_between_cases()
         started = time.perf_counter()
         result = agentic_rag_service.answer(
             item["question"],
