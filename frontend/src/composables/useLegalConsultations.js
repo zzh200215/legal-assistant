@@ -6,7 +6,7 @@ import { qk, qkPrefix } from '../query/keys'
 // 法律咨询 tab 领域模块（查询层 + 幂等写）：
 // 列表走统一查询层（同 key 去重/缓存/取消），提交/追问经 useMutation（Idempotency-Key 防连点重复）。
 
-export function useLegalConsultations({ client, message, confirm, onReviewSubmitted, caseId }) {
+export function useLegalConsultations({ client, message, confirm, onReviewSubmitted, caseId, context, withHistory = true }) {
   const consultForm = ref({ question: '' })
   const consultLoading = ref(false)
   const consultResult = ref(null)
@@ -18,6 +18,9 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
     key: () => qk.legal.consultations(caseId?.value || null),
     fetcher: () => client.listLegalConsultations({ params: caseId?.value ? { case_id: caseId.value } : undefined }),
     staleTime: 30 * 1000,
+    // 只要不读历史列表就别建这条请求：右栏 copilot 常驻在外壳上，
+    // 默认取数会让它每进一个页面都发一次 GET /legal/consultations（无关页面也会）。
+    enabled: withHistory,
   })
 
   const consultationsList = computed(() => {
@@ -51,6 +54,9 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
         body: {
           question: consultForm.value.question,
           case_id: caseId?.value || undefined,
+          // 面板带进来的「当前对象」（合同审查 / 文书草稿）。没有就一个字段都不加，
+          // 保持咨询场景的请求体形状不变（e2e 有全等断言）。
+          ...(context?.value || {}),
         },
       })
     } finally {
