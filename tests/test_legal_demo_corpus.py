@@ -15,6 +15,7 @@ from app.core.database import Base
 from app.models.legal import LegalArticle, LegalSource
 from app.services.legal.legal_service import (
     DEMO_SOURCES,
+    _compose_corpus_full_text,
     _load_demo_articles,
     ensure_demo_sources,
 )
@@ -43,6 +44,14 @@ class DemoCorpusFileTests(unittest.TestCase):
 
     def test_missing_corpus_degrades_to_empty(self):
         self.assertEqual(_load_demo_articles("不存在的语料.json"), [])
+        self.assertEqual(_compose_corpus_full_text("不存在的语料.json"), "")
+
+    def test_full_text_is_composed_from_articles(self):
+        text = _compose_corpus_full_text("劳动合同法.json")
+        self.assertIn("第1条", text)
+        self.assertIn("第98条", text)
+        self.assertIn("第一章 总则", text)
+        self.assertGreater(len(text), 5000, "全文太短，像是只拼了摘要")
 
 
 class EnsureDemoSourcesTests(unittest.TestCase):
@@ -83,6 +92,11 @@ class EnsureDemoSourcesTests(unittest.TestCase):
                 f"法源 {source.id}《{source.title}》没有条文",
             )
         self.assertEqual(checked, len(with_corpus), "带语料的法源没有被全部检查到")
+        # 带语料的法源要同时写全文（检索用），否则条文查得到、检索却看不到
+        for source in sources:
+            if source.title not in titles_with_corpus:
+                continue
+            self.assertTrue((source.full_text or "").strip(), f"《{source.title}》没有写全文")
 
     def test_second_call_is_noop(self):
         ensure_demo_sources(self.db, 102)

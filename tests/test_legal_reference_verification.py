@@ -420,6 +420,76 @@ class SentenceNumberVerificationTests(unittest.TestCase):
         numbers = _sentence_citation_numbers(refs, attribution)
         self.assertEqual(numbers, {0: ["第47条"]})
 
+    def test_named_law_wins_over_lexical_matches(self):
+        refs = [
+            {"source_id": self.source.id, "title": "《中华人民共和国劳动合同法》", "citation": "劳动合同法"},
+            {"source_id": self.source.id + 1, "title": "《中华人民共和国劳动争议调解仲裁法》", "citation": "劳动争议调解仲裁法"},
+        ]
+        attribution = {
+            "sentences": [
+                {"index": 0, "text": "根据《劳动合同法》第八十二条规定，未签书面合同应支付二倍工资。",
+                 "matches": [{"reference_index": 0, "score": 0.91}, {"reference_index": 1, "score": 0.64}]},
+            ],
+        }
+        numbers = _sentence_citation_numbers(refs, attribution)
+        self.assertEqual(numbers, {0: ["第82条"]})
+
+    def test_named_law_counts_even_without_lexical_match(self):
+        refs = [
+            {"source_id": self.source.id, "title": "《中华人民共和国劳动合同法》", "citation": "劳动合同法"},
+            {"source_id": self.source.id + 1, "title": "《中华人民共和国劳动争议调解仲裁法》", "citation": "劳动争议调解仲裁法"},
+        ]
+        attribution = {
+            "sentences": [
+                {"index": 0, "text": "《劳动争议调解仲裁法》第二十七条规定仲裁时效为一年。",
+                 "matches": [{"reference_index": 0, "score": 0.5}]},
+            ],
+        }
+        numbers = _sentence_citation_numbers(refs, attribution)
+        self.assertEqual(numbers, {1: ["第27条"]})
+
+    def test_unnamed_sentence_goes_to_best_match_only(self):
+        refs = [
+            {"source_id": self.source.id, "title": "《中华人民共和国劳动合同法》", "citation": "劳动合同法"},
+            {"source_id": self.source.id + 1, "title": "《中华人民共和国劳动争议调解仲裁法》", "citation": "劳动争议调解仲裁法"},
+        ]
+        attribution = {
+            "sentences": [
+                {"index": 0, "text": "根据第四十七条规定，经济补偿按工作年限计算。",
+                 "matches": [{"reference_index": 0, "score": 0.9}, {"reference_index": 1, "score": 0.5}]},
+            ],
+        }
+        numbers = _sentence_citation_numbers(refs, attribution)
+        self.assertEqual(numbers, {0: ["第47条"]})
+
+    def test_tie_between_different_laws_is_not_attributed(self):
+        refs = [
+            {"source_id": self.source.id, "title": "《中华人民共和国劳动合同法》", "citation": "劳动合同法"},
+            {"source_id": self.source.id + 1, "title": "《中华人民共和国劳动争议调解仲裁法》", "citation": "劳动争议调解仲裁法"},
+        ]
+        attribution = {
+            "sentences": [
+                {"index": 0, "text": "若符合法定解除情形，根据第四十七条可主张经济补偿。",
+                 "matches": [{"reference_index": 0, "score": 0.8889}, {"reference_index": 1, "score": 0.8889}]},
+            ],
+        }
+        numbers = _sentence_citation_numbers(refs, attribution)
+        self.assertEqual(numbers, {})
+
+    def test_tie_between_duplicate_sources_of_same_law_keeps_both(self):
+        refs = [
+            {"source_id": self.source.id, "title": "《中华人民共和国劳动合同法》", "citation": "劳动合同法"},
+            {"source_id": self.source.id + 1, "title": "中华人民共和国劳动合同法（演示依据）", "citation": "劳动合同法"},
+        ]
+        attribution = {
+            "sentences": [
+                {"index": 0, "text": "根据第四十七条可主张经济补偿。",
+                 "matches": [{"reference_index": 0, "score": 0.8}, {"reference_index": 1, "score": 0.8}]},
+            ],
+        }
+        numbers = _sentence_citation_numbers(refs, attribution)
+        self.assertEqual(numbers, {0: ["第47条"], 1: ["第47条"]})
+
     def test_enrich_references_uses_sentence_numbers_without_rewriting_citation(self):
         refs = [{"source_id": self.source.id, "title": "中华人民共和国劳动合同法", "citation": "劳动合同法"}]
         enriched = enrich_references(self.db, refs, sentence_numbers={0: ["第47条"]})

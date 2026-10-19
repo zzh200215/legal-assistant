@@ -88,21 +88,21 @@ DEMO_SOURCES = [
         "corpus": "合同法.json",
     },
     {
-        "title": "《中华人民共和国劳动合同法》第40、46、47条（演示依据）",
+        "title": "《中华人民共和国劳动合同法》（演示依据）",
         "source_type": "statute",
-        "citation": "劳动合同法第40、46、47条",
+        "citation": "劳动合同法",
         "jurisdiction": "中国大陆",
-        "version": "现行版本（需复核）",
-        "content": "无过失性辞退需提前30日通知或额外支付一个月工资（第40条）；用人单位依第四十条解除应支付经济补偿（第46条）；经济补偿按工作年限每满一年支付一个月工资（第47条）。正式使用前应核验最新法源。",
+        "version": "2012年修订版",
+        "content": "劳动合同订立、履行、解除与终止，经济补偿与赔偿金，劳务派遣与非全日制用工及法律责任。语料为 2012 年修正文本全文（98 条）。正式使用前应核验最新法源。",
         "corpus": "劳动合同法.json",
     },
     {
-        "title": "《中华人民共和国劳动争议调解仲裁法》第27条（演示依据）",
+        "title": "《中华人民共和国劳动争议调解仲裁法》（演示依据）",
         "source_type": "statute",
-        "citation": "劳动争议调解仲裁法第27条",
+        "citation": "劳动争议调解仲裁法",
         "jurisdiction": "中国大陆",
         "version": "现行版本（需复核）",
-        "content": "劳动争议仲裁时效为一年，自当事人知道或应当知道其权利被侵害之日起计算。此条目用于演示检索链路，正式使用前应核验最新法源。",
+        "content": "劳动争议调解与仲裁程序：仲裁时效、申请与受理、开庭与裁决、终局裁决与先予执行。语料为现行文本全文（54 条）。正式使用前应核验最新法源。",
         "corpus": "劳动争议调解仲裁法.json",
     },
     {
@@ -115,12 +115,12 @@ DEMO_SOURCES = [
         "corpus": "民间借贷规定.json",
     },
     {
-        "title": "《中华人民共和国消费者权益保护法》第55条（演示依据）",
+        "title": "《中华人民共和国消费者权益保护法》（演示依据）",
         "source_type": "statute",
-        "citation": "消费者权益保护法第55条",
+        "citation": "消费者权益保护法",
         "jurisdiction": "中国大陆",
         "version": "现行版本（需复核）",
-        "content": "经营者提供商品或服务有欺诈行为的，应增加赔偿其受到的损失，增加赔偿的金额为消费者购买商品价款的3倍。正式使用前应核验最新法源。",
+        "content": "消费者权利、经营者义务、欺诈三倍赔偿与争议解决。语料为节选条文（8 条），覆盖常用主张；正式使用前应核验最新法源。",
         "corpus": "消费者权益保护法.json",
     },
     {
@@ -139,19 +139,43 @@ DEMO_SOURCES = [
 _DEMO_CORPUS_DIR = Path(__file__).resolve().parents[3] / "scripts" / "legal_corpus"
 
 
-def _load_demo_articles(corpus_file: str) -> list[dict]:
-    """读仓库内语料文件的条文；文件缺失/损坏时返回空表（演示库退化成只有摘要）。"""
+def _load_demo_corpus(corpus_file: str) -> dict:
+    """读仓库内语料文件；文件缺失/损坏时返回空字典（演示库退化成只有摘要）。"""
     path = _DEMO_CORPUS_DIR / corpus_file
     if not path.exists():
         logger.warning("legal_service: demo corpus missing: %s", path)
-        return []
+        return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.warning("legal_service: demo corpus unreadable: %s (%s)", path, exc)
-        return []
-    articles = payload.get("articles") if isinstance(payload, dict) else None
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _load_demo_articles(corpus_file: str) -> list[dict]:
+    """语料文件里的条文列表。"""
+    articles = _load_demo_corpus(corpus_file).get("articles")
     return [item for item in articles or [] if isinstance(item, dict) and item.get("content")]
+
+
+def _compose_corpus_full_text(corpus_file: str) -> str:
+    """把条文拼成全文（检索用）；语料自带 `full_text` 时优先用它。"""
+    payload = _load_demo_corpus(corpus_file)
+    if not payload:
+        return ""
+    text = payload.get("full_text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    parts: list[str] = []
+    chapter: str | None = None
+    for item in _load_demo_articles(corpus_file):
+        current = str(item.get("chapter") or "")
+        if current and current != chapter:
+            chapter = current
+            parts.append(f"\n{current}\n")
+        parts.append(f"{item.get('article_number') or ''} {item.get('content')}".strip())
+    return "\n".join(parts).strip()
 
 CATEGORY_KEYWORDS = {
     "labor_dispute": ("劳动", "工资", "加班", "辞退", "解除劳动", "社保", "工伤"),
@@ -301,6 +325,9 @@ def ensure_demo_sources(db: Session, user_id: int):
     for item in DEMO_SOURCES:
         entry = dict(item)
         corpus_file = entry.pop("corpus", None)
+        full_text = _compose_corpus_full_text(corpus_file) if corpus_file else ""
+        if full_text:
+            entry["full_text"] = full_text
         source = LegalSource(
             user_id=user_id,
             effective_date=date.today(),
@@ -635,23 +662,71 @@ def _reference_source_text(ref: dict, source_by_id: dict, article_text_by_source
     return f"{ref.get('title') or ''} {ref.get('citation') or ''}"
 
 
+def _normalize_law_name(value) -> str:
+    """法源名的可比较形式：去掉书名号/括号/空白与「中华人民共和国」前缀、演示后缀。"""
+    text = str(value or "")
+    for token in ("《", "》", "〈", "〉", "（", "）", "(", ")", "【", "】", "[", "]", "　", " "):
+        text = text.replace(token, "")
+    text = text.replace("中华人民共和国", "")
+    for suffix in ("演示依据", "演示模板", "演示"):
+        text = text.replace(suffix, "")
+    return text.strip()
+
+
+def _named_reference_indexes(text: str, refs: list) -> list[int]:
+    """本句里「被点名」的引用下标（句子里直接写了该法源名）。
+
+    模型写「根据《劳动合同法》第八十二条」时，条号属于被点名的那部法；而句级词面映射
+    可能同时把这句话挂到另一部法上（共享「一年/之日起/书面」这类词），若不加区分，
+    另一部法会被误判成「引用的第 82 条未找到」。点名比词面重合更强，优先采信。
+    """
+    named: list[int] = []
+    for index, ref in enumerate(refs):
+        if not isinstance(ref, dict):
+            continue
+        for candidate in (_normalize_law_name(ref.get("title")), _normalize_law_name(ref.get("citation"))):
+            if len(candidate) >= 3 and candidate in text:
+                named.append(index)
+                break
+    return named
+
+
 def _sentence_citation_numbers(refs: list, attribution: dict) -> dict[int, list[str]]:
     """从「已判定归属某条引用的句子」里收集条号，作为该引用的条级核验范围。
 
     模型经常把「第四十七条」写在正文里，而 references[].citation 只写书名；句级映射既然
     已经知道哪句属于哪条引用，就把这些条号交给核验，让条级核验有据可依（不改写模型原文）。
+
+    归属优先级：句子里点名的法源 > 词面映射里得分最高的那一条引用。两者都比「挂到所有
+    匹配上的引用」更准：否则「第四十七条」会被同时塞给共享词面的另一部法，把对方误判成
+    「已核对一致」（条号恰好存在但含义不同）或「未找到」。
     """
     numbers_by_index: dict[int, list[str]] = {}
     for item in (attribution or {}).get("sentences") or []:
-        numbers = parse_citation_numbers(item.get("text"))
+        text = str(item.get("text") or "")
+        numbers = parse_citation_numbers(text)
         if not numbers:
             continue
+        matched: list[tuple[int, float]] = []
         for match in item.get("matches") or []:
             index = match.get("reference_index")
             if not isinstance(index, int) or not (0 <= index < len(refs)):
                 continue
             if not isinstance(refs[index], dict):
                 continue
+            raw_score = match.get("score")
+            score = float(raw_score) if isinstance(raw_score, (int, float)) else 0.0
+            matched.append((index, score))
+        indexes = _named_reference_indexes(text, refs)
+        if not indexes:
+            best = max((score for _, score in matched), default=None)
+            tied = [index for index, score in matched if best is not None and score >= best]
+            # 并列且不是同一部法（例如同一部法在库里有两条法源）时，无法判断条号属于谁：
+            # 与其把「第四十七条」同时算进两部法（可能凑出假的「已核对一致」），不如不给。
+            if len({_normalize_law_name(refs[index].get("title")) or _normalize_law_name(refs[index].get("citation")) for index in tied}) > 1:
+                tied = []
+            indexes = tied
+        for index in indexes:
             bucket = numbers_by_index.setdefault(index, [])
             for number in numbers:
                 if number not in bucket:

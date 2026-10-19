@@ -172,3 +172,80 @@ $env:PYTHONIOENCODING='utf-8'
     --output .tmp_consultation_review2.json --sheet-output .tmp_consultation_spotcheck_sheet2.md
 # 本机 python 子进程写不了 eval/outputs：产物先落仓库根，再 Move-Item
 ```
+
+## 9. 补全语料 + 条号归属口径修正（2026-10-19，第三轮）
+
+第二轮补的是「缺的那一部法」，这一轮补的是「已有语料其实不完整」——`劳动合同法.json` 只有 17 条节选，且**第 48 条的内容误写成了第 87 条**。
+
+### 9.1 改了什么
+
+| 改动 | 说明 |
+| --- | --- |
+| `scripts/legal_corpus/劳动合同法.json` | 重写为 **98 条全文**（2012 修正文本逐条），修正第 48/87 条串行、补回第 46/47 条缺失款项；`document_number` 更新为「主席令第73号」、新增 `promulgation_date` |
+| `app/services/legal/legal_service.py` | 新增 `_load_demo_corpus()`（返回整份语料）与 `_compose_corpus_full_text()`；`ensure_demo_sources()` 建源时写入的 `full_text` 由语料拼出，法源列表/详情不再只有摘要 |
+| `scripts/backfill_demo_articles.py` | 新增 `--sync`：按「条文指纹」识别旧语料写入的条文并**替换**、同步标题/版本/施行日期/正文，非演示法源不改名（避免动到用户自己的法源） |
+| `app/services/legal/legal_service.py::_sentence_citation_numbers` | **条号归属口径修正**：句子点名了法源 → 只算给被点名的；没点名 → 只算给词面最高分的那一条；并列且**不是同一部法** → 不给（宁可不给，也不制造假的「已核对一致」） |
+
+### 9.2 同步结果（`python -B scripts/backfill_demo_articles.py --sync`）
+
+- 7 个法源补到 98 条条文、19 个法源元数据对齐；演示库条文总量 **1034 条**
+- 引用→条文正文覆盖率与第二轮同口径：user 3 `8/10`、user 10 `9/18`、user 15 `0/3`、user 37 `41/46`
+- 覆盖缺口只剩 1 个法源：`服务合同审查要点摘要（演示模板）`（source 28，3 条引用）——模板本身不是法条，属于**设计如此**
+
+### 9.3 第三轮重跑（同一抽样，确定性 seed 不变）
+
+| 指标 | 第一轮 | 第二轮 | 第三轮 |
+| --- | --- | --- | --- |
+| 抽样里能看到法源条文正文 | 1 / 8 | 3 / 8 | 3 / 8 |
+| glm-5.2 忠实度（忠实/可判） | 4 / 7 = 0.571 | 4 / 4 = 1.000 | 4 / 6 = 0.667 |
+| glm-5.2 质量 pass | 3 / 7 = 0.429 | 3 / 8 = 0.375 | 4 / 7 = 0.571 |
+| qwen-plus 忠实度 | 6 / 8 = 0.750 | 6 / 8 = 0.750 | 7 / 8 = 0.875 |
+| qwen-plus 质量 pass | 5 / 8 = 0.625 | 5 / 8 = 0.625 | 5 / 8 = 0.625 |
+| 两模型分歧 | 5 | 4 | 3 |
+| 规则层（历史快照） | 3 通过 / 15 未通过 / 59 无字段 | 不变 | 4 / 15 / 60（54 条咨询、91 条引用） |
+
+**读法**：裁判层的分母随「判官这次有没有返回可用结论」浮动（`glm 4/4 → 4/6` 是它这一轮多了两次可用输出），**单轮差异不能当趋势读**。这一轮稳定可复现的只有两件事：证据可得性 3/8（不再是 1/8）、以及新记录的条级核验真的从「无字段」变成「已核对」（§9.5）。
+
+### 9.4 历史引用核验重算（A 项，只报告未写回）
+
+`scripts/recompute_reference_verification.py`（新增维护脚本，默认 dry-run）：用**与生成时同一条代码路径**重算 54 条咨询 / 91 条引用。
+
+| 口径 | verified | unverified | unmarked |
+| --- | --- | --- | --- |
+| 历史快照（现状） | 11 | 74 | 6 |
+| 重算（现有 `source_id`） | **42** | 49 | 0 |
+| 重算 + 按标题补 `source_id` | **58** | 33 | 0 |
+
+- 结论变化 **40 条**；16 条引用没有 `source_id`，全部可按标题匹配到法源
+- **没有写回**：`references_json.verification` 是生成时的快照，写回等于改历史记录；是否写回、要不要连带补 `source_id`，留作显式决策
+
+### 9.5 新咨询实测：口径修正消除了一个假阳性
+
+三条真实咨询（`demo_reviewer`、案件 #4、真实 LLM、`generate` 步 20–40 s）：
+
+| 咨询 | 劳动合同法引用 | 劳动争议调解仲裁法引用 | 说明 |
+| --- | --- | --- | --- |
+| `id 58`（修正前） | `verified=true`「第82条、第47条、第87条已与法源条文核对一致」 | `verified=false`「第82条、第87条未在已收录的 54 条条文中找到」 | **假阴性**：条号本是劳动合同法的，被词面匹配塞给了仲裁法 |
+| `id 61`（点名优先） | `verified=true`「第82条、第47条、第87条已与法源条文核对一致」 | `verified=true`「第47条已与法源条文核对一致」 | **假阳性**：那句话没点名法源，两法词面**并列**，仍被算进仲裁法 |
+| `id 62`（并列不给） | `verified=true` | `verified=null`「无核验字段」 | 假阳性消除：仲裁法这一轮没有拿到任何条号，就不声称核验过 |
+
+### 9.6 如实边界
+
+1. **裁判层单轮差异不可当趋势**：分母是可判条目数，随判官返回波动；要趋势得固定判官可用性并跑多轮。
+2. **重算结果未写回**：规则层在库内仍是历史快照（`verified 11`），§9.4 的 42/58 只是「如果重算会是多少」。
+3. **口径修正只作用于新记录**：历史快照不回溯；重算脚本已同步使用新口径，所以写回时不会把旧的假阳性带回来。
+4. 演示库里同一部法仍有两份（§8.5.4），未清理。
+
+### 9.7 复现
+
+```powershell
+$env:PYTHONIOENCODING='utf-8'
+.\.venv\Scripts\python.exe -B scripts\backfill_demo_articles.py --sync --dry-run   # 先看会替换哪些条文
+.\.venv\Scripts\python.exe -B scripts\backfill_demo_articles.py --sync             # 幂等同步
+.\.venv\Scripts\python.exe -B scripts\recompute_reference_verification.py           # 重算报告（dry-run）
+.\.venv\Scripts\python.exe -B scripts\recompute_reference_verification.py --fill-source-id --apply   # 若要写回
+.\.venv\Scripts\python.exe -B scripts\run_consultation_review.py --sample 8 --min-interval 8 `
+    --output .tmp_consultation_review3.json --sheet-output .tmp_consultation_spotcheck_sheet3.md
+```
+
+产物：`eval/outputs/consultation_review_after_labor_corpus.json`、`consultation_spotcheck_sheet_after_labor_corpus.md`（第三轮，同抽样可直接对照第一、二轮）。
