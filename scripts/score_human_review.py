@@ -201,10 +201,35 @@ def print_report(result: dict[str, Any]) -> None:
         print("提示：表里还没有人工表态，两个基准的分母都是 0，一致率均为 n/a。")
 
 
+def print_acceptance(result: dict[str, Any], threshold: float) -> None:
+    """验收口径：两个基准的人工同意率都达到阈值，且各自分母不为 0。"""
+    print(f"=== 验收（阈值 {threshold}）===")
+    all_pass = True
+    for side in result["sides"]:
+        summary = result["agreement"][side]
+        denominator = summary["denominator"]
+        rate = None if not denominator else summary["numerator"] / denominator
+        if rate is None:
+            verdict = "未达成（分母 0：该基准还没有可比对的条目）"
+            all_pass = False
+        elif rate >= threshold:
+            verdict = "达成"
+        else:
+            verdict = "未达成"
+            all_pass = False
+        shown = "n/a" if rate is None else f"{rate:.4f}"
+        print(f"  {side}：{shown}（{summary['numerator']}/{denominator}）→ {verdict}")
+    if all_pass:
+        print(f"结论：一致率 ≥ {threshold} 达成。")
+    else:
+        print(f"结论：尚未达成 ≥ {threshold}（补填人工结论或复核分歧条目后再看）。")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="计算人工抽检与 AI 裁判的一致率")
     parser.add_argument("--sheet", default="eval/outputs/divergence_review_sheet.md")
     parser.add_argument("--json", default=None, help="把结果同时写成 JSON")
+    parser.add_argument("--threshold", type=float, default=0.8, help="验收阈值（默认 0.8，诊断文档口径）")
     args = parser.parse_args()
 
     path = ROOT / args.sheet if not Path(args.sheet).is_absolute() else Path(args.sheet)
@@ -218,6 +243,13 @@ def main() -> int:
     result = build_result(entries)
     result["sheet"] = str(path)
     print_report(result)
+    print_acceptance(result, args.threshold)
+    result["threshold"] = args.threshold
+    result["accepted"] = all(
+        result["agreement"][side]["denominator"] > 0
+        and result["agreement"][side]["numerator"] / result["agreement"][side]["denominator"] >= args.threshold
+        for side in result["sides"]
+    )
     if args.json:
         out = Path(args.json) if Path(args.json).is_absolute() else ROOT / args.json
         out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

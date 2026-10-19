@@ -63,6 +63,32 @@ python -B scripts/score_human_review.py --sheet eval/outputs/human_spotcheck_she
 
 即：**表一填完就能出验收数**，不存在"填完才发现脚本跑不通"的风险。
 
+**填表与评分流程（2026-10-19 定的操作口径）**：25 条按 3 批给用户判（第 1 批 1–9、第 2 批 10–17、第 3 批 18–25，按"分歧项 → 忠实度一致项 → 质量一致项"的顺序），聊天里只给问题/答案/引用片段，**不给裁判判定**（保持"先判后看"）；用户回结论后由脚本写回表：
+
+```
+# 看进度 / 打印某几条摘要（聊天里分批用）
+python -B scripts/human_sheet_digest.py
+python -B scripts/human_sheet_digest.py --digest 1 9
+
+# 写回结论（python 子进程写不了 eval/outputs，故先写仓库根再 Move-Item 归位）
+python -B scripts/human_sheet_digest.py --fill cross-001=正确 --fill cross-003=错误 --note cross-003=金额与片段不一致 --out _sheet_filled.md
+Move-Item _sheet_filled.md eval/outputs/human_spotcheck_sheet.md -Force
+
+# 评分（--threshold 默认 0.8，会直接打印"达成/未达成"）
+python -B scripts/score_human_review.py --sheet eval/outputs/human_spotcheck_sheet.md --json eval/outputs/human_spotcheck_score.json
+```
+
+**验收输出示例**（阈值判定随 `--threshold`）：
+
+```
+=== 验收（阈值 0.8）===
+  glm：0.3333（1/3）→ 未达成
+  qwen-plus：0.3333（1/3）→ 未达成
+结论：尚未达成 ≥ 0.8（补填人工结论或复核分歧条目后再看）。
+```
+
+**第三层结果**：待 25 条人工结论填完后回填本节（分子/分母、两个基准的一致率、与裁判不同向的条目清单、是否达成 ≥0.8）。
+
 ## 4. 决策记录
 
 1. **忠实度与三维质量分开判**：忠实度是布尔（断言能否在引用片段里找到依据），质量是三维打分 + verdict；两者分母、口径都不同，不混算。
@@ -74,7 +100,7 @@ python -B scripts/score_human_review.py --sheet eval/outputs/human_spotcheck_she
 
 ## 5. 开口项
 
-1. **A-5（阻塞在人工）**：等 25 条人工结论填完 → 跑 `score_human_review.py` → 把一致率写进诊断文档。**当前未填，验收尚未达成**。
+1. **A-5（阻塞在人工）**：等 25 条人工结论填完 → 跑 `score_human_review.py` → 把一致率写进诊断文档。**当前进度：第 1 批（1–9）已发给用户判定，尚未回填**。配套工具已就绪并验证：`scripts/human_sheet_digest.py`（看进度 / 分批摘要 / 写回结论）、`scripts/score_human_review.py --threshold 0.8`（直接打印达成与否，并可 `--json` 落盘）。
 2. **deepseek-v4.1-flash 口径未落地**：本机无该凭据；若要严格按诊断文档口径，需要提供 deepseek 的 base_url / api_key 后重跑 `run_cross_judge.py --judge-model deepseek-v4.1-flash`。
 3. **抽样规模 25/66**：忠实度 31 题里抽 12、质量 35 题里抽 12；样本小，一致率只能作为方向性证据，不能当精确估计。
 4. **未覆盖产品主链路**：这套三层评审跑在 RAG QA 数据集上；法律咨询（copilot 主链路）的答案质量还没有同口径的三层评审（trace 已能提供过程证据，但缺答案级裁判）。
