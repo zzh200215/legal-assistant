@@ -121,6 +121,21 @@ def parse_sheet(text: str) -> list[dict[str, Any]]:
     return entries
 
 
+def wilson_interval(numerator: int, denominator: int, z: float = 1.96) -> tuple[float, float] | None:
+    """Wilson 得分区间（默认 95%）。小样本下比正态近似稳，且不会越出 [0,1]。
+
+    用途：一致率是抽样估计，样本只有 ~24 条；只报点估计容易把"0.83"读成精确值，
+    因此报告里同时给出区间——区间下界仍 ≥0.8 才算"稳稳达成"。
+    """
+    if denominator <= 0:
+        return None
+    p = numerator / denominator
+    z2 = z * z
+    center = (p + z2 / (2 * denominator)) / (1 + z2 / denominator)
+    margin = (z / (1 + z2 / denominator)) * ((p * (1 - p) / denominator + z2 / (4 * denominator * denominator)) ** 0.5)
+    return (max(0.0, center - margin), min(1.0, center + margin))
+
+
 def summarize(entries: list[dict[str, Any]], side: str) -> dict[str, Any]:
     filled = [entry for entry in entries if entry["human"] in {"correct", "wrong"} and side in entry["sides"]]
     agree = [
@@ -133,6 +148,7 @@ def summarize(entries: list[dict[str, Any]], side: str) -> dict[str, Any]:
         "numerator": len(agree),
         "denominator": len(filled),
         "rate": round(len(agree) / len(filled), 4) if filled else None,
+        "wilson_95": wilson_interval(len(agree), len(filled)),
         "disagreed_entries": [entry["id"] or entry["title"] for entry in filled if entry not in agree],
     }
 
@@ -141,7 +157,11 @@ def _rate_text(summary: dict[str, Any]) -> str:
     rate = summary["rate"]
     if summary["denominator"] == 0:
         return "n/a（分母 0：该基准下还没有人工表态的条目）"
-    return f"{rate:.4f}（{summary['numerator']}/{summary['denominator']}）"
+    text = f"{rate:.4f}（{summary['numerator']}/{summary['denominator']}）"
+    interval = summary.get("wilson_95")
+    if interval:
+        text += f"｜95% CI [{interval[0]:.3f}, {interval[1]:.3f}]"
+    return text
 
 
 def build_result(entries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -202,25 +222,38 @@ def print_report(result: dict[str, Any]) -> None:
 
 
 def print_acceptance(result: dict[str, Any], threshold: float) -> None:
-    """验收口径：两个基准的人工同意率都达到阈值，且各自分母不为 0。"""
+    """验收口径：两个基准的人工同意率都达到阈值，且各自分母不为 0。
+
+    点估计按诊断文档口径（≥0.8 即达成）；同时给出 95% Wilson 区间——
+    样本只有 ~24 条，若点估计达成但区间下界低于阈值，会额外标注"小样本达成"，
+    避免把抽样估计当成精确值。
+    """
     print(f"=== 验收（阈值 {threshold}）===")
     all_pass = True
+    caveats: list[str] = []
     for side in result["sides"]:
         summary = result["agreement"][side]
         denominator = summary["denominator"]
         rate = None if not denominator else summary["numerator"] / denominator
+        interval = summary.get("wilson_95")
         if rate is None:
             verdict = "未达成（分母 0：该基准还没有可比对的条目）"
             all_pass = False
         elif rate >= threshold:
             verdict = "达成"
+            if interval and interval[0] < threshold:
+                verdict += "（小样本：95% CI 下界低于阈值）"
+                caveats.append(f"{side} 的 95% CI 下界 {interval[0]:.3f} < {threshold}")
         else:
             verdict = "未达成"
             all_pass = False
         shown = "n/a" if rate is None else f"{rate:.4f}"
-        print(f"  {side}：{shown}（{summary['numerator']}/{denominator}）→ {verdict}")
+        ci = "" if not interval else f"｜95% CI [{interval[0]:.3f}, {interval[1]:.3f}]"
+        print(f"  {side}：{shown}（{summary['numerator']}/{denominator}）{ci} → {verdict}")
     if all_pass:
         print(f"结论：一致率 ≥ {threshold} 达成。")
+        for caveat in caveats:
+            print(f"  备注：{caveat}（样本量有限，结论按点估计口径成立）。")
     else:
         print(f"结论：尚未达成 ≥ {threshold}（补填人工结论或复核分歧条目后再看）。")
 
