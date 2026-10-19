@@ -405,3 +405,71 @@ python -B scripts/run_cross_judge.py --min-interval 10 `
 ```powershell
 python -B scripts/score_human_review.py --sheet eval/outputs/divergence_review_sheet.md
 ```
+
+## baseline 快照（2026-10-19 固化）
+
+90 天项「baseline 快照」：`eval/run_experiments.py` 早就有 `--check-regression` 与快照比对逻辑，
+但**快照文件从来没有被固化过**（`eval/outputs/baseline_snapshot.json` 一直缺失），于是「评测与审计」页的
+baseline 区块长期为空，也没有人能一键判断改动是否让检索/回答退化。本轮把它补上。
+
+```powershell
+$env:CHROMA_PERSIST_DIR='./.tmp_chroma_eval'      # 默认 data/ 目录对 python 子进程不可写（本机 ACL）
+$env:EVAL_CASE_PAUSE_SECONDS='12'                 # 免费额度网关 rpm/tpm 上限很低，按题节流
+python -B scripts/eval_baseline.py --write --output-dir .tmp_baseline_out
+# 产物先落在仓库根目录下的临时目录，再 Move-Item 到 eval/outputs/（同上 ACL 原因）
+python -B scripts/eval_baseline.py --check        # 回归门禁：退出码 2 = 检出回归或配置漂移
+```
+
+| 项 | 值 |
+| --- | --- |
+| 数据集 | 35 题（`eval/qa_dataset.json`，3 篇 fixture 语料） |
+| hit_at_k | 1.0 |
+| mrr | 1.0 |
+| citation_accuracy | 1.0 |
+| refusal_accuracy | 1.0 |
+| retrieval_evidence_coverage | 1.0 |
+| citation_evidence_coverage | 1.0 |
+| badcase_count | 0 |
+| 锚点 | git `78c8514`、prompt_version 1、top_k 5、confidence_threshold 0.35、`glm-5.2` + `text-embedding-v3` |
+
+**如实说明**：这批指标在 fixture 语料上已经**饱和**（全 1.0），所以快照的价值是「防回归」
+（任何一次掉分都会在 `--check` 里显形），而不是区分不同方案；有区分度的结论要看下面的混合检索消融
+与 `qa_eval_repaired.json`（35 题真实语料）。
+
+## 混合检索消融（2026-10-19）
+
+90 天项「混合检索调优」：把 RRF 融合常数、稠密候选宽度、LLM 重排三个旋钮放到同一套 17 题上对照，
+走的是**生产检索路径** `LegalRetrievalService.search`（不是评测专用实现）。
+
+```powershell
+python -B scripts/run_hybrid_retrieval_ablation.py --pretty --output .tmp_hybrid_ablation.json
+```
+
+语料 18 部法规 / 17 题 / top_k 5 / 真实 `text-embedding-v3` 向量 / git `78c8514` / `2026-10-19T03:12:51Z`。
+
+| 臂 | Hit@5 | MRR | 拒答准确率 | 避让违规 | badcase | 耗时(s) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 词级 only（无向量） | 1.0 | 0.8802 | 1.0 | 0 | 0 | 0.45 |
+| 混合 RRF k=60（当前默认） | 1.0 | 0.8802 | 1.0 | 0 | 0 | 0.78 |
+| 混合 RRF k=10 | 1.0 | 0.8802 | 1.0 | 0 | 0 | 0.13 |
+| 混合 RRF k=200 | 1.0 | 0.8802 | 1.0 | 0 | 0 | 0.12 |
+| 混合 + 稠密候选 10（默认 30） | 1.0 | 0.8802 | 1.0 | 0 | 0 | 0.11 |
+| 混合 + LLM 重排 top5 | 1.0 | **0.9531** | 1.0 | 0 | 0 | 209.38 |
+
+结论与决策：
+
+1. **RRF 常数不是敏感旋钮**：k=10 / 60 / 200 三档的 Hit@5 与 MRR **完全一致**（0.8802），
+   所以 `RAG_RRF_K` 保持默认 60（RRF 论文口径），不需要调参——这一点由消融数据支撑，而不是凭感觉。
+2. **稠密候选宽度也不敏感**：30 → 10 同样没有变化（0.8802），默认 30 保留。
+3. **LLM 重排是唯一有效杠杆，但代价不可接受**：MRR 0.8802 → 0.9531（+0.073），
+   耗时 0.1–0.8s → **209.4s**（≈12.3s/题，约 270×）。因此**不设为默认路径**，保留为高价值查询的可选档。
+4. **本套评测已饱和**：Hit@5 六臂全 1.0，说明 17 题/18 部法规的语料太容易，**不足以支撑更细的调优结论**；
+   要继续调优得先做更有区分度的检索评测集（含同法条干扰项、跨法条多跳题）。
+5. 拒答准确率与「避让失效法源」违规在六臂上都是 1.0 / 0——没有出现「为了召回而牺牲合规」的退化。
+
+产物：`eval/outputs/hybrid_retrieval_ablation.json`（含每题的 default/arm 排名对照，便于定位翻转题）。
+
+**顺带发现的开口项**：跑 baseline 时日志出现过一次
+`BM25 keyword recall error; falling back to scan (AttributeError)`——BM25 索引路径偶发 `AttributeError`
+后回退到 jieba 全表扫描（功能正确、只是慢）。未修，已记入 `docs/review/2026-10-project-diagnosis.md` 的开口项。
+
