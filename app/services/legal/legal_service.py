@@ -10,6 +10,7 @@ import logging
 import re
 import time
 from datetime import date
+from pathlib import Path
 
 import jieba
 from sqlalchemy.orm import Session
@@ -84,6 +85,7 @@ DEMO_SOURCES = [
         "jurisdiction": "中国大陆",
         "version": "现行版本（需复核）",
         "content": "合同订立、履行、违约责任及争议解决的一般规则。此条目用于演示检索链路，正式使用前应核验最新法源。",
+        "corpus": "合同法.json",
     },
     {
         "title": "《中华人民共和国劳动合同法》第40、46、47条（演示依据）",
@@ -92,6 +94,7 @@ DEMO_SOURCES = [
         "jurisdiction": "中国大陆",
         "version": "现行版本（需复核）",
         "content": "无过失性辞退需提前30日通知或额外支付一个月工资（第40条）；用人单位依第四十条解除应支付经济补偿（第46条）；经济补偿按工作年限每满一年支付一个月工资（第47条）。正式使用前应核验最新法源。",
+        "corpus": "劳动合同法.json",
     },
     {
         "title": "《中华人民共和国劳动争议调解仲裁法》第27条（演示依据）",
@@ -100,6 +103,7 @@ DEMO_SOURCES = [
         "jurisdiction": "中国大陆",
         "version": "现行版本（需复核）",
         "content": "劳动争议仲裁时效为一年，自当事人知道或应当知道其权利被侵害之日起计算。此条目用于演示检索链路，正式使用前应核验最新法源。",
+        "corpus": "劳动争议调解仲裁法.json",
     },
     {
         "title": "《最高人民法院关于审理民间借贷案件适用法律若干问题的规定》（演示依据）",
@@ -108,6 +112,7 @@ DEMO_SOURCES = [
         "jurisdiction": "中国大陆",
         "version": "现行版本（需复核）",
         "content": "民间借贷利率上限、举证责任及合同效力的一般规则。此条目用于演示检索链路，正式使用前应核验最新法源。",
+        "corpus": "民间借贷规定.json",
     },
     {
         "title": "《中华人民共和国消费者权益保护法》第55条（演示依据）",
@@ -116,6 +121,7 @@ DEMO_SOURCES = [
         "jurisdiction": "中国大陆",
         "version": "现行版本（需复核）",
         "content": "经营者提供商品或服务有欺诈行为的，应增加赔偿其受到的损失，增加赔偿的金额为消费者购买商品价款的3倍。正式使用前应核验最新法源。",
+        "corpus": "消费者权益保护法.json",
     },
     {
         "title": "服务合同审查要点摘要（演示模板）",
@@ -126,6 +132,26 @@ DEMO_SOURCES = [
         "content": "服务合同审查应关注：付款节点与验收前置条件、交付标准与逾期处理、违约金计算方式与上限、保密范围与期限、知识产权归属、解除条件与通知期限、争议解决机构与管辖地。此条目用于演示检索链路。",
     },
 ]
+
+# 演示法源里的 `corpus` 指向仓库内的条文语料（`scripts/legal_corpus/*.json`）。
+# 演示库过去只有一段摘要文字，没有条文级数据，导致「引用核验」只能停在法源级
+# （引用条目没有 verification 字段），条级核验与忠实度判官都拿不到条文正文。
+_DEMO_CORPUS_DIR = Path(__file__).resolve().parents[3] / "scripts" / "legal_corpus"
+
+
+def _load_demo_articles(corpus_file: str) -> list[dict]:
+    """读仓库内语料文件的条文；文件缺失/损坏时返回空表（演示库退化成只有摘要）。"""
+    path = _DEMO_CORPUS_DIR / corpus_file
+    if not path.exists():
+        logger.warning("legal_service: demo corpus missing: %s", path)
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("legal_service: demo corpus unreadable: %s (%s)", path, exc)
+        return []
+    articles = payload.get("articles") if isinstance(payload, dict) else None
+    return [item for item in articles or [] if isinstance(item, dict) and item.get("content")]
 
 CATEGORY_KEYWORDS = {
     "labor_dispute": ("劳动", "工资", "加班", "辞退", "解除劳动", "社保", "工伤"),
@@ -273,14 +299,28 @@ def ensure_demo_sources(db: Session, user_id: int):
     if db.query(LegalSource).filter(LegalSource.user_id == user_id).count():
         return
     for item in DEMO_SOURCES:
-        db.add(
-            LegalSource(
-                user_id=user_id,
-                effective_date=date.today(),
-                status="active",
-                **item,
-            )
+        entry = dict(item)
+        corpus_file = entry.pop("corpus", None)
+        source = LegalSource(
+            user_id=user_id,
+            effective_date=date.today(),
+            status="active",
+            **entry,
         )
+        db.add(source)
+        db.flush()  # 条文要挂 source.id
+        for article in _load_demo_articles(corpus_file) if corpus_file else []:
+            db.add(
+                LegalArticle(
+                    source_id=source.id,
+                    article_number=str(article.get("article_number") or "")[:32] or "第1条",
+                    title=(str(article.get("title"))[:256] if article.get("title") else None),
+                    content=article["content"],
+                    chapter=(str(article.get("chapter"))[:64] if article.get("chapter") else None),
+                    section=(str(article.get("section"))[:64] if article.get("section") else None),
+                    sequence=int(article.get("sequence") or 0),
+                )
+            )
     db.commit()
 
 
