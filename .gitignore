@@ -59,7 +59,10 @@ data/
 scripts/review_feedback_state.json
 
 # Eval run artifacts (generated reports; dataset & scripts are tracked)
-eval/outputs/
+eval/outputs/*
+# 例外：baseline 快照是回归门禁的锚点（scripts/eval_baseline.py --check 要读它），
+# 与其它评测产物不同，它需要入库；参数/prompt 版本漂移会被 --check 点名。
+!eval/outputs/baseline_snapshot.json
 
 # jieba 分词缓存（检索评测首次运行时按 CWD 落盘）
 jieba.cache
