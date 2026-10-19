@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.database import Base
-from app.core.llm_client import ModelGateway, settings
+from app.core.llm_client import TRANSPORT_EXTRA_RETRIES, ModelGateway, settings
 from app.core.llm_provider_adapter import provider_adapter
 from app.core.model_policy import (
     EMBED_TIMEOUT_SECONDS,
@@ -259,7 +259,10 @@ class ModelGatewayRetryTests(_GatewaySettingsMixin, unittest.IsolatedAsyncioTest
         client = AlwaysFails()
         with self.assertRaises(httpx.ConnectError):
             await self.gateway._post_json_with_retry(client, url="u", payload={}, headers={}, retries=3)
-        self.assertEqual(client.calls, 3)
+        # 传输类错误（连接失败/超时）在 retries 之外还有 TRANSPORT_EXTRA_RETRIES 次额外尝试：
+        # 真机观测到免费网关会成串 ConnectError，只给 retries 次会整段降级（见
+        # docs/review/step12-llm-gateway-resilience.md）。这里同时锁住「有额外预算」与「预算有界」。
+        self.assertEqual(client.calls, 3 + TRANSPORT_EXTRA_RETRIES)
 
     async def test_rate_limited_429_is_retried(self):
         class Flaky429:
