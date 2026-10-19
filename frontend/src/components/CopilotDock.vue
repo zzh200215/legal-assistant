@@ -72,7 +72,12 @@
         <QueryStateView v-else-if="viewState === 'error'" status="error" :error="consultError" min-height="0px" @retry="runConsultation" />
 
         <!-- 结果区（懒加载 chunk）：字段全部来自服务端响应，缺字段就不渲染，不用本地假值补齐 -->
-        <CopilotAnswer v-if="visibleResult" :result="visibleResult" @feedback-submitted="onFeedbackSubmitted" />
+        <CopilotAnswer
+          v-if="visibleResult"
+          :result="visibleResult"
+          :faithfulness-state="faithfulnessState"
+          @feedback-submitted="onFeedbackSubmitted"
+        />
 
         <!-- 空态：未提问。没有案件上下文时说明清楚，但仍允许提问 -->
         <QueryStateView v-if="viewState === 'empty'" status="empty" min-height="0px">
@@ -177,6 +182,27 @@ const { consultForm, consultLoading, consultResult, submitConsultation } = useLe
 const consultError = shallowRef(null)
 const lastQuestion = ref('')
 
+// 忠实度校验是「答案之后」的独立动作：判官是一次完整 LLM 往返（真机约 10s），
+// 塞进创建咨询的请求里会让「提问→答案」多等一个数量级。答案先渲染，这里再补判并翻转标记。
+// 判官不可用/网络失败时静默保持「未校验」——面板已有该状态，不额外打扰用户。
+const faithfulnessState = ref('idle')
+const runFaithfulnessCheck = async (consultationId) => {
+  if (!consultationId || !online.value) return
+  faithfulnessState.value = 'checking'
+  try {
+    const response = await consultClient.checkConsultationFaithfulness(consultationId)
+    const verdict = response?.data
+    // 只有真拿到结论才覆盖：判官不可用的空结论不该抹掉响应里已有的判断（例如已存的历史结论）。
+    if (verdict?.available && consultResult.value?.id === consultationId) {
+      consultResult.value = { ...consultResult.value, faithfulness: verdict }
+    }
+  } catch {
+    // 判官不可用：不落库、不改口径，徽标留在「未校验」
+  } finally {
+    faithfulnessState.value = 'idle'
+  }
+}
+
 const runConsultation = async () => {
   const question = consultForm.value.question.trim()
   if (!question || consultLoading.value || !online.value) return
@@ -191,7 +217,10 @@ const runConsultation = async () => {
   if (lastRequestError.value) {
     consultError.value = lastRequestError.value
     lastRequestError.value = null
+    return
   }
+  // 不 await：忠实度是补判，答复已经可读，不该让用户等判官。
+  void runFaithfulnessCheck(consultResult.value?.id)
 }
 
 const viewState = computed(() => {

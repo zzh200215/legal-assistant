@@ -92,7 +92,11 @@ import CopilotTrace from './CopilotTrace.vue'
 // 四层可解释性（过程时间线 / 证据卡 / 逐句溯源 / 忠实度）全部由 copilotLayers.js 从
 // props.result 推导，缺字段就降级为「未提供/未校验」——本文件不做任何本地补值或推断。
 
-const props = defineProps({ result: { type: Object, required: true } })
+const props = defineProps({
+  result: { type: Object, required: true },
+  // 忠实度是生成后的补判动作（判官约 10s），面板在等待期间把标记显示为「校验中」。
+  faithfulnessState: { type: String, default: 'idle' },
+})
 const emit = defineEmits(['feedback-submitted'])
 
 const adviceText = computed(() => props.result.advice || '')
@@ -111,7 +115,18 @@ const blocks = computed(() => {
   return out
 })
 const attribution = computed(() => layers.value.attribution)
-const faithfulness = computed(() => layers.value.faithfulness)
+// 等待判官时显示「校验中」；判完（或判官不可用）就交回 deriveFaithfulness 的三态口径。
+const faithfulness = computed(() => {
+  if (props.faithfulnessState === 'checking') {
+    return {
+      state: 'checking',
+      label: '忠实度校验中…',
+      detail: '正在逐条核对答复中的断言是否有证据支持。',
+      unsupported: [],
+    }
+  }
+  return layers.value.faithfulness
+})
 const confidenceText = computed(() => {
   const value = props.result.confidence
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
@@ -327,6 +342,10 @@ const submitFeedback = async (score, note) => {
 
 .cop-faithful-unchecked .cop-faithful-label {
   color: var(--color-text-secondary);
+}
+/* 校验中：与「未校验」区分开，用主色提示这是一次进行中的动作，判完会翻转 */
+.cop-faithful-checking .cop-faithful-label {
+  color: var(--color-primary);
 }
 
 .cop-faithful-pass .cop-faithful-label {

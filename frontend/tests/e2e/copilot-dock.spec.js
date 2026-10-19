@@ -32,7 +32,8 @@ const answer = (overrides = {}) => ({
 })
 
 // 案件工作台 + 全局外壳所需接口全量 mock；onConsult 控制 POST /legal/consultations 的行为
-async function mockApi(page, { onConsult } = {}) {
+// onFaithfulness 控制生成后的忠实度补判：默认返回「判官不可用」，让未校验口径保持可断言。
+async function mockApi(page, { onConsult, onFaithfulness } = {}) {
   const requests = []
   const failed = []
   const consultPosts = []
@@ -60,6 +61,12 @@ async function mockApi(page, { onConsult } = {}) {
     if (method === 'GET' && path === '/billing/subscriptions/quota') return route.fulfill({ json: success(null) })
     if (method === 'GET' && path === '/legal/sources/19/articles') return route.fulfill({ json: success([{ id: 1901, article_number: '第十九条', title: '试用期', content: '劳动合同期限三年以上固定期限和无固定期限的，试用期不得超过六个月。' }]) })
     if (method === 'POST' && path === '/legal/consultations/77/feedback') return route.fulfill({ json: success({ ok: true }) })
+    if (method === 'POST' && /^\/legal\/consultations\/\d+\/faithfulness$/.test(path)) {
+      if (onFaithfulness) return onFaithfulness(route)
+      return route.fulfill({
+        json: success({ available: false, faithful: null, unsupported: [], reason: 'faithfulness_unavailable' }),
+      })
+    }
     if (method === 'POST' && path === '/legal/consultations') {
       const body = route.request().postDataJSON()
       consultPosts.push(body)
@@ -559,6 +566,38 @@ test('服务端句级映射与本地分句对不齐时回退整篇粒度，不�
   await expect(dock.locator('.cop-note', { hasText: '与本地分句对不齐' })).toContainText('已回退')
   await dock.locator('.cop-sentence').first().click()
   await expect(dock.locator('.cop-evidence.is-highlighted')).toHaveCount(2)
+
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+  expect(failed).toEqual([])
+})
+
+// 忠实度补判（POST /legal/consultations/{id}/faithfulness）：答案先渲染，判官结论回来再翻转标记
+test('生成后补判忠实度：标记从校验中翻成结论，且不改动答案本身', async ({ page }) => {
+  const { failed, requests } = await mockApi(page, {
+    onConsult: (route) => route.fulfill({ json: success(answer()) }),
+    onFaithfulness: (route) =>
+      route.fulfill({
+        json: success({
+          available: true,
+          faithful: false,
+          unsupported: ['「赔偿金按二倍计算」未在证据中找到依据'],
+          reason: '1 处断言未被证据支持。',
+          evidence_count: 2,
+          checked_at: '2026-10-19T02:00:00+00:00',
+        }),
+      }),
+  })
+
+  await page.goto('/legal-workspace?case_id=3&tab=consultation')
+  const dock = page.locator(dockSelector)
+  await ask(page, dock)
+
+  // 判官结论落地：标记翻转、未支持断言列出，答案正文仍在
+  await expect(dock.locator('.cop-faithful')).toHaveClass(/cop-faithful-fail/)
+  await expect(dock.locator('.cop-faithful-label')).toHaveText('忠实度校验未通过')
+  await expect(dock.locator('.cop-faithful-list li')).toHaveCount(1)
+  await expect(dock.locator('.cop-answer')).toContainText('违法解除按经济补偿标准的二倍支付赔偿金。')
+  expect(requests).toContain('POST /legal/consultations/77/faithfulness')
 
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
   expect(failed).toEqual([])

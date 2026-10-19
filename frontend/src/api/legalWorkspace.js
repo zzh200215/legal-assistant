@@ -196,6 +196,12 @@ export default {
   submitConsultationFeedback(id, payload, options = {}) {
     return http.post(`/legal/consultations/${id}/feedback`, payload, { headers: idempotencyHeaders(options) })
   },
+  // 忠实度校验是「答案返回之后」的独立动作：判官调用约 10s，不能塞进创建咨询的请求里。
+  checkConsultationFaithfulness(id, { refresh = false } = {}, options = {}) {
+    const config = { headers: idempotencyHeaders(options) }
+    if (refresh) config.params = { refresh: true }
+    return http.post(`/legal/consultations/${id}/faithfulness`, {}, config)
+  },
   submitReviewFeedback(id, payload, options = {}) {
     return http.post(`/legal/contract-reviews/${id}/feedback`, payload, { headers: idempotencyHeaders(options) })
   },

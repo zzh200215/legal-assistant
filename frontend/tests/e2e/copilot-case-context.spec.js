@@ -59,6 +59,10 @@ async function mockApi(page) {
     if (method === 'GET' && path === '/legal/drafts/7/versions') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/drafts/7/comments') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/drafts/7/collaboration') return route.fulfill({ json: success({ collaborators: [] }) })
+    if (method === 'POST' && /^\/legal\/consultations\/\d+\/faithfulness$/.test(path)) {
+      // 忠实度补判：判官不可用（标记停在未校验），本 spec 不关心该层
+      return route.fulfill({ json: success({ available: false, faithful: null, unsupported: [], reason: 'faithfulness_unavailable' }) })
+    }
     if (method === 'POST' && path === '/legal/consultations') {
       const body = route.request().postDataJSON()
       consultPosts.push(body)

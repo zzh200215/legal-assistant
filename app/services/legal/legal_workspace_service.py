@@ -17,6 +17,7 @@ from app.core.auth import verify_case_access
 from app.core.time import utc_now
 from app.models.legal import (
     ContractReview,
+    LegalArticle,
     LegalCase,
     LegalConsultation,
     LegalDocumentVersion,
@@ -33,6 +34,8 @@ from app.services.legal.legal_service import (
     DISCLAIMER,
     DRAFT_FIELDS,
     DRAFT_REQUIRED_FIELDS,
+    _article_text_by_source,
+    _reference_source_text,
     compute_disclaimer_level,
     consultation_followup,
     consultation_payload,
@@ -42,7 +45,8 @@ from app.services.legal.legal_service import (
     review_contract,
     target_query,
 )
-from app.services.legal.legal_reference_service import enrich_references
+from app.services.legal.legal_reference_service import enrich_references, parse_citation_numbers
+from app.services.rag.agentic_judge import check_faithfulness
 from app.services.legal.legal_domain_service import finalize_consultation_trace, legal_domain_service
 from app.services.billing.subscription_service import subscription_service
 from app.services.legal.matter_service import matter_service
@@ -139,6 +143,8 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "trace": _json_or(getattr(row, "trace_json", None), "{}"),
             # 句级引用映射：面板逐句溯源直读（无映射的老记录返回 {}，前端回退到整篇答案粒度）。
             "attribution": _json_or(getattr(row, "attribution_json", None), "{}"),
+            # 忠实度校验：答案返回后由判官补判并落库（无结论的老记录返回 {}，前端显示「未校验」）。
+            "faithfulness": _json_or(getattr(row, "faithfulness_json", None), "{}"),
         }
     if isinstance(row, ContractReview):
         return {
@@ -175,6 +181,107 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
         "is_final": bool(getattr(row, "is_final", 0)),
         "model_snapshot": _json_or(getattr(row, "model_snapshot_json", None), "{}"),
     }
+
+
+def _faithfulness_evidence(db: Session, row: LegalConsultation) -> list[dict]:
+    """把本次咨询的引用整理成判官可读的证据片段。
+
+    优先给「被引用的那几条条文」的正文（模型写了条号时），其次给该法源已收录的条文正文，
+    再退到法源正文；确实没有可读文本的引用直接跳过——宁可让判官看到更少的证据，
+    也不要塞空片段让它误判「有依据」。判官侧另有 6 段 × 300 字的截断上限。
+    """
+    refs = _json_or(row.references_json, "[]")
+    if not isinstance(refs, list) or not refs:
+        return []
+    source_ids = {
+        ref.get("source_id") for ref in refs
+        if isinstance(ref, dict) and ref.get("source_id")
+    }
+    source_by_id: dict[int, LegalSource] = {}
+    articles_by_source: dict[int, list[LegalArticle]] = {}
+    if source_ids:
+        source_by_id = {
+            source.id: source
+            for source in db.query(LegalSource).filter(LegalSource.id.in_(source_ids)).all()
+        }
+        for article in db.query(LegalArticle).filter(LegalArticle.source_id.in_(source_ids)).all():
+            articles_by_source.setdefault(article.source_id, []).append(article)
+
+    chunks: list[dict] = []
+    for ref in refs:
+        if not isinstance(ref, dict):
+            continue
+        source = source_by_id.get(ref.get("source_id")) if ref.get("source_id") else None
+        body = ""
+        if source is not None:
+            articles = articles_by_source.get(source.id) or []
+            numbers = set(parse_citation_numbers(ref.get("citation")))
+            picked = [item for item in articles if item.article_number in numbers] if numbers else []
+            chosen = picked or articles
+            body = "\n".join(f"{item.article_number} {item.content}" for item in chosen)
+            body = body or source.full_text or source.content or ""
+        header = " ".join(part for part in (ref.get("title"), ref.get("citation")) if part)
+        text = f"{header}\n{body}".strip()
+        if text:
+            chunks.append({"content": text})
+    return chunks
+
+
+def _material_readable(db: Session, user: User, material) -> bool:
+    """合同审查 / 文书草稿的读权限口径（与 LegalWorkspaceReadModule.get_row 一致）。
+
+    本人记录直接可用；他人记录需管理员/审核人身份，或能访问该记录所属案件。
+    注入上下文与判官取证共用同一口径，避免「能拿来提问、却不算证据」这种自相矛盾。
+    """
+    if material.user_id == user.id:
+        return True
+    if user.role in {"admin", "dept_admin"} or getattr(material, "reviewer_id", None) == user.id:
+        return True
+    if not getattr(material, "case_id", None):
+        return False
+    try:
+        verify_case_access(material.case_id, user.id, db)
+    except HTTPException:
+        return False
+    return True
+
+
+def _material_context_evidence(db: Session, user: User, row: LegalConsultation) -> list[dict]:
+    """把本次咨询带进来的「当前材料」（合同审查 / 文书草稿）也算作判官证据。
+
+    没有这一步，带材料提问的答复会被判成「未被证据支持」——因为判官只看到法源条文，
+    而答复里引用的付款期限、仲裁请求等细节本来就在用户材料里（真机实测到的误判）。
+    材料 id 从 trace_json 的 contexts 元数据读回，逐条按归属校验；读不到就跳过（不伪造证据）。
+    """
+    trace = _json_or(getattr(row, "trace_json", None), "{}")
+    contexts = trace.get("contexts") if isinstance(trace, dict) else None
+    if not isinstance(contexts, list) or not contexts:
+        return []
+
+    chunks: list[dict] = []
+    for item in contexts:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("type")
+        item_id = item.get("id")
+        if kind == "contract_review":
+            model, label = ContractReview, "合同审查"
+        elif kind == "draft":
+            model, label = LegalDraft, "文书草稿"
+        else:
+            continue
+        if not isinstance(item_id, int):
+            continue
+        material = db.query(model).filter(model.id == item_id).first()
+        if material is None or not _material_readable(db, user, material):
+            # 判官证据只认该用户读得到的材料：咨询时已校验过一次归属，这里用同一口径复核
+            continue
+        body = getattr(material, "content", None) or ""
+        if not body:
+            continue
+        title = item.get("title") or getattr(material, "title", None) or f"{label} #{item_id}"
+        chunks.append({"content": f"{label} {title}\n{body}"})
+    return chunks
 
 
 def _draft_missing_fields(document_type: str, fields: dict[str, str]) -> list[str]:
@@ -338,15 +445,8 @@ class LegalWorkspaceModule:
         row = db.query(model).filter(model.id == item_id).first()
         if row is None:
             raise LookupError("LEGAL_CONTEXT_NOT_FOUND")
-        if row.user_id != user.id:
-            is_privileged = user.role in {"admin", "dept_admin"} or getattr(row, "reviewer_id", None) == user.id
-            if not is_privileged:
-                if not row.case_id:
-                    raise LookupError("LEGAL_CONTEXT_NOT_FOUND")
-                try:
-                    verify_case_access(row.case_id, user.id, db)
-                except HTTPException:
-                    raise LookupError("LEGAL_CONTEXT_NOT_FOUND")
+        if not _material_readable(db, user, row):
+            raise LookupError("LEGAL_CONTEXT_NOT_FOUND")
         return {
             "type": kind,
             "type_label": label,
@@ -354,6 +454,31 @@ class LegalWorkspaceModule:
             "title": getattr(row, "title", None) or f"{label} #{row.id}",
             "text": getattr(row, "content", None) or "",
         }
+
+    async def check_consultation_faithfulness(
+        self, db: Session, user: User, consultation_id: int, *, refresh: bool = False,
+    ) -> dict:
+        """生成后忠实度校验（copilot 第四层）：判官逐条核对答复中的事实性断言是否有证据支持。
+
+        时序上它**不属于生成过程**：答案先返回给用户，前端拿到后再触发这里，所以判官慢也不会拖慢回答。
+        已判过的记录直接回读（`refresh=True` 才重判）；判官不可用时**不落库**——把「判官挂了」
+        固化成一条结论，比不判更误导，留空才能下次重试。
+        """
+        row = legal_workspace_read_module.get_row(db, user, "consultation", consultation_id)
+        if not refresh:
+            stored = _json_or(getattr(row, "faithfulness_json", None), "{}")
+            if isinstance(stored, dict) and stored:
+                return stored
+
+        chunks = _faithfulness_evidence(db, row)
+        # 带材料提问时，材料正文也是答复的依据；不并入会让判官把「引用了合同条款」判成无依据。
+        chunks.extend(_material_context_evidence(db, user, row))
+        verdict = await check_faithfulness(row.question or "", row.advice or "", chunks, user_id=user.id)
+        result = {**verdict, "evidence_count": len(chunks), "checked_at": utc_now().isoformat()}
+        if verdict.get("available"):
+            row.faithfulness_json = json.dumps(result, ensure_ascii=False)
+            db.commit()
+        return result
 
     async def create_consultation(
         self, db: Session, user: User, question: str, *, case_id: int | None = None,

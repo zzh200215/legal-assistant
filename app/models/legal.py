@@ -159,6 +159,10 @@ class LegalConsultation(Base):
     # 逐句溯源：建议正文每一句对应哪几条引用（句级），JSON。
     # 与 references_json 的区别：references_json 是「本次引用了什么」，本列是「哪一句用了哪条」。
     attribution_json = Column(Text, nullable=True, comment="句级引用映射，JSON")
+    # 生成后忠实度校验：答案里的事实性断言是否都能在证据里找到依据，JSON。
+    # 与 trace_json/attribution_json 同属「可解释性」三件套，但它由判官模型事后补判
+    # （答案先返回，前端拿到后再触发），所以与生成过程分开存储、可单独刷新。
+    faithfulness_json = Column(Text, nullable=True, comment="忠实度校验结果，JSON")
     reviewed_version = Column(Integer, nullable=True, comment="审核动作所绑定的业务版本号")
     feedback_score = Column(Integer, nullable=True, comment="用户评分：1=满意 -1=不满意")
     feedback_note = Column(Text, nullable=True, comment="用户反馈备注")

@@ -845,6 +845,31 @@ class FollowupIn(BaseModel):
     question: str = Field(min_length=1, max_length=5000)
 
 
+@router.post("/consultations/{item_id}/faithfulness")
+def check_consultation_faithfulness_api(
+    item_id: int,
+    refresh: bool = Query(default=False, description="true 时忽略已存结论重新判一次"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """生成后忠实度校验（copilot 第四层）。
+
+    刻意**不放在创建咨询的同一个请求里**：判官是一次完整 LLM 往返（真机约 10s），
+    放进去会让「提问→答案」多等一个数量级。前端拿到答案后再调这里，标记从「校验中」
+    翻成结论；判官不可用时返回 available=false 且**不落库**，前端显示「未校验」。
+    """
+    try:
+        return _run_async(
+            legal_workspace_module.check_consultation_faithfulness(
+                db, current_user, item_id, refresh=refresh
+            )
+        )
+    except LookupError as exc:
+        if str(exc) == "LEGAL_CONSULTATION_NOT_FOUND":
+            raise api_error(404, "咨询记录不存在或无权访问", code="LEGAL_CONSULTATION_NOT_FOUND")
+        raise
+
+
 @router.post("/consultations/{item_id}/followup")
 def followup_consultation(item_id: int, req: FollowupIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Multi-turn follow-up: creates a new consultation linked to the previous context."""
