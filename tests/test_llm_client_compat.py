@@ -4,7 +4,9 @@ import unittest
 import httpx
 
 from app.core.llm_client import (
+    RATE_LIMIT_EXTRA_RETRIES,
     RETRY_AFTER_MAX_SECONDS,
+    TRANSPORT_EXTRA_RETRIES,
     LLMClient,
     ModelGateway,
     _retry_after_seconds,
@@ -91,8 +93,27 @@ class RetryAfterTests(unittest.TestCase):
     def test_delay_prefers_the_larger_of_backoff_and_retry_after(self):
         # 第一次尝试：固定退避 1.5s，但供应商要求 30s → 等 30s
         self.assertEqual(_retry_delay_seconds(self._http_error("30"), 1), 30.0)
-        # 没有 Retry-After 时保持原有退避节奏
+        # 没有 Retry-After 时保持指数退避
         self.assertEqual(_retry_delay_seconds(self._http_error(None), 2), 3.0)
+
+    def test_rate_limited_backs_off_exponentially_and_caps(self):
+        # 429 没有 Retry-After 时也必须能跨过「分钟窗口」：1.5→3→6→12→24→30（封顶）
+        delays = [_retry_delay_seconds(self._http_error(None), attempt) for attempt in range(1, 7)]
+        self.assertEqual(delays, [1.5, 3.0, 6.0, 12.0, 24.0, 30.0])
+
+    def test_other_transient_errors_keep_linear_backoff(self):
+        self.assertEqual(_retry_delay_seconds(self._http_error(None, status=503), 3), 4.5)
+
+    def test_transport_errors_back_off_exponentially_with_lower_cap(self):
+        error = httpx.ConnectError("connection reset")
+        delays = [_retry_delay_seconds(error, attempt) for attempt in range(1, 6)]
+        self.assertEqual(delays, [1.5, 3.0, 6.0, 12.0, 15.0])
+
+    def test_rate_limit_gets_extra_attempts(self):
+        self.assertGreaterEqual(RATE_LIMIT_EXTRA_RETRIES, 3)
+
+    def test_transport_gets_extra_attempts(self):
+        self.assertGreaterEqual(TRANSPORT_EXTRA_RETRIES, 3)
 
 
 if __name__ == "__main__":

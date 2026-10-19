@@ -50,7 +50,27 @@ LLM call failed, falling back to deterministic logic: Event loop is closed
 
 即：**最坏情况是"等待 ≤ 超时 × 重试次数后降级"，不是无限挂起**；且降级是如实标注的，不会假装成功。
 
-## 4. 如实说明
+## 4. 补记（2026-10-18 深夜）：免费额度的 rpm 上限与指数退避
+
+**新现象**：固化 baseline 快照时连续失败，网关返回
+
+```json
+{"error":{"message":"rpm exhausted","type":"quota_exceeded_error","code":"8"}}
+```
+
+**实测口径**（临时探针，已删）：静默 70s 让窗口复位后，按固定间隔发最小请求——**约 11 次/分钟仍有 ~40% 被拒**（`rpm exhausted`），说明免费额度的每分钟请求数上限很低；而一轮 RAG 评测要约 40–70 次聊天调用，必然撞上。限流响应**不带 `Retry-After`**，原来的线性退避（1.5s/3s/4.5s，共 3 次）等不到窗口。
+
+**修复**（`app/core/llm_client.py`）：
+
+- `_retry_delay_seconds`：`ModelErrorKind.RATE_LIMITED` 走**指数退避** `min(1.5 × 2^(n-1), 30s)`，其它瞬态错误保持线性；响应带 `Retry-After` 时取两者较大值（上限 60s）。
+- 限流额外给 `RATE_LIMIT_EXTRA_RETRIES = 4` 次机会（共 7 次），避免「一次限流打断整轮评测」。
+- 回归：`tests/test_llm_client_compat.py::RetryAfterTests` 扩到 8 例（指数序列 1.5/3/6/12/24/30、非限流仍线性、额外次数下限）。
+
+**评测侧配合**：`eval/run_eval.py` 新增 `EVAL_CASE_PAUSE_SECONDS`（默认 0，不改既有行为），需要时按题节流；跑 baseline 时设 6s。
+
+**如实说明**：这不能提高供应商的上限，只是让「慢」替代「失败」。真正稳定的评测仍建议换用不限流的密钥或自建模型。
+
+## 5. 如实说明
 
 1. **降级率仍有 5/24（20.8%）**，但全部发生在修复前的 id ≤ 32；修复后连续 10 次无降级。样本小，不能断言"再也不会降级"。
 2. **网关侧的限流/超时是外部风险**：本机是免费额度网关（`glm-5.2`），我们只能保证"有界 + 如实降级"，不能保证第三方 SLA。
@@ -58,7 +78,7 @@ LLM call failed, falling back to deterministic logic: Event loop is closed
 4. 修复只覆盖 `ModelGateway` 的**连接池**；`chat_stream` 等路径复用同一池，同样受益（未单独压测）。
 5. 后端回归子集（`-k "legal or llm or gateway or consult or reference or refusal"`）**578 passed / 2 failed**，两条失败都不属于本项：一条是上面那条已修的失效熔断测试（修后 33 passed），另一条是既有的环境不一致 `tests/test_legal_encryption.py::test_aes_gcm_ciphertext_does_not_expose_plaintext`（断言密文前缀 `enc:v1:`，而本机 `.env` 为 `LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION=v2`，该用例未像同文件其它用例那样 patch `_settings()`）。
 
-## 5. 下一步
+## 6. 下一步
 
 - 降级率做成可观测指标（`trace.metrics` 已有数据，缺的是聚合看板）。
 - 若要缩短等待：把超时降到 20–30s 并观察降级率变化（需要产品决策）。

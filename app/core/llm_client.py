@@ -35,6 +35,14 @@ RETRY_BACKOFF_SECONDS = 1.5
 # 于是免费额度下会出现「重试 3 次仍 429 → 整轮评测/整次咨询失败」。这里优先按
 # 响应里的 Retry-After 等待，并设上限避免把请求挂死。
 RETRY_AFTER_MAX_SECONDS = 60.0
+# 限流单独给更多次机会：免费额度网关的 rpm 上限很低，一次评测动辄几十次调用，
+# 若只重试 3 次会被一次限流打断整轮（实测 `rpm exhausted` / code 8）。
+RATE_LIMIT_EXTRA_RETRIES = 4
+# 传输类错误（连接被重置/连不上）在批量嵌入时也会出现：评测一轮要发几十次嵌入请求，
+# 3 次线性退避（1.5s/3s）不够跨过网络抖动，整轮评测会被一次 ConnectError 打断。
+TRANSPORT_EXTRA_RETRIES = 3
+RETRY_BACKOFF_MAX_SECONDS = 30.0
+TRANSPORT_BACKOFF_MAX_SECONDS = 15.0
 
 
 def _retry_after_seconds(exc: Exception, *, cap_seconds: float = RETRY_AFTER_MAX_SECONDS) -> float | None:
@@ -56,8 +64,19 @@ def _retry_after_seconds(exc: Exception, *, cap_seconds: float = RETRY_AFTER_MAX
 
 
 def _retry_delay_seconds(exc: Exception, attempt: int) -> float:
-    """重试等待：固定退避，遇到 429 的 Retry-After 时取两者较大值。"""
-    delay = RETRY_BACKOFF_SECONDS * attempt
+    """重试等待：限流与传输错误走指数退避，其它瞬态错误保持线性退避。
+
+    429 的窗口通常按分钟计，线性退避（1.5s/3s/4.5s）等不到窗口；指数退避
+    1.5→3→6→12→24→30s 能在几次之内跨过窗口。传输类错误（连接被重置）同理，
+    只是封顶更低（15s）。响应带 Retry-After 时取较大值。
+    """
+    kind = classify_error(exc).kind
+    if kind == ModelErrorKind.RATE_LIMITED:
+        delay = min(RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)), RETRY_BACKOFF_MAX_SECONDS)
+    elif kind == ModelErrorKind.TRANSPORT:
+        delay = min(RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)), TRANSPORT_BACKOFF_MAX_SECONDS)
+    else:
+        delay = RETRY_BACKOFF_SECONDS * attempt
     retry_after = _retry_after_seconds(exc)
     if retry_after is not None:
         delay = max(delay, retry_after)
@@ -540,17 +559,29 @@ class ModelGateway:
             },
         ):
             last_error: Exception | None = None
-            for attempt in range(1, retries + 1):
+            attempt = 0
+            while True:
+                attempt += 1
                 try:
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
                     return resp.json()
                 except Exception as exc:
                     # 只对明确瞬态错误（超时/传输/5xx/429）重试；参数/鉴权/权限/内容拦截等直接抛出。
-                    if not classify_error(exc).retryable:
+                    error = classify_error(exc)
+                    if not error.retryable:
                         raise
                     last_error = exc
-                    if attempt == retries:
+                    # 限流（429）与传输抖动在免费额度/长批量下很常见，且往往不带 Retry-After，
+                    # 给它们额外的重试次数，否则一轮评测会被一次抖动打断。
+                    if error.kind == ModelErrorKind.RATE_LIMITED:
+                        extra = RATE_LIMIT_EXTRA_RETRIES
+                    elif error.kind == ModelErrorKind.TRANSPORT:
+                        extra = TRANSPORT_EXTRA_RETRIES
+                    else:
+                        extra = 0
+                    allowed = retries + extra
+                    if attempt >= allowed:
                         break
                     await asyncio.sleep(_retry_delay_seconds(exc, attempt))
             if last_error is not None:
