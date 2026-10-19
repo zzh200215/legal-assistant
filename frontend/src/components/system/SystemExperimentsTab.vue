@@ -101,6 +101,47 @@
             <el-table-column prop="share_text" label="占比" width="100" class-name="app-num" />
           </el-table>
         </div>
+
+        <h3 class="evidence-subhead">按天趋势</h3>
+        <p v-if="!evidenceTrendRows.length" class="evidence-empty">近 {{ evidenceStats.window_days }} 天没有带指标的答复。</p>
+        <div v-else class="app-table-wrap">
+          <el-table :data="evidenceTrendRows" border size="small" max-height="260">
+            <el-table-column prop="date" label="日期" width="110" />
+            <el-table-column prop="total" label="答复" width="80" class-name="app-num" />
+            <el-table-column prop="with_evidence" label="带指标" width="90" class-name="app-num" />
+            <el-table-column prop="strong" label="逐条核对" width="100" class-name="app-num" />
+            <el-table-column prop="partial" label="部分核对" width="100" class-name="app-num" />
+            <el-table-column prop="weak" label="待核" width="80" class-name="app-num" />
+            <el-table-column prop="none" label="未引用" width="80" class-name="app-num" />
+            <el-table-column prop="checked_text" label="条文核对通过率" min-width="130" class-name="app-num" />
+          </el-table>
+        </div>
+
+        <h3 class="evidence-subhead">
+          法源引用与语料缺口
+          <span class="app-card-head-meta">
+            窗口内共 {{ evidenceStats.sources_total || 0 }} 个法源被引用<span
+              v-if="(evidenceStats.sources_total || 0) > (evidenceStats.sources || []).length"
+            >（下表只列引用最多的 {{ (evidenceStats.sources || []).length }} 个）</span>
+          </span>
+        </h3>
+        <p v-if="!evidenceSourceRows.length" class="evidence-empty">窗口内的答复没有挂到法源库的引用。</p>
+        <div v-else class="app-table-wrap">
+          <el-table :data="evidenceSourceRows" border size="small" max-height="320">
+            <el-table-column prop="title" label="法源" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="references" label="被引用" width="90" class-name="app-num" />
+            <el-table-column prop="consultations" label="涉及答复" width="100" class-name="app-num" />
+            <el-table-column prop="articles" label="条文数" width="90" class-name="app-num" />
+            <el-table-column prop="verified" label="核验通过" width="100" class-name="app-num" />
+            <el-table-column label="语料" width="110">
+              <template #default="{ row }">
+                <span v-if="row.articles" class="app-tag is-ok">有条文</span>
+                <span v-else class="app-tag is-warn">缺条文</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <p v-if="evidenceGapNote" class="evidence-note">{{ evidenceGapNote }}</p>
       </div>
     </section>
 
@@ -220,6 +261,40 @@ const evidenceLevelRows = computed(() => {
   }))
 })
 
+// 按天趋势：只有有数据的日期（后端已排序），通过率按「真的做过条文级核对的引用」算
+const evidenceTrendRows = computed(() => {
+  if (evidenceError.value) return []
+  return (evidenceStats.value.trend || []).map((row) => ({
+    date: row.date,
+    total: row.total,
+    with_evidence: row.with_evidence,
+    strong: row.strong,
+    partial: row.partial,
+    weak: row.weak,
+    none: row.none,
+    checked_text: formatRate(row.article_checked ? row.article_verified / row.article_checked : null),
+  }))
+})
+
+// 法源引用榜：`articles === 0` 就是语料采购清单（模板类法源本就不该有条文）
+const evidenceSourceRows = computed(() => {
+  if (evidenceError.value) return []
+  return evidenceStats.value.sources || []
+})
+
+const evidenceGapNote = computed(() => {
+  const gaps = evidenceStats.value.corpus_gaps || []
+  const unmatched = evidenceStats.value.unmatched_references || {}
+  const parts = []
+  if (gaps.length) {
+    parts.push(`语料缺口 ${gaps.length} 个：${gaps.map((row) => row.title).join('、')}`)
+  }
+  if (unmatched.references) {
+    parts.push(`${unmatched.references} 条引用没挂到法源库（涉及 ${unmatched.consultations} 条答复），未计入上表`)
+  }
+  return parts.join('；')
+})
+
 const experimentArtifacts = computed(() => experimentOverview.value.artifact_status || {})
 const experimentSummary = computed(() => experimentOverview.value.summary || {})
 const rolloutSummary = computed(() => experimentOverview.value.rollouts || { items: [] })
@@ -335,6 +410,27 @@ onMounted(async () => {
 }
 .evidence-level-wrap {
   margin-top: var(--space-4);
+}
+/* 趋势与法源榜是同一张卡里的二级分区：小标题 + 说明，不另起卡片 */
+.evidence-subhead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: var(--space-5) 0 var(--space-2);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.evidence-subhead .app-card-head-meta {
+  font-weight: 400;
+}
+.evidence-empty,
+.evidence-note {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.7;
 }
 /* 令牌里的 .app-metric-grid-4 在 1100px 以下直接收成一列，四个读数用两列更合适 */
 @media (max-width: 1100px) {

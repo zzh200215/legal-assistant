@@ -53,6 +53,8 @@ test('System 组织架构：admin 列表 + 创建组织/部门 + 归属分配', 
     if (method === 'GET' && path === '/analytics/tool-health') return route.fulfill({ json: success({ items: [] }) })
     if (method === 'GET' && path === '/analytics/task-runs') return route.fulfill({ json: success({ items: [], total: 0, page: 1, page_size: 20 }) })
     if (method === 'GET' && path === '/analytics/experiments/overview') return route.fulfill({ json: success({ summary: {}, artifact_status: {}, rollouts: { items: [] }, experiments: [], prompt_traffic: { items: [] } }) })
+    // 健康检查 tab 的「检索索引」卡片（BM25 运行计数）
+    if (method === 'GET' && path === '/analytics/retrieval-index/stats') return route.fulfill({ json: success({ enabled: true, ttl_seconds: 300, index_ready: true, stale: false, epoch: 0, built_at: '2026-10-19T13:33:17+00:00', builds: 1, build_failures: 0, stale_discarded: 0, ttl_rebuilds: 0, fallback_scans: 0, last_build_ms: 2.26, last_build_at: '2026-10-19T13:33:17+00:00', index_size: 42 }) })
     if (method === 'GET' && path === '/agent/approvals') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/documents/knowledge-bases') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/documents/') return route.fulfill({ json: success({ items: [], total: 0 }) })

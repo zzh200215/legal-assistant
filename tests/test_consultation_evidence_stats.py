@@ -15,7 +15,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.database import Base
-from app.models.legal import LegalConsultation
+from app.models.legal import LegalArticle, LegalConsultation, LegalSource
 from app.models.user import User
 from app.services.legal import legal_reference_service
 from app.services.observability.analytics_service import analytics_service
@@ -61,6 +61,7 @@ class ConsultationEvidenceStatsTests(unittest.TestCase):
         *,
         user_id: int = 1,
         evidence: str | None = None,
+        references: list[dict] | None = None,
         days_ago: int = 0,
     ) -> LegalConsultation:
         row = LegalConsultation(
@@ -71,11 +72,35 @@ class ConsultationEvidenceStatsTests(unittest.TestCase):
             risk_level="medium",
             status="pending_review",
             evidence_json=evidence,
+            references_json=json.dumps(references or [], ensure_ascii=False),
             created_at=self.now - timedelta(days=days_ago),
         )
         self.db.add(row)
         self.db.commit()
         return row
+
+    def _source(self, *, source_id: int, title: str, articles: int = 0) -> None:
+        self.db.add(
+            LegalSource(
+                id=source_id,
+                user_id=1,
+                title=title,
+                source_type="statute",
+                citation=title,
+                content=f"{title} 摘要",
+                version="v1",
+            )
+        )
+        for index in range(articles):
+            self.db.add(
+                LegalArticle(
+                    source_id=source_id,
+                    article_number=f"第{index + 1}条",
+                    content=f"条文正文 {index + 1}",
+                    sequence=index + 1,
+                )
+            )
+        self.db.commit()
 
     def test_level_labels_match_reference_service(self):
         # 两处标签必须逐字一致：前端徽标与观测 tab 说的得是同一件事
@@ -150,6 +175,85 @@ class ConsultationEvidenceStatsTests(unittest.TestCase):
         self.assertIsNone(stats["checked_rate"])
         self.assertIsNone(stats["evidence_coverage"])
         self.assertEqual([row["count"] for row in stats["levels"]], [0, 0, 0, 0])
+        self.assertEqual(stats["trend"], [])
+        self.assertEqual(stats["sources"], [])
+        self.assertEqual(stats["corpus_gaps"], [])
+        self.assertEqual(stats["unmatched_references"], {"references": 0, "consultations": 0})
+
+    def test_trend_buckets_by_day(self):
+        self._consultation(evidence=_evidence("strong", references=2, article_checked=2, article_verified=2))
+        self._consultation(evidence=_evidence("partial", references=2, article_checked=1, article_verified=1))
+        self._consultation(evidence=_evidence("weak", references=1, article_checked=1), days_ago=3)
+        self._consultation(evidence=None, days_ago=3)
+
+        stats = analytics_service.get_consultation_evidence_stats(self.db, days=30)
+        trend = stats["trend"]
+
+        # 只有有数据的日期出现，按日期升序
+        self.assertEqual([row["date"] for row in trend], sorted(row["date"] for row in trend))
+        self.assertEqual(len(trend), 2)
+        today = trend[-1]
+        self.assertEqual(today["total"], 2)
+        self.assertEqual(today["with_evidence"], 2)
+        self.assertEqual(today["strong"], 1)
+        self.assertEqual(today["partial"], 1)
+        self.assertEqual(today["article_checked"], 3)
+        self.assertEqual(today["article_verified"], 3)
+        older = trend[0]
+        self.assertEqual(older["total"], 2)  # 含一条没有 evidence 的老记录
+        self.assertEqual(older["with_evidence"], 1)
+        self.assertEqual(older["weak"], 1)
+
+    def test_source_ranking_and_corpus_gaps(self):
+        self._source(source_id=1, title="《中华人民共和国劳动合同法》", articles=2)
+        self._source(source_id=2, title="服务合同审查要点摘要（演示模板）", articles=0)
+        verified = {"verified": True, "article_scope": "verified"}
+        no_corpus = {"verified": False, "article_scope": "no_corpus"}
+        self._consultation(
+            evidence=_evidence("partial", references=3, article_checked=2, article_verified=1, no_corpus=1),
+            references=[
+                {"source_id": 1, "citation": "劳动合同法第40条", "verification": verified},
+                {"source_id": 1, "citation": "劳动合同法第47条", "verification": verified},
+                {"source_id": 2, "citation": "服务合同审查要点", "verification": no_corpus},
+            ],
+        )
+        self._consultation(
+            evidence=_evidence("weak", references=1, article_checked=1),
+            references=[
+                {"title": "《中华人民共和国劳动争议调解仲裁法》", "citation": "第27条"},  # 没挂 source_id
+                {"source_id": 1, "citation": "劳动合同法第87条", "verification": {"verified": False, "article_scope": "missing"}},
+            ],
+        )
+
+        stats = analytics_service.get_consultation_evidence_stats(self.db, days=30)
+        sources = {row["source_id"]: row for row in stats["sources"]}
+
+        self.assertEqual(stats["sources_total"], 2)
+        # 按引用次数倒序：法源 1 被引 3 次、法源 2 被引 1 次
+        self.assertEqual([row["source_id"] for row in stats["sources"]], [1, 2])
+        self.assertEqual(sources[1]["references"], 3)
+        self.assertEqual(sources[1]["consultations"], 2)
+        self.assertEqual(sources[1]["verified"], 2)
+        self.assertEqual(sources[1]["articles"], 2)
+        self.assertEqual(sources[2]["no_corpus"], 1)
+        self.assertEqual(sources[2]["articles"], 0)
+        # 缺口清单只含没有条文级数据的法源
+        self.assertEqual([row["source_id"] for row in stats["corpus_gaps"]], [2])
+        # 没挂 source_id 的引用单独计数，不进排行
+        self.assertEqual(stats["unmatched_references"], {"references": 1, "consultations": 1})
+
+    def test_source_row_survives_deleted_source(self):
+        self._consultation(
+            evidence=_evidence("weak", references=1, article_checked=1),
+            references=[{"source_id": 999, "citation": "已删除法源第1条"}],
+        )
+
+        stats = analytics_service.get_consultation_evidence_stats(self.db, days=30)
+
+        self.assertEqual(stats["sources"][0]["source_id"], 999)
+        self.assertEqual(stats["sources"][0]["title"], "法源 #999（已删除）")
+        self.assertEqual(stats["sources"][0]["articles"], 0)
+        self.assertEqual([row["source_id"] for row in stats["corpus_gaps"]], [999])
 
 
 if __name__ == "__main__":

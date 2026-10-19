@@ -28,6 +28,9 @@ export default {
   consultationEvidenceStats(days = 30) {
     return http.get('/analytics/consultations/evidence-stats', { params: { days } })
   },
+  retrievalIndexStats() {
+    return http.get('/analytics/retrieval-index/stats')
+  },
   workflowOverview(days = 7) {
     return http.get('/analytics/workflows/overview', { params: { days } })
   },

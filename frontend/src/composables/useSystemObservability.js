@@ -13,6 +13,28 @@ const emptyEvidence = () => ({
   levels: [],
   references: {},
   checked_rate: null,
+  trend: [],
+  sources: [],
+  sources_total: 0,
+  corpus_gaps: [],
+  unmatched_references: { references: 0, consultations: 0 },
+})
+
+const emptyIndexStats = () => ({
+  enabled: true,
+  ttl_seconds: 300,
+  index_ready: false,
+  stale: true,
+  epoch: 0,
+  built_at: null,
+  builds: 0,
+  build_failures: 0,
+  stale_discarded: 0,
+  ttl_rebuilds: 0,
+  fallback_scans: 0,
+  last_build_ms: null,
+  last_build_at: null,
+  index_size: 0,
 })
 
 export function useSystemObservability({ client, message, isAdmin }) {
@@ -28,6 +50,9 @@ export function useSystemObservability({ client, message, isAdmin }) {
   const toolHealthLoading = ref(false)
   const toolHealthRows = ref([])
   const toolHealthError = ref(null)
+  const indexLoading = ref(false)
+  const indexStats = ref(emptyIndexStats())
+  const indexError = ref(null)
 
   const fetchHealthData = async () => {
     healthLoading.value = true
@@ -58,5 +83,13 @@ export function useSystemObservability({ client, message, isAdmin }) {
     catch (error) { toolHealthRows.value = []; toolHealthError.value = normalizeError(error) }
     finally { toolHealthLoading.value = false }
   }
-  return { healthLoading, healthData, experimentDays, experimentLoading, experimentOverview, experimentError, evidenceLoading, evidenceStats, evidenceError, toolHealthLoading, toolHealthRows, toolHealthError, fetchHealthData, fetchExperimentOverview, fetchEvidenceStats, fetchToolHealth }
+  const fetchIndexStats = async () => {
+    indexError.value = null
+    if (!isAdmin.value) { indexStats.value = emptyIndexStats(); return }
+    indexLoading.value = true
+    try { const { data } = await client.retrievalIndexStats(); indexStats.value = { ...emptyIndexStats(), ...(data || {}) } }
+    catch (error) { indexStats.value = emptyIndexStats(); indexError.value = normalizeError(error); message.error(error.response?.data?.detail || '获取检索索引状态失败') }
+    finally { indexLoading.value = false }
+  }
+  return { healthLoading, healthData, experimentDays, experimentLoading, experimentOverview, experimentError, evidenceLoading, evidenceStats, evidenceError, toolHealthLoading, toolHealthRows, toolHealthError, indexLoading, indexStats, indexError, fetchHealthData, fetchExperimentOverview, fetchEvidenceStats, fetchToolHealth, fetchIndexStats }
 }

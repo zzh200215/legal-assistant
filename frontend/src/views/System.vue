@@ -65,14 +65,14 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElTabs, ElTabPane } from 'element-plus/es/components/tabs/index'
 import 'element-plus/es/components/tab-pane/style/css'
 import 'element-plus/es/components/tabs/style/css'
 import SystemOverviewBar from '../components/system/SystemOverviewBar.vue'
 import SystemHealthTab from '../components/system/SystemHealthTab.vue'
-import SystemTokensTab from '../components/system/SystemTokensTab.vue'
+import SystemTasksTab from '../components/system/SystemTasksTab.vue'
 import SystemOplogsTab from '../components/system/SystemOplogsTab.vue'
 import SystemAlertsTab from '../components/system/SystemAlertsTab.vue'
 import SystemExperimentsTab from '../components/system/SystemExperimentsTab.vue'
@@ -82,9 +82,15 @@ import SystemApprovalsTab from '../components/system/SystemApprovalsTab.vue'
 import SystemKnowledgeTab from '../components/system/SystemKnowledgeTab.vue'
 import SystemOrgTab from '../components/system/SystemOrgTab.vue'
 import SystemSensitivityTab from '../components/system/SystemSensitivityTab.vue'
-import SystemTasksTab from '../components/system/SystemTasksTab.vue'
 import PilotAnalyticsTabs from '../components/system/PilotAnalyticsTabs.vue'
 import SystemEventFunnelTab from '../components/system/SystemEventFunnelTab.vue'
+
+// tab 组件按需加载：tab 本身已经是 lazy（首次激活才渲染），但静态 import 会把全部组件打进
+// System 路由 chunk（15 个 tab 一度把页面 chunk 顶到 130 KB 预算线）。只把体量最大的
+// Token 统计（22.5 KB）拆成异步 chunk——既压住页面 chunk，又不让整体资产因过多小 chunk 膨胀
+// （每拆一个 chunk 都要多付一份 chunk 头与独立 CSS，总资产预算只剩几 KB 余量）。
+const asyncTab = (loader) => defineAsyncComponent({ loader, delay: 0 })
+const SystemTokensTab = asyncTab(() => import('../components/system/SystemTokensTab.vue'))
 
 const route = useRoute()
 const router = useRouter()

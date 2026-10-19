@@ -102,6 +102,19 @@ def consultation_evidence_stats(
     )
 
 
+@router.get("/retrieval-index/stats")
+def retrieval_index_stats(
+    current_user: User = Depends(require_admin_user),
+):
+    """检索索引（内存 BM25）的运行计数：构建/失败/陈旧丢弃/TTL 重建/回退扫描。
+
+    只读进程内计数，不含查询内容或正文；用于判断「偶发回退全表扫描」是否还在发生。
+    """
+    from app.services.rag.rag_service import rag_service
+
+    return rag_service.bm25_stats()
+
+
 @router.get("/workflows/overview")
 def workflow_overview(
     days: int = Query(7, ge=1, le=365, description="统计天数"),

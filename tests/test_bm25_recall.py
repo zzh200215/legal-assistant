@@ -81,6 +81,54 @@ class BM25RecallTests(unittest.TestCase):
         self.assertTrue(res)
         self.assertIn("c1", [c["id"] for c in res])
 
+    def test_stats_count_build_and_ready_index(self):
+        """索引构建成功后：builds +1、index_size 记条目数、last_build_ms 有值、不再 stale。"""
+        self._run(self._rows4(), ["货款支付"], where=None)
+        stats = self.service.bm25_stats()
+        self.assertGreaterEqual(stats["builds"], 1)
+        self.assertEqual(stats["index_size"], 4)
+        self.assertFalse(stats["stale"])
+        self.assertTrue(stats["index_ready"])
+        self.assertIsNotNone(stats["last_build_ms"])
+        self.assertEqual(stats["fallback_scans"], 0)
+
+    def test_stats_count_fallback_scan_when_index_unavailable(self):
+        """索引建不起来（collection.get 抛错）→ build_failures +1，且本次召回记一次回退扫描。
+
+        注意这是最坏的降级路径：BM25 构建与 jieba 扫描都要读 collection，向量库本身不可用时
+        关键词召回为空（返回空列表而不是抛异常），计数器如实记下原因。
+        """
+        with patch.object(self.service.collection, "get", side_effect=RuntimeError("boom")):
+            res = asyncio.run(self.service._keyword_multi_recall(
+                ["货款支付"], where=None, candidate_limit=5,
+            ))
+        self.assertEqual(res, [])
+        stats = self.service.bm25_stats()
+        self.assertEqual(stats["build_failures"], 1)
+        self.assertEqual(stats["fallback_scans"], 1)
+        self.assertFalse(stats["index_ready"])
+
+    def test_stats_count_import_failure_as_fallback(self):
+        with patch.dict(sys.modules, {"rank_bm25": None}):
+            self._run(self._rows4(), ["货款支付"], where=None)
+        self.assertEqual(self.service.bm25_stats()["fallback_scans"], 1)
+
+    def test_stats_count_ttl_rebuild(self):
+        """索引超龄 → ttl_rebuilds +1 并真的重建（built_at 前移）。"""
+        self._run(self._rows4(), ["货款支付"], where=None)
+        with patch("app.services.rag.rag_service.settings.RAG_BM25_TTL_SECONDS", 10):
+            self.service._bm25_built_at = 0.0
+            self._run(self._rows4(), ["货款支付"], where=None)
+        self.assertEqual(self.service.bm25_stats()["ttl_rebuilds"], 1)
+
+    def test_stats_shape_is_json_serializable(self):
+        """接口直接返回这个 dict，值必须能 JSON 序列化（built_at 为 ISO 字符串或 None）。"""
+        import json
+
+        payload = json.dumps(self.service.bm25_stats())
+        self.assertIn("fallback_scans", payload)
+        self.assertIn("ttl_seconds", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

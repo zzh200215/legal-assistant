@@ -63,6 +63,17 @@ class RAGService(RetrievalMixin, AnswerMixin, IndexingMixin, QueryRewriteMixin):
         self._bm25_lock = threading.Lock()
         self._bm25_epoch = 0
         self._bm25_built_at = 0.0
+        # 索引运行计数（只读观测：构建次数/耗时/失败、陈旧丢弃、TTL 重建、回退扫描）
+        self._bm25_stats = {
+            "builds": 0,
+            "build_failures": 0,
+            "stale_discarded": 0,
+            "ttl_rebuilds": 0,
+            "fallback_scans": 0,
+            "last_build_ms": None,
+            "last_build_at": None,
+            "index_size": 0,
+        }
         # RAG④：可插拔重排（懒构建——按当前 RAG_RERANK_ENGINE 选 bge/llm/heuristic）
         self._reranker = None
 

@@ -10,6 +10,7 @@ import asyncio
 import logging
 import re
 import time
+from datetime import datetime, timezone
 
 from app.core.config import get_settings
 from app.core.llm_client import llm_client
@@ -140,10 +141,13 @@ class RetrievalMixin:
         """
         with self._bm25_lock:
             epoch = self._bm25_epoch
+            started = time.perf_counter()
+            self._bm25_stats["builds"] += 1
             try:
                 rows = self.collection.get(include=["documents", "metadatas"])
             except Exception as exc:
                 logger.warning("BM25 index build unavailable; falling back (%s)", type(exc).__name__)
+                self._bm25_stats["build_failures"] += 1
                 self._bm25_stale = True
                 return
             ids = rows.get("ids") or []
@@ -166,12 +170,34 @@ class RetrievalMixin:
                     index = None
             # 构建期间被并发失效（epoch 已前进）：不发布陈旧索引，标记待重建
             if self._bm25_epoch != epoch:
+                self._bm25_stats["stale_discarded"] += 1
                 self._bm25_stale = True
                 return
             self._bm25_items = items
             self._bm25_index = index
             self._bm25_stale = False
             self._bm25_built_at = time.time()
+            self._bm25_stats["last_build_ms"] = round((time.perf_counter() - started) * 1000, 2)
+            self._bm25_stats["last_build_at"] = datetime.fromtimestamp(
+                self._bm25_built_at, tz=timezone.utc
+            ).isoformat()
+            self._bm25_stats["index_size"] = len(items)
+
+    def bm25_stats(self) -> dict:
+        """BM25 索引的只读运行计数（管理员观测用；不含正文或查询内容）。"""
+        return {
+            "enabled": bool(settings.RAG_BM25_ENABLED),
+            "ttl_seconds": int(settings.RAG_BM25_TTL_SECONDS),
+            "index_ready": self._bm25_index is not None,
+            "stale": bool(self._bm25_stale),
+            "epoch": self._bm25_epoch,
+            "built_at": (
+                datetime.fromtimestamp(self._bm25_built_at, tz=timezone.utc).isoformat()
+                if self._bm25_built_at
+                else None
+            ),
+            **self._bm25_stats,
+        }
 
     def _bm25_keyword_recall(self, query_variants: list[str], *, where: dict | None,
                              candidate_limit: int) -> list[dict] | None:
@@ -179,17 +205,20 @@ class RetrievalMixin:
         try:
             from rank_bm25 import BM25Okapi  # noqa: F401
         except ImportError:
+            self._bm25_stats["fallback_scans"] += 1
             return None
         if self._bm25_index is None or self._bm25_stale:
             self._build_bm25_index()
         elif settings.RAG_BM25_TTL_SECONDS > 0 and time.time() - self._bm25_built_at > settings.RAG_BM25_TTL_SECONDS:
             # TTL 兜底：索引超龄（可能漏了失效信号）强制重建，避免旧数据长期参与检索
+            self._bm25_stats["ttl_rebuilds"] += 1
             self._bm25_stale = True
             self._build_bm25_index()
         # 快照到局部变量：并发重建会在锁内整体换掉索引与 items，打分过程中不能再去读 self.*
         index = self._bm25_index
         items = self._bm25_items
         if index is None:
+            self._bm25_stats["fallback_scans"] += 1
             return None
         scored: dict[str, dict] = {}
         for variant in query_variants:

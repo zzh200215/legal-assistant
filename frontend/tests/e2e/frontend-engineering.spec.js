@@ -46,6 +46,18 @@ async function mockApi(page, role, extra) {
     if (method === 'GET' && path === '/health') {
       return route.fulfill({ json: success({ status: 'ok', timestamp: '2026-01-01T00:00:00', checks: {} }) })
     }
+    // /system 健康检查 tab 的「检索索引」卡片：必须 mock，否则会带着假 token 打到真实后端，
+    // 401 触发全局拦截器清 token → 用例被踢回登录页（表现为「健康检查」tab 找不到）。
+    if (method === 'GET' && path === '/analytics/retrieval-index/stats') {
+      return route.fulfill({
+        json: success({
+          enabled: true, ttl_seconds: 300, index_ready: true, stale: false, epoch: 0,
+          built_at: '2026-01-01T00:00:00+00:00', builds: 1, build_failures: 0, stale_discarded: 0,
+          ttl_rebuilds: 0, fallback_scans: 0, last_build_ms: 1.5,
+          last_build_at: '2026-01-01T00:00:00+00:00', index_size: 12,
+        }),
+      })
+    }
     if (extra) {
       return extra({ route, path, method, request })
     }
