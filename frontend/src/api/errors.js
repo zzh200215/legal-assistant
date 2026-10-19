@@ -84,8 +84,16 @@ export function normalizeError(err) {
   if (!err) {
     return { kind: ErrorKind.UNKNOWN, code: '', status: undefined, message: DEFAULT_MESSAGES[ErrorKind.UNKNOWN], detail: '', requestId: '', traceId: '' }
   }
-  if (err && typeof err === 'object' && err.__normalized && typeof err.__normalized === 'object' && typeof err.__normalized.kind === 'string') {
-    return err.__normalized
+  const cached = err && typeof err === 'object' ? err.__normalized : null
+  if (cached && typeof cached === 'object' && typeof cached.kind === 'string') {
+    return cached
+  }
+  // 已规范化结果被再次传入（如 errorMessage(normalizeError(err))）必须原样返回：
+  // 规范化结果自身带 __normalized: true 且没有 response，继续往下走会被误判成网络错误
+  // （kind 退化成 network、文案变成「网络连接异常」，见 2026-10-19 修复记录）。
+  if (err && typeof err === 'object' && err.__normalized === true
+    && typeof err.kind === 'string' && typeof err.message === 'string') {
+    return err
   }
 
   const { code, detail, requestId, traceId } = extractEnvelope(err)

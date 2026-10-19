@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeError, ErrorKind } from '../errors.js'
+import { normalizeError, errorMessage, ErrorKind } from '../errors.js'
 
 test('业务错误：稳定错误码映射 + request_id/trace_id 提取', () => {
   const err = normalizeError({
@@ -58,4 +58,20 @@ test('同一次调用结果被缓存（幂等）', () => {
   const a = normalizeError(raw)
   const b = normalizeError(raw)
   assert.equal(a, b)
+})
+
+test('已规范化的结果再次规范化不改写结论（可重入）', () => {
+  const raw = { response: { status: 429, data: { error: { code: 'RATE_LIMIT' } } } }
+  const once = normalizeError(raw)
+  const twice = normalizeError(once)
+  assert.equal(twice.kind, ErrorKind.RATE_LIMIT)
+  assert.equal(twice.message, once.message)
+  // 走 errorMessage 这条常见路径也不能退化
+  assert.equal(errorMessage(once), once.message)
+})
+
+test('已规范化的无状态错误（网络类）再次规范化保持 network', () => {
+  const once = normalizeError({ code: 'ECONNABORTED', message: 'timeout of 10000ms exceeded' })
+  assert.equal(once.kind, ErrorKind.TIMEOUT)
+  assert.equal(normalizeError(once).kind, ErrorKind.TIMEOUT)
 })
