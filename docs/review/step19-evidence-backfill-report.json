@@ -1,0 +1,115 @@
+{
+ "generated_at": "2026-10-19T14:57:25.977755+00:00",
+ "mode": "apply",
+ "totals": {
+  "scanned_without_evidence": 57,
+  "with_references": 54,
+  "skipped_no_references": 3,
+  "with_material_context": 8,
+  "applied": 54,
+  "levels": {
+   "strong": 26,
+   "partial": 14,
+   "weak": 14
+  }
+ },
+ "per_user": {
+  "3": {
+   "strong": 5
+  },
+  "10": {
+   "strong": 6,
+   "weak": 6
+  },
+  "15": {
+   "strong": 3
+  },
+  "37": {
+   "strong": 12,
+   "partial": 14,
+   "weak": 8
+  }
+ },
+ "samples": [
+  {
+   "consultation_id": 1,
+   "user_id": 10,
+   "level": "strong",
+   "references": 3,
+   "article_verified": 3,
+   "note": "3 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 3,
+   "user_id": 10,
+   "level": "strong",
+   "references": 2,
+   "article_verified": 2,
+   "note": "2 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 4,
+   "user_id": 10,
+   "level": "strong",
+   "references": 1,
+   "article_verified": 1,
+   "note": "1 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 7,
+   "user_id": 15,
+   "level": "strong",
+   "references": 1,
+   "article_verified": 1,
+   "note": "1 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 8,
+   "user_id": 15,
+   "level": "strong",
+   "references": 1,
+   "article_verified": 1,
+   "note": "1 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 9,
+   "user_id": 15,
+   "level": "strong",
+   "references": 1,
+   "article_verified": 1,
+   "note": "1 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 10,
+   "user_id": 10,
+   "level": "strong",
+   "references": 1,
+   "article_verified": 1,
+   "note": "1 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 16,
+   "user_id": 10,
+   "level": "strong",
+   "references": 2,
+   "article_verified": 2,
+   "note": "2 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 17,
+   "user_id": 10,
+   "level": "strong",
+   "references": 2,
+   "article_verified": 2,
+   "note": "2 条引用已与法源条文核对一致"
+  },
+  {
+   "consultation_id": 18,
+   "user_id": 37,
+   "level": "strong",
+   "references": 2,
+   "article_verified": 2,
+   "note": "2 条引用已与法源条文核对一致"
+  }
+ ]
+}

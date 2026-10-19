@@ -273,10 +273,16 @@ export function deriveVerifiability(result) {
   const level = asText(raw.level)
   if (!Object.prototype.hasOwnProperty.call(VERIFIABILITY_TONES, level)) return null
   const count = (value) => (Number.isFinite(value) && value > 0 ? value : 0)
+  const note = asText(raw.note)
+  // 事后回填的摘要（scripts/backfill_consultation_evidence.py）带 basis=recomputed：
+  // 它回答的是「以当前法源库看能不能核到」，不是生成当时的结论，必须说清楚。
+  const recomputed = asText(raw.basis) === 'recomputed'
   return {
     level,
     label: asText(raw.label) || '证据可核验性未知',
-    note: asText(raw.note),
+    note,
+    title: recomputed ? `${note}（按当前法源库事后重算，非生成当时结论）` : note,
+    recomputed,
     tone: VERIFIABILITY_TONES[level],
     references: count(raw.references),
     articleVerified: count(raw.article_verified),

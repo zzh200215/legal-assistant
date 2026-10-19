@@ -384,3 +384,30 @@ test('deriveVerifiability：在线证据可核验性只在后端给了合法 lev
   assert.equal(layers.verifiability.level, 'partial')
   assert.equal(layers.verifiability.tone, 'neutral')
 })
+
+test('deriveVerifiability：事后回填的摘要要标明「非生成当时结论」', () => {
+  // 老记录由 scripts/backfill_consultation_evidence.py 回填，带 basis=recomputed：
+  // 它回答的是「以当前法源库看能不能核到」，标题里必须说清楚，不能冒充生成时的事实。
+  const recomputed = deriveVerifiability({
+    ...RESULT,
+    evidence: {
+      level: 'strong',
+      label: '引用已逐条核对',
+      note: '3 条引用已与法源条文核对一致',
+      basis: 'recomputed',
+      computed_at: '2026-10-19T00:00:00+00:00',
+    },
+  })
+  assert.equal(recomputed.recomputed, true)
+  assert.equal(recomputed.note, '3 条引用已与法源条文核对一致')
+  assert.match(recomputed.title, /事后重算/)
+  assert.match(recomputed.title, /非生成当时结论/)
+
+  // 生成当时算的（没有 basis）不加后缀
+  const generated = deriveVerifiability({
+    ...RESULT,
+    evidence: { level: 'strong', label: '引用已逐条核对', note: '3 条引用已与法源条文核对一致' },
+  })
+  assert.equal(generated.recomputed, false)
+  assert.equal(generated.title, generated.note)
+})

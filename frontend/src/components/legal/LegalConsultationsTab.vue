@@ -30,7 +30,7 @@
                 size="small"
                 effect="plain"
                 :type="consultVerifiability.tone === 'success' ? 'success' : consultVerifiability.tone === 'warning' ? 'warning' : 'info'"
-                :title="consultVerifiability.note"
+                :title="consultVerifiability.title"
               >依据：{{ consultVerifiability.label }}</el-tag>
               <div class="result-actions">
                 <el-button size="small" type="success" plain @click="emit('go-to-review', consultResult)">进入合同审查</el-button>

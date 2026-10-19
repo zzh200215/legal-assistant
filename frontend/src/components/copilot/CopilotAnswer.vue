@@ -13,7 +13,7 @@
         v-if="verifiability"
         class="cop-tag"
         :class="`cop-tag-${verifiability.tone}`"
-        :title="verifiability.note"
+        :title="verifiability.title"
       >依据：{{ verifiability.label }}</span>
     </div>
 

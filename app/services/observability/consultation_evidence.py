@@ -47,6 +47,10 @@ _REFERENCE_KEYS = (
 # 法源引用榜只展示前 N 个（前端是表格，不翻页）
 SOURCE_LIMIT = 10
 
+# 事后回填的摘要带这个 basis 标记（`scripts/backfill_consultation_evidence.py`）：
+# 「按当前法源库重算」与「生成当时算的」是两件事，聚合里分开计数、界面上分开说。
+RECOMPUTED_BASIS = "recomputed"
+
 
 def _parse(payload: str | None) -> dict | None:
     if not payload:
@@ -125,6 +129,9 @@ class ConsultationEvidenceMixin:
         - `references`：引用条数与三态计数（逐条核对通过 / 条号未找到 / 法源无条文 / 未标条号 / 未挂法源）；
         - `checked_rate`：`article_verified / article_checked`——**只算真的做过条文级核对的引用**；
         - `evidence_coverage`：有 evidence 的答复 / 窗口内全部咨询——用来看指标本身的覆盖面；
+          其中 `with_evidence_generated`（生成当时算的）与 `with_evidence_recomputed`
+          （2026-10-19 之后按当前法源库回填的，见 `scripts/backfill_consultation_evidence.py`）
+          分开计数：两者都算「有指标」，但只有前者是生成当时的事实；
         - `trend`：按天分桶的同口径计数（只有有数据的日期出现）；
         - `sources` / `corpus_gaps`：被引用的法源排行，以及其中**没有条文级数据**的那些
           （`articles == 0`）——后者就是语料采购清单；
@@ -147,6 +154,7 @@ class ConsultationEvidenceMixin:
         levels = {level: 0 for level in LEVEL_LABELS}
         references = {key: 0 for key in _REFERENCE_KEYS}
         with_evidence = 0
+        with_evidence_recomputed = 0
         trend: dict[str, dict] = {}
         source_refs: dict[int, dict] = {}
         unmatched_references = 0
@@ -156,6 +164,9 @@ class ConsultationEvidenceMixin:
             summary = _parse(evidence_json)
             if summary is not None:
                 with_evidence += 1
+                recomputed = summary.get("basis") == RECOMPUTED_BASIS
+                if recomputed:
+                    with_evidence_recomputed += 1
                 level = summary.get("level")
                 if level in levels:
                     levels[level] += 1
@@ -172,6 +183,7 @@ class ConsultationEvidenceMixin:
                         "date": day,
                         "total": 0,
                         "with_evidence": 0,
+                        "with_evidence_recomputed": 0,
                         "article_verified": 0,
                         "article_checked": 0,
                         **{level: 0 for level in LEVEL_LABELS},
@@ -180,6 +192,8 @@ class ConsultationEvidenceMixin:
                 bucket["total"] += 1
                 if summary is not None:
                     bucket["with_evidence"] += 1
+                    if summary.get("basis") == RECOMPUTED_BASIS:
+                        bucket["with_evidence_recomputed"] += 1
                     if level in LEVEL_LABELS:
                         bucket[level] += 1
                     for key in ("article_verified", "article_checked"):
@@ -221,6 +235,8 @@ class ConsultationEvidenceMixin:
             "window_days": window,
             "total_consultations": total,
             "with_evidence": with_evidence,
+            "with_evidence_generated": with_evidence - with_evidence_recomputed,
+            "with_evidence_recomputed": with_evidence_recomputed,
             "without_evidence": total - with_evidence,
             "evidence_coverage": _rate(with_evidence, total),
             "levels": [

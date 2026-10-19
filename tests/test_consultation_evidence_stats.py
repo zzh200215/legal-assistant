@@ -37,6 +37,8 @@ def _evidence(level: str, **counts) -> str:
         "materials": counts.get("materials", 0),
         "note": "",
     }
+    if counts.get("basis"):
+        payload["basis"] = counts["basis"]
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -141,6 +143,26 @@ class ConsultationEvidenceStatsTests(unittest.TestCase):
         self.assertEqual(stats["evidence_coverage"], round(1 / 3, 4))
         self.assertEqual({row["level"]: row["share"] for row in stats["levels"]}["strong"], 1.0)
         self.assertEqual(stats["checked_rate"], 1.0)
+
+    def test_recomputed_backfill_is_counted_separately(self):
+        # 事后回填的摘要（basis=recomputed）算「有指标」，但必须与生成当时的区分开——
+        # 它回答的是「以当前法源库看能不能核到」，不是生成当时的结论。
+        self._consultation(evidence=_evidence("strong", references=1, article_checked=1, article_verified=1))
+        self._consultation(
+            evidence=_evidence(
+                "strong", references=1, article_checked=1, article_verified=1, basis="recomputed"
+            )
+        )
+
+        stats = analytics_service.get_consultation_evidence_stats(self.db, days=30)
+
+        self.assertEqual(stats["with_evidence"], 2)
+        self.assertEqual(stats["with_evidence_generated"], 1)
+        self.assertEqual(stats["with_evidence_recomputed"], 1)
+        self.assertEqual(stats["evidence_coverage"], 1.0)
+        bucket = stats["trend"][0]
+        self.assertEqual(bucket["with_evidence"], 2)
+        self.assertEqual(bucket["with_evidence_recomputed"], 1)
 
     def test_window_excludes_older_consultations(self):
         self._consultation(evidence=_evidence("strong", references=1, article_checked=1, article_verified=1))

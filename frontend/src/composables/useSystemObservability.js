@@ -8,6 +8,8 @@ const emptyEvidence = () => ({
   window_days: 30,
   total_consultations: 0,
   with_evidence: 0,
+  with_evidence_generated: 0,
+  with_evidence_recomputed: 0,
   without_evidence: 0,
   evidence_coverage: null,
   levels: [],

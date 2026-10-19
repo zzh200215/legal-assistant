@@ -68,7 +68,7 @@
       <div class="app-card-head">
         <h2>证据可核验性（在线指标）</h2>
         <span class="app-card-head-meta">
-          近 {{ evidenceStats.window_days }} 天 · {{ evidenceStats.total_consultations }} 条咨询答复，其中 {{ evidenceStats.with_evidence }} 条带指标
+          近 {{ evidenceStats.window_days }} 天 · {{ evidenceStats.total_consultations }} 条咨询答复，其中 {{ evidenceStats.with_evidence }} 条带指标（生成时 {{ evidenceStats.with_evidence_generated }} / 事后重算 {{ evidenceStats.with_evidence_recomputed }}）
         </span>
       </div>
       <div class="app-card-body">
@@ -109,6 +109,7 @@
             <el-table-column prop="date" label="日期" width="110" />
             <el-table-column prop="total" label="答复" width="80" class-name="app-num" />
             <el-table-column prop="with_evidence" label="带指标" width="90" class-name="app-num" />
+            <el-table-column prop="with_evidence_recomputed" label="事后重算" width="100" class-name="app-num" />
             <el-table-column prop="strong" label="逐条核对" width="100" class-name="app-num" />
             <el-table-column prop="partial" label="部分核对" width="100" class-name="app-num" />
             <el-table-column prop="weak" label="待核" width="80" class-name="app-num" />
@@ -268,6 +269,7 @@ const evidenceTrendRows = computed(() => {
     date: row.date,
     total: row.total,
     with_evidence: row.with_evidence,
+    with_evidence_recomputed: row.with_evidence_recomputed || 0,
     strong: row.strong,
     partial: row.partial,
     weak: row.weak,
