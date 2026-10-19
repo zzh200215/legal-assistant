@@ -34,11 +34,15 @@ def _settings(active_version="v1", keys=None, single_key=""):
 class LegalEncryptionTests(unittest.TestCase):
     def test_aes_gcm_ciphertext_does_not_expose_plaintext(self):
         source = "张三的技术服务合同，联系电话 13800138000"
-        ciphertext = encryption.encrypt_text(source)
+        # 固定 v1 作为活动版本：断言的是「密文不泄露明文 + 可回读」，
+        # 不应取决于本机 .env 里 LEGAL_DATA_ENCRYPTION_ACTIVE_VERSION 的取值。
+        with patch.object(encryption, "get_settings", return_value=_settings(active_version="v1")):
+            ciphertext = encryption.encrypt_text(source)
+            decrypted = encryption.decrypt_text(ciphertext)
 
         self.assertTrue(ciphertext.startswith("enc:v1:"))
         self.assertNotIn(source, ciphertext)
-        self.assertEqual(encryption.decrypt_text(ciphertext), source)
+        self.assertEqual(decrypted, source)
 
     def test_legacy_plaintext_remains_readable_during_rollout(self):
         self.assertEqual(encryption.decrypt_text("历史明文记录"), "历史明文记录")
