@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>人工抽检：三层评审第三层（25 条）</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; font: 14px/1.7 "Noto Sans SC", "Plus Jakarta Sans", system-ui, sans-serif;
+         background: #F6F7FB; color: #0F172A; }
+  header { max-width: 900px; margin: 0 auto 16px; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .sub { color: #64748B; font-size: 13px; }
+  .bar { position: sticky; top: 0; z-index: 5; max-width: 900px; margin: 0 auto 16px; padding: 12px 16px;
+          background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border: 1px solid #E6E9F0;
+          border-radius: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .bar b { font-variant-numeric: tabular-nums; }
+  .bar button { margin-left: auto; padding: 7px 12px; border-radius: 9px; border: 1px solid #E6E9F0;
+                 background: #fff; cursor: pointer; font: inherit; }
+  .bar button + button { margin-left: 0; }
+  .bar button:hover { border-color: #4F46E5; color: #4F46E5; }
+  .card { max-width: 900px; margin: 0 auto 14px; background: #fff; border: 1px solid #E6E9F0;
+           border-radius: 14px; padding: 16px 18px; }
+  .card.done { border-color: #4F46E5; box-shadow: 0 1px 3px rgba(15,23,42,.05), 0 10px 28px -14px rgba(79,70,229,.28); }
+  .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .idx { font-weight: 700; }
+  .pill { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #EEF0FE; color: #4338CA; }
+  .pill.f { background: #D4F5EE; color: #0D9488; }
+  .field { margin: 6px 0; }
+  .field span { color: #64748B; font-size: 12.5px; }
+  .ev { background: #FAFAFB; border: 1px solid #EEF1F6; border-radius: 10px; padding: 8px 10px;
+         font-size: 12.5px; color: #4B5968; white-space: pre-wrap; }
+  .acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .acts button { padding: 7px 14px; border-radius: 9px; border: 1px solid #E6E9F0; background: #fff;
+                  cursor: pointer; font: inherit; }
+  .acts button.on { background: #4F46E5; border-color: #4F46E5; color: #fff; font-weight: 600; }
+  .acts button.on.unknown { background: #64748B; border-color: #64748B; }
+  textarea { width: 100%; min-height: 72px; font: 12.5px/1.6 ui-monospace, Consolas, monospace;
+              border: 1px solid #E6E9F0; border-radius: 10px; padding: 8px 10px; }
+  .hint { color: #94A3B8; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>人工抽检：三层评审第三层（25 条）</h1>
+  <div class="sub">口径：<b>忠实度</b>条目「正确」= 答案的事实性断言都能在引用片段里找到依据；<b>质量</b>条目「正确」= 答案质量可接受（可判 pass）。
+  「无法判断」与留空都不进一致率分母。两位裁判的判定<b>不在本页显示</b>（先自己判）。</div>
+</header>
+
+<div class="bar">
+  <span>进度：<b id="progress">0 / 25</b></span>
+  <span class="hint">选择自动存在本机浏览器，可中途关掉再来</span>
+  <button id="copy">复制结论行</button>
+  <button id="reset">清空</button>
+</div>
+
+<main id="cards"></main>
+
+<div class="card">
+  <div class="field"><span>结论行（贴回对话即可）：</span></div>
+  <textarea id="out" readonly></textarea>
+  <div class="hint">格式：<code>1 正确, 2 错误, 3 无法判断, …</code>；未判的条目不会出现。</div>
+</div>
+
+<script id="entries" type="application/json">[{"index": 1, "id": "cross-001", "kind": "quality", "item": "divergent", "question": "项目团队由哪些角色组成？", "reference": "由1名项目经理、2名后端工程师、1名前端工程师和1名测试工程师组成。", "answer": "项目团队由项目经理、后端工程师、前端工程师和测试工程师组成。依据为 [片段 2]。", "evidence": "`[片段 1] - 2026 年 6 月 20 日：完成环境搭建与法规知识库导入\n- 2026 年 7 月 05 日：完成合同审查与法律咨询核心功能\n- 2026 年 7 月 25 日：完成文书草稿与律师审核流程\n- 2026 年 8 月 05 日：完成正式上线与评测集验证` ／ `[片段 2] 项目团队由 1 名项目经理、2 名后端工程师、1 名前端工程师和 1 名测试工程师组成。`"}, {"index": 2, "id": "cross-002", "kind": "faithfulness", "item": "agree", "question": "保密期限有多久？", "reference": "", "answer": "保密期限为项目终止后 3 年。\n\n依据 [片段 2]，双方对项目中涉及的经营数据、客户资料、模型配置和提示词模板承担保密义务，保密期限为项目终止后 3 年。", "evidence": "`[片段 1] 若乙方未按约定时间完成关键里程碑，每延期 1 个自然日，应按合同总金额的 0.3% 向甲方支付违约金，但累计违约金不超过合同总金额的 10%。\n若甲方逾期付款超过 15 个自然日，乙方有权暂停交付工作，并要求甲方按逾期金额的每日 0.05% 支付违约金。` ／ `[片段 2] 双方对项目中涉及的经营数据、客户资料、模型配置和提示词模板承担保密义务，保密期限为项目终止后 3 年。`"}, {"index": 3, "id": "cross-003", "kind": "faithfulness", "item": "agree", "question": "尾款金额和支付条件是什么？", "reference": "", "answer": "尾款金额为人民币 60 万元，支付条件为项目最终验收通过后 10 个工作日内支付 [片段 2]。", "evidence": "`[片段 1] 项目启动日期为 2026 年 6 月 15 日，计划于 2026 年 8 月 30 日完成验收上线。\n乙方应在 2026 年 7 月 10 日前完成需求确认和原型评审。` ／ `[片段 2] 合同总金额为人民币 268 万元（含税）。\n甲方应在合同签署后 5 个工作日内支付首付款 100 万元。\n乙方完成第一阶段交付并通过阶段验收后，甲方应在 2026 年 7 月 30 日前支付第二笔款项 108 万元。\n项目最终验收通过后 10 个工作日内支付尾款 60 万元。`"}, {"index": 4, "id": "cross-004", "kind": "faithfulness", "item": "agree", "question": "这份合同的甲方和乙方分别是谁？", "reference": "", "answer": "甲方是星河制造（上海）有限公司，乙方是云帆智能科技（杭州）有限公司。\n依据 [片段 1] 明确记载了该合同的主体信息。", "evidence": "`[片段 1] 甲方：星河制造（上海）有限公司\n乙方：云帆智能科技（杭州）有限公司\n项目经理：李明` ／ `[片段 2] 乙方负责为甲方建设法律文书与合同审查平台，范围包括：\n\n1. 合同文档解析与条款结构化抽取\n2. 法律法规检索与引用展示\n3. 合同条款风险识别与修改建议\n4. 法律文书草稿生成与事实校验`"}, {"index": 5, "id": "cross-005", "kind": "faithfulness", "item": "agree", "question": "项目经理是谁？", "reference": "", "answer": "项目经理是李明。依据[片段 1]，合同主体部分明确列明“项目经理：李明”。", "evidence": "`[片段 1] 甲方：星河制造（上海）有限公司\n乙方：云帆智能科技（杭州）有限公司\n项目经理：李明` ／ `[片段 2] 乙方负责为甲方建设法律文书与合同审查平台，范围包括：\n\n1. 合同文档解析与条款结构化抽取\n2. 法律法规检索与引用展示\n3. 合同条款风险识别与修改建议\n4. 法律文书草稿生成与事实校验`"}, {"index": 6, "id": "cross-006", "kind": "faithfulness", "item": "agree", "question": "第二笔款项金额和付款截止日期分别是什么？", "reference": "", "answer": "第二笔款项金额为人民币 108 万元，付款截止日期为 2026 年 7 月 30 日前。\n\n依据[片段 2]，乙方完成第一阶段交付并通过阶段验收后，甲方应在 2026 年 7 月 30 日前支付第二笔款项 108 万元。", "evidence": "`[片段 1] 项目启动日期为 2026 年 6 月 15 日，计划于 2026 年 8 月 30 日完成验收上线。\n乙方应在 2026 年 7 月 10 日前完成需求确认和原型评审。` ／ `[片段 2] 合同总金额为人民币 268 万元（含税）。\n甲方应在合同签署后 5 个工作日内支付首付款 100 万元。\n乙方完成第一阶段交付并通过阶段验收后，甲方应在 2026 年 7 月 30 日前支付第二笔款项 108 万元。\n项目最终验收通过后 10 个工作日内支付尾款 60 万元。`"}, {"index": 7, "id": "cross-007", "kind": "faithfulness", "item": "agree", "question": "平台重点提升哪三方面的效率？", "reference": "", "answer": "平台重点提升法律依据定位、合同风险识别和文书初稿这三方面的效率。\n\n依据为 [片段 1] 中明确提到“重点提升法律依据定位、合同风险识别和文书初稿效率”。", "evidence": "`[片段 1] 本项目面向个人用户与小型律所，建设一套法律检索、合同审查与文书草稿平台，重点提升法律依据定位、合同风险识别和文书初稿效率。` ／ `[片段 2] 本次交付范围包括以下五个模块：\n\n1. 法律知识库（法规、案例、模板入库与检索）\n2. 法律咨询辅助（分类、事实补充、依据引用）\n3. 合同智能审查（条款风险识别与修改建议）\n4. 法律文书草稿生成（字段校验与模板匹配）\n5. 律师审核与版本留痕（通过/退回/补充意见）`"}, {"index": 8, "id": "cross-008", "kind": "faithfulness", "item": "agree", "question": "模型幻觉带来的风险是什么，如何应对？", "reference": "", "answer": "模型幻觉的风险是导致编造法律依据，应对措施是引入引用校验Agent进行拦截。依据[片段 2]。", "evidence": "`[片段 1] 项目团队由 1 名项目经理、2 名后端工程师、1 名前端工程师和 1 名测试工程师组成。` ／ `[片段 2] 已识别的主要风险包括：\n\n- 若法规版本更新不及时，检索结果可能引用失效条文\n- 若模型幻觉导致编造法律依据，需要证据校验Agent拦截\n- 若用户提交的事实不完整，文书草稿会出现大量待补充字段\n\n对应措施为增加版本治理、引入引用校验Agent、强制事实字段必填校验。`"}, {"index": 9, "id": "cross-009", "kind": "faithfulness", "item": "agree", "question": "法规版本更新不及时会带来什么风险，如何应对？", "reference": "", "answer": "法规版本更新不及时会导致检索结果可能引用失效条文，应对措施为增加版本治理。依据 [片段 2]。", "evidence": "`[片段 1] 项目团队由 1 名项目经理、2 名后端工程师、1 名前端工程师和 1 名测试工程师组成。` ／ `[片段 2] 已识别的主要风险包括：\n\n- 若法规版本更新不及时，检索结果可能引用失效条文\n- 若模型幻觉导致编造法律依据，需要证据校验Agent拦截\n- 若用户提交的事实不完整，文书草稿会出现大量待补充字段\n\n对应措施为增加版本治理、引入引用校验Agent、强制事实字段必填校验。`"}, {"index": 10, "id": "cross-010", "kind": "faithfulness", "item": "agree", "question": "项目团队由哪些角色组成？", "reference": "", "answer": "项目团队由项目经理、后端工程师、前端工程师和测试工程师组成。依据为 [片段 2]。", "evidence": "`[片段 1] - 2026 年 6 月 20 日：完成环境搭建与法规知识库导入\n- 2026 年 7 月 05 日：完成合同审查与法律咨询核心功能\n- 2026 年 7 月 25 日：完成文书草稿与律师审核流程\n- 2026 年 8 月 05 日：完成正式上线与评测集验证` ／ `[片段 2] 项目团队由 1 名项目经理、2 名后端工程师、1 名前端工程师和 1 名测试工程师组成。`"}, {"index": 11, "id": "cross-011", "kind": "faithfulness", "item": "agree", "question": "历史项目里因为模型接口变更导致延期的情况是什么？", "reference": "", "answer": "历史项目中曾出现 2 次因外部模型接口变更导致延期，最长延期 18 天。依据见 [片段 2]。", "evidence": "`[片段 1] 近三年营业收入保持增长，2025 年收入为 1820 万元。\n但该公司应收账款占比偏高，2025 年末应收账款占总资产比例达到 41%。` ／ `[片段 2] 供应商近两年累计交付 12 个法律AI应用项目，其中 9 个按期上线。\n历史项目中曾出现 2 次因外部模型接口变更导致延期，最长延期 18 天。`"}, {"index": 12, "id": "cross-012", "kind": "faithfulness", "item": "agree", "question": "报告的总体结论是什么？", "reference": "", "answer": "该供应商具备法律AI项目交付经验，但现金流稳定性和测试环境安全治理仍需重点关注。依据见[片段 2]。", "evidence": "`[片段 1] 若继续推进合作，建议在合同中增加以下约束：\n\n1. 明确日志脱敏整改完成时间，不晚于 2026 年 7 月 15 日\n2. 将模型接口变更纳入月度风险同步机制\n3. 对关键里程碑设置验收门槛和延期违约责任\n4. 要求法律依据检索结果必须附带来源与版本信息` ／ `[片段 2] 总体看，该供应商具备法律AI项目交付经验，但现金流稳定性和测试环境安全治理仍需重点关注。`"}, {"index": 13, "id": "cross-013", "kind": "faithfulness", "item": "agree", "question": "这家供应商2025年的营业收入是多少？", "reference": "", "answer": "这家供应商2025年的营业收入为1820万元。依据[片段 2]，该供应商2025年收入为1820万元。", "evidence": "`[片段 1] 供应商名称：启拓数据服务有限公司\n成立时间：2019 年 4 月\n注册资本：500 万元\n核心联系人：周婷` ／ `[片段 2] 近三年营业收入保持增长，2025 年收入为 1820 万元。\n但该公司应收账款占比偏高，2025 年末应收账款占总资产比例达到 41%。`"}, {"index": 14, "id": "cross-014", "kind": "quality", "item": "agree", "question": "用户提交的事实不完整会导致什么问题？", "reference": "文书草稿会出现大量待补充字段，对策是强制事实字段必填校验。", "answer": "会导致文书草稿出现大量待补充字段。[片段 2]\n\n依据为：若用户提交的事实不完整，文书草稿会出现大量待补充字段。[片段 2]", "evidence": "`[片段 1] 项目团队由 1 名项目经理、2 名后端工程师、1 名前端工程师和 1 名测试工程师组成。` ／ `[片段 2] 已识别的主要风险包括：\n\n- 若法规版本更新不及时，检索结果可能引用失效条文\n- 若模型幻觉导致编造法律依据，需要证据校验Agent拦截\n- 若用户提交的事实不完整，文书草稿会出现大量待补充字段\n\n对应措施为增加版本治理、引入引用校验Agent、强制事实字段必填校验。`"}, {"index": 15, "id": "cross-015", "kind": "quality", "item": "agree", "question": "乙方公司的CEO是谁？", "reference": "", "answer": "根据当前文档内容，无法确认该问题。", "evidence": "`[片段 1] 甲方：星河制造（上海）有限公司\n乙方：云帆智能科技（杭州）有限公司\n项目经理：李明` ／ `[片段 2] 乙方负责为甲方建设法律文书与合同审查平台，范围包括：\n\n1. 合同文档解析与条款结构化抽取\n2. 法律法规检索与引用展示\n3. 合同条款风险识别与修改建议\n4. 法律文书草稿生成与事实校验`"}, {"index": 16, "id": "cross-016", "kind": "quality", "item": "agree", "question": "这个项目的预算总额是多少？", "reference": "", "answer": "根据当前文档内容，无法确认该问题。", "evidence": "`[片段 1] 本项目面向个人用户与小型律所，建设一套法律检索、合同审查与文书草稿平台，重点提升法律依据定位、合同风险识别和文书初稿效率。` ／ `[片段 2] 本次交付范围包括以下五个模块：\n\n1. 法律知识库（法规、案例、模板入库与检索）\n2. 法律咨询辅助（分类、事实补充、依据引用）\n3. 合同智能审查（条款风险识别与修改建议）\n4. 法律文书草稿生成（字段校验与模板匹配）\n5. 律师审核与版本留痕（通过/退回/补充意见）`"}, {"index": 17, "id": "cross-017", "kind": "quality", "item": "agree", "question": "哪些内容不在本期交付范围内？", "reference": "", "answer": "根据当前文档内容，无法确认该问题。", "evidence": "`[片段 1] 本项目面向个人用户与小型律所，建设一套法律检索、合同审查与文书草稿平台，重点提升法律依据定位、合同风险识别和文书初稿效率。` ／ `[片段 2] 本次交付范围包括以下五个模块：\n\n1. 法律知识库（法规、案例、模板入库与检索）\n2. 法律咨询辅助（分类、事实补充、依据引用）\n3. 合同智能审查（条款风险识别与修改建议）\n4. 法律文书草稿生成（字段校验与模板匹配）\n5. 律师审核与版本留痕（通过/退回/补充意见）`"}, {"index": 18, "id": "cross-018", "kind": "quality", "item": "agree", "question": "这家供应商当前是否有未结诉讼案件？", "reference": "", "answer": "根据当前文档内容，无法确认该问题。", "evidence": "`[片段 1] 公司已通过 ISO27001 信息安全管理体系认证，有专职安全负责人。\n但最近一次内部审计发现，测试环境日志保留策略未完全落地，存在敏感字段脱敏不彻底的问题。` ／ `[片段 2] 若继续推进合作，建议在合同中增加以下约束：\n\n1. 明确日志脱敏整改完成时间，不晚于 2026 年 7 月 15 日\n2. 将模型接口变更纳入月度风险同步机制\n3. 对关键里程碑设置验收门槛和延期违约责任\n4. 要求法律依据检索结果必须附带来源与版本信息`"}, {"index": 19, "id": "cross-019", "kind": "quality", "item": "agree", "question": "争议解决方式是什么？", "reference": "应先友好协商，协商不成则提交上海仲裁委员会仲裁。", "answer": "争议解决方式为：双方先友好协商，协商不成的，提交上海仲裁委员会仲裁。依据为 [片段 2]。", "evidence": "`[片段 1] 双方对项目中涉及的经营数据、客户资料、模型配置和提示词模板承担保密义务，保密期限为项目终止后 3 年。` ／ `[片段 2] 因本合同产生的争议，双方应先友好协商；协商不成的，提交上海仲裁委员会仲裁。`"}, {"index": 20, "id": "cross-020", "kind": "quality", "item": "agree", "question": "这份合同的甲方和乙方分别是谁？", "reference": "甲方是星河制造（上海）有限公司，乙方是云帆智能科技（杭州）有限公司。", "answer": "甲方是星河制造（上海）有限公司，乙方是云帆智能科技（杭州）有限公司。\n依据 [片段 1] 明确记载了该合同的主体信息。", "evidence": "`[片段 1] 甲方：星河制造（上海）有限公司\n乙方：云帆智能科技（杭州）有限公司\n项目经理：李明` ／ `[片段 2] 乙方负责为甲方建设法律文书与合同审查平台，范围包括：\n\n1. 合同文档解析与条款结构化抽取\n2. 法律法规检索与引用展示\n3. 合同条款风险识别与修改建议\n4. 法律文书草稿生成与事实校验`"}, {"index": 21, "id": "cross-021", "kind": "quality", "item": "agree", "question": "合同服务范围包括哪些内容？", "reference": "包括合同文档解析与条款结构化抽取、法律法规检索与引用展示、合同条款风险识别与修改建议、法律文书草稿生成与事实校验。", "answer": "合同服务范围包括：合同文档解析与条款结构化抽取、法律法规检索与引用展示、合同条款风险识别与修改建议、法律文书草稿生成与事实校验。依据 [片段 2]。", "evidence": "`[片段 1] 甲方：星河制造（上海）有限公司\n乙方：云帆智能科技（杭州）有限公司\n项目经理：李明` ／ `[片段 2] 乙方负责为甲方建设法律文书与合同审查平台，范围包括：\n\n1. 合同文档解析与条款结构化抽取\n2. 法律法规检索与引用展示\n3. 合同条款风险识别与修改建议\n4. 法律文书草稿生成与事实校验`"}, {"index": 22, "id": "cross-022", "kind": "quality", "item": "agree", "question": "平台重点提升哪三方面的效率？", "reference": "重点提升法律依据定位、合同风险识别和文书初稿效率。", "answer": "平台重点提升法律依据定位、合同风险识别和文书初稿这三方面的效率。\n\n依据为 [片段 1] 中明确提到“重点提升法律依据定位、合同风险识别和文书初稿效率”。", "evidence": "`[片段 1] 本项目面向个人用户与小型律所，建设一套法律检索、合同审查与文书草稿平台，重点提升法律依据定位、合同风险识别和文书初稿效率。` ／ `[片段 2] 本次交付范围包括以下五个模块：\n\n1. 法律知识库（法规、案例、模板入库与检索）\n2. 法律咨询辅助（分类、事实补充、依据引用）\n3. 合同智能审查（条款风险识别与修改建议）\n4. 法律文书草稿生成（字段校验与模板匹配）\n5. 律师审核与版本留痕（通过/退回/补充意见）`"}, {"index": 23, "id": "cross-023", "kind": "quality", "item": "agree", "question": "法规版本更新不及时会带来什么风险，如何应对？", "reference": "若法规版本更新不及时，检索结果可能引用失效条文，对策是增加版本治理。", "answer": "法规版本更新不及时会导致检索结果可能引用失效条文，应对措施为增加版本治理。依据 [片段 2]。", "evidence": "`[片段 1] 项目团队由 1 名项目经理、2 名后端工程师、1 名前端工程师和 1 名测试工程师组成。` ／ `[片段 2] 已识别的主要风险包括：\n\n- 若法规版本更新不及时，检索结果可能引用失效条文\n- 若模型幻觉导致编造法律依据，需要证据校验Agent拦截\n- 若用户提交的事实不完整，文书草稿会出现大量待补充字段\n\n对应措施为增加版本治理、引入引用校验Agent、强制事实字段必填校验。`"}, {"index": 24, "id": "cross-024", "kind": "quality", "item": "agree", "question": "2025年末应收账款占总资产比例是多少？", "reference": "2025年末应收账款占总资产比例达到41%。", "answer": "2025年末应收账款占总资产比例为41% [片段 2]。依据为财务与经营情况中明确记载“2025 年末应收账款占总资产比例达到 41%” [片段 2]。", "evidence": "`[片段 1] 供应商名称：启拓数据服务有限公司\n成立时间：2019 年 4 月\n注册资本：500 万元\n核心联系人：周婷` ／ `[片段 2] 近三年营业收入保持增长，2025 年收入为 1820 万元。\n但该公司应收账款占比偏高，2025 年末应收账款占总资产比例达到 41%。`"}, {"index": 25, "id": "cross-025", "kind": "quality", "item": "agree", "question": "尽调报告建议供应商在什么时间前完成日志脱敏整改？", "reference": "建议不晚于2026年7月15日完成日志脱敏整改。", "answer": "尽调报告建议供应商在 2026 年 7 月 15 日前完成日志脱敏整改。\n\n依据 [片段 2]，合作建议中明确要求“明确日志脱敏整改完成时间，不晚于 2026 年 7 月 15 日”。", "evidence": "`[片段 1] 公司已通过 ISO27001 信息安全管理体系认证，有专职安全负责人。\n但最近一次内部审计发现，测试环境日志保留策略未完全落地，存在敏感字段脱敏不彻底的问题。` ／ `[片段 2] 若继续推进合作，建议在合同中增加以下约束：\n\n1. 明确日志脱敏整改完成时间，不晚于 2026 年 7 月 15 日\n2. 将模型接口变更纳入月度风险同步机制\n3. 对关键里程碑设置验收门槛和延期违约责任\n4. 要求法律依据检索结果必须附带来源与版本信息`"}]</script>
+<script>
+const entries = JSON.parse(document.getElementById('entries').textContent);
+const VERDICTS = ['正确', '错误', '无法判断'];
+const KEY = 'human-spotcheck-verdicts-v1';
+const store = JSON.parse(localStorage.getItem(KEY) || '{}');
+const cards = document.getElementById('cards');
+const out = document.getElementById('out');
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+}
+
+function render() {
+  cards.innerHTML = '';
+  entries.forEach((e) => {
+    const card = document.createElement('section');
+    card.className = 'card' + (store[e.index] ? ' done' : '');
+    const parts = [];
+    parts.push('<div class="field"><span>问题：</span>' + escapeHtml(e.question) + '</div>');
+    if (e.reference) parts.push('<div class="field"><span>参考答案：</span>' + escapeHtml(e.reference) + '</div>');
+    parts.push('<div class="field"><span>系统答案：</span>' + escapeHtml(e.answer) + '</div>');
+    if (e.evidence) parts.push('<div class="field"><span>引用片段：</span><div class="ev">' + escapeHtml(e.evidence) + '</div></div>');
+    const buttons = VERDICTS.map((v) => {
+      const on = store[e.index] === v ? ' on' : '';
+      const unknown = v === '无法判断' ? ' unknown' : '';
+      return '<button data-v="' + v + '" class="' + (on + unknown).trim() + '">' + v + '</button>';
+    }).join('');
+    card.innerHTML =
+      '<div class="head"><span class="idx">[' + e.index + ']</span>' +
+      '<span class="pill' + (e.kind === 'faithfulness' ? ' f' : '') + '">' + (e.kind === 'faithfulness' ? '忠实度' : '质量') + '</span>' +
+      '<span class="pill">' + (e.item === 'divergent' ? '分歧项' : '一致项') + '</span>' +
+      '<span class="hint">' + escapeHtml(e.id) + '</span></div>' +
+      parts.join('') +
+      '<div class="acts">' + buttons + '</div>';
+    card.querySelectorAll('button[data-v]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        store[e.index] = btn.dataset.v;
+        localStorage.setItem(KEY, JSON.stringify(store));
+        render();
+      });
+    });
+    cards.appendChild(card);
+  });
+  update();
+}
+
+function update() {
+  const answered = entries.filter((e) => store[e.index]).length;
+  document.getElementById('progress').textContent = answered + ' / ' + entries.length;
+  out.value = entries.filter((e) => store[e.index]).map((e) => e.index + ' ' + store[e.index]).join(', ');
+}
+
+document.getElementById('copy').addEventListener('click', async () => {
+  const btn = document.getElementById('copy');
+  try {
+    await navigator.clipboard.writeText(out.value);
+    btn.textContent = '已复制';
+  } catch (err) {
+    out.select();
+    btn.textContent = '请手动复制';
+  }
+  setTimeout(() => { btn.textContent = '复制结论行'; }, 1500);
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  Object.keys(store).forEach((k) => delete store[k]);
+  localStorage.setItem(KEY, '{}');
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
