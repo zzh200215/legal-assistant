@@ -101,6 +101,8 @@ python -B scripts/score_human_review.py --sheet eval/outputs/human_spotcheck_she
 
 **判定入口（三种，任选）**：① 浏览器点选 `docs/review/human-spotcheck.html`（离线、25 条三按钮、进度、结论行一键复制，**不含裁判判定**）；② 速览 `docs/review/human-spotcheck-brief.md`（25 条一页版）；③ 原表 `eval/outputs/human_spotcheck_sheet.md`（含折叠的裁判意见，判完再看）。三者同源，结论都写回原表。
 
+**一个必须知道的归一规则**：裁判侧判罚会被归一成**二值**——`pass` / `忠实` → pass，而 **`review`（需人工复核）算 fail**（`scripts/score_human_review.py` 的 `normalize_side`）。因此质量条目里人工判「正确」（=可 pass）而裁判判 `review` 时，会计为**不同向**。这条规则已进回归测试（`tests/test_human_review_scoring.py::ParseSheetTests::test_review_verdict_counts_as_not_pass`），避免口径漂移。
+
 ## 4. 决策记录
 
 1. **忠实度与三维质量分开判**：忠实度是布尔（断言能否在引用片段里找到依据），质量是三维打分 + verdict；两者分母、口径都不同，不混算。
