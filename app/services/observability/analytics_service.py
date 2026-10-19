@@ -6,6 +6,7 @@
 
 from app.core.config import get_settings
 from app.services.observability.alerts import AlertsMixin
+from app.services.observability.consultation_evidence import ConsultationEvidenceMixin
 from app.services.observability.feedback import FeedbackMixin
 from app.services.observability.llm_analytics import LLMAnalyticsMixin
 from app.services.observability.operations import OperationsMixin
@@ -20,6 +21,7 @@ class AnalyticsService(
     AlertsMixin,
     OperationsMixin,
     PromptEvalMixin,
+    ConsultationEvidenceMixin,
 ):
     """观测分析门面：职责边界——只做聚合，不含具体分析逻辑。"""
 

@@ -15,13 +15,13 @@
       <div class="app-card-body">
         <div class="app-filter-bar">
           <span class="app-filter-label">流量窗口：</span>
-          <el-radio-group v-model="experimentDays" @change="fetchExperimentOverview">
+          <el-radio-group v-model="experimentDays" @change="refreshExperimentWindow">
             <el-radio-button :value="7">近 7 天</el-radio-button>
             <el-radio-button :value="30">近 30 天</el-radio-button>
             <el-radio-button :value="90">近 90 天</el-radio-button>
           </el-radio-group>
           <div class="app-filter-bar-actions">
-            <el-button :loading="experimentLoading" @click="fetchExperimentOverview">刷新</el-button>
+            <el-button :loading="experimentLoading || evidenceLoading" @click="refreshExperimentWindow">刷新</el-button>
           </div>
         </div>
       </div>
@@ -60,6 +60,46 @@
               <template v-else>{{ item.text }}</template>
             </span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-card system-panel-card">
+      <div class="app-card-head">
+        <h2>证据可核验性（在线指标）</h2>
+        <span class="app-card-head-meta">
+          近 {{ evidenceStats.window_days }} 天 · {{ evidenceStats.total_consultations }} 条咨询答复，其中 {{ evidenceStats.with_evidence }} 条带指标
+        </span>
+      </div>
+      <div class="app-card-body">
+        <div class="app-metric-grid-4 evidence-metric-grid">
+          <div class="app-stat">
+            <span class="app-stat-label">逐条核对通过率</span>
+            <strong class="app-stat-value">{{ formatRate(evidenceStats.checked_rate) }}</strong>
+            <span class="app-stat-note">{{ evidenceStats.references?.article_verified || 0 }} / {{ evidenceStats.references?.article_checked || 0 }} 条引用核到条文</span>
+          </div>
+          <div class="app-stat">
+            <span class="app-stat-label">指标覆盖面</span>
+            <strong class="app-stat-value">{{ formatRate(evidenceStats.evidence_coverage) }}</strong>
+            <span class="app-stat-note">{{ evidenceStats.without_evidence }} 条老记录无指标（不摊进分母）</span>
+          </div>
+          <div class="app-stat">
+            <span class="app-stat-label">引用条数</span>
+            <strong class="app-stat-value">{{ evidenceStats.references?.references || 0 }}</strong>
+            <span class="app-stat-note">{{ evidenceStats.references?.article_missing || 0 }} 条条号未找到</span>
+          </div>
+          <div class="app-stat">
+            <span class="app-stat-label">语料缺口引用</span>
+            <strong class="app-stat-value">{{ evidenceStats.references?.no_corpus || 0 }}</strong>
+            <span class="app-stat-note">{{ evidenceStats.references?.no_numbers || 0 }} 条未标条号 · {{ evidenceStats.references?.unmatched || 0 }} 条未挂法源</span>
+          </div>
+        </div>
+        <div class="app-table-wrap evidence-level-wrap">
+          <el-table v-loading="evidenceLoading" :data="evidenceLevelRows" border size="small">
+            <el-table-column prop="label" label="可核验性口径" min-width="160" />
+            <el-table-column prop="count" label="答复数" width="100" class-name="app-num" />
+            <el-table-column prop="share_text" label="占比" width="100" class-name="app-num" />
+          </el-table>
         </div>
       </div>
     </section>
@@ -162,8 +202,23 @@ const {
   experimentLoading,
   experimentOverview,
   experimentError,
+  evidenceLoading,
+  evidenceStats,
+  evidenceError,
   fetchExperimentOverview,
+  fetchEvidenceStats,
 } = useSystemObservability({ client: api, message: ElMessage, isAdmin })
+
+// 证据可核验性：口径四档（后端给 label 与占比），空窗口时给一行说明而不是空表
+const evidenceLevelRows = computed(() => {
+  if (evidenceError.value) return []
+  return (evidenceStats.value.levels || []).map((row) => ({
+    level: row.level,
+    label: row.label,
+    count: row.count,
+    share_text: formatRate(row.share),
+  }))
+})
 
 const experimentArtifacts = computed(() => experimentOverview.value.artifact_status || {})
 const experimentSummary = computed(() => experimentOverview.value.summary || {})
@@ -235,9 +290,15 @@ const formatRate = (value) => {
   return `${Math.round(Number(value) * 100)}%`
 }
 
+// 流量窗口切换：实验观测与证据可核验性共用同一个天数，一次刷新两块
+const refreshExperimentWindow = () => {
+  fetchExperimentOverview()
+  fetchEvidenceStats()
+}
+
 onMounted(async () => {
   await authStore.loadMe()
-  fetchExperimentOverview()
+  refreshExperimentWindow()
 })
 </script>
 
@@ -263,10 +324,23 @@ onMounted(async () => {
   display: grid;
   gap: 6px;
 }
+/* 证据可核验性：四个读数各带一行口径说明（与 AgentHeader 的 .app-stat-note 同款） */
+.evidence-metric-grid {
+  margin-top: 0;
+}
+.app-stat-note {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+.evidence-level-wrap {
+  margin-top: var(--space-4);
+}
 /* 令牌里的 .app-metric-grid-4 在 1100px 以下直接收成一列，四个读数用两列更合适 */
 @media (max-width: 1100px) {
   .experiment-metric-grid,
-  .artifact-grid {
+  .artifact-grid,
+  .evidence-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

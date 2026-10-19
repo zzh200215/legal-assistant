@@ -25,6 +25,9 @@ export default {
   experimentOverview(days = 30) {
     return http.get('/analytics/experiments/overview', { params: { days } })
   },
+  consultationEvidenceStats(days = 30) {
+    return http.get('/analytics/consultations/evidence-stats', { params: { days } })
+  },
   workflowOverview(days = 7) {
     return http.get('/analytics/workflows/overview', { params: { days } })
   },

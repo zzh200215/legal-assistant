@@ -89,7 +89,31 @@
 4. 历史 50 条真实咨询里只有 3 条能核到条文（step16），所以**现阶段这个徽标在老记录上多数显示
    「引用待核」**——这不是新缺陷，正是补语料（step16 §8/§9）之后要观察的指标。
 
-## 6 下一步
+## 6 观测 tab（管理员视角）
+
+同一个指标接进系统页「实验观测」tab，用来回答「**语料覆盖到底够不够用**」——离线评审只能事后抽样，
+这里能按窗口看分布。
+
+| 层 | 文件 | 内容 |
+| --- | --- | --- |
+| 聚合 | `app/services/observability/consultation_evidence.py`（新 mixin） | `get_consultation_evidence_stats(db, *, days, organization_id)`：按窗口聚合 `evidence_json`，输出四档分布 + 引用三态计数 + `checked_rate` + `evidence_coverage` |
+| 接口 | `app/api/admin/analytics_api.py` | `GET /api/analytics/consultations/evidence-stats?days=30`（`require_admin_user`；管理员有组织时只统计本组织成员） |
+| 前端 | `frontend/src/composables/useSystemObservability.js`、`frontend/src/components/system/SystemExperimentsTab.vue`、`frontend/src/api/analytics.js` | 与实验观测**共用同一个流量窗口**（7/30/90 天，一次刷新两块）；卡片 `证据可核验性（在线指标）` = 四个 `.app-stat`（逐条核对通过率 / 指标覆盖面 / 引用条数 / 语料缺口引用）+ 四档分布表 |
+
+**真机读数（2026-10-19，近 30 天）**：50 条咨询答复、**2 条带指标**（指标当天上线），
+`checked_rate = 100%`（2/2 条引用核到条文），`evidence_coverage = 4%`，四档 = `strong 1 / partial 1 / weak 0 / none 0`，
+实拍 `docs/review/step17-evidence-admin-card.png`。
+
+**口径细节**：`checked_rate` 的分母是 `article_checked`（只算真的做过条文级核对的引用），
+`evidence_coverage` 才是「带指标的答复 / 窗口内全部咨询」——**4% 不是缺陷，是指标刚上线**；
+两个比率分母不同，卡片上分行显示就是为了不让读者把两者混为一谈。
+
+**测试**：`tests/test_consultation_evidence_stats.py` 6 例——四档标签与
+`legal_reference_service._EVIDENCE_LEVELS` 逐字一致（漂移守卫）、分布与比率、无 `evidence`/坏 JSON
+的行不摊进分母、窗口过滤、组织过滤、空窗口返回 `None` 而非 0%；`system-orgs` + `system-feedback-tasks`
++ `frontend-engineering` → **6 passed**。
+
+## 7 下一步
 
 - 观察项：新咨询的 `level` 分布（`strong` 占比）作为「语料覆盖是否够用」的在线信号；
 - 可选：把 `evidence` 汇总进系统页的评测/观测 tab（现在只有离线评审能看到分布）；

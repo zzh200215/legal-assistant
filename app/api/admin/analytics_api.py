@@ -86,6 +86,22 @@ def experiment_overview(
     return analytics_service.get_experiment_overview(db=db, days=days)
 
 
+@router.get("/consultations/evidence-stats")
+def consultation_evidence_stats(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """咨询答复的「证据可核验性」分布（在线指标，见 docs/review/step17）。
+
+    只聚合生成时算好的确定性统计，不重算、不改写记录；老记录（无 evidence_json）
+    单独计数，不摊进比率分母。
+    """
+    return analytics_service.get_consultation_evidence_stats(
+        db, days=days, organization_id=current_user.organization_id
+    )
+
+
 @router.get("/workflows/overview")
 def workflow_overview(
     days: int = Query(7, ge=1, le=365, description="统计天数"),
