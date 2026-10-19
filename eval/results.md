@@ -469,7 +469,18 @@ python -B scripts/run_hybrid_retrieval_ablation.py --pretty --output .tmp_hybrid
 
 产物：`eval/outputs/hybrid_retrieval_ablation.json`（含每题的 default/arm 排名对照，便于定位翻转题）。
 
-**顺带发现的开口项**：跑 baseline 时日志出现过一次
+**顺带发现的开口项（2026-10-19 已修）**：跑 baseline 时日志出现过一次
 `BM25 keyword recall error; falling back to scan (AttributeError)`——BM25 索引路径偶发 `AttributeError`
-后回退到 jieba 全表扫描（功能正确、只是慢）。未修，已记入 `docs/review/2026-10-project-diagnosis.md` 的开口项。
+后回退到 jieba 全表扫描（功能正确、只是慢）。
+
+**根因（已复现并修复）**：`app/services/rag/retrieval.py` 的构建/打分存在 TOCTOU 竞态——`_build_bm25_index()`
+在锁内**先把线上索引置空**（旧 `self._bm25_index = None`、`self._bm25_items = []`）再重建，而并发打分线程在
+`_bm25_keyword_recall()` 里通过 `is None` 判断之后才调用 `self._bm25_index.get_scores(...)`，正好撞上这个空窗 →
+`AttributeError: 'NoneType' object has no attribute 'get_scores'`（`retrieval.py:190`），被上层 `except` 兜住并回退全表扫描。
+**修法**：① 构建结果先在局部变量里攒好、锁内**一次性发布**（`items` 与 `index` 成对赋值，中途不置空、不逐条追加）；
+② 打分前把 `index` / `items` 快照到局部变量，打分过程中不再读 `self.*`；③ 构建失败（Chroma 取数异常）时**保留上一版索引**
+并继续标记 `stale` 下轮重试，而不是把可用索引清空。
+**回归测试**（`tests/test_rag_and_observability.py::BM25IndexTests`）：`test_concurrent_rebuild_during_scoring_does_not_crash`
+（用 patch 在打分中途换掉索引，模拟并发重建——旧代码上正是 `AttributeError: 'NoneType' object has no attribute 'get_scores'`）、
+`test_build_failure_keeps_previous_index`。RAG/检索相关 8 个测试文件 **166 passed**。
 

@@ -117,5 +117,6 @@
 
 - 观察项：新咨询的 `level` 分布（`strong` 占比）作为「语料覆盖是否够用」的在线信号；
 - 可选：把 `evidence` 汇总进系统页的评测/观测 tab（现在只有离线评审能看到分布）；
-- 未修开口项：`app/services/rag/retrieval.py:245` 的 BM25 索引路径偶发 `AttributeError`
-  回退全表扫描（功能正确、只是慢）。
+- ~~未修开口项：`app/services/rag/retrieval.py:245` 的 BM25 索引路径偶发 `AttributeError` 回退全表扫描~~
+  **已于 2026-10-19 修复**：根因是构建期把线上索引置空造成的 TOCTOU 竞态（打分线程在 `is None` 判断后撞上空窗），
+  改为锁内一次性成对发布 + 打分前快照；详见 `eval/results.md`「混合检索消融」末节与 `docs/review/2026-10-project-diagnosis.md` 同日补记。

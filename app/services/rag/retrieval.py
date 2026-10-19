@@ -133,11 +133,13 @@ class RetrievalMixin:
 
         并发锁 + epoch：同一进程内并发查询不会重复构建；构建期间失效的陈旧索引不会覆盖新数据。
         构建成功时间用于 TTL 兜底过期重建。
+
+        构建结果先在局部变量里攒好、最后一次性发布：中途既不把线上索引置空，也不逐条追加，
+        否则并发打分线程会在通过 `is None` 判断之后看到 None / 半截 items（AttributeError 或错配）。
+        构建失败时保留上一版索引（并标记 stale 下轮重试），避免把可用的降级路径变成全表扫描。
         """
         with self._bm25_lock:
             epoch = self._bm25_epoch
-            self._bm25_items = []
-            self._bm25_index = None
             try:
                 rows = self.collection.get(include=["documents", "metadatas"])
             except Exception as exc:
@@ -147,23 +149,27 @@ class RetrievalMixin:
             ids = rows.get("ids") or []
             docs = rows.get("documents") or []
             metas = rows.get("metadatas") or []
+            items: list[tuple] = []
             corpus_tokens = []
             for i, chunk_id in enumerate(ids):
                 content = docs[i] if i < len(docs) else ""
                 metadata = metas[i] if i < len(metas) else {}
-                self._bm25_items.append((chunk_id, content, metadata))
+                items.append((chunk_id, content, metadata))
                 corpus_text = self._build_keyword_corpus(content, metadata)
                 corpus_tokens.append(self._bm25_tokenize(corpus_text))
+            index = None
             if corpus_tokens:
                 try:
                     from rank_bm25 import BM25Okapi
-                    self._bm25_index = BM25Okapi(corpus_tokens)
+                    index = BM25Okapi(corpus_tokens)
                 except Exception:
-                    self._bm25_index = None
-            # 构建期间被并发失效（epoch 已前进）：不应用陈旧索引，标记待重建
+                    index = None
+            # 构建期间被并发失效（epoch 已前进）：不发布陈旧索引，标记待重建
             if self._bm25_epoch != epoch:
                 self._bm25_stale = True
                 return
+            self._bm25_items = items
+            self._bm25_index = index
             self._bm25_stale = False
             self._bm25_built_at = time.time()
 
@@ -180,18 +186,21 @@ class RetrievalMixin:
             # TTL 兜底：索引超龄（可能漏了失效信号）强制重建，避免旧数据长期参与检索
             self._bm25_stale = True
             self._build_bm25_index()
-        if self._bm25_index is None:
+        # 快照到局部变量：并发重建会在锁内整体换掉索引与 items，打分过程中不能再去读 self.*
+        index = self._bm25_index
+        items = self._bm25_items
+        if index is None:
             return None
         scored: dict[str, dict] = {}
         for variant in query_variants:
             tokens = self._bm25_tokenize(variant)
             if not tokens:
                 continue
-            scores = self._bm25_index.get_scores(tokens)
+            scores = index.get_scores(tokens)
             for idx, raw_score in enumerate(scores):
-                if idx >= len(self._bm25_items):
+                if idx >= len(items):
                     continue
-                chunk_id, content, metadata = self._bm25_items[idx]
+                chunk_id, content, metadata = items[idx]
                 # 全局索引必须按 where 元数据剪枝，否则跨用户/范围泄漏
                 if not self._metadata_matches_where(metadata, where):
                     continue

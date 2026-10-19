@@ -2370,6 +2370,61 @@ class BM25IndexTests(unittest.TestCase):
             rag_service._build_bm25_index()
         self.assertTrue(rag_service._bm25_stale)  # 陈旧索引未应用，保持待重建
 
+    def _bm25_rows4(self):
+        """4 文档：货款/支付 仅出现在 c1（df=1 < N/2）→ Okapi idf 为正，BM25 有分。"""
+        return {
+            "ids": ["c1", "c2", "c3", "c4"],
+            "documents": [
+                "甲方应支付货款一百万元",
+                "劳动合同期限为三年",
+                "会议纪要：项目启动会安排",
+                "差旅报销标准说明",
+            ],
+            "metadatas": [
+                {"document_id": 1, "user_id": 7},
+                {"document_id": 2, "user_id": 8},
+                {"document_id": 3, "user_id": 8},
+                {"document_id": 4, "user_id": 8},
+            ],
+        }
+
+    def test_concurrent_rebuild_during_scoring_does_not_crash(self):
+        """打分期间并发重建换掉索引：必须用本地快照，不得抛 AttributeError 回退全表扫描。"""
+        with patch.object(rag_service.collection, "get", return_value=self._bm25_rows4()):
+            rag_service._bm25_stale = True
+            rag_service._build_bm25_index()
+
+        original_tokenize = rag_service._bm25_tokenize
+        calls = {"count": 0}
+
+        def tokenize(text):
+            if calls["count"] == 0:
+                # 模拟另一线程正在锁内重建：线上索引与 items 被整体换掉（旧实现会先置空）
+                rag_service._bm25_index = None
+                rag_service._bm25_items = []
+            calls["count"] += 1
+            return original_tokenize(text)
+
+        with patch.object(rag_service, "_bm25_tokenize", side_effect=tokenize):
+            matches = rag_service._bm25_keyword_recall(["货款支付"], where={"user_id": 7}, candidate_limit=5)
+
+        self.assertTrue(matches)  # 旧实现此处抛 AttributeError → 上层回退 jieba 全表扫描
+        self.assertIn("c1", [item["id"] for item in matches])
+
+    def test_build_failure_keeps_previous_index(self):
+        """取数失败时保留上一版索引并标记待重建，不把可用索引清空。"""
+        with patch.object(rag_service.collection, "get", return_value=self._bm25_rows4()):
+            rag_service._bm25_stale = True
+            rag_service._build_bm25_index()
+        previous = rag_service._bm25_index
+        self.assertIsNotNone(previous)
+
+        with patch.object(rag_service.collection, "get", side_effect=RuntimeError("boom")):
+            rag_service._bm25_stale = True
+            rag_service._build_bm25_index()
+        self.assertIs(rag_service._bm25_index, previous)
+        self.assertTrue(rag_service._bm25_stale)
+
     def test_ttl_triggers_rebuild(self):
         """索引超龄（漏了失效信号）时强制重建。"""
         rag_service._bm25_stale = False
