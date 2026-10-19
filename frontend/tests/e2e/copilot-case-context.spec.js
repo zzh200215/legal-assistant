@@ -35,6 +35,9 @@ async function mockApi(page) {
   const consultPosts = []
   await page.addInitScript(() => localStorage.setItem('token', 'copilot-ctx-e2e-token'))
 
+  // 实时通道关闭 → 面板回退到被 mock 的 REST 路径（本文件断言的是 REST 请求体）
+  await page.routeWebSocket(/\/api\/ws\/chat/, (ws) => ws.close())
+
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     if (!url.pathname.startsWith('/api/')) return route.continue()

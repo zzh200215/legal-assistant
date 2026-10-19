@@ -96,6 +96,11 @@ export function deriveFaithfulness(result) {
 
 const TRACE_STATUS_LABELS = { success: '完成', degraded: '降级', skipped: '跳过', refused: '已拦截' }
 
+/** 步骤状态的中文标签（实时流式帧与最终 trace 共用同一套词表） */
+export function traceStatusLabel(status) {
+  return TRACE_STATUS_LABELS[status] || ''
+}
+
 /** 步骤耗时：1s 以下按毫秒显示，避免出现「0.0s」。 */
 export function formatStepDuration(durationMs) {
   const ms = Number(durationMs)
@@ -144,7 +149,7 @@ export function deriveTraceReplay(result, evidence = deriveEvidenceCards(result)
     return {
       mode: 'trace',
       modeLabel: '服务端步骤',
-      caption: '以下步骤由服务端在处理过程中记录（含各阶段耗时与状态），不是实时推送的事件流。',
+      caption: '以下步骤由服务端在处理过程中记录（含各阶段耗时与状态）；这里展示的是最终记录，不是实时推送的事件流。',
       steps: serverSteps,
     }
   }

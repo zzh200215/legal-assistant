@@ -58,14 +58,28 @@
         <!-- 离线：明确网络态（QueryStateView 的 offline 文案），下方若已有答复则照旧展示 -->
         <QueryStateView v-if="viewState === 'offline'" status="offline" min-height="0px" />
 
-        <!-- 生成中：一次同步长请求（LLM 20-30s），只给时间维度的阶段提示，不伪造步骤/耗时/命中结果 -->
+        <!-- 生成中：优先展示 WS 实时步骤（服务端每完成一步推一帧）；
+             实时通道不可用时退回「一次同步长请求」的阶段提示，不伪造步骤/耗时 -->
         <div v-else-if="viewState === 'loading'" class="cop-progress-block">
-          <div class="cop-progress" role="status" aria-live="polite">
+          <ol v-if="liveSteps.length" class="cop-live" role="status" aria-live="polite">
+            <li v-for="step in liveSteps" :key="step.id" class="cop-live-step">
+              <span class="cop-live-dot" :class="`is-${step.status}`" aria-hidden="true"></span>
+              <span class="cop-live-label">{{ step.label }}</span>
+              <span v-if="step.statusLabel" class="cop-live-status" :class="`is-${step.status}`">{{ step.statusLabel }}</span>
+              <span v-if="step.duration" class="cop-live-ms">{{ step.duration }}</span>
+              <span v-if="step.detail" class="cop-live-detail">{{ step.detail }}</span>
+            </li>
+          </ol>
+          <div v-else class="cop-progress" role="status" aria-live="polite">
             <span class="cop-progress-dot" aria-hidden="true"></span>
             <span>{{ stageText }}</span>
           </div>
-          <!-- 口径如实交代：这条链路拿不到实时步骤事件，别让阶段文案被读成服务端进度 -->
-          <p class="cop-progress-note">该接口一次请求返回全部结果，没有实时步骤事件；答复回来后再展示服务端记录的处理过程。</p>
+          <!-- 口径如实交代：有实时帧就说是实时推送，没有就说清楚这条链路拿不到实时步骤事件 -->
+          <p class="cop-progress-note">
+            {{ liveSteps.length
+              ? '以上步骤由服务端在处理过程中实时推送，状态与耗时均为服务端记录。'
+              : '该接口一次请求返回全部结果，没有实时步骤事件；答复回来后再展示服务端记录的处理过程。' }}
+          </p>
         </div>
 
         <!-- 失败：统一错误态 + 可重试；文案由 QueryStateView 内部的 normalizeError 映射 -->
@@ -120,8 +134,10 @@ import { computed, defineAsyncComponent, ref, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import legalWorkspace from '../api/legalWorkspace'
 import { useCopilotContext, copilotContextPayload } from '../composables/useCopilotContext'
+import { formatStepDuration, traceStatusLabel } from '../composables/copilotLayers'
 import { useLegalConsultations } from '../composables/useLegalConsultations'
 import { useStagedProgress } from '../composables/useStagedProgress'
+import { streamConsultation } from '../utils/consultSocket'
 import { useOnline } from '../utils/network.js'
 import QueryStateView from './QueryStateView.vue'
 
@@ -181,6 +197,8 @@ const { consultForm, consultLoading, consultResult, submitConsultation } = useLe
 
 const consultError = shallowRef(null)
 const lastQuestion = ref('')
+// WS 实时步骤（生成中展示；结果到达后清空，改用响应里的 trace）
+const liveSteps = ref([])
 
 // 忠实度校验是「答案之后」的独立动作：判官是一次完整 LLM 往返（真机约 10s），
 // 塞进创建咨询的请求里会让「提问→答案」多等一个数量级。答案先渲染，这里再补判并翻转标记。
@@ -210,6 +228,14 @@ const runConsultation = async () => {
   lastQuestion.value = question
   consultError.value = null
   lastRequestError.value = null
+  liveSteps.value = []
+
+  // 先走 WS 实时通道：能拿到服务端逐步推送的过程帧（B1）。
+  // 只有在「还没收到任何步骤帧」时才允许回退 REST——那时服务端还没开始处理，
+  // 重发不会重复扣配额；已经跑起来再重发就会扣两次，宁可如实报错让用户重试。
+  const streamed = await tryStreamConsultation(question)
+  if (streamed) return
+
   await submitConsultation()
   // 失败时 useMutation 会调 onError 并吞掉异常（不向外抛），因此失败与否以「原始错误」为准。
   // 传原始错误对象而非已规范化结果：normalizeError 对自己的返回值不可重入
@@ -221,6 +247,49 @@ const runConsultation = async () => {
   }
   // 不 await：忠实度是补判，答复已经可读，不该让用户等判官。
   void runFaithfulnessCheck(consultResult.value?.id)
+}
+
+/** @returns {Promise<boolean>} true = 已由实时通道交付结果（含「已开跑但失败」） */
+const tryStreamConsultation = async (question) => {
+  consultLoading.value = true
+  try {
+    const consultation = await streamConsultation({
+      payload: {
+        content: question,
+        case_id: context.value.caseId || undefined,
+        ...copilotContextPayload(context.value),
+      },
+      onStep: (step) => {
+        liveSteps.value = [
+          ...liveSteps.value,
+          {
+            id: step.id || `step-${liveSteps.value.length}`,
+            label: step.label || '未命名步骤',
+            status: step.status || '',
+            statusLabel: traceStatusLabel(step.status),
+            duration: formatStepDuration(step.duration_ms),
+            detail: step.detail || '',
+          },
+        ]
+      },
+    })
+    consultResult.value = consultation
+    consultForm.value.question = ''
+    // 实时帧只是「生成中」的过程展示，结果到了就以响应里的 trace 为准
+    liveSteps.value = []
+    void runFaithfulnessCheck(consultation?.id)
+    return true
+  } catch (error) {
+    if (error?.streamed) {
+      // 服务端已经开始处理：不重发，如实报错
+      consultError.value = error
+      liveSteps.value = []
+      return true
+    }
+    return false
+  } finally {
+    consultLoading.value = false
+  }
 }
 
 const viewState = computed(() => {
@@ -469,6 +538,90 @@ const onFeedbackSubmitted = (score) => {
   color: var(--color-text-muted);
   font-size: var(--text-xs);
   line-height: 1.6;
+}
+
+/* WS 实时步骤：服务端每完成一步推一帧，逐条落到这里（生成中的过程展示） */
+.cop-live {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cop-live-step {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.cop-live-dot {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--color-success);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+}
+
+.cop-live-dot.is-degraded {
+  border-color: var(--color-warning);
+}
+
+.cop-live-dot.is-refused {
+  border-color: var(--color-danger);
+}
+
+.cop-live-dot.is-skipped {
+  border-color: var(--color-border-hover);
+}
+
+.cop-live-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.cop-live-status {
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-success-light);
+  color: var(--color-success);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cop-live-status.is-degraded {
+  background: var(--color-warning-light);
+  color: var(--color-warning);
+}
+
+.cop-live-status.is-refused {
+  background: var(--color-danger-light);
+  color: var(--color-danger);
+}
+
+.cop-live-status.is-skipped {
+  background: var(--color-info-light);
+  color: var(--color-text-muted);
+}
+
+.cop-live-ms {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.cop-live-detail {
+  grid-column: 2 / -1;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.55;
 }
 
 .cop-empty {

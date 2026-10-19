@@ -33,7 +33,9 @@ const answer = (overrides = {}) => ({
 
 // 案件工作台 + 全局外壳所需接口全量 mock；onConsult 控制 POST /legal/consultations 的行为
 // onFaithfulness 控制生成后的忠实度补判：默认返回「判官不可用」，让未校验口径保持可断言。
-async function mockApi(page, { onConsult, onFaithfulness } = {}) {
+// onConsultSocket 控制 WS 实时通道：默认直接关闭 → 面板回退到被 mock 的 REST 路径（旧断言不变）；
+// 传了它则按 docs/websocket-protocol.md 的 consult 契约应答（覆盖 B1 实时时间线）。
+async function mockApi(page, { onConsult, onFaithfulness, onConsultSocket } = {}) {
   const requests = []
   const failed = []
   const consultPosts = []
@@ -41,6 +43,11 @@ async function mockApi(page, { onConsult, onFaithfulness } = {}) {
     if (r.url().includes('/api/') && r.status() >= 400) failed.push(`${r.request().method()} ${new URL(r.url()).pathname} -> ${r.status()}`)
   })
   await page.addInitScript(() => localStorage.setItem('token', 'copilot-e2e-token'))
+
+  await page.routeWebSocket(/\/api\/ws\/chat/, (ws) => {
+    if (onConsultSocket) return onConsultSocket(ws)
+    ws.close()
+  })
 
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
@@ -174,6 +181,71 @@ test('Enter 提交：POST body 带 question + case_id，渲染 advice / 风险 /
   await expect(dock.getByText('反馈已提交，感谢您的评价。')).toBeVisible()
   await expect(dock.getByText('已收到反馈：有帮助')).toBeVisible()
   expect(requests).toContain('POST /legal/consultations/77/feedback')
+
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+  expect(failed).toEqual([])
+})
+
+test('实时通道：WS 逐帧推进度，面板边生成边显示服务端步骤', async ({ page }) => {
+  const streamed = []
+  const { requests, failed } = await mockApi(page, {
+    // REST 也准备好：若面板没有走 WS，这个分支会被命中，测试随即可从请求记录里看出来
+    onConsult: (route) => route.fulfill({ json: success(answer()) }),
+    onConsultSocket: (ws) => {
+      ws.onMessage((raw) => {
+        const message = JSON.parse(raw)
+        if (message.type !== 'consult') return
+        streamed.push(message)
+        ws.send(JSON.stringify({ type: 'welcome', session_id: 1, resume_token: 'rt', last_seq: 0, resumed: false }))
+        ws.send(JSON.stringify({ type: 'consult_step', id: 'retrieve', label: '检索法源', status: 'success', duration_ms: 12, detail: '带回 2 条候选法源' }))
+        ws.send(JSON.stringify({ type: 'consult_step', id: 'generate', label: '生成建议', status: 'success', duration_ms: 900, detail: '模型返回结构化结果' }))
+        // 留住「生成中」窗口，才能断言实时步骤确实渲染过
+        setTimeout(() => {
+          ws.send(JSON.stringify({ type: 'consult_done', consultation: answer() }))
+        }, 800)
+      })
+    },
+  })
+
+  await page.goto('/legal-workspace?case_id=3&tab=consultation')
+  const dock = page.locator(dockSelector)
+  await ask(page, dock)
+
+  // 实时步骤：逐条来自服务端帧，状态与耗时照实展示
+  await expect(dock.locator('.cop-live-step')).toHaveCount(2)
+  await expect(dock.locator('.cop-live-step').first()).toContainText('检索法源')
+  await expect(dock.locator('.cop-live-step').first()).toContainText('完成')
+  await expect(dock.locator('.cop-live-step').first()).toContainText('12ms')
+  await expect(dock.locator('.cop-live-step').first()).toContainText('带回 2 条候选法源')
+  await expect(dock.locator('.cop-live-step').nth(1)).toContainText('生成建议')
+  await expect(dock.locator('.cop-progress-note')).toContainText('实时推送')
+
+  // 请求契约：走 WS（content + case_id），且没有回退到 REST
+  await expect.poll(() => streamed.length).toBe(1)
+  expect(streamed[0]).toEqual({ type: 'consult', content: QUESTION, case_id: 3 })
+  expect(requests).not.toContain('POST /legal/consultations')
+
+  // 结果帧到达：实时块让位给正式答复（trace 来自响应本身）
+  await expect(dock.locator('.cop-answer')).toContainText('试用期不超过六个月')
+  await expect(dock.locator('.cop-live-step')).toHaveCount(0)
+  await expect(dock.locator('.cop-textarea')).toHaveValue('')
+
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+  expect(failed).toEqual([])
+})
+
+test('实时通道不可用：静默回退 REST，不显示任何伪造的实时步骤', async ({ page }) => {
+  const { requests, failed } = await mockApi(page, {
+    onConsult: (route) => route.fulfill({ json: success(answer()) }),
+  })
+
+  await page.goto('/legal-workspace?case_id=3&tab=consultation')
+  const dock = page.locator(dockSelector)
+  await ask(page, dock)
+
+  await expect(dock.locator('.cop-answer')).toContainText('试用期不超过六个月')
+  expect(requests).toContain('POST /legal/consultations')
+  await expect(dock.locator('.cop-live-step')).toHaveCount(0)
 
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
   expect(failed).toEqual([])
