@@ -97,6 +97,6 @@ references[0].verification = {verified: false, verification_basis: "引用的第
 
 ## 6. 下一步
 
-- A 三层评审：`eval/outputs/human_spotcheck_sheet.md` 的 25 条人工结论待用户填写，之后跑 `scripts/score_human_review.py` 记录一致率。
+- A 三层评审：~~25 条人工结论待填~~ **已收口（2026-10-19）**：用户逐条判定 25/25（24 正确 / 1 错误），AI 裁判与人工一致率 **0.88（22/25，95% CI [0.700, 0.958]）** ≥0.8，3 条不同向见 `docs/review/step13-three-layer-review.md` §3。
 - D bundle 预算：~~`npm run bundle:check` 三项红线（入口 raw 146.2/120、gzip 51.2/42、总资产）待决策（降体积 / 重标定 / 暂缓）~~ **已解决（2026-10-18，step10）**：入口 raw 102.0/120、gzip 35.8/42、最大页面 chunk 121.8/130、总资产 1579.0/1600，四项全绿；红线未放宽。详见 `docs/review/step10-bundle-budget.md`。
 - E 观察：真实咨询连跑若干次，确认不再出现「第二次降级」。

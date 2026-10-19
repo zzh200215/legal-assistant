@@ -36,7 +36,7 @@
 
 **口径偏差（如实记录）**：诊断文档写的是 `deepseek-v4.1-flash`，实际用的是 **qwen-plus**（dashscope 兼容模式，走 `.env` 的 `EMBEDDING_API_BASE_URL/API_KEY`）——本机 `.env` 里**没有任何 deepseek 凭据**。用户已裁决沿用 qwen-plus 并在文档写明偏差（本表即该记录）。裁判脚本的忠实度 prompt 从 `app/services/rag/agentic_judge.check_faithfulness` **逐字复用**，三维 prompt 直接 import `eval/llm_judge._build_prompt`，因此换模型不改口径。
 
-## 3. 第三层：人工抽检（已就绪，等填表）
+## 3. 第三层：人工抽检（已完成，25/25 条）
 
 **抽检表**：`eval/outputs/human_spotcheck_sheet.md`（644 行 / 25 条 = 1 条分歧项 + 12 条忠实度一致项 + 12 条质量一致项），生成命令（`--sheet-mode stratified` 是**零模型调用的确定性抽样**：分歧项全列 + 一致项分层等距取，同一命令两次生成同一张表）：
 
@@ -87,7 +87,28 @@ python -B scripts/score_human_review.py --sheet eval/outputs/human_spotcheck_she
 结论：尚未达成 ≥ 0.8（补填人工结论或复核分歧条目后再看）。
 ```
 
-**第三层结果**：待 25 条人工结论填完后回填本节（分子/分母、两个基准的一致率、与裁判不同向的条目清单、是否达成 ≥0.8）。
+**第三层结果（2026-10-19，25/25 条由用户逐条判定）**：
+
+```
+=== 人工抽检一致率（AI 裁判 vs 人工）===
+条目总数 25｜已表态 25（正确 24 / 错误 1）｜无法判断 0｜留空 0｜填了备注 1
+  [quality] 共 13 条：已表态 13 ｜ [faithfulness] 共 12 条：已表态 12
+基准 glm：人工同意率 = 0.8800（22/25）｜95% CI [0.700, 0.958]
+基准 qwen-plus：人工同意率 = 0.8800（22/25）｜95% CI [0.700, 0.958]
+  按类型 faithfulness：glm 0.9167（11/12）｜qwen-plus 0.9167（11/12）
+  按类型 quality：glm 0.8462（11/13）｜qwen-plus 0.8462（11/13）
+=== 验收（阈值 0.8）=== glm / qwen-plus：0.8800（22/25）→ 达成（小样本：95% CI 下界低于阈值）
+```
+
+**与裁判不同向的 3 条**（人工 vs 两位裁判）：
+
+| 条目 | 类型 | 人工 | 裁判 | 分歧点 |
+| --- | --- | --- | --- | --- |
+| `cross-001` | 质量 | 正确（可 pass） | `review`（=fail） | 答案只列角色、漏人数：裁判按「完整性不足」判复核，人工认为可接受 |
+| `cross-009` | 忠实度 | 错误（不忠实） | 忠实 | 片段把风险与措施并列列举，答案写成「风险→对应措施」的确定对应：人工认为对应关系超出片段依据 |
+| `cross-014` | 质量 | 正确（可 pass） | `review`（=fail） | 答案只答风险、未答对策：裁判判不完整，人工认为可接受 |
+
+**怎么读这个 0.88**：它是「裁判与人工同向率」，不是「答案正确率」；两个基准同值说明分歧不来自模型差异，而来自**口径**（`cross-001`/`cross-014` 是裁判对「完整性」偏严，`cross-009` 是裁判对「因果对应」偏宽）。这正是三层评审的价值：把「裁判口径的薄弱面」定位出来，而不是只给一个分数。评分产物 `eval/outputs/human_spotcheck_score.json`。
 
 **样本量与置信度（如实口径）**：验收线 0.8 用的是**点估计**（诊断文档口径），但人工样本只有 25 条（分母 ≤25），点估计的抽样误差不可忽略——脚本因此同时打印 **95% Wilson 区间**（小样本下比正态近似稳，且不会越出 [0,1]）：
 
@@ -114,7 +135,7 @@ python -B scripts/score_human_review.py --sheet eval/outputs/human_spotcheck_she
 
 ## 5. 开口项
 
-1. **A-5（阻塞在人工）**：等 25 条人工结论填完 → 跑 `score_human_review.py` → 把一致率写进诊断文档。**当前进度：第 1 批（1–9）已发给用户判定，尚未回填**。配套工具已就绪并验证：`scripts/human_sheet_digest.py`（看进度 / 分批摘要 / 写回结论）、`scripts/score_human_review.py --threshold 0.8`（直接打印达成与否，并可 `--json` 落盘）。
+1. ~~**A-5（阻塞在人工）**：等 25 条人工结论填完 → 跑 `score_human_review.py` → 把一致率写进诊断文档。~~ **已收口（2026-10-19）**：25/25 条由用户逐条判定（24 正确 / 1 错误），一致率 **0.88（22/25，95% CI [0.700, 0.958]）**，≥0.8 达成（小样本标注），已写入诊断文档 §7 指标表与 30 天项 ③。工具链：`scripts/human_sheet_digest.py`（看进度 / 分批摘要 / 写回结论）、`scripts/score_human_review.py --threshold 0.8`（打印达成与否，`--json` 落盘到 `eval/outputs/human_spotcheck_score.json`）。
 2. **deepseek-v4.1-flash 口径未落地**：本机无该凭据；若要严格按诊断文档口径，需要提供 deepseek 的 base_url / api_key 后重跑 `run_cross_judge.py --judge-model deepseek-v4.1-flash`。
 3. **抽样规模 25/66**：忠实度 31 题里抽 12、质量 35 题里抽 12；样本小，一致率只能作为方向性证据，不能当精确估计。
 4. **未覆盖产品主链路**：这套三层评审跑在 RAG QA 数据集上；法律咨询（copilot 主链路）的答案质量还没有同口径的三层评审（trace 已能提供过程证据，但缺答案级裁判）。
