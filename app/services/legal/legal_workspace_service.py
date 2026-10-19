@@ -483,6 +483,7 @@ class LegalWorkspaceModule:
     async def create_consultation(
         self, db: Session, user: User, question: str, *, case_id: int | None = None,
         contract_review_id: int | None = None, draft_id: int | None = None,
+        step_callback=None,
     ) -> ConsultationResult:
         subscription_service.ensure_default_plans(db)
         if not subscription_service.check_quota(db, user.id, "consultation"):
@@ -506,6 +507,7 @@ class LegalWorkspaceModule:
         category, known, missing, refs, advice, risk, status = await consultation_payload(
             question, sources, user_id=user.id, db=db, trace_out=trace,
             attribution_out=attribution, extra_context=extra_context,
+            step_callback=step_callback,
         )
         disclaimer = compute_disclaimer_level(risk_level=risk, category=category)
         row = LegalConsultation(

@@ -739,6 +739,7 @@ async def consultation_payload(
     trace_out: dict | None = None,
     attribution_out: dict | None = None,
     extra_context: dict | None = None,
+    step_callback=None,
 ):
     """LLM-powered legal consultation with deterministic fallback.
 
@@ -752,20 +753,29 @@ async def consultation_payload(
     形如 `{"type", "type_label", "id", "title", "text"}`：只拼进 prompt 的问题段作为参考上下文，
     不参与法源排序，也不会被当成法源引用；实际用了哪份、多少字会如实写进 trace 顶层 `contexts`。
     不传则 prompt 与从前逐字一致。
+
+    `step_callback`（可选，async 可调用）在每一步完成时立刻被调用，参数与该步的 trace 字典一致
+    （`{id, label, status, duration_ms, detail}`）。WS 流式时间线用它「边跑边推」；推送失败只记
+    warning，不影响咨询本身（回调异常不会中断链路，也不会污染 trace）。
     """
     steps: list[dict] = []
 
-    def _record(step: dict) -> None:
-        if trace_out is None:
-            return
-        steps.append(step)
-        trace_out["trace_version"] = 1
-        trace_out["source"] = "legal_consultation"
-        trace_out["steps"] = steps
+    async def _record(step: dict) -> None:
+        # trace_out 负责落库，step_callback 负责实时推送，两者独立：只要有一个就继续
+        if trace_out is not None:
+            steps.append(step)
+            trace_out["trace_version"] = 1
+            trace_out["source"] = "legal_consultation"
+            trace_out["steps"] = steps
+        if step_callback is not None:
+            try:
+                await step_callback(step)
+            except Exception:  # noqa: BLE001 - 推送失败不能影响咨询本身
+                logger.warning("consultation step callback failed", exc_info=True)
 
     # 拒答：涉及违法/危害行为的实施求助，在进入 LLM 与检索前直接拒绝（合规红线）
     if _should_refuse(question):
-        _record(_trace_step(
+        await _record(_trace_step(
             "refuse", "合规拦截", status="refused",
             detail="问题涉及违法或危害行为的实施求助，未进入检索与生成",
         ))
@@ -789,7 +799,7 @@ async def consultation_payload(
             retrieve_detail += "，均未生效"
     else:
         retrieve_detail = "本次未检索到候选法源"
-    _record(_trace_step(
+    await _record(_trace_step(
         "retrieve", "检索法源",
         status="success" if ranked_sources else "degraded",
         duration_ms=retrieve_ms,
@@ -855,11 +865,11 @@ async def consultation_payload(
             verify_started = time.perf_counter()
             refs = enrich_references(db, refs, sentence_numbers=_sentence_citation_numbers(refs, attribution))
             verify_ms = _elapsed_ms(verify_started)
-            _record(_trace_step(
+            await _record(_trace_step(
                 "generate", "生成建议", status="success", duration_ms=generate_ms,
                 detail="模型返回结构化结果",
             ))
-            _record(_trace_step(
+            await _record(_trace_step(
                 "facts", "抽取事实", status="success",
                 detail=f"已确认 {len(known)} 项 · 待补充 {len(missing)} 项",
             ))
@@ -871,7 +881,7 @@ async def consultation_payload(
                 if unmarked:
                     verify_detail += f" · {unmarked} 条无核验字段"
                 verify_status = "success"
-            _record(_trace_step(
+            await _record(_trace_step(
                 "verify", "核验引用", status=verify_status, duration_ms=verify_ms, detail=verify_detail,
             ))
             _attach_trace_metrics(
@@ -883,12 +893,12 @@ async def consultation_payload(
                 attribution_out.update(attribution)
             status = "needs_lawyer_review" if risk == "high" or missing else "pending_review"
             return category, known, missing, refs, advice, risk, status
-        _record(_trace_step(
+        await _record(_trace_step(
             "generate", "生成建议", status="degraded", duration_ms=generate_ms,
             detail="模型返回无法解析为结构化结果，已用规则兜底",
         ))
     else:
-        _record(_trace_step(
+        await _record(_trace_step(
             "generate", "生成建议", status="degraded", duration_ms=generate_ms,
             detail="模型调用未返回结果，已用规则兜底",
         ))
@@ -898,7 +908,7 @@ async def consultation_payload(
     category, known, missing, refs, advice, risk, status = _consultation_deterministic(safe_question, ranked_sources)
     refs = enrich_references(db, refs)
     verify_ms = _elapsed_ms(verify_started)
-    _record(_trace_step(
+    await _record(_trace_step(
         "facts", "抽取事实", status="degraded",
         detail=f"按问题文本抽取：已确认 {len(known)} 项 · 待补充 {len(missing)} 项",
     ))
@@ -910,7 +920,7 @@ async def consultation_payload(
         if unmarked:
             verify_detail += f" · {unmarked} 条无核验字段"
         verify_status = "success"
-    _record(_trace_step(
+    await _record(_trace_step(
         "verify", "核验引用", status=verify_status, duration_ms=verify_ms, detail=verify_detail,
     ))
     _attach_trace_metrics(

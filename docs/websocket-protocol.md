@@ -33,6 +33,8 @@
 | `done` | S→C | 否 | `{content, citations?, confidence?, ...}` 完成事件（可恢复） |
 | `run_snapshot` | S→C | 否 | `{run, logs}` Agent 运行快照（可恢复） |
 | `cancelled` | S→C | 否 | `{kind, id, cancelled, job?/status?}` 取消结果（可恢复） |
+| `consult_step` | S→C | 是 | `{id, label, status, duration_ms, detail}` 法律咨询单步进度（检索/生成/抽取/核验） |
+| `consult_done` | S→C | 否 | `{consultation}` 咨询完整结果（与 REST `POST /api/legal/consultations` 同形状，可恢复） |
 | `subscribe` / `unsubscribe` | C→S | — | `{channels: [...]}` 订阅通道（chat/agent/jobs/notifications） |
 
 ## 2. 客户端消息（C → S）
@@ -43,6 +45,10 @@
 
 新格式（`type` 字段）：
 - `{"type":"chat", ...}` / `{"type":"agent_run", ...}`：同上
+- `{"type":"consult", "content": "...", "case_id"?: int, "contract_review_id"?: int, "draft_id"?: int}`：法律咨询（流式进度 + 完整结果）
+  - 与 REST 同一条业务链路（配额、案件上下文、材料上下文、trace、句级溯源、忠实度校验都一致），区别只在过程可见；
+  - `contract_review_id` 与 `draft_id` 互斥（同时给返回 `LEGAL_CONTEXT_CONFLICT`）；不带 `type` 的旧 chat 消息继续按 chat 处理；
+  - 进度帧 `consult_step` 为 volatile（不落库、不占恢复窗口），最终帧 `consult_done` 落库，断线重连可按 §3 恢复。
 - `{"type":"ack", "ack_seq": N}`
 - `{"type":"resume", "resume_token": "...", "ack_seq": N}`（仅首条消息）
 - `{"type":"subscribe"/"unsubscribe", "channels": ["jobs", ...]}`

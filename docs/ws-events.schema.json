@@ -93,11 +93,31 @@
       },
       "required": ["channels"]
     },
+    "consult_step": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "consult_step" },
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "status": { "enum": ["success", "degraded", "skipped", "refused"] },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "detail": { "type": "string" }
+      },
+      "required": ["id", "label", "status"]
+    },
+    "consult_done": {
+      "allOf": [{ "$ref": "#/definitions/envelope" }],
+      "properties": {
+        "type": { "const": "consult_done" },
+        "consultation": { "type": "object" }
+      },
+      "required": ["consultation"]
+    },
     "client_message": {
       "type": "object",
       "properties": {
         "type": {
-          "enum": ["ack", "resume", "subscribe", "unsubscribe", "cancel", "chat", "agent_run", "pong", "ping", null]
+          "enum": ["ack", "resume", "subscribe", "unsubscribe", "cancel", "chat", "agent_run", "consult", "pong", "ping", null]
         },
         "ack_seq": { "type": "integer" },
         "resume_token": { "type": "string" },
@@ -107,6 +127,9 @@
         "content": { "type": "string", "maxLength": 8000 },
         "document_id": { "type": "integer" },
         "session_id": { "type": "integer" },
+        "case_id": { "type": "integer" },
+        "contract_review_id": { "type": "integer" },
+        "draft_id": { "type": "integer" },
         "goal": { "type": "string", "maxLength": 8000 },
         "max_steps": { "type": "integer", "minimum": 1, "maximum": 10 },
         "approval_id": { "type": "integer" },

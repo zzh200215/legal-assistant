@@ -28,6 +28,7 @@ from app.services.memory.chat_session_service import chat_session_service
 from app.services.documents.document_qa_service import document_qa_service
 from app.services.documents.document_service import document_service
 from app.services.rag.agentic_rag_service import agentic_rag_service
+from app.services.legal.legal_workspace_service import legal_workspace_module, serialize_workspace_row
 from app.services.memory.conversation_memory_service import conversation_memory_service
 from app.services.memory import ws_session_service as ws
 from app.services.memory.ws_session_service import (
@@ -337,6 +338,86 @@ async def _handle_chat(session: WsSession, data: dict, db: Session, user: User) 
         )
 
 
+async def _handle_consult(session: WsSession, data: dict, db: Session, user: User) -> None:
+    """法律咨询（流式）：边处理边推 `consult_step`，最后推 `consult_done` 带完整结果。
+
+    与 REST `POST /api/legal/consultations` 同一条业务链路（`legal_workspace_module.create_consultation`），
+    区别只在过程可见：REST 一次返回全部，这里每完成一步就推一帧。步骤帧是 volatile（不落库，
+    避免刷 ws_event_logs）；最终结果帧非 volatile，断线重连仍能取回。
+    """
+    content = str(data.get("content") or "").strip()
+    if not content:
+        await send_event(session, "error",
+                         {"code": "WS_EMPTY_MESSAGE", "message": "消息内容不能为空"},
+                         volatile=True)
+        return
+    if len(content) > MAX_WS_MESSAGE_LENGTH:
+        await send_event(session, "error",
+                         {"code": "WS_MESSAGE_TOO_LONG", "message": "消息过长"},
+                         volatile=True)
+        return
+
+    params: dict = {}
+    for key in ("case_id", "contract_review_id", "draft_id"):
+        raw = data.get(key)
+        if raw in (None, ""):
+            continue
+        try:
+            params[key] = int(raw)
+        except (TypeError, ValueError):
+            await send_event(session, "error",
+                             {"code": "WS_INVALID_PARAM", "message": f"{key} 必须为整数"},
+                             volatile=True)
+            return
+
+    async def step_callback(step: dict) -> None:
+        await send_event(session, "consult_step", step, volatile=True)
+
+    try:
+        operation = await legal_workspace_module.create_consultation(
+            db, user, content, step_callback=step_callback, **params,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "QUOTA_EXCEEDED":
+            await send_event(session, "error",
+                             {"code": code, "message": "本月咨询配额已用完，请升级订阅"},
+                             volatile=True)
+        elif code == "LEGAL_CONTEXT_CONFLICT":
+            await send_event(session, "error",
+                             {"code": code, "message": "一次只能带一份参考材料"},
+                             volatile=True)
+        else:
+            await send_event(session, "error",
+                             {"code": "WS_INTERNAL_ERROR", "message": _ws_error_message(exc)},
+                             volatile=True)
+        return
+    except LookupError as exc:
+        code = str(exc)
+        messages = {
+            "LEGAL_CASE_NOT_FOUND": "案件不存在或无权访问",
+            "LEGAL_CONTEXT_NOT_FOUND": "参考材料不存在或无权访问",
+        }
+        await send_event(session, "error",
+                         {"code": code, "message": messages.get(code, "请求的对象不存在")},
+                         volatile=True)
+        return
+
+    result = serialize_workspace_row(operation.row)
+    result["disclaimer_level"] = operation.disclaimer["level"]
+    result["disclaimer_label"] = operation.disclaimer["label"]
+    # 与 REST 入口同样的漏斗埋点：流式与同步两条路各记一次，指标口径一致
+    from app.services.observability.funnel_service import record_event
+    record_event(
+        db, "consult_submit", user_id=user.id,
+        organization_id=getattr(user, "organization_id", None),
+        case_id=params.get("case_id"),
+    )
+    db.commit()
+    await send_event(session, "consult_done", {"consultation": result},
+                     volatile=False, db=db)
+
+
 async def _handle_agent(session: WsSession, data: dict, db: Session, user: User) -> None:
     action = str(data.get("action") or "run").strip()
 
@@ -499,8 +580,10 @@ async def _handle_protocol_message(session: WsSession, msg: dict, db: Session,
     if mtype == "cancel":
         await _handle_cancel(session, msg, db, user)
         return
-    if mtype in (None, "chat", "agent_run"):
-        if mtype == "agent_run" or "goal" in msg or "action" in msg:
+    if mtype in (None, "chat", "agent_run", "consult"):
+        if mtype == "consult":
+            await _handle_consult(session, msg, db, user)
+        elif mtype == "agent_run" or "goal" in msg or "action" in msg:
             await _handle_agent(session, msg, db, user)
         else:
             await _handle_chat(session, msg, db, user)
