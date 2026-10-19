@@ -8,6 +8,13 @@
       <span v-if="result.risk_level" class="cop-tag" :class="`cop-tag-${riskTagType(result.risk_level)}`">{{ riskLabel(result.risk_level) }}</span>
       <span v-if="result.category" class="cop-tag cop-tag-accent">{{ categoryLabel(result.category) }}</span>
       <span v-if="confidenceText" class="cop-tag cop-tag-info">置信度 {{ confidenceText }}%</span>
+      <!-- 证据可核验性：生成时算好的确定性统计（老记录没有该字段则不显示） -->
+      <span
+        v-if="verifiability"
+        class="cop-tag"
+        :class="`cop-tag-${verifiability.tone}`"
+        :title="verifiability.note"
+      >依据：{{ verifiability.label }}</span>
     </div>
 
     <!-- 3. 逐句溯源：每句可点，点了高亮支撑证据（粒度见下方说明） -->
@@ -115,6 +122,8 @@ const blocks = computed(() => {
   return out
 })
 const attribution = computed(() => layers.value.attribution)
+// 证据可核验性：后端生成时的统计（老记录为 null，不渲染）
+const verifiability = computed(() => layers.value.verifiability)
 // 等待判官时显示「校验中」；判完（或判官不可用）就交回 deriveFaithfulness 的三态口径。
 const faithfulness = computed(() => {
   if (props.faithfulnessState === 'checking') {

@@ -163,6 +163,9 @@ class LegalConsultation(Base):
     # 与 trace_json/attribution_json 同属「可解释性」三件套，但它由判官模型事后补判
     # （答案先返回，前端拿到后再触发），所以与生成过程分开存储、可单独刷新。
     faithfulness_json = Column(Text, nullable=True, comment="忠实度校验结果，JSON")
+    # 证据可核验性：本次答复的引用里有多少条真的核到了法源条文、多少条所在法源没有条文级
+    # 数据，JSON。生成时一次算好，供前端在答复旁直接提示「这条答复的依据能不能核验」。
+    evidence_json = Column(Text, nullable=True, comment="证据可核验性摘要，JSON")
     reviewed_version = Column(Integer, nullable=True, comment="审核动作所绑定的业务版本号")
     feedback_score = Column(Integer, nullable=True, comment="用户评分：1=满意 -1=不满意")
     feedback_note = Column(Text, nullable=True, comment="用户反馈备注")

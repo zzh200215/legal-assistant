@@ -24,6 +24,14 @@
               <el-tag v-if="quotaHint('consultation')" size="small" effect="plain" :type="quotaSummary?.consultation?.remaining <= 0 ? 'danger' : 'warning'">{{ quotaHint('consultation') }}</el-tag>
               <el-tag :type="riskTagType(consultResult.risk_level)" size="small">{{ riskLabel(consultResult.risk_level) }}</el-tag>
               <el-tag v-if="consultResult.confidence !== undefined" :type="confidenceTagType(consultResult.confidence)" size="small" effect="plain">置信度 {{ consultResult.confidence }}%</el-tag>
+              <!-- 证据可核验性（0100 迁移）：生成时的确定性统计，老记录没有该字段就不显示 -->
+              <el-tag
+                v-if="consultVerifiability"
+                size="small"
+                effect="plain"
+                :type="consultVerifiability.tone === 'success' ? 'success' : consultVerifiability.tone === 'warning' ? 'warning' : 'info'"
+                :title="consultVerifiability.note"
+              >依据：{{ consultVerifiability.label }}</el-tag>
               <div class="result-actions">
                 <el-button size="small" type="success" plain @click="emit('go-to-review', consultResult)">进入合同审查</el-button>
                 <el-button size="small" type="primary" plain @click="emit('go-to-draft', consultResult)">生成文书</el-button>
@@ -150,6 +158,7 @@ import { useLegalConsultations } from '../../composables/useLegalConsultations'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
 import { useStagedProgress } from '../../composables/useStagedProgress'
+import { deriveVerifiability } from '../../composables/copilotLayers'
 import { asReferenceList } from '../../utils/references'
 import {
   riskTagType, riskLabel, categoryLabel,
@@ -209,6 +218,9 @@ const historyVisible = computed(() => historyStatus.value !== 'empty')
 // references 由模型产出，历史上出现过 null / 缺标题的条目：渲染前先过滤，
 // 否则一个坏条目会让整个结果卡渲染报错（白屏）。
 const referenceItems = computed(() => asReferenceList(consultResult.value?.references))
+
+// 证据可核验性：后端生成时算好的统计（老记录没有 evidence 字段 → null，不显示标签）
+const consultVerifiability = computed(() => deriveVerifiability(consultResult.value))
 
 // 历史咨询 → 结果卡：点击行内"查看结果"加载完整详情（含送审按钮），替代刷新后丢失的会话内状态
 const focusRowId = ref(null)

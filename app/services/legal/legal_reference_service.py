@@ -75,32 +75,42 @@ def parse_citation_numbers(text: str | None) -> list[str]:
     return list(dict.fromkeys(numbers))
 
 
-def _article_verification(db: Session | None, source: LegalSource, citation: str | None) -> tuple[bool | None, str]:
-    """按条号核对法源条文，返回 (是否命中, 说明)。
+def _article_verification(
+    db: Session | None, source: LegalSource, citation: str | None
+) -> tuple[bool | None, str, str]:
+    """按条号核对法源条文，返回 (是否命中, 说明, 可核验性口径)。
 
     三级如实：该法源没有条文级数据 / 引用没写条号 → None（面板显示「未校验」，不硬判）；
     条号全部命中 → True；有缺失 → False 并点名缺失条号。
+
+    第三个返回值是给「在线证据可核验性」用的机器可读口径，取值：
+    `verified`（逐条核对通过）/ `missing`（有条文库但引用条号没找到）/
+    `no_corpus`（该法源没有条文级数据）/ `no_numbers`（引用没写条号）/ `no_db`（无库环境）。
     """
     if db is None:
-        return None, "无数据库连接，未做条文级核对"
+        return None, "无数据库连接，未做条文级核对", "no_db"
     existing = {
         canonical
         for (raw,) in db.query(LegalArticle.article_number).filter(LegalArticle.source_id == source.id).all()
         if (canonical := _canonical_article_number(raw or ""))
     }
     if not existing:
-        return None, "该法源未收录条文级数据，未做逐条核对"
+        return None, "该法源未收录条文级数据，未做逐条核对", "no_corpus"
     numbers = parse_citation_numbers(citation)
     if not numbers:
-        return None, "引用未标注条号，未做逐条核对"
+        return None, "引用未标注条号，未做逐条核对", "no_numbers"
     missing = [number for number in numbers if number not in existing]
     if missing:
         # 已收录条数是硬事实：让「本条未收录」与「引用可能有误」在文案上可区分，避免误判成引用错误。
-        return False, (
-            f"引用的{'、'.join(missing)}未在已收录的 {len(existing)} 条条文中找到"
-            "（可能是该条未收录，也可能引用有误）"
+        return (
+            False,
+            (
+                f"引用的{'、'.join(missing)}未在已收录的 {len(existing)} 条条文中找到"
+                "（可能是该条未收录，也可能引用有误）"
+            ),
+            "missing",
         )
-    return True, f"引用的{'、'.join(numbers)}已与法源条文核对一致"
+    return True, f"引用的{'、'.join(numbers)}已与法源条文核对一致", "verified"
 
 
 def _json_ids(raw: str | None) -> list[int]:
@@ -169,7 +179,7 @@ def verify_source(source: LegalSource, db: Session | None = None, *, citation: s
     else:
         note = _STATUS_NOTES["active"]
 
-    verified, basis = _article_verification(db, source, citation)
+    verified, basis, article_scope = _article_verification(db, source, citation)
 
     return {
         "source_id": source.id,
@@ -183,6 +193,7 @@ def verify_source(source: LegalSource, db: Session | None = None, *, citation: s
         "verification_note": note,
         "verified": verified,
         "verification_basis": basis,
+        "article_scope": article_scope,
     }
 
 
@@ -211,13 +222,79 @@ def enrich_references(
         out = dict(ref)
         source = by_id.get(ref.get("source_id")) if ref.get("source_id") else None
         if source is None:
-            out["verification"] = {"verified": False, "verification_note": _UNVERIFIED_NOTE}
+            out["verification"] = {
+                "verified": False,
+                "verification_note": _UNVERIFIED_NOTE,
+                "article_scope": "no_source",
+            }
         else:
             extra = " ".join((sentence_numbers or {}).get(index) or [])
             citation = " ".join(part for part in (ref.get("citation"), extra) if part)
             out["verification"] = verify_source(source, db=db, citation=citation)
         enriched.append(out)
     return enriched
+
+
+_EVIDENCE_LEVELS = {
+    "strong": "引用已逐条核对",
+    "partial": "部分引用已核对",
+    "weak": "引用待核",
+    "none": "未引用法源",
+}
+
+
+def evidence_summary(refs: list[dict], *, materials: int = 0) -> dict:
+    """把一次答复的证据可核验性汇总成在线指标（随响应返回，前端据此提示用户）。
+
+    口径只用「已发生的事实」：条文级核对做过没有、通过没有、引用有没有挂到法源库。
+    不做加权评分，也不把「未收录条文」说成「引用错误」。
+    """
+    counts = {"verified": 0, "missing": 0, "no_corpus": 0, "no_numbers": 0, "no_source": 0}
+    for ref in refs or []:
+        verification = ref.get("verification") if isinstance(ref, dict) else None
+        scope = (verification or {}).get("article_scope") if isinstance(verification, dict) else None
+        counts[scope if scope in counts else "no_source"] += 1
+
+    total = sum(counts.values())
+    if total == 0:
+        level = "none"
+    elif counts["verified"] == total:
+        level = "strong"
+    elif counts["verified"]:
+        level = "partial"
+    else:
+        level = "weak"
+
+    notes: list[str] = []
+    if total == 0:
+        notes.append("本次答复没有引用法源，无法据此核验事实断言")
+    if counts["verified"]:
+        notes.append(f"{counts['verified']} 条引用已与法源条文核对一致")
+    if counts["missing"]:
+        notes.append(f"{counts['missing']} 条引用的条号未在已收录条文中找到")
+    if counts["no_corpus"]:
+        notes.append(f"{counts['no_corpus']} 条引用所在法源没有条文级数据")
+    if counts["no_numbers"]:
+        notes.append(f"{counts['no_numbers']} 条引用未标注条号，未做逐条核对")
+    if counts["no_source"]:
+        notes.append(f"{counts['no_source']} 条引用未挂到法源库")
+    if materials:
+        notes.append(f"已把 {materials} 份案件材料纳入证据")
+
+    return {
+        "version": 1,
+        "level": level,
+        "label": _EVIDENCE_LEVELS[level],
+        "references": total,
+        "article_checked": counts["verified"] + counts["missing"],
+        "article_verified": counts["verified"],
+        "article_missing": counts["missing"],
+        "no_corpus": counts["no_corpus"],
+        "no_numbers": counts["no_numbers"],
+        "unmatched": counts["no_source"],
+        "materials": int(materials or 0),
+        "note": "；".join(notes),
+    }
 
 
 def _as_date(value) -> "object":

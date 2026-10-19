@@ -95,7 +95,6 @@ export function deriveFaithfulness(result) {
 }
 
 const TRACE_STATUS_LABELS = { success: '完成', degraded: '降级', skipped: '跳过', refused: '已拦截' }
-
 /** 步骤状态的中文标签（实时流式帧与最终 trace 共用同一套词表） */
 export function traceStatusLabel(status) {
   return TRACE_STATUS_LABELS[status] || ''
@@ -258,6 +257,37 @@ export function deriveAttribution(result, evidence = deriveEvidenceCards(result)
   }
 }
 
+const VERIFIABILITY_TONES = { strong: 'success', partial: 'neutral', weak: 'warning', none: 'neutral' }
+
+/**
+ * 证据可核验性（在线指标，见 0100 迁移）：后端**生成时**算好的确定性统计——
+ * 本次答复引用了多少条、其中多少条真的核到了法源条文、多少条所在法源没有条文级数据。
+ *
+ * 与忠实度的分工：忠实度是判官事后补判「断言有没有依据」（要额外模型调用、可能不可用），
+ * 本项是「依据本身能不能被核验」（不花模型调用、不会失败），两者互补、都要如实展示。
+ * 老记录没有 `evidence` 字段 → 返回 null，调用方不渲染（不假装统计过）。
+ */
+export function deriveVerifiability(result) {
+  const raw = isObject(result?.evidence) ? result.evidence : null
+  if (!raw) return null
+  const level = asText(raw.level)
+  if (!Object.prototype.hasOwnProperty.call(VERIFIABILITY_TONES, level)) return null
+  const count = (value) => (Number.isFinite(value) && value > 0 ? value : 0)
+  return {
+    level,
+    label: asText(raw.label) || '证据可核验性未知',
+    note: asText(raw.note),
+    tone: VERIFIABILITY_TONES[level],
+    references: count(raw.references),
+    articleVerified: count(raw.article_verified),
+    articleMissing: count(raw.article_missing),
+    noCorpus: count(raw.no_corpus),
+    noNumbers: count(raw.no_numbers),
+    unmatched: count(raw.unmatched),
+    materials: count(raw.materials),
+  }
+}
+
 /** 一次性推导四层，避免各组件重复算同一份引用。 */
 export function deriveCopilotLayers(result) {
   const evidence = deriveEvidenceCards(result)
@@ -266,5 +296,6 @@ export function deriveCopilotLayers(result) {
     evidence,
     attribution: deriveAttribution(result, evidence),
     faithfulness: deriveFaithfulness(result),
+    verifiability: deriveVerifiability(result),
   }
 }

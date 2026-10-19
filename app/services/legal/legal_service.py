@@ -23,7 +23,11 @@ from app.models.legal import (
     LegalSource,
 )
 from app.services.org.data_protection_service import data_protection_service
-from app.services.legal.legal_reference_service import enrich_references, parse_citation_numbers
+from app.services.legal.legal_reference_service import (
+    enrich_references,
+    evidence_summary,
+    parse_citation_numbers,
+)
 from app.services.llm.prompt_service import prompt_service
 
 logger = logging.getLogger(__name__)
@@ -853,6 +857,7 @@ async def consultation_payload(
     db: Session | None = None,
     trace_out: dict | None = None,
     attribution_out: dict | None = None,
+    evidence_out: dict | None = None,
     extra_context: dict | None = None,
     step_callback=None,
 ):
@@ -863,6 +868,10 @@ async def consultation_payload(
 
     `attribution_out`（可选，同样传空 dict）会写入句级引用映射：每句建议对应哪几条引用、
     词面重合度多少。不传则完全不计算，行为与从前一致。
+
+    `evidence_out`（可选，同样传空 dict）会写入「本次答复的证据可核验性」摘要（引用条数、
+    逐条核对通过/未找到、法源有无条文级数据、是否纳入案件材料），供前端在答复旁提示用户
+    「这条答复的依据能不能核验」。不传则完全不计算。
 
     `extra_context`（可选）是调用方读到的「用户当前正在看的材料」（合同审查正文 / 文书正文），
     形如 `{"type", "type_label", "id", "title", "text"}`：只拼进 prompt 的问题段作为参考上下文，
@@ -1006,6 +1015,8 @@ async def consultation_payload(
             _record_trace_context(trace_out, context_meta)
             if attribution_out is not None:
                 attribution_out.update(attribution)
+            if evidence_out is not None:
+                evidence_out.update(evidence_summary(refs, materials=1 if context_meta else 0))
             status = "needs_lawyer_review" if risk == "high" or missing else "pending_review"
             return category, known, missing, refs, advice, risk, status
         await _record(_trace_step(
@@ -1047,6 +1058,8 @@ async def consultation_payload(
         attribution_out.update(attribute_sentences_to_references(
             advice, refs, sources, article_text_by_source=_article_text_by_source(db, refs),
         ))
+    if evidence_out is not None:
+        evidence_out.update(evidence_summary(refs, materials=1 if context_meta else 0))
     return category, known, missing, refs, advice, risk, status
 
 

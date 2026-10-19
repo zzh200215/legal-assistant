@@ -145,6 +145,8 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "attribution": _json_or(getattr(row, "attribution_json", None), "{}"),
             # 忠实度校验：答案返回后由判官补判并落库（无结论的老记录返回 {}，前端显示「未校验」）。
             "faithfulness": _json_or(getattr(row, "faithfulness_json", None), "{}"),
+            # 证据可核验性：生成时算好的确定性统计（老记录返回 {}，前端不渲染该提示）。
+            "evidence": _json_or(getattr(row, "evidence_json", None), "{}"),
         }
     if isinstance(row, ContractReview):
         return {
@@ -504,9 +506,10 @@ class LegalWorkspaceModule:
         db.commit()
         trace: dict = {}
         attribution: dict = {}
+        evidence: dict = {}
         category, known, missing, refs, advice, risk, status = await consultation_payload(
             question, sources, user_id=user.id, db=db, trace_out=trace,
-            attribution_out=attribution, extra_context=extra_context,
+            attribution_out=attribution, evidence_out=evidence, extra_context=extra_context,
             step_callback=step_callback,
         )
         disclaimer = compute_disclaimer_level(risk_level=risk, category=category)
@@ -534,6 +537,8 @@ class LegalWorkspaceModule:
         row.trace_json = finalize_consultation_trace(trace, row.model_snapshot_json)
         # 句级引用映射与 trace 同批落库：它同样是「过程产物」，读的时候不该再算一遍
         row.attribution_json = json.dumps(attribution, ensure_ascii=False) if attribution else None
+        # 证据可核验性：生成时的确定性统计，不花模型调用也不会失败，因此与 trace 同批落库
+        row.evidence_json = json.dumps(evidence, ensure_ascii=False) if evidence else None
         db.commit()
         subscription_service.record_usage(db, user.id, "consultation")
         matter_service.record_activity(

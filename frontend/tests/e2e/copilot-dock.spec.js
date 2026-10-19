@@ -643,6 +643,62 @@ test('服务端句级映射与本地分句对不齐时回退整篇粒度，不�
   expect(failed).toEqual([])
 })
 
+// 证据可核验性（0100 迁移）：生成时的确定性统计，随响应返回；老记录没有该字段就不渲染
+test('证据可核验性：响应带 evidence 时在元信息行给出依据标签，缺字段时不渲染', async ({ page }) => {
+  const { failed } = await mockApi(page, {
+    onConsult: (route) =>
+      route.fulfill({
+        json: success(
+          answer({
+            evidence: {
+              version: 1,
+              level: 'partial',
+              label: '部分引用已核对',
+              references: 2,
+              article_checked: 2,
+              article_verified: 1,
+              article_missing: 1,
+              no_corpus: 0,
+              no_numbers: 0,
+              unmatched: 0,
+              materials: 1,
+              note: '1 条引用已与法源条文核对一致；1 条引用的条号未在已收录条文中找到；已把 1 份案件材料纳入证据',
+            },
+          }),
+        ),
+      }),
+  })
+
+  await page.goto('/legal-workspace?case_id=3&tab=consultation')
+  const dock = page.locator(dockSelector)
+  await ask(page, dock)
+
+  const chip = dock.locator('.cop-meta .cop-tag', { hasText: '依据：部分引用已核对' })
+  await expect(chip).toHaveCount(1)
+  await expect(chip).toHaveClass(/cop-tag-neutral/)
+  // 口径细节挂在 title 上：不只给结论，用户能看到「几条核到、几条没核到」
+  await expect(chip).toHaveAttribute('title', /1 条引用的条号未在已收录条文中找到/)
+  await expect(chip).toHaveAttribute('title', /已把 1 份案件材料纳入证据/)
+
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+  expect(failed).toEqual([])
+})
+
+// 反向断言：基线响应（没有 evidence 字段，等同老记录）不得凭空出现依据标签
+test('证据可核验性：响应没有 evidence 字段时不渲染该标签', async ({ page }) => {
+  const { failed } = await mockApi(page, {
+    onConsult: (route) => route.fulfill({ json: success(answer()) }),
+  })
+
+  await page.goto('/legal-workspace?case_id=3&tab=consultation')
+  const dock = page.locator(dockSelector)
+  await ask(page, dock)
+
+  await expect(dock.locator('.cop-meta .cop-tag', { hasText: '依据：' })).toHaveCount(0)
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+  expect(failed).toEqual([])
+})
+
 // 忠实度补判（POST /legal/consultations/{id}/faithfulness）：答案先渲染，判官结论回来再翻转标记
 test('生成后补判忠实度：标记从校验中翻成结论，且不改动答案本身', async ({ page }) => {
   const { failed, requests } = await mockApi(page, {

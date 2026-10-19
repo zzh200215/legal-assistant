@@ -6,6 +6,7 @@ import {
   deriveEvidenceCards,
   deriveFaithfulness,
   deriveTraceReplay,
+  deriveVerifiability,
   formatStepDuration,
   splitAnswerSentences,
 } from '../copilotLayers.js'
@@ -339,4 +340,47 @@ test('deriveAttribution：分句对不齐或句数不符时回退整篇粒度，
   const legacy = deriveAttribution({ ...RESULT, attribution: {} })
   assert.equal(legacy.granularity, 'answer')
   assert.match(legacy.note, /未返回逐句引用映射/)
+})
+
+test('deriveVerifiability：在线证据可核验性只在后端给了合法 level 时才展示', () => {
+  // 老记录没有 evidence 字段 → null，调用方不渲染（不假装统计过）
+  assert.equal(deriveVerifiability({ ...RESULT, evidence: undefined }), null)
+  assert.equal(deriveVerifiability({ ...RESULT, evidence: {} }), null)
+  assert.equal(deriveVerifiability({ ...RESULT, evidence: { level: 'excellent' } }), null)
+
+  const strong = deriveVerifiability({
+    ...RESULT,
+    evidence: {
+      version: 1,
+      level: 'strong',
+      label: '引用已逐条核对',
+      references: 2,
+      article_verified: 2,
+      article_missing: 0,
+      no_corpus: 0,
+      no_numbers: 0,
+      unmatched: 0,
+      materials: 1,
+      note: '2 条引用已与法源条文核对一致；已把 1 份案件材料纳入证据',
+    },
+  })
+  assert.equal(strong.level, 'strong')
+  assert.equal(strong.tone, 'success')
+  assert.equal(strong.articleVerified, 2)
+  assert.equal(strong.materials, 1)
+  assert.match(strong.note, /案件材料/)
+
+  // weak 用 warning 色调；缺失计数缺省为 0，不出现 NaN
+  const weak = deriveVerifiability({
+    ...RESULT,
+    evidence: { level: 'weak', label: '引用待核', note: '1 条引用的条号未在已收录条文中找到' },
+  })
+  assert.equal(weak.tone, 'warning')
+  assert.equal(weak.references, 0)
+  assert.equal(weak.articleMissing, 0)
+
+  // 四层推导里也要带上它（面板直接读 layers.verifiability）
+  const layers = deriveCopilotLayers({ ...RESULT, evidence: { level: 'partial', label: '部分引用已核对' } })
+  assert.equal(layers.verifiability.level, 'partial')
+  assert.equal(layers.verifiability.tone, 'neutral')
 })
