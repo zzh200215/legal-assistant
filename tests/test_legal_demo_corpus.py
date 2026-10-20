@@ -17,6 +17,7 @@ from app.services.legal.legal_service import (
     DEMO_SOURCES,
     _compose_corpus_full_text,
     _load_demo_articles,
+    _load_demo_corpus,
     ensure_demo_sources,
 )
 
@@ -52,6 +53,19 @@ class DemoCorpusFileTests(unittest.TestCase):
         self.assertIn("第98条", text)
         self.assertIn("第一章 总则", text)
         self.assertGreater(len(text), 5000, "全文太短，像是只拼了摘要")
+
+    def test_consumer_law_corpus_is_complete(self):
+        """消保法语料从 8 条节选补到 2013 年修正文本全文 63 条。"""
+        payload = _load_demo_corpus("消费者权益保护法.json")
+        articles = payload["articles"]
+        self.assertEqual(len(articles), 63)
+        self.assertEqual([item["sequence"] for item in articles], list(range(1, 64)))
+        by_number = {item["article_number"]: item["content"] for item in articles}
+        self.assertIn("七日内退货", by_number["第25条"])
+        self.assertIn("三倍", by_number["第55条"])
+        self.assertIn("1994年1月1日", by_number["第63条"])
+        self.assertIn("npc.gov.cn", payload["provenance"]["url"])
+        self.assertIn("63 条", payload["content"])
 
 
 class EnsureDemoSourcesTests(unittest.TestCase):

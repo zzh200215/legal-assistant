@@ -173,7 +173,7 @@ def main() -> int:
                 source.full_text = full_text
             if normalize_title(source.title) != normalize_title(entry["title"]):
                 print(f"       ⚠ 标题归一不一致：{source.title!r} vs {entry['title']!r}")
-        if not args.dry_run and (filled_articles or synced_sources):
+        if not args.dry_run and (filled_articles or synced_sources or per_corpus):
             db.commit()
     finally:
         db.close()
