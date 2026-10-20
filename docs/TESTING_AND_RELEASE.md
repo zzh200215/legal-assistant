@@ -137,6 +137,29 @@ cd frontend && npx playwright test sources-flow copilot-dock --workers=1
 新增上传/索引类用例请沿用该配置，不要再直接写 `data/uploads`：受限 ACL / 只读挂载的机器上会
 `EACCES`，历史上曾让整轮全量卡在校验上传的用例里（2026-10-20 修复）。
 
+## 3.2 一键门禁（收尾只跑一条命令）
+
+`scripts/check_all.py` 把 §3 的门禁 + CI 里的其余 job（ruff、迁移链、冻结评测、前端单测/类型/包体）
+串成一条命令，顺序与 CI 一致，逐段输出并落 `.gate_logs/<stage>.log`：
+
+```bash
+.\.venv\Scripts\python.exe scripts\check_all.py            # 默认 10 段，约 13 分钟
+.\.venv\Scripts\python.exe scripts\check_all.py --e2e      # 追加 Playwright（需后端已在 :8001）
+.\.venv\Scripts\python.exe scripts\check_all.py --list     # 只列清单
+.\.venv\Scripts\python.exe scripts\check_all.py --only backend,openapi
+.\.venv\Scripts\python.exe scripts\check_all.py --skip backend
+```
+
+- 退出码：`0` 全通过（含 SKIP/WARN）、`1` 有失败、`2` 用法错误；失败时摘要直接点名日志路径。
+- **串行执行**是刻意的：见 §3.1 的并行边界，eslint/build 与 Playwright 抢 dev server 会产生假失败。
+- 解释器优先用仓库 `.venv`（可用 `CHECK_ALL_PYTHON` 覆盖）；缺 `ruff` 默认只告警，加 `--strict` 视为失败。
+- 子进程的 `TEMP` / `CHROMA_PERSIST_DIR` 被钉到 `.gate_logs/tmp`，不碰系统 TEMP，也不往仓库 `data/` 写。
+- `.gate_logs/` 已 ignore，可随时整目录删除。
+- **低完整性沙箱（DSH/Windows）注意**：工作区内的 `.venv` 解释器会被降为 Low Integrity，`npm/vite` 写
+  `frontend/` 直接 `EPERM`——不是代码问题。脚本检测到这种情况会直接打印工作区外解释器的调用方式；
+  用它跑即可（`.venv/pyvenv.cfg` 的 `home` 指向它，脚本照样用 `.venv` 跑 pytest）。只跑后端时加
+  `--skip frontend-build,frontend-bundle`。
+
 ## 4. 变更纪律（红线）
 
 1. 不改业务逻辑 / API 契约 / schema / 迁移历史；测试暴露真实缺陷时**先单独报告并获同意**再修。

@@ -73,6 +73,8 @@ chroma_eval_store/
 aibg_test_chroma/
 # 测试临时根目录（TEMP 不可用时 conftest 的兜底位置）
 .pytest_tmp/
+# 一键门禁（scripts/check_all.py）的输出与临时目录
+.gate_logs/
 
 # External repo export artifacts (_repo_main.py, _repo_meta.json, etc.)
 _repo_*
