@@ -126,33 +126,8 @@ html:root {
   padding: var(--space-5);
 }
 
-/* ─── Menu / Sidebar ─── */
-.el-menu {
-  border-right: none !important;
-  background: transparent;
-}
-.el-menu-item {
-  height: 44px;
-  line-height: 44px;
-  margin: 2px var(--space-2);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-base);
-  color: var(--color-text-secondary);
-  transition: all var(--transition-fast);
-}
-.el-menu-item:hover {
-  background: var(--color-primary-light) !important;
-  color: var(--color-primary) !important;
-}
-.el-menu-item.is-active {
-  background: var(--color-primary-light) !important;
-  color: var(--color-primary) !important;
-  font-weight: 600;
-}
-.el-menu-item .el-icon {
-  margin-right: 10px;
-  font-size: 18px;
-}
+/* ─── Menu / Sidebar ───
+   导航已改成原生按钮（.nav-entry），el-menu 不再出现在任何模板里，其覆写一并删除。 */
 
 /* ─── Tag ─── */
 .el-tag {
@@ -300,18 +275,8 @@ html:root {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0 !important;
 }
 
-/* ─── Statistic ─── */
-.el-statistic .el-statistic__head {
-  color: var(--color-text-muted);
-  font-weight: 500;
-  margin-bottom: 4px;
-  font-size: var(--text-sm);
-}
-.el-statistic .el-statistic__content {
-  font-weight: 700;
-  color: var(--color-text);
-  font-size: var(--text-xl);
-}
+/* ─── Statistic ───
+   统计卡已改用 .app-stat（design-tokens.css），el-statistic 不再出现在任何模板里。 */
 
 /* ─── Empty ─── */
 .el-empty {

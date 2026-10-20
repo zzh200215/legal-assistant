@@ -24,11 +24,23 @@ const ASSETS = resolve(DIST, 'assets')
 // 删掉 main.js 里零使用的组件注册、把最后两处 el-row/el-col 换成原生栅格后，
 // 实测入口 102.0kB raw / 35.8kB gzip、最大页面 chunk 121.8kB（System）、总资产 1579.0kB——四项全部达标，
 // 故本次**不下调也不放宽**预算：现有红线已被证明可达，保留其约束力（详见 docs/review/step10-bundle-budget.md）。
+//
+// 2026-10-20 余量治理（step20）：总量已经贴线（1599.9 / 1600，只剩 0.1kB），逐个量过所有能做的地方——
+// ① CSS 合并（cssCodeSplit: false）：只省 3.2kB，还牺牲按路由加载 CSS，不做；
+// ② Sentry：生产构建下 `VITE_SENTRY_DSN` 为空，整个 SDK 已被 tree-shake（dist 里搜不到 browserTracing）；
+// ③ 运行时依赖：逐个扫描全部有引用，没有未用大包；
+// ④ 图标：`@element-plus/icons-vue` 只有 Chat 显式用一枚，其余是 element-plus 组件内部在用，删不掉；
+// ⑤ 死 CSS：删掉 el-menu / el-statistic 的覆写（组件已不再使用），design-tokens 里另有约 18 个
+//    direction B 之前的遗留类与在用选择器交织，收益 ~1.4kB、风险高于收益，留作开口项。
+// 真正有效的一招是**把 copilot 面板改成按需加载**：入口 114.8 → 77.0kB raw、41.1 → 26.9kB gzip；
+// 但代码只是搬进异步 chunk，总量基本不动（仅分块开销 +2.4kB 后又被死 CSS 抵消一部分）。
+// 所以本轮**重定预算**：入口按新实测收紧（100 / 35），总量按实测 +6% 放宽到 1700，页面 chunk 不动；
+// 另加 95% 预警档，让下一次增长先出 ⚠️ 而不是直接撞红。
 const BUDGETS = {
-  entryJsRawKB: Number(process.env.ENTRY_JS_RAW_KB || 120),
-  entryJsGzipKB: Number(process.env.ENTRY_JS_GZIP_KB || 42),
+  entryJsRawKB: Number(process.env.ENTRY_JS_RAW_KB || 100),
+  entryJsGzipKB: Number(process.env.ENTRY_JS_GZIP_KB || 35),
   pageChunkRawKB: Number(process.env.PAGE_CHUNK_RAW_KB || 130),
-  totalRawKB: Number(process.env.TOTAL_RAW_KB || 1600),
+  totalRawKB: Number(process.env.TOTAL_RAW_KB || 1700),
 }
 
 // 路由级页面 chunk 命名（router.js 懒加载视图）
@@ -78,17 +90,22 @@ function main() {
   results.push({ label: '总资产 (raw)', value: totalRawKB, limit: BUDGETS.totalRawKB, unit: 'KB' })
 
   let failed = false
+  let warned = false
   for (const r of results) {
-    const flag = r.value > r.limit ? '❌ 超预算' : '✅'
-    console.log(`${flag} ${r.label}: ${r.value.toFixed(1)} ${r.unit} (预算 ${r.limit} ${r.unit})`)
-    if (r.value > r.limit) failed = true
+    const over = r.value > r.limit
+    // 95% 预警档：还没撞线但只剩不到 5% 余量时先出 ⚠️，避免下一次改动才发现（不判失败）
+    const tight = !over && r.value > r.limit * 0.95
+    const flag = over ? '❌ 超预算' : tight ? '⚠️ 接近预算' : '✅'
+    console.log(`${flag} ${r.label}: ${r.value.toFixed(1)} ${r.unit} (预算 ${r.limit} ${r.unit}，已用 ${((r.value / r.limit) * 100).toFixed(0)}%)`)
+    if (over) failed = true
+    if (tight) warned = true
   }
   if (reportOnly) process.exit(0)
   if (failed) {
     console.error('[bundle] 超出 bundle 预算：请按页面/入口拆分或按需加载后复检')
     process.exit(1)
   }
-  console.log('[bundle] 全部预算通过')
+  console.log(warned ? '[bundle] 预算通过，但有项目已用超过 90%：下次改动前请先量产物' : '[bundle] 全部预算通过')
 }
 
 main()

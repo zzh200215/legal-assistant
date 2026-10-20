@@ -119,7 +119,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Check, Cpu, DataLine, Files, House, List, Notebook, Reading, ScaleToOriginal, Tickets } from '@element-plus/icons-vue'
 import api from './api'
@@ -128,7 +128,9 @@ import { clearQueryCache } from './query/cache'
 import OfflineBanner from './components/OfflineBanner.vue'
 import ForbiddenState from './components/ForbiddenState.vue'
 import NotificationBell from './components/legal/NotificationBell.vue'
-import CopilotDock from './components/CopilotDock.vue'
+// 面板首屏不用（用户先看工作台内容），按需加载：把面板及其四层组件挪出入口 chunk，
+// 栅格列宽由 CSS 变量预留，所以后加载不会造成布局位移。
+const CopilotDock = defineAsyncComponent(() => import('./components/CopilotDock.vue'))
 import { clearWorkspaceCrumbs, useWorkspaceCrumbs } from './composables/workspaceBreadcrumb'
 import { useCopilotDock } from './composables/useCopilotDock'
 import { useAuthStore } from './stores/auth'
