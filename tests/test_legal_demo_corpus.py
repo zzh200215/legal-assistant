@@ -67,6 +67,20 @@ class DemoCorpusFileTests(unittest.TestCase):
         self.assertIn("npc.gov.cn", payload["provenance"]["url"])
         self.assertIn("63 条", payload["content"])
 
+    def test_private_lending_corpus_is_complete(self):
+        """民间借贷规定从 8 条节选补到 2020 年第二次修正文本全文 31 条。"""
+        payload = _load_demo_corpus("民间借贷规定.json")
+        articles = payload["articles"]
+        self.assertEqual(len(articles), 31)
+        self.assertEqual([item["sequence"] for item in articles], list(range(1, 32)))
+        by_number = {item["article_number"]: item["content"] for item in articles}
+        self.assertIn("套取金融机构贷款转贷", by_number["第13条"])
+        self.assertIn("一年期贷款市场报价利率四倍", by_number["第25条"])
+        self.assertIn("2020年8月20日", by_number["第31条"])
+        self.assertIn("cicc.court.gov.cn", payload["provenance"]["url"])
+        self.assertEqual(payload["version"], "2020年第二次修正")
+        self.assertEqual(payload["effective_date"], "2021-01-01")
+
 
 class EnsureDemoSourcesTests(unittest.TestCase):
     def setUp(self):
