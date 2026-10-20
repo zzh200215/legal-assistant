@@ -100,6 +100,7 @@ class JudgeClient:
         min_interval: float,
         backoff: list[float],
         timeout: float = 120.0,
+        max_tokens: int = 1024,
     ) -> None:
         self.model = model
         self.url = base_url.rstrip("/") + "/chat/completions"
@@ -107,6 +108,7 @@ class JudgeClient:
         self._min_interval = min_interval
         self._backoff = backoff
         self._timeout = timeout
+        self._max_tokens = max_tokens
         self._last_start = 0.0
         self.attempts = 0
         self.ok_calls = 0
@@ -128,7 +130,7 @@ class JudgeClient:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
-            "max_tokens": 1024,
+            "max_tokens": self._max_tokens,
         }
         last_error = "unknown"
         for attempt in range(len(self._backoff) + 1):
@@ -173,6 +175,7 @@ class JudgeClient:
             "endpoint": self.url,
             "min_interval_seconds": self._min_interval,
             "backoff_seconds": self._backoff,
+            "max_tokens": self._max_tokens,
             "http_attempts": self.attempts,
             "ok_calls": self.ok_calls,
             "retries": self.retries,

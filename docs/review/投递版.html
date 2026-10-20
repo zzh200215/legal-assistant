@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>律智检 · 2026-10 主线改造交付摘要</title>
+<style>
+  :root {
+    --ink: #111827;
+    --muted: #5b6472;
+    --faint: #8a93a3;
+    --line: #d9dee7;
+    --indigo: #4f46e5;
+    --teal: #0d9488;
+    --paper: #ffffff;
+    --wash: #f6f7fb;
+  }
+  * { box-sizing: border-box; }
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; background: #eceef3; color: var(--ink); }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0 auto;
+    padding: 10.5mm 12mm 8mm;
+    background: var(--paper);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  @media screen {
+    .page { margin: 18px auto; box-shadow: 0 2px 28px rgba(15, 23, 42, 0.14); }
+  }
+  @media print {
+    html, body { background: #fff; }
+    .page { box-shadow: none; margin: 0; }
+  }
+
+  /* ---------- header ---------- */
+  .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 8mm; padding-bottom: 3.2mm; border-bottom: 1.2pt solid var(--ink); }
+  .kicker { font-size: 7.2pt; letter-spacing: 0.18em; color: var(--indigo); font-weight: 700; margin: 0 0 1.6mm; }
+  h1 { font-size: 21pt; line-height: 1.12; margin: 0; letter-spacing: -0.01em; }
+  h1 span { color: var(--indigo); }
+  .lede { margin: 1.8mm 0 0; font-size: 9pt; line-height: 1.55; color: #2f3745; max-width: 128mm; }
+  .lede b { color: var(--ink); }
+  .head-meta { text-align: right; font-size: 7pt; color: var(--muted); line-height: 1.7; white-space: nowrap; }
+  .head-meta strong { display: block; font-size: 7.4pt; color: var(--ink); letter-spacing: 0.04em; }
+
+  /* ---------- metric band ---------- */
+  .metrics { display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 0.7pt solid var(--line); }
+  .metric { padding: 3.2mm 3mm 2.8mm 0; position: relative; }
+  .metric + .metric { padding-left: 3mm; border-left: 0.7pt solid var(--line); }
+  .metric .num { font-family: Georgia, "Times New Roman", "Songti SC", serif; font-size: 20pt; line-height: 1; color: var(--indigo); letter-spacing: -0.02em; }
+  .metric .num small { font-size: 9pt; letter-spacing: 0; }
+  .metric .mlabel { margin-top: 1.5mm; font-size: 7.8pt; font-weight: 700; color: var(--ink); }
+  .metric .sub { margin-top: 0.6mm; font-size: 6.8pt; color: var(--faint); line-height: 1.45; }
+
+  /* ---------- body ---------- */
+  .body { display: grid; grid-template-columns: 1.58fr 1fr; gap: 7mm; padding-top: 4.5mm; }
+  .section-title { font-size: 7.4pt; letter-spacing: 0.16em; color: var(--faint); font-weight: 700; margin: 0 0 2.2mm; text-transform: uppercase; }
+  .section-title b { color: var(--indigo); }
+
+  .cap { display: grid; grid-template-columns: 7mm 1fr; gap: 2.2mm; padding: 0 0 3.4mm; margin-bottom: 3.4mm; border-bottom: 0.6pt solid #eceff4; }
+  .cap:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+  .cap .idx { font-family: Georgia, serif; font-size: 8pt; color: var(--teal); padding-top: 0.4mm; }
+  .cap h3 { font-size: 9.4pt; margin: 0 0 0.7mm; line-height: 1.3; }
+  .cap p { margin: 0; font-size: 8.3pt; line-height: 1.65; color: #3c4553; }
+  .cap p code { font-family: Consolas, "SFMono-Regular", monospace; font-size: 6.9pt; background: var(--wash); padding: 0.2mm 0.8mm; border-radius: 1mm; color: #374151; }
+
+  .proof { border-left: 0.7pt solid var(--line); padding-left: 5mm; }
+  .proof-block { margin-bottom: 3.6mm; }
+  .proof-block:last-child { margin-bottom: 0; }
+  .proof-block h4 { font-size: 8pt; margin: 0 0 1.2mm; color: var(--ink); }
+  .proof-block h4 span { color: var(--teal); font-family: Georgia, serif; margin-right: 1.2mm; }
+  .proof-row { display: grid; grid-template-columns: 14mm 1fr; gap: 1.5mm; font-size: 7.6pt; line-height: 1.5; padding: 0.8mm 0; border-bottom: 0.5pt dotted #e4e7ee; }
+  .proof-row:last-child { border-bottom: 0; }
+  .proof-row .k { color: var(--muted); }
+  .proof-row .v { color: #2f3745; }
+  .proof-row .v b { color: var(--indigo); }
+
+  /* ---------- deliverables ---------- */
+  .deliverables { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin-top: 5mm; padding: 3.4mm 0; border-top: 0.7pt solid var(--line); border-bottom: 0.7pt solid var(--line); }
+  .d-item { display: flex; align-items: flex-start; gap: 2mm; }
+  .d-item b { font-family: Georgia, serif; font-size: 15pt; line-height: 1; color: var(--teal); }
+  .d-item span { display: block; font-size: 7.8pt; font-weight: 700; color: var(--ink); }
+  .d-item em { display: block; font-style: normal; font-size: 6.6pt; color: var(--faint); margin-top: 0.6mm; line-height: 1.35; }
+
+  /* ---------- boundary ---------- */
+  .boundary { margin-top: 4mm; background: var(--wash); border-left: 2.2pt solid var(--indigo); padding: 3mm 3.2mm; }
+  .boundary h4 { margin: 0 0 1mm; font-size: 7.2pt; letter-spacing: 0.08em; color: var(--indigo); }
+  .boundary p { margin: 0; font-size: 6.9pt; line-height: 1.55; color: #4b5464; }
+  .boundary b { color: var(--ink); }
+
+  .foot { margin-top: 2.8mm; padding-top: 2mm; border-top: 0.6pt solid var(--line); display: flex; justify-content: space-between; gap: 6mm; font-size: 6.5pt; color: var(--faint); }
+  .foot a { color: var(--indigo); text-decoration: none; }
+  .foot .stack { text-align: right; }
+</style>
+</head>
+<body>
+<main class="page">
+
+  <header class="head">
+    <div>
+      <p class="kicker">2026-10 主线改造 · 交付摘要</p>
+      <h1>律智检<span> · </span>法律 AI 工作台</h1>
+      <p class="lede">把「懂当前上下文的右侧 copilot」做成产品主线，承载 Agentic-RAG 的<b>四层可信体验</b>：过程 → 证据 → 溯源 → 忠实度；并把质量工程补齐到可复现。</p>
+    </div>
+    <div class="head-meta">
+      <strong>个人项目 · 求职作品集</strong>
+      两周 · 17 份 step 文档<br />
+      Vue 3 · FastAPI · MySQL / Redis<br />
+      Agentic-RAG · 多模型评审
+    </div>
+  </header>
+
+  <section class="metrics">
+    <div class="metric">
+      <div class="num">0.9815</div>
+      <div class="mlabel">证据覆盖率 @5</div>
+      <div class="sub">法规 27 题；样例 QA 35 题 1.0</div>
+    </div>
+    <div class="metric">
+      <div class="num">1.0</div>
+      <div class="mlabel">引用 / 拒答准确率</div>
+      <div class="sub">35 题，badcase 0</div>
+    </div>
+    <div class="metric">
+      <div class="num">31<small>/31</small></div>
+      <div class="mlabel">忠实度逐条校验</div>
+      <div class="sub">同族判官，不支持断言 0</div>
+    </div>
+    <div class="metric">
+      <div class="num">0.88</div>
+      <div class="mlabel">AI × 人工一致率</div>
+      <div class="sub">25 条，95% CI 0.700–0.958</div>
+    </div>
+    <div class="metric">
+      <div class="num">−32<small>%</small></div>
+      <div class="mlabel">入口 JS 体积</div>
+      <div class="sub">114.8 → 78.4 KB；gzip −33%</div>
+    </div>
+  </section>
+
+  <div class="body">
+    <section>
+      <h2 class="section-title"><b>01</b>　做了什么</h2>
+
+      <article class="cap">
+        <div class="idx">01</div>
+        <div>
+          <h3>常驻 copilot 面板</h3>
+          <p>每个页面右侧固定助手，可收起；工作台 / 案件「打开助手」直接开它，「整页」保留深度视图。栅格 <code>248px / 1fr / 380px</code>，收起 52px，面板按需加载、首屏无布局位移。</p>
+        </div>
+      </article>
+
+      <article class="cap">
+        <div class="idx">02</div>
+        <div>
+          <h3>四层可信体验</h3>
+          <p>咨询走 WS 真流式：检索法源 → 生成建议 → 抽取事实 → 核验引用逐步推送；证据卡展示条文原文、版本与效力；点任意一句高亮支撑它的证据；答案返回后由判官补判忠实度。</p>
+        </div>
+      </article>
+
+      <article class="cap">
+        <div class="idx">03</div>
+        <div>
+          <h3>证据可核验性</h3>
+          <p>生成时就算好四档徽标（引用已逐条核对 / 部分核对 / 待核 / 未引用），落库并接入管理员趋势、法源引用榜与语料缺口清单；历史记录回填标注「事后重算」，不假装是生成时结论。</p>
+        </div>
+      </article>
+
+      <article class="cap">
+        <div class="idx">04</div>
+        <div>
+          <h3>三层评审</h3>
+          <p>规则层 35 题 hit@5 / 引用准确率 / 拒答准确率全 1.0 → 跨模型裁判 glm-5.2 × qwen-plus 忠实度 31/31 → 人工抽检 25 条一致率 0.88；三层都是可重跑脚本，不是一次性报告。</p>
+        </div>
+      </article>
+
+      <article class="cap">
+        <div class="idx">05</div>
+        <div>
+          <h3>法源语料与条号核验</h3>
+          <p>补全劳动合同法 98 条、劳动争议调解仲裁法 54 条全文，回填 416 条条文；把「引用有没有对应法源」推进到「条号对不对」，历史引用核验重算后 verified 11 → 58 条。</p>
+        </div>
+      </article>
+
+      <article class="cap">
+        <div class="idx">06</div>
+        <div>
+          <h3>工程质量与性能</h3>
+          <p>入口 JS 114.8 → 78.4 KB（−32%），四项包体预算全绿；前端单测 84 / e2e 53、后端咨询子集 135 passed；定位并修掉 LLM 网关连接池跨事件循环复用根因，真机降级 5/24 → 0/10。</p>
+        </div>
+      </article>
+    </section>
+
+    <aside class="proof">
+      <h2 class="section-title"><b>02</b>　怎么证明</h2>
+
+      <div class="proof-block">
+        <h4><span>①</span>三层评审，同一套口径</h4>
+        <div class="proof-row"><div class="k">规则层</div><div class="v">35 题 hit@5 / 引用 / 拒答 <b>1.0</b>，badcase 0</div></div>
+        <div class="proof-row"><div class="k">裁判层</div><div class="v">glm-5.2 × qwen-plus 忠实度 <b>31/31</b>，分歧 0</div></div>
+        <div class="proof-row"><div class="k">人工层</div><div class="v"><b>0.88</b>（22/25，95% CI 0.700–0.958）</div></div>
+      </div>
+
+      <div class="proof-block">
+        <h4><span>②</span>咨询主链路，真实数据</h4>
+        <div class="proof-row"><div class="k">可核验性</div><div class="v">51 条答复带指标；条级核对 <b>51/51</b></div></div>
+        <div class="proof-row"><div class="k">句级溯源</div><div class="v">81/196 句命中（<b>41.3%</b>）；trace 覆盖 38 条</div></div>
+        <div class="proof-row"><div class="k">可复现</div><div class="v">三层脚本 + 版本化 baseline 回归门禁</div></div>
+      </div>
+
+      <div class="proof-block">
+        <h4><span>③</span>交付质量</h4>
+        <div class="proof-row"><div class="k">前端</div><div class="v">84 单测 / 53 e2e；lint 0 error</div></div>
+        <div class="proof-row"><div class="k">包体</div><div class="v">入口 <b>78.4/100</b> KB；gzip 27.4/35；总量 1605.2/1700</div></div>
+        <div class="proof-row"><div class="k">演示</div><div class="v">8 拍真实轨迹，33.6s 录完（含真实 LLM 往返）</div></div>
+      </div>
+
+      <div class="proof-block">
+        <h4><span>④</span>链路延伸</h4>
+        <div class="proof-row"><div class="k">合同审查</div><div class="v">7 条审查 / 53 条风险；条款定位 <b>47%</b>；有据性 glm 7/7 vs qwen 4/7（step21）</div></div>
+      </div>
+    </aside>
+  </div>
+
+  <section class="deliverables">
+    <div class="d-item"><b>17</b><div><span>份 step 文档</span><em>每轮验收表 + 截图 + 复现命令</em></div></div>
+    <div class="d-item"><b>8</b><div><span>拍 demo 录像</span><em>真实后端 + 真实 LLM，33.6s</em></div></div>
+    <div class="d-item"><b>3</b><div><span>条复现命令</span><em>前端门禁 / 后端子集 / 评测</em></div></div>
+    <div class="d-item"><b>1</b><div><span>套回归门禁</span><em>版本化 baseline + 漂移检出</em></div></div>
+  </section>
+
+  <section class="boundary">
+    <h4>诚实边界</h4>
+    <p>判官与被测同族（忠实度主口径由 glm-5.2 自判）；人工样本 <b>25/66</b>，CI 下界 0.700 &lt; 0.8，按「小样本达成」标注；检索集已饱和（六臂 hit@5 全 1.0），不足以支撑更细调优；五部法源仍是节选；合同审查评审样本小（7 条 / 2 用户）。<b>所有数字都可在仓库文档与 eval/outputs 中复现，降级处均如实标注。</b></p>
+  </section>
+
+  <footer class="foot">
+    <div>完整交付说明：<a href="交付说明.md">docs/review/交付说明.md</a>　·　17 份 step 文档、截图与复现命令见仓库</div>
+    <div class="stack">2026-10　·　Vue 3 / FastAPI / Agentic-RAG</div>
+  </footer>
+
+</main>
+</body>
+</html>

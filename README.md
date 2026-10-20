@@ -241,6 +241,7 @@ node scripts/capture-readme-screenshots.mjs
 | RAG 指标与评测 | [RAG_EVALUATION_GUIDE.md](docs/RAG_EVALUATION_GUIDE.md) / [EVAL_METRICS.md](docs/EVAL_METRICS.md) |
 | 配置与环境变量 | [CONFIG.md](docs/CONFIG.md) |
 | 发布与运维 | [operations-runbook.md](docs/operations-runbook.md) / [CANARY_AND_RELEASE.md](docs/CANARY_AND_RELEASE.md) |
+| 2026-10 主线改造交付说明 | [交付说明.md](docs/review/交付说明.md) |
 
 ## 使用边界
 
