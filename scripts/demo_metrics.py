@@ -20,6 +20,17 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUTS = ROOT / "eval" / "outputs"
 
 
+def _ensure_utf8_stdout() -> None:
+    """Windows 控制台默认 GBK：打印 ✅ / 中文混排会 UnicodeEncodeError，这里统一切 UTF-8。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
 def load(name: str) -> dict:
     path = OUTPUTS / name
     if not path.exists():
@@ -37,6 +48,7 @@ def pct(value: object) -> str:
 
 
 def main() -> int:
+    _ensure_utf8_stdout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--with-bundle", action="store_true", help="额外运行前端包体预算检查")
     args = parser.parse_args()
