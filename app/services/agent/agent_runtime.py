@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models.agent import AgentRun
 from app.services.agent.agent_run_state import AgentRunState
-from app.workflows.langgraph_compat import RUNTIME_CONTEXT_KEY, merge_keyed_slots
+from app.workflows.langgraph_compat import RUNTIME_CONTEXT_KEY, current_runtime_context, merge_keyed_slots
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -99,12 +99,24 @@ class AgentGraphState(TypedDict, total=False):
 def resolve_runtime(state: dict[str, Any]) -> AgentRuntime:
     """取出当前节点的运行时上下文。
 
-    解析顺序：state 中显式注入（回退引擎 / 图外调用）→ LangGraph Runtime context
-    → 旧式活对象 state 键（保留给直接调用节点的单测）。
+    解析顺序：ContextVar（LangGraph 0.5.x 兼容）→ state 显式注入（回退引擎 / 图外调用）
+    → LangGraph 0.6 Runtime context → 旧式活对象 state 键（保留给直接调用节点的单测）。
     """
+    injected = current_runtime_context()
+    if isinstance(injected, AgentRuntime):
+        return injected
     injected = state.get(RUNTIME_CONTEXT_KEY)
     if isinstance(injected, AgentRuntime):
         return injected
+    try:
+        from langgraph.config import get_config
+
+        configurable = (get_config() or {}).get("configurable") or {}
+        context = configurable.get(RUNTIME_CONTEXT_KEY)
+        if isinstance(context, AgentRuntime):
+            return context
+    except Exception:
+        pass
     try:
         from langgraph.runtime import get_runtime
 

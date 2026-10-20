@@ -1,3 +1,4 @@
+import inspect
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -78,6 +79,8 @@ from app.workflows.langgraph_compat import (
     StateGraph,
     build_checkpointer,
     graph_stream_writer,
+    reset_runtime_context,
+    set_runtime_context,
     workflow_engine_name,
 )
 
@@ -372,15 +375,26 @@ class AgentService(EvidenceVerificationMixin, AgentWorkflowNodesMixin, Superviso
 
         本服务所有图调用（首次执行 / 断点恢复 / 快照恢复）都必须走这里：``ainvoke`` 下
         LangGraph 给节点的是 no-op writer，节点事件会被静默丢弃。
+
+        LangGraph 0.6+ 用原生 ``context=`` 传运行时；0.5.x 没有该参数，改用 ContextVar
+        （LangGraph 创建子任务时会复制当前 context）并在 configurable 里留一份兜底。
         """
-        async for payload in self._workflow.astream(
-            graph_input,
-            self._graph_config(agent_run),
-            context=runtime,
-            stream_mode="custom",
-        ):
-            if isinstance(payload, dict) and runtime.event_callback:
-                await runtime.event_callback(payload)
+        config = self._graph_config(agent_run)
+        supports_context = "context" in inspect.signature(self._workflow.astream).parameters
+        token = set_runtime_context(runtime)
+        try:
+            if not supports_context:
+                configurable = dict(config.get("configurable") or {})
+                configurable[RUNTIME_CONTEXT_KEY] = runtime
+                config = {**config, "configurable": configurable}
+            stream_kwargs: dict[str, Any] = {"stream_mode": "custom"}
+            if supports_context:
+                stream_kwargs["context"] = runtime
+            async for payload in self._workflow.astream(graph_input, config, **stream_kwargs):
+                if isinstance(payload, dict) and runtime.event_callback:
+                    await runtime.event_callback(payload)
+        finally:
+            reset_runtime_context(token)
 
     def _create_run(
         self,

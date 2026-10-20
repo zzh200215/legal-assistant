@@ -6,6 +6,7 @@ import os
 import sqlite3
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from contextvars import ContextVar, Token
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -16,6 +17,24 @@ END = "__end__"
 # 真 langgraph 走 `ainvoke(..., context=...)` + `langgraph.runtime.get_runtime()`，
 # 上下文不进入 checkpoint，因此可以承载 Session / ORM 实例 / 回调等活对象。
 RUNTIME_CONTEXT_KEY = "__runtime_context__"
+
+# LangGraph 0.5.x 没有 `context=` 通道（0.6 才加），但节点里的 `resolve_runtime(state)`
+# 仍需要一个取用运行时的方式。这里用 ContextVar 承载同一对象：`_stream_workflow` 在
+# 驱动图之前 set、结束后 reset；LangGraph 创建子任务时会复制当前 context，所以节点里
+# 取得到。0.6 同时走原生 context 通道，两条路径互不依赖。
+_RUNTIME_CONTEXT: ContextVar[Any | None] = ContextVar("agent_runtime_context", default=None)
+
+
+def set_runtime_context(runtime: Any) -> Token:
+    return _RUNTIME_CONTEXT.set(runtime)
+
+
+def reset_runtime_context(token: Token) -> None:
+    _RUNTIME_CONTEXT.reset(token)
+
+
+def current_runtime_context() -> Any | None:
+    return _RUNTIME_CONTEXT.get()
 
 # 持久化 checkpoint 的本地 SQLite 默认路径（data/ 已在 .gitignore 中）
 _DEFAULT_CHECKPOINT_DB_PATH = "data/langgraph_checkpoints.sqlite"

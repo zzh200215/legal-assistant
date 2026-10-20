@@ -11,6 +11,7 @@
   用例变红。
 """
 
+import inspect
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -133,7 +134,18 @@ class AgentStreamEventsTests(unittest.IsolatedAsyncioTestCase):
             self.skipTest("fallback engine has no stream channel")
 
         async def ainvoke_instead(service, graph_input, *, agent_run, runtime):
-            await service._workflow.ainvoke(graph_input, service._graph_config(agent_run), context=runtime)
+            # 0.6 用原生 context=；0.5.x 没有该参数，用与 _stream_workflow 相同的兜底。
+            config = service._graph_config(agent_run)
+            token = langgraph_compat.set_runtime_context(runtime)
+            try:
+                if "context" in inspect.signature(service._workflow.ainvoke).parameters:
+                    await service._workflow.ainvoke(graph_input, config, context=runtime)
+                else:
+                    configurable = dict(config.get("configurable") or {})
+                    configurable[langgraph_compat.RUNTIME_CONTEXT_KEY] = runtime
+                    await service._workflow.ainvoke(graph_input, {**config, "configurable": configurable})
+            finally:
+                langgraph_compat.reset_runtime_context(token)
 
         events: list[dict] = []
         with patch.object(AgentService, "_stream_workflow", ainvoke_instead):
