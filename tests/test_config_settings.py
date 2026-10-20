@@ -16,7 +16,10 @@ from app.core.config.security import SecuritySettings
 
 
 def _valid_settings_kwargs() -> dict:
+    # ``_env_file=None``：不读开发者本地 .env（如自定义 LLM_MODEL），断言只针对默认值，
+    # 否则同一份代码在不同 .env 的机器上结果不同（CI 无 .env 时才是绿的）。
     return {
+        "_env_file": None,
         "ENVIRONMENT": "development",
         "LLM_API_KEY": "test-config-key-1234567890",
         "SECRET_KEY": "s" * 40,
@@ -84,13 +87,16 @@ def test_retention_days_json_invalid_raises():
 
 def test_production_validation_raises_only_in_production():
     prod = Settings(
+        _env_file=None,
         ENVIRONMENT="production",
         LLM_API_KEY="test-config-key-1234567890",
         SECRET_KEY="s" * 40,
         LEGAL_DATA_ENCRYPTION_KEY="",
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as excinfo:
         prod.validate_production_or_raise()
+    # 报错必须点名是加密密钥缺失（而不是恰好因其它问题抛错就算通过）
+    assert "LEGAL_DATA_ENCRYPTION" in str(excinfo.value)
 
     dev = Settings(**_valid_settings_kwargs())
     dev.validate_production_or_raise()  # 不抛

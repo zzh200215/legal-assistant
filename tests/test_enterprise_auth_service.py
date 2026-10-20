@@ -112,8 +112,10 @@ class EnterpriseAuthTests(unittest.TestCase):
         """MySQL users.hashed_password NOT NULL：OAuth 用户须有随机占位密码，且本地密码登录必然失败"""
         user, _ = self.service.oauth_login(self.db, "wecom", "WECODE-003", None, None)
         self.assertIsNotNone(user.hashed_password)
-        other, token = self.service.local_login(self.db, user.username, "any-password", None, None)
+        other, token, failure = self.service.local_login(self.db, user.username, "any-password", None, None)
+        self.assertIsNone(other)
         self.assertIsNone(token)
+        self.assertIsNone(failure)  # 密码错误走「不区分原因」分支，避免账号枚举
 
 
 class LoginLockoutPolicyTests(unittest.TestCase):
@@ -172,17 +174,22 @@ class LoginLockoutPolicyTests(unittest.TestCase):
         with patch.object(get_settings(), "LOGIN_MAX_FAIL_COUNT", 1):
             self._fail_login()
         self.db.refresh(self.user)
-        # 锁定期内即使密码正确也拒绝
-        user, token = self.service.local_login(self.db, "locktester", "right-password", None, None)
+        # 锁定期内即使密码正确也拒绝，并回传锁定原因（三态拆分）
+        user, token, failure = self.service.local_login(self.db, "locktester", "right-password", None, None)
+        self.assertIsNone(user)
         self.assertIsNone(token)
+        self.assertEqual(failure["reason"], "account_locked")
+        self.assertIsNotNone(failure["locked_until"])
         # 锁定到期后自动解锁并放行
         self.user.locked_until = utc_now() - timedelta(seconds=1)
         self.db.add(self.user)
         self.db.commit()
-        user, token = self.service.local_login(self.db, "locktester", "right-password", None, None)
+        user, token, failure = self.service.local_login(self.db, "locktester", "right-password", None, None)
         self.assertIsNotNone(token)
+        self.assertIsNone(failure)
         self.db.refresh(self.user)
         self.assertEqual(self.user.login_fail_count, 0)
+        self.assertEqual(self.user.status, "active")
 
     def test_settings_change_takes_effect_without_restart(self):
         """服务是模块级单例：阈值必须每次读配置，不能在构造期快照。"""

@@ -27,31 +27,60 @@ os.environ.setdefault("SIGNING_FADADA_SANDBOX_URL", "https://sandbox.fadada.test
 os.environ.setdefault("SIGNING_FADADA_API_KEY", "test-api-key-" + "x" * 24)
 os.environ.setdefault("OPEN_API_ENABLED", "1")
 
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+
+def _test_tmp_root() -> str:
+    """测试临时根目录。
+
+    Windows 上若 TEMP 被设成 Unix 路径（如 ``/tmp``），``tempfile.gettempdir()`` 会
+    回退到当前工作目录，于是向量库/评测产物/上传对象/``mkstemp`` 中间文件全散落在
+    仓库根目录。这里显式兜底到仓库内忽略目录 ``.pytest_tmp/``，并把进程级 tempdir
+    一并钉住（含 TEMP/TMP 环境变量，子进程同样生效），保证临时产物集中、可清理。
+    """
+    root = tempfile.gettempdir()
+    if Path(root).resolve() == Path.cwd().resolve():
+        root = str(Path.cwd() / ".pytest_tmp")
+        os.environ["TEMP"] = root
+        os.environ["TMP"] = root
+        tempfile.tempdir = root
+    Path(root).mkdir(parents=True, exist_ok=True)
+    return root
+
+
+_TEST_TMP = _test_tmp_root()
+
 # E-7：测试使用独立向量库目录，避免仓库 chroma_db 存量数据（schema 随版本演进）
 # 或并发测试相互污染。
-import tempfile  # noqa: E402
-
 os.environ.setdefault(
     "CHROMA_PERSIST_DIR",
-    os.path.join(tempfile.gettempdir(), "aibg_test_chroma"),
+    os.path.join(_TEST_TMP, "aibg_test_chroma"),
 )
 
 # #90：评测 bundle 导出到临时目录，避免测试写仓库内跟踪文件（eval/bundles/feedback_autogen/qa_dataset.json）
 os.environ.setdefault(
     "EVAL_BUNDLE_OUTPUT_DIR",
-    os.path.join(tempfile.gettempdir(), "aibg_test_eval_bundle"),
+    os.path.join(_TEST_TMP, "aibg_test_eval_bundle"),
 )
 
 # LangGraph checkpoint 落 SQLite：测试写临时文件，避免仓库 data/ 里累积测试 thread。
 os.environ.setdefault(
     "LANGGRAPH_CHECKPOINT_DB",
-    os.path.join(tempfile.gettempdir(), "aibg_test_langgraph", "checkpoints.sqlite"),
+    os.path.join(_TEST_TMP, "aibg_test_langgraph", "checkpoints.sqlite"),
+)
+
+# 上传/对象存储改写到临时目录：上传用例原本直接写仓库 data/uploads，既污染工作区，
+# 又在只读挂载/受限 ACL 的机器上 EACCES（曾让整轮回归卡在建库上传用例上）。
+# document_service.UPLOAD_DIR 与存储适配器同源于该配置，导入前设置即可同步生效。
+os.environ.setdefault(
+    "STORAGE_LOCAL_DIR",
+    os.path.join(_TEST_TMP, "aibg_test_storage"),
 )
 
 # CI 无 data/ 目录：为 OCR 测试生成占位 PNG fixture（本地产物不入 git）。
 def _ensure_upload_fixtures() -> None:
     import io
-    from pathlib import Path
 
     try:
         from PIL import Image

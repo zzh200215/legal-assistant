@@ -132,6 +132,11 @@ cd frontend && npx playwright test sources-flow copilot-dock --workers=1
 表现为一批用例 `connect ECONNREFUSED ::1:5173` 的**假失败**（2026-10-18 实测：并发时 8 failed，单独重跑 50 passed）。
 正确做法是：重命令先跑完，再跑 Playwright；或把 Playwright 放到后台 job 里独占。
 
+**测试写盘位置（不要写仓库）：** `tests/conftest.py` 在导入 app 前把 `STORAGE_LOCAL_DIR`、
+`CHROMA_PERSIST_DIR`、`EVAL_BUNDLE_OUTPUT_DIR`、`LANGGRAPH_CHECKPOINT_DB` 全部重定向到临时目录。
+新增上传/索引类用例请沿用该配置，不要再直接写 `data/uploads`：受限 ACL / 只读挂载的机器上会
+`EACCES`，历史上曾让整轮全量卡在校验上传的用例里（2026-10-20 修复）。
+
 ## 4. 变更纪律（红线）
 
 1. 不改业务逻辑 / API 契约 / schema / 迁移历史；测试暴露真实缺陷时**先单独报告并获同意**再修。
