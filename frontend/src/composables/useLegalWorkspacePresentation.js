@@ -38,7 +38,8 @@ export function useContractRiskPresentation({ contractForm, contractResult, cont
   const riskFilter = ref({ clauseType: '', level: '', sortBy: '', located: '' })
   const highlightedParagraph = ref(null)
   const contractContentRef = ref(null)
-  const contractParagraphs = computed(() => (contractForm.value.content || '').split('\n').filter((line) => line.trim()))
+  // 已上传/已审查记录的正文在 contractResult.content 上，段落要与左侧原文一致，不能只看表单
+  const contractParagraphs = computed(() => (contractResult.value?.content || contractForm.value.content || '').split('\n').filter((line) => line.trim()))
   const availableClauseTypes = computed(() => Array.from(new Set((contractResult.value?.risks || []).map((risk) => risk.clause_type).filter(Boolean))))
   const filteredRisks = computed(() => {
     let risks = [...(contractResult.value?.risks || [])]

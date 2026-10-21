@@ -135,6 +135,28 @@ def _contract_review_evidence_gaps(db: Session, target_id: int) -> dict[str, int
     }
 
 
+class RiskAnchorIn(BaseModel):
+    """就地补定位：段落序号（1 基）+ 该段原文片段。"""
+
+    paragraph: int = Field(ge=1, le=10000)
+    snippet: str = Field(min_length=1, max_length=300)
+
+
+def _can_anchor_risk(db: Session, user: User, review) -> bool:
+    """补定位的写权限：提交人本人、审核律师或管理员。"""
+    from app.models.org import OrganizationMember
+
+    if review.user_id == user.id or user.role in {"admin", "dept_admin"}:
+        return True
+    if not getattr(user, "organization_id", None):
+        return False
+    member = db.query(OrganizationMember).filter(
+        OrganizationMember.organization_id == user.organization_id,
+        OrganizationMember.user_id == user.id,
+    ).first()
+    return bool(member and member.legal_role in {"admin", "reviewer"})
+
+
 def _require_evidence_ack(db: Session, target_type: str, target_id: int, action: str, acknowledged: bool) -> None:
     """证据链门禁（分级）：高风险缺口必须补齐定位；中低风险缺口允许人工确认后通过。"""
     if action != "approve" or target_type != "contract_review":
@@ -991,6 +1013,49 @@ def list_contract_review_versions(item_id: int, db: Session = Depends(get_db), c
         return legal_workspace_read_module.versions(db, current_user, "contract_review", item_id)
     except LookupError:
         raise api_error(404, "合同审查记录不存在", code="LEGAL_CONTRACT_REVIEW_NOT_FOUND")
+
+
+@router.post("/contract-reviews/{item_id}/risks/{risk_index}/anchor")
+def anchor_contract_risk(
+    item_id: int, risk_index: int, req: RiskAnchorIn,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """就地补定位：把风险锚到合同原文的某一段，写回 risks_json 并重算 evidence_summary。
+
+    校验片段确实来自该段（去空白后是子串），避免「随便指一段」把缺口刷成有定位。
+    """
+    try:
+        row = legal_workspace_read_module.get_row(db, current_user, "contract_review", item_id)
+    except LookupError:
+        raise api_error(404, "合同审查记录不存在", code="LEGAL_CONTRACT_REVIEW_NOT_FOUND")
+    if not _can_anchor_risk(db, current_user, row):
+        raise api_error(403, "仅提交人、审核律师或管理员可补定位", code="LEGAL_RISK_ANCHOR_FORBIDDEN")
+
+    try:
+        risks = json.loads(row.risks_json or "[]")
+    except (TypeError, ValueError):
+        risks = []
+    if not isinstance(risks, list) or not 0 <= risk_index < len(risks):
+        raise api_error(404, "风险项不存在", code="LEGAL_RISK_NOT_FOUND")
+
+    paragraphs = [line.strip() for line in (row.content or "").splitlines() if line.strip()]
+    if req.paragraph > len(paragraphs):
+        raise api_error(400, "段落超出合同正文范围", code="LEGAL_RISK_ANCHOR_INVALID")
+    paragraph_text = paragraphs[req.paragraph - 1]
+    if "".join(req.snippet.split()) not in "".join(paragraph_text.split()):
+        raise api_error(400, "定位片段必须来自所选段落", code="LEGAL_RISK_ANCHOR_INVALID")
+
+    risks[risk_index]["source_location"] = {"paragraph": req.paragraph, "snippet": req.snippet.strip()}
+    row.risks_json = json.dumps(risks, ensure_ascii=False)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    audit.log(
+        db, current_user, "legal_risk_anchor", target_type="contract_review",
+        target_id=item_id, detail=f"risk_index={risk_index};paragraph={req.paragraph}",
+    )
+    return serialize_workspace_row(row)
 
 
 @router.post("/contract-reviews/{item_id}/resubmit")

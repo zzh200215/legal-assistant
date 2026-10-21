@@ -100,6 +100,14 @@
             <p v-if="selectedEvidence && !selectedEvidence.anchored" class="evidence-note">无条款定位：建议人工定位到具体条款后再确认。</p>
             <p v-else-if="selectedEvidence?.snippetVerified === false" class="evidence-note is-warn">定位待核：引用的原文片段未在合同正文中匹配。</p>
             <h4>{{ selectedRisk.description || '需要进一步核对该条款。' }}</h4>
+            <div class="detail-section anchor-section">
+              <h5>条款定位</h5>
+              <p v-if="selectedRisk.source_location?.paragraph" class="anchor-current">已定位：第 {{ selectedRisk.source_location.paragraph }} 段<span v-if="selectedRisk.source_location?.snippet">「{{ selectedRisk.source_location.snippet }}」</span></p>
+              <template v-else>
+                <p v-if="anchoringRisk === selectedRisk" class="anchor-hint">请在左侧合同原文中点击要锚定的段落（片段将取自该段原文）。<el-button size="small" text @click="cancelAnchoring">取消</el-button></p>
+                <el-button v-else size="small" :loading="anchorLoading" @click="startAnchoring(selectedRisk)">从原文补定位</el-button>
+              </template>
+            </div>
             <div class="detail-section">
               <h5>修改建议</h5>
               <p>{{ selectedRisk.suggestion || '请结合交易背景补充具体修改方案。' }}</p>
@@ -267,7 +275,7 @@ const contractStageText = useStagedProgress(contractLoading, [
 ])
 const {
   reviewFilter, riskFilter, highlightedParagraph, availableClauseTypes, filteredRisks, filteredContractReviews,
-  resetRiskFilter, jumpToRisk,
+  contractParagraphs, resetRiskFilter, jumpToRisk,
 } = useContractRiskPresentation({ contractForm, contractResult, contractReviews })
 const { compareForm, compareLoading, compareResult, submitCompare } = useContractComparison({ client: legalWorkspace, message: ElMessage })
 // 历史审查三态（ux-audit P1-3/M-13）：加载失败与"暂无记录"分离，失败可重试
@@ -396,7 +404,40 @@ const returnContractForRevision = async () => {
     ElMessage.error(error.response?.data?.error?.detail || error.response?.data?.detail || '退回修订失败')
   }
 }
+const anchoringRisk = ref(null)
+const anchorLoading = ref(false)
+const startAnchoring = (risk) => {
+  anchoringRisk.value = risk
+  highlightedParagraph.value = null
+}
+const cancelAnchoring = () => { anchoringRisk.value = null }
+const saveAnchor = async (paragraph) => {
+  const risk = anchoringRisk.value
+  const index = (contractResult.value?.risks || []).indexOf(risk)
+  if (!risk || index < 0) return
+  const text = contractParagraphs.value[paragraph - 1] || ''
+  if (!text) return
+  anchorLoading.value = true
+  try {
+    const response = await legalWorkspace.anchorContractRisk(contractResult.value.id, index, {
+      paragraph,
+      snippet: text.slice(0, 200),
+    })
+    const updated = response?.data || response
+    if (updated?.risks) {
+      contractResult.value = updated
+      selectedRisk.value = updated.risks[index] || null
+    }
+    anchoringRisk.value = null
+    ElMessage.success(`已标记为第 ${paragraph} 段，证据链已更新`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || error.message || '补定位失败')
+  } finally {
+    anchorLoading.value = false
+  }
+}
 const selectParagraph = (paragraph) => {
+  if (anchoringRisk.value) { void saveAnchor(paragraph); return }
   const risk = (contractResult.value?.risks || []).find((item) => item.source_location?.paragraph === paragraph)
   if (risk) selectedRisk.value = risk
 }
@@ -594,4 +635,7 @@ onMounted(openLatestContractReview)
   .compare-grid { grid-template-columns: minmax(0, 1fr); }
   .compare-result-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
+
+.anchor-current { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.6; }
+.anchor-hint { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--color-primary-light); color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.6; }
 </style>

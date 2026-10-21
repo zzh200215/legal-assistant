@@ -1027,3 +1027,107 @@ class ContractEvidenceGateTests(unittest.TestCase):
         self.db.refresh(clean)
         self.assertEqual(clean.status, "pending_review")  # 整批拒绝，不做部分成功
 
+class ContractRiskAnchorTests(unittest.TestCase):
+    """就地补定位：把风险锚到合同原文段落，写回 risks_json 并重算证据链。"""
+
+    def setUp(self):
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        self.TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        Base.metadata.create_all(bind=engine)
+        self.db = self.TestingSessionLocal()
+
+        self.owner = User(
+            username="anchor_owner", email="anchor_owner@example.com",
+            hashed_password=hash_password("secret"), role="user",
+        )
+        self.admin = User(
+            username="anchor_admin", email="anchor_admin@example.com",
+            hashed_password=hash_password("secret"), role="admin",
+        )
+        self.db.add_all([self.owner, self.admin])
+        self.db.commit()
+
+        def override_get_db():
+            db = self.TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.client = TestClient(app)
+        self.owner_headers = {"Authorization": f"Bearer {create_access_token({'sub': self.owner.id})}"}
+        self.admin_headers = {"Authorization": f"Bearer {create_access_token({'sub': self.admin.id})}"}
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        self.db.close()
+
+    def _review(self):
+        row = ContractReview(
+            user_id=self.owner.id,
+            title="补定位用例",
+            content="合同总金额为人民币一百万元。\n双方未约定交付标准。",
+            summary="摘要",
+            risks_json=json.dumps([{
+                "clause_type": "payment", "risk_level": "high", "description": "付款节点未明确",
+                "suggestion": "补充付款节点", "source_location": {"paragraph": None, "snippet": ""},
+            }], ensure_ascii=False),
+            references_json="[]", status="pending_review", version=1,
+        )
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def _anchor(self, row, index=0, paragraph=1, snippet="合同总金额为人民币一百万元", headers=None):
+        return self.client.post(
+            f"/api/legal/contract-reviews/{row.id}/risks/{index}/anchor",
+            headers=headers or self.owner_headers,
+            json={"paragraph": paragraph, "snippet": snippet},
+        )
+
+    def test_owner_anchor_updates_evidence_summary(self):
+        row = self._review()
+        response = self._anchor(row)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["evidence_summary"]["unanchored"], 0)
+        self.assertEqual(data["evidence_summary"]["unanchored_high"], 0)
+        self.assertEqual(data["evidence_summary"]["level"], "strong")
+        self.assertEqual(data["risks"][0]["source_location"]["paragraph"], 1)
+        self.assertTrue(data["risks"][0]["evidence"]["anchored"])
+
+        self.db.refresh(row)
+        stored = json.loads(row.risks_json)
+        self.assertEqual(stored[0]["source_location"]["snippet"], "合同总金额为人民币一百万元")
+
+    def test_reviewer_can_anchor(self):
+        row = self._review()
+        response = self._anchor(row, headers=self.admin_headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["evidence_summary"]["anchored"], 1)
+
+    def test_snippet_must_come_from_selected_paragraph(self):
+        row = self._review()
+        response = self._anchor(row, paragraph=1, snippet="这句话不在第一段")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "LEGAL_RISK_ANCHOR_INVALID")
+
+    def test_paragraph_out_of_range_is_rejected(self):
+        row = self._review()
+        response = self._anchor(row, paragraph=9)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "LEGAL_RISK_ANCHOR_INVALID")
+
+    def test_unknown_risk_index_returns_404(self):
+        row = self._review()
+        response = self._anchor(row, index=3)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "LEGAL_RISK_NOT_FOUND")
+

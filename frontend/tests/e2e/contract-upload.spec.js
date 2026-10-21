@@ -5,6 +5,24 @@ import { test, expect } from '@playwright/test'
 // 全 mock，锁定上传路径契约（区别于 U-3 的纯文本提交）。
 const success = (data) => ({ success: true, data })
 
+// 审查结果夹具：服务端已在读接口补好 evidence / evidence_summary（前端直接用，不重算）
+const REVIEW = {
+  id: 1,
+  title: '联调合同.txt',
+  status: 'draft',
+  summary: '上传合同审查完成，共识别 2 处风险点',
+  content: [
+    '合同总金额为人民币一百万元。',
+    '双方未约定交付标准。',
+  ].join('\n'),
+  risks: [
+    { id: 11, clause_type: 'payment', label: '付款条款', risk_level: 'high', description: '付款节点未明确', suggestion: '补充付款节点', source_location: { paragraph: 1, snippet: '合同总金额为人民币一百万元' }, evidence: { anchored: true, paragraph: 1, snippet_verified: true } },
+    { id: 12, clause_type: 'delivery', label: '交付与验收', risk_level: 'medium', description: '未约定交付标准', suggestion: '补充交付与验收条款', source_location: { paragraph: null, snippet: '' }, evidence: { anchored: false, paragraph: null, snippet_verified: null } },
+  ],
+  evidence_summary: { total: 2, active: 2, anchored: 1, unanchored: 1, unanchored_high: 0, unanchored_by_level: { medium: 1 }, snippets: 1, verified: 1, located_rate: 0.5, snippet_rate: 1, level: 'partial' },
+  version: 1,
+}
+
 test('合同审查：上传文件触发 multipart 审查并渲染结果', async ({ page }) => {
   const requests = {}
   const unexpected = []
@@ -40,23 +58,23 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
 
     if (method === 'POST' && path === '/legal/contract-reviews/upload') {
       requests.upload = request.postDataBuffer().toString('utf8')
-      return route.fulfill({ json: success({
-        id: 1,
-        title: '联调合同.txt',
-        status: 'draft',
-        summary: '上传合同审查完成，共识别 2 处风险点',
-        content: [
-          '合同总金额为人民币一百万元。',
-          '双方未约定交付标准。',
-        ].join('\n'),
-        // 服务端读时补的 evidence：前端应直接用这份口径，而不是本地重算
-        risks: [
-          { id: 11, clause_type: 'payment', label: '付款条款', risk_level: 'high', description: '付款节点未明确', suggestion: '补充付款节点', source_location: { paragraph: 1, snippet: '合同总金额为人民币一百万元' }, evidence: { anchored: true, paragraph: 1, snippet_verified: true } },
-          { id: 12, clause_type: 'delivery', label: '交付与验收', risk_level: 'medium', description: '未约定交付标准', suggestion: '补充交付与验收条款', source_location: { paragraph: null, snippet: '' }, evidence: { anchored: false, paragraph: null, snippet_verified: null } },
-        ],
-        evidence_summary: { total: 2, anchored: 1, unanchored: 1, snippets: 1, verified: 1, located_rate: 0.5, snippet_rate: 1, level: 'partial' },
-        version: 1,
-      }) })
+      return route.fulfill({ json: success(REVIEW) })
+    }
+
+    if (method === 'POST' && path === '/legal/contract-reviews/1/risks/1/anchor') {
+      requests.anchor = request.postDataJSON()
+      const updated = JSON.parse(JSON.stringify(REVIEW))
+      updated.risks[1].source_location = { paragraph: 2, snippet: REVIEW.content.split('\n')[1] }
+      updated.risks[1].evidence = { anchored: true, paragraph: 2, snippet_verified: true }
+      updated.evidence_summary = {
+        ...REVIEW.evidence_summary,
+        anchored: 2,
+        unanchored: 0,
+        unanchored_by_level: {},
+        located_rate: 1,
+        level: 'strong',
+      }
+      return route.fulfill({ json: success(updated) })
     }
 
     unexpected.push(`${method} ${path}`)
@@ -100,6 +118,16 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
   await expect(page.locator('.risk-issue')).toHaveCount(1)
   await page.locator('.evidence-gap-toggle').click()
   await expect(page.getByText('付款节点未明确')).toBeVisible()
+
+  // 就地补定位：点「从原文补定位」→ 点第 2 段 → 回填 source_location 并刷新证据链
+  await page.locator('.risk-issue').filter({ hasText: '交付与验收' }).click()
+  await page.getByRole('button', { name: '从原文补定位' }).click()
+  await expect(page.getByText('请在左侧合同原文中点击要锚定的段落')).toBeVisible()
+  await page.locator('#para-2').click()
+  await expect.poll(() => requests.anchor).toEqual({ paragraph: 2, snippet: '双方未约定交付标准。' })
+  await expect(page.locator('.evidence-chain')).toHaveText('2/2 有定位')
+  await expect(page.locator('.risk-location--missing')).toHaveCount(0)
+  await expect(page.locator('.evidence-gap-toggle')).toBeDisabled()
   await expect(page.getByText('合同文件审查完成')).toBeVisible()
   expect(requests.upload).toBeDefined()
   expect(requests.upload).toContain('联调合同.txt')

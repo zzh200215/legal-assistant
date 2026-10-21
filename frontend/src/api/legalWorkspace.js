@@ -100,6 +100,9 @@ export default {
     if (caseId) form.append('case_id', caseId)
     return http.post('/legal/contract-reviews/upload', form, { headers: idempotencyHeaders(options) })
   },
+  anchorContractRisk(reviewId, riskIndex, payload, options = {}) {
+    return http.post(`/legal/contract-reviews/${reviewId}/risks/${riskIndex}/anchor`, payload, { headers: idempotencyHeaders(options) })
+  },
   compareContracts(payload, options = {}) {
     return http.post('/legal/contract-compare', payload, { headers: idempotencyHeaders(options) })
   },
