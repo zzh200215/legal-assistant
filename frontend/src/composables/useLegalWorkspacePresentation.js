@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { normalizeEvidenceText, resolveRiskEvidence } from './useContractEvidence'
 
 const label = (values, value) => values[value] || value
 
@@ -34,16 +35,21 @@ export const formatDate = (value) => value ? String(value).replace('T', ' ').sli
 
 export function useContractRiskPresentation({ contractForm, contractResult, contractReviews }) {
   const reviewFilter = ref({ status: '', risk: '' })
-  const riskFilter = ref({ clauseType: '', level: '', sortBy: '' })
+  const riskFilter = ref({ clauseType: '', level: '', sortBy: '', located: '' })
   const highlightedParagraph = ref(null)
   const contractContentRef = ref(null)
   const contractParagraphs = computed(() => (contractForm.value.content || '').split('\n').filter((line) => line.trim()))
   const availableClauseTypes = computed(() => Array.from(new Set((contractResult.value?.risks || []).map((risk) => risk.clause_type).filter(Boolean))))
   const filteredRisks = computed(() => {
     let risks = [...(contractResult.value?.risks || [])]
-    const { clauseType, level, sortBy } = riskFilter.value
+    const { clauseType, level, sortBy, located } = riskFilter.value
     if (clauseType) risks = risks.filter((risk) => risk.clause_type === clauseType)
     if (level) risks = risks.filter((risk) => risk.risk_level === level)
+    if (located === 'anchored' || located === 'missing') {
+      // 证据链筛选与徽标同源：都走 useContractEvidence 的定位判定，避免两套口径
+      const normalized = normalizeEvidenceText(contractResult.value?.content || contractForm.value.content || '')
+      risks = risks.filter((risk) => resolveRiskEvidence(risk, normalized).anchored === (located === 'anchored'))
+    }
     const rank = { high: 0, medium: 1, low: 2 }
     if (sortBy === 'risk_desc') risks.sort((a, b) => (rank[a.risk_level] ?? 3) - (rank[b.risk_level] ?? 3))
     if (sortBy === 'paragraph_asc') risks.sort((a, b) => (a.source_location?.paragraph ?? 999) - (b.source_location?.paragraph ?? 999))
@@ -53,7 +59,7 @@ export function useContractRiskPresentation({ contractForm, contractResult, cont
     if (reviewFilter.value.status && review.status !== reviewFilter.value.status) return false
     return !reviewFilter.value.risk || (review.risks || []).some((risk) => risk.risk_level === reviewFilter.value.risk)
   }))
-  const resetRiskFilter = () => { riskFilter.value = { clauseType: '', level: '', sortBy: '' } }
+  const resetRiskFilter = () => { riskFilter.value = { clauseType: '', level: '', sortBy: '', located: '' } }
   const jumpToRisk = (risk) => {
     const paragraph = risk.source_location?.paragraph
     highlightedParagraph.value = paragraph || null

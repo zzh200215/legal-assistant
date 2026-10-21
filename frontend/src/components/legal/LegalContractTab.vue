@@ -71,7 +71,7 @@
         <aside class="app-card risk-pane">
           <div class="app-card-head">
             <h2>风险与问题</h2>
-            <span class="app-card-head-meta risk-counts"><span class="high-count">高 {{ riskCounts.high }}</span><span>中 {{ riskCounts.medium }}</span><span>低 {{ riskCounts.low }}</span></span>
+            <span class="app-card-head-meta risk-counts"><span v-if="evidenceChain.total" class="evidence-chain" :class="`is-${evidenceChain.level}`" :title="evidenceChainHint">{{ evidenceChain.anchored }}/{{ evidenceChain.total }} 有定位</span><span class="high-count">高 {{ riskCounts.high }}</span><span>中 {{ riskCounts.medium }}</span><span>低 {{ riskCounts.low }}</span></span>
           </div>
           <div class="risk-filters">
             <el-select v-model="riskFilter.level" size="small" clearable placeholder="全部等级">
@@ -80,14 +80,25 @@
             <el-select v-model="riskFilter.clauseType" size="small" clearable placeholder="全部条款">
               <el-option v-for="type in availableClauseTypes" :key="type" :label="clauseLabel(type)" :value="type" />
             </el-select>
+            <button
+              v-if="evidenceChain.total"
+              class="evidence-gap-toggle"
+              :class="{ active: riskFilter.located === 'missing' }"
+              type="button"
+              :aria-pressed="riskFilter.located === 'missing'"
+              :disabled="!evidenceChain.unanchored"
+              @click="toggleEvidenceGap"
+            >无定位 {{ evidenceChain.unanchored }}</button>
           </div>
           <div class="risk-list" aria-label="审查风险列表">
-            <RiskIssueItem v-for="issue in filteredRisks" :key="issue.id || `${issue.clause_type}-${issue.source_location?.paragraph}`" :issue="issue" :active="selectedRisk === issue" @select="selectRisk" />
+            <RiskIssueItem v-for="issue in filteredRisks" :key="issue.id || `${issue.clause_type}-${issue.source_location?.paragraph}`" :issue="issue" :active="selectedRisk === issue" :evidence="evidenceForRisk(evidenceChain, issue)" @select="selectRisk" />
             <div v-if="!filteredRisks.length" class="risk-empty">未发现符合筛选条件的风险项。</div>
           </div>
 
           <section v-if="selectedRisk" class="risk-detail">
             <p class="detail-kicker">{{ clauseLabel(selectedRisk.clause_type) || selectedRisk.label || '风险说明' }}</p>
+            <p v-if="selectedEvidence && !selectedEvidence.anchored" class="evidence-note">无条款定位：建议人工定位到具体条款后再确认。</p>
+            <p v-else-if="selectedEvidence?.snippetVerified === false" class="evidence-note is-warn">定位待核：引用的原文片段未在合同正文中匹配。</p>
             <h4>{{ selectedRisk.description || '需要进一步核对该条款。' }}</h4>
             <div class="detail-section">
               <h5>修改建议</h5>
@@ -230,6 +241,7 @@ import DocumentVersion from './DocumentVersion.vue'
 import DocumentDiff from './DocumentDiff.vue'
 import { useContractReviews } from '../../composables/useContractReviews'
 import { useContractRiskPresentation, clauseLabel, formatDate, riskLabel, statusLabel } from '../../composables/useLegalWorkspacePresentation'
+import { EVIDENCE_CHAIN_LEVELS, buildContractEvidenceChain, evidenceForRisk } from '../../composables/useContractEvidence'
 import { useContractComparison } from '../../composables/useContractComparison'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
@@ -294,6 +306,19 @@ const riskCounts = computed(() => (contractResult.value?.risks || []).reduce((co
   if (Object.hasOwn(counts, risk.risk_level)) counts[risk.risk_level] += 1
   return counts
 }, { high: 0, medium: 0, low: 0 }))
+// 证据链：与风险清单同源实时计算，徽标/筛选/详情提示共用一份判定
+const evidenceChain = computed(() => buildContractEvidenceChain(contractResult.value?.risks || [], documentContent.value))
+const selectedEvidence = computed(() => (selectedRisk.value ? evidenceForRisk(evidenceChain.value, selectedRisk.value) : null))
+const evidenceChainHint = computed(() => {
+  const meta = EVIDENCE_CHAIN_LEVELS[evidenceChain.value.level] || EVIDENCE_CHAIN_LEVELS.none
+  const snippet = evidenceChain.value.snippets
+    ? `｜snippet 可核验 ${evidenceChain.value.verified}/${evidenceChain.value.snippets}`
+    : '｜没有 snippet 可核验'
+  return `${meta.label} · ${meta.hint}${snippet}`
+})
+const toggleEvidenceGap = () => {
+  riskFilter.value = { ...riskFilter.value, located: riskFilter.value.located === 'missing' ? '' : 'missing' }
+}
 const selectedReferences = computed(() => selectedRisk.value?.references || selectedRisk.value?.legal_basis || contractResult.value?.references || [])
 const canSubmitForReview = computed(() => Boolean(contractResult.value?.id) && !['pending_review', 'needs_lawyer_review', 'lawyer_approved'].includes(contractResult.value?.status))
 
@@ -488,7 +513,17 @@ onMounted(openLatestContractReview)
 /* 风险栏用 flex 列：风险项详情可长可短（未选中时不渲染），弹性 + 独立滚动避免卡片 overflow:hidden 裁切 */
 .risk-pane { display: flex; flex-direction: column; max-height: 860px; }
 .risk-filters, .human-decision-note { flex: none; }
-.risk-counts { display: flex; gap: var(--space-2); white-space: nowrap; }
+.risk-counts { display: flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
+.evidence-chain { padding: 2px 8px; border: 1px solid var(--color-border-light); border-radius: var(--radius-full); color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: 500; }
+.evidence-chain.is-strong { border-color: var(--color-success); color: var(--color-success); }
+.evidence-chain.is-partial { border-color: var(--color-warning); color: var(--color-warning); }
+.evidence-chain.is-weak, .evidence-chain.is-none { border-color: var(--color-danger); color: var(--color-danger); }
+.evidence-gap-toggle { flex: none; padding: 0 var(--space-3); height: 24px; border: 1px solid var(--color-border-light); border-radius: var(--radius-full); background: var(--color-surface); color: var(--color-text-secondary); font-size: var(--text-xs); cursor: pointer; }
+.evidence-gap-toggle:hover:not(:disabled) { border-color: var(--color-warning); color: var(--color-warning); }
+.evidence-gap-toggle.active { border-color: var(--color-warning); background: var(--color-warning-light); color: var(--color-warning); }
+.evidence-gap-toggle:disabled { opacity: 0.5; cursor: default; }
+.evidence-note { margin: 0 0 var(--space-2); padding: 6px 8px; border-radius: var(--radius-sm); background: var(--color-warning-light); color: var(--color-warning); font-size: var(--text-xs); line-height: 1.6; }
+.evidence-note.is-warn { background: var(--color-danger-light); color: var(--color-danger); }
 .risk-counts .high-count { color: var(--color-danger); }
 .risk-filters { display: flex; gap: var(--space-2); padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border-light); }
 .risk-filters .el-select { width: 50%; min-width: 0; }

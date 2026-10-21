@@ -40,7 +40,21 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
 
     if (method === 'POST' && path === '/legal/contract-reviews/upload') {
       requests.upload = request.postDataBuffer().toString('utf8')
-      return route.fulfill({ json: success({ id: 1, title: '联调合同.txt', status: 'draft', summary: '上传合同审查完成，共识别 3 处风险点', risks: [], version: 1 }) })
+      return route.fulfill({ json: success({
+        id: 1,
+        title: '联调合同.txt',
+        status: 'draft',
+        summary: '上传合同审查完成，共识别 2 处风险点',
+        content: [
+          '合同总金额为人民币一百万元。',
+          '双方未约定交付标准。',
+        ].join('\n'),
+        risks: [
+          { id: 11, clause_type: 'payment', label: '付款条款', risk_level: 'high', description: '付款节点未明确', suggestion: '补充付款节点', source_location: { paragraph: 1, snippet: '合同总金额为人民币一百万元' } },
+          { id: 12, clause_type: 'delivery', label: '交付与验收', risk_level: 'medium', description: '未约定交付标准', suggestion: '补充交付与验收条款', source_location: { paragraph: null, snippet: '' } },
+        ],
+        version: 1,
+      }) })
     }
 
     unexpected.push(`${method} ${path}`)
@@ -67,7 +81,23 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
   })
 
   // 结果渲染 + 消息 + multipart 载荷含 file/case_id
-  await expect(page.getByText('上传合同审查完成，共识别 3 处风险点')).toBeVisible()
+  await expect(page.getByText('上传合同审查完成，共识别 2 处风险点')).toBeVisible()
+
+  // 证据链：1 条有条款定位 / 1 条缺口；缺口的风险在列表里显式标注，不能静默
+  await expect(page.locator('.evidence-chain')).toHaveText('1/2 有定位')
+  await expect(page.locator('.risk-location--missing')).toHaveCount(1)
+  await expect(page.locator('.evidence-gap-toggle')).toHaveText('无定位 1')
+
+  // 缺定位的风险：详情里给出人工定位提示
+  await page.locator('.risk-issue').filter({ hasText: '交付与验收' }).click()
+  await expect(page.locator('.evidence-note')).toContainText('建议人工定位')
+
+  // 缺口筛选：只看无定位，条目里不再出现有定位的那条风险
+  await page.locator('.evidence-gap-toggle').click()
+  await expect(page.getByText('付款节点未明确')).toHaveCount(0)
+  await expect(page.locator('.risk-issue')).toHaveCount(1)
+  await page.locator('.evidence-gap-toggle').click()
+  await expect(page.getByText('付款节点未明确')).toBeVisible()
   await expect(page.getByText('合同文件审查完成')).toBeVisible()
   expect(requests.upload).toBeDefined()
   expect(requests.upload).toContain('联调合同.txt')

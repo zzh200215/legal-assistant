@@ -3,6 +3,8 @@
     <span class="risk-topline">
       <span class="risk-level" :class="`level-${issue.risk_level || 'low'}`">{{ riskLabel(issue.risk_level) }}</span>
       <span v-if="issue.source_location?.paragraph" class="risk-location">第 {{ issue.source_location.paragraph }} 段</span>
+      <span v-else class="risk-location risk-location--missing">无条款定位</span>
+      <span v-if="evidence?.snippetVerified === false" class="risk-location risk-location--unverified">定位待核</span>
     </span>
     <strong>{{ issue.label || clauseLabel(issue.clause_type) || '合同风险' }}</strong>
     <span class="risk-description">{{ issue.description || '需要进一步核对该条款。' }}</span>
@@ -13,7 +15,11 @@
 <script setup>
 import { clauseLabel, riskLabel } from '../../composables/useLegalWorkspacePresentation'
 
-defineProps({ issue: { type: Object, required: true }, active: { type: Boolean, default: false } })
+defineProps({
+  issue: { type: Object, required: true },
+  active: { type: Boolean, default: false },
+  evidence: { type: Object, default: null },
+})
 defineEmits(['select'])
 </script>
 
@@ -27,6 +33,8 @@ defineEmits(['select'])
 .level-medium { border-color: var(--color-warning); color: var(--color-warning); }
 .level-low { border-color: var(--color-success); color: var(--color-success); }
 .risk-location { color: var(--color-text-muted); font-size: 11px; }
+.risk-location--missing { padding: 0 6px; border-radius: var(--radius-full); background: var(--color-warning-light); color: var(--color-warning); }
+.risk-location--unverified { padding: 0 6px; border-radius: var(--radius-full); background: var(--color-danger-light); color: var(--color-danger); }
 strong { font-size: 13px; font-weight: 600; }
 .risk-description { color: var(--color-text-secondary); font-size: 12px; line-height: 1.65; }
 .risk-snippet { color: var(--color-text-muted); font-size: 11px; line-height: 1.55; }
