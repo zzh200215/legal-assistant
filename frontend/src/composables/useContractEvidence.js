@@ -74,6 +74,56 @@ export function evidenceForRisk(chain, risk) {
   return chain.byKey?.get(riskEvidenceKey(risk)) || null
 }
 
+/**
+ * 服务端已下发 evidence 时，直接用后端口径（每条风险带 `evidence`，顶层 `evidence_summary`）。
+ * 保留本地计算只作为兼容回退：老缓存、e2e 夹具或第三方调用可能没有这两个字段。
+ */
+export function chainFromServer(risks = [], summary = {}) {
+  const list = Array.isArray(risks) ? risks : []
+  const items = list.map((risk) => {
+    const evidence = risk?.evidence && typeof risk.evidence === 'object' ? risk.evidence : {}
+    return {
+      key: riskEvidenceKey(risk),
+      risk,
+      anchored: Boolean(evidence.anchored),
+      paragraph: evidence.paragraph ?? risk?.source_location?.paragraph ?? null,
+      snippet: String(risk?.source_location?.snippet ?? '').trim(),
+      snippetVerified: evidence.snippet_verified ?? null,
+    }
+  })
+  const total = summary?.total ?? items.length
+  const anchored = summary?.anchored ?? items.filter((item) => item.anchored).length
+  return {
+    total,
+    anchored,
+    unanchored: summary?.unanchored ?? total - anchored,
+    snippets: summary?.snippets ?? items.filter((item) => item.snippet).length,
+    verified: summary?.verified ?? 0,
+    locatedRate: summary?.located_rate ?? (total ? anchored / total : 0),
+    snippetRate: summary?.snippet_rate ?? null,
+    level: summary?.level || evidenceLevel(anchored, total),
+    items,
+    gaps: items.filter((item) => !item.anchored),
+    byKey: new Map(items.map((item) => [item.key, item])),
+    source: 'server',
+  }
+}
+
+export function resolveEvidenceChain(risks = [], summary = null, content = '') {
+  const list = Array.isArray(risks) ? risks : []
+  if (summary && list.every((risk) => risk && risk.evidence)) {
+    return chainFromServer(list, summary)
+  }
+  return { ...buildContractEvidenceChain(list, content), source: 'client' }
+}
+
 export function useContractEvidence() {
-  return { buildContractEvidenceChain, evidenceForRisk, resolveRiskEvidence, riskEvidenceKey }
+  return {
+    buildContractEvidenceChain,
+    chainFromServer,
+    resolveEvidenceChain,
+    evidenceForRisk,
+    resolveRiskEvidence,
+    riskEvidenceKey,
+  }
 }

@@ -3,9 +3,11 @@ import assert from 'node:assert/strict'
 import {
   EVIDENCE_CHAIN_LEVELS,
   buildContractEvidenceChain,
+  chainFromServer,
   evidenceForRisk,
   evidenceLevel,
   normalizeEvidenceText,
+  resolveEvidenceChain,
   resolveRiskEvidence,
   riskEvidenceKey,
 } from '../useContractEvidence.js'
@@ -112,4 +114,48 @@ test('证据链分档与文案齐备（徽标 hover 用）', () => {
     assert.ok(EVIDENCE_CHAIN_LEVELS[level].label, `${level} 缺少 label`)
     assert.ok(EVIDENCE_CHAIN_LEVELS[level].hint, `${level} 缺少 hint`)
   }
+})
+
+const serverRisk = (id, anchored, snippetVerified) => ({
+  id,
+  clause_type: 'payment',
+  description: '服务端已判',
+  source_location: { paragraph: anchored ? 1 : null, snippet: anchored ? '合同总金额为人民币一百万元' : '' },
+  evidence: { anchored, paragraph: anchored ? 1 : null, snippet_verified: snippetVerified },
+})
+
+const SERVER_SUMMARY = {
+  total: 2,
+  anchored: 1,
+  unanchored: 1,
+  snippets: 1,
+  verified: 1,
+  located_rate: 0.5,
+  snippet_rate: 1,
+  level: 'partial',
+}
+
+test('服务端已下发 evidence 时按其口径装配（不再本地重算）', () => {
+  const chain = chainFromServer([serverRisk(1, true, true), serverRisk(2, false, null)], SERVER_SUMMARY)
+  assert.equal(chain.total, 2)
+  assert.equal(chain.anchored, 1)
+  assert.equal(chain.unanchored, 1)
+  assert.equal(chain.level, 'partial')
+  assert.equal(chain.source, 'server')
+  assert.equal(chain.gaps.length, 1)
+  assert.equal(evidenceForRisk(chain, { id: 1 }).anchored, true)
+})
+
+test('resolveEvidenceChain 优先服务端；缺 evidence 字段时回退本地', () => {
+  const serverChain = resolveEvidenceChain([serverRisk(1, true, true), serverRisk(2, false, null)], SERVER_SUMMARY, CONTENT)
+  assert.equal(serverChain.source, 'server')
+
+  // e2e 夹具 / 老缓存：没有 evidence 字段与 summary
+  const localChain = resolveEvidenceChain([risk({ paragraph: 1 })], null, CONTENT)
+  assert.equal(localChain.source, 'client')
+  assert.equal(localChain.anchored, 1)
+
+  // 有条目缺 evidence 也回退，避免一半服务端一半本地混算
+  const mixed = resolveEvidenceChain([serverRisk(1, true, true), risk({ paragraph: 1 })], SERVER_SUMMARY, CONTENT)
+  assert.equal(mixed.source, 'client')
 })

@@ -49,10 +49,12 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
           '合同总金额为人民币一百万元。',
           '双方未约定交付标准。',
         ].join('\n'),
+        // 服务端读时补的 evidence：前端应直接用这份口径，而不是本地重算
         risks: [
-          { id: 11, clause_type: 'payment', label: '付款条款', risk_level: 'high', description: '付款节点未明确', suggestion: '补充付款节点', source_location: { paragraph: 1, snippet: '合同总金额为人民币一百万元' } },
-          { id: 12, clause_type: 'delivery', label: '交付与验收', risk_level: 'medium', description: '未约定交付标准', suggestion: '补充交付与验收条款', source_location: { paragraph: null, snippet: '' } },
+          { id: 11, clause_type: 'payment', label: '付款条款', risk_level: 'high', description: '付款节点未明确', suggestion: '补充付款节点', source_location: { paragraph: 1, snippet: '合同总金额为人民币一百万元' }, evidence: { anchored: true, paragraph: 1, snippet_verified: true } },
+          { id: 12, clause_type: 'delivery', label: '交付与验收', risk_level: 'medium', description: '未约定交付标准', suggestion: '补充交付与验收条款', source_location: { paragraph: null, snippet: '' }, evidence: { anchored: false, paragraph: null, snippet_verified: null } },
         ],
+        evidence_summary: { total: 2, anchored: 1, unanchored: 1, snippets: 1, verified: 1, located_rate: 0.5, snippet_rate: 1, level: 'partial' },
         version: 1,
       }) })
     }

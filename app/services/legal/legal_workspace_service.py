@@ -30,6 +30,7 @@ from app.models.legal_contract import LegalReviewPolicy, LegalReviewPolicyVersio
 from app.models.user import User
 from app.models.org import LegalMemberRole, OrganizationMember
 from app.services.observability.audit_log_service import AuditLogService
+from app.services.legal.contract_evidence import annotate_contract_evidence
 from app.services.legal.legal_service import (
     DISCLAIMER,
     DRAFT_FIELDS,
@@ -149,10 +150,15 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "evidence": _json_or(getattr(row, "evidence_json", None), "{}"),
         }
     if isinstance(row, ContractReview):
+        # 证据链：读时现算（不写库、不迁移），每条风险补 evidence，顶层给聚合统计。
+        risks_with_evidence, evidence_summary = annotate_contract_evidence(
+            row.content or "", _json_or(row.risks_json, "[]")
+        )
         return {
             "id": row.id, "case_id": row.case_id, "title": row.title, "content": row.content,
             "document_id": row.document_id, "version": row.version, "status": row.status,
-            "summary": row.summary, "risks": _json_or(row.risks_json, "[]"),
+            "summary": row.summary, "risks": risks_with_evidence,
+            "evidence_summary": evidence_summary,
             "references": _json_or(row.references_json, "[]"),
             "review_policy_id": row.review_policy_id,
             "review_policy_version": row.review_policy_version,

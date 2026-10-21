@@ -241,7 +241,7 @@ import DocumentVersion from './DocumentVersion.vue'
 import DocumentDiff from './DocumentDiff.vue'
 import { useContractReviews } from '../../composables/useContractReviews'
 import { useContractRiskPresentation, clauseLabel, formatDate, riskLabel, statusLabel } from '../../composables/useLegalWorkspacePresentation'
-import { EVIDENCE_CHAIN_LEVELS, buildContractEvidenceChain, evidenceForRisk } from '../../composables/useContractEvidence'
+import { EVIDENCE_CHAIN_LEVELS, evidenceForRisk, resolveEvidenceChain } from '../../composables/useContractEvidence'
 import { useContractComparison } from '../../composables/useContractComparison'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
@@ -307,7 +307,11 @@ const riskCounts = computed(() => (contractResult.value?.risks || []).reduce((co
   return counts
 }, { high: 0, medium: 0, low: 0 }))
 // 证据链：与风险清单同源实时计算，徽标/筛选/详情提示共用一份判定
-const evidenceChain = computed(() => buildContractEvidenceChain(contractResult.value?.risks || [], documentContent.value))
+const evidenceChain = computed(() => resolveEvidenceChain(
+  contractResult.value?.risks || [],
+  contractResult.value?.evidence_summary || null,
+  documentContent.value,
+))
 const selectedEvidence = computed(() => (selectedRisk.value ? evidenceForRisk(evidenceChain.value, selectedRisk.value) : null))
 const evidenceChainHint = computed(() => {
   const meta = EVIDENCE_CHAIN_LEVELS[evidenceChain.value.level] || EVIDENCE_CHAIN_LEVELS.none

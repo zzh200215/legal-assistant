@@ -63,7 +63,7 @@ step21 的规则层读数：**53 条风险里只有 25 条带条款定位（47.2
 
 ## 6. 诚实边界
 
-1. **双份实现**：前端 `useContractEvidence` 与后端规则层（`_norm` + 定位率）是同一口径的两份代码，存在漂移风险；根治要让后端在审查结果里下发 `evidence_summary`，前端只渲染（要改 API 契约 + OpenAPI 快照）。
+1. **两份实现仍在，但以后端为准**：服务端已在读接口下发 `evidence` / `evidence_summary`（见 §8），前端优先用；`useContractEvidence` 的本地计算只作为缺字段时的回退（老缓存、e2e 夹具、第三方调用）。彻底消除要删掉回退路径，代价是老数据不再有兜底。
 2. **只覆盖合同审查**：咨询链路的四档徽标走的是 `evidence_json` 另一套实现，两者还没抽成同一个组件。
 3. **snippet 是「包含」判断**：合同里出现重复句时会把另一处误判为可核验；真正的溯源需要段落锚点 + 字符偏移，当前 `source_location` 只有 paragraph + snippet。
 4. **提示不是阻断**：缺口目前只做展示与筛选，没有接「无定位必须复核」的流程，也没有进入审核队列。
@@ -72,6 +72,35 @@ step21 的规则层读数：**53 条风险里只有 25 条带条款定位（47.2
 
 ## 7. 下一步
 
-1. **后端下发 evidence summary**：在审查结果里带 `{anchored, total, snippets, verified, level}`，前端不再重算，消除双份口径。
+1. ~~**后端下发 evidence summary**~~（已完成，见 §8）：审查结果里带 `evidence_summary` 与每条风险的 `evidence`，前端优先使用。
 2. **缺口进入复核动作**：无定位的风险在 review-queue 里作为待办项，律师必须补定位或显式接受，才能通过审核。
 3. **段落偏移**：给 `source_location` 补 `start/end` 偏移，把「包含判断」升级成真正的高亮定位。
+
+---
+
+## 8. 追加：证据链改由后端下发（2026-10-21 晚）
+
+§6 第 1 条说的双份实现当天就收口了：**服务端在读接口现算**，前端不再重算。
+
+**位置**：`app/services/legal/contract_evidence.py`（纯函数）+ `serialize_workspace_row`（列表/详情/上传/重提都走它）。
+
+**返回什么**：
+
+```json
+{
+  "risks": [ { "...": "...", "evidence": { "anchored": true, "paragraph": 1, "snippet_verified": true } } ],
+  "evidence_summary": {
+    "total": 2, "anchored": 1, "unanchored": 1,
+    "snippets": 1, "verified": 1,
+    "located_rate": 0.5, "snippet_rate": 1.0, "level": "partial"
+  }
+}
+```
+
+**为什么在读时算**：不写库、不做迁移，7 条历史记录立刻就有同一口径的结果；写时算反而要处理存量回填与版本漂移。
+
+**前端**：`resolveEvidenceChain(risks, summary, content)` —— 有 `evidence_summary` 且每条风险都带 `evidence` 就用服务端口径；否则回退本地计算（e2e 夹具/老缓存）。e2e 的 mock 已补上这两个字段，覆盖服务端路径；单测 2 例覆盖优先级与回退。
+
+**验证**：后端 9 例（空清单、全定位、片段缺失不入分母、片段不匹配、空白匹配、三档阈值、脏数据、不改原对象、序列化集成）；前端单测 95 passed；e2e `contract-upload` 1 passed；OpenAPI 契约无 drift（该接口无 response_model，字段为附加）。
+
+**仍存在的边界**：snippet 仍是「包含」判断（重复句会误判）；缺口只提示不阻断（§6 第 4 条未变）。
