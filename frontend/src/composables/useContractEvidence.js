@@ -36,7 +36,8 @@ export function resolveRiskEvidence(risk = {}, normalizedContent = '') {
   const snippetVerified = snippet
     ? normalizedContent.includes(normalizeEvidenceText(snippet).slice(0, SNIPPET_MATCH_LIMIT))
     : null
-  return { anchored, paragraph, snippet, snippetVerified }
+  const dismissed = String(risk?.status || '') === 'dismissed'
+  return { anchored, paragraph, snippet, snippetVerified, dismissed }
 }
 
 export function evidenceLevel(anchored, total) {
@@ -49,9 +50,11 @@ export function buildContractEvidenceChain(risks = [], content = '') {
   const normalizedContent = normalizeEvidenceText(content)
   const list = Array.isArray(risks) ? risks : []
   const items = list.map((risk) => ({ key: riskEvidenceKey(risk), risk, ...resolveRiskEvidence(risk, normalizedContent) }))
-  const total = items.length
-  const anchoredCount = items.filter((item) => item.anchored).length
-  const withSnippet = items.filter((item) => item.snippet)
+  // 已忽略的风险不算缺口，也不进覆盖率分母（与后端 annotate_contract_evidence 同口径）
+  const activeItems = items.filter((item) => !item.dismissed)
+  const total = activeItems.length
+  const anchoredCount = activeItems.filter((item) => item.anchored).length
+  const withSnippet = activeItems.filter((item) => item.snippet)
   const verified = withSnippet.filter((item) => item.snippetVerified).length
 
   return {
@@ -64,7 +67,7 @@ export function buildContractEvidenceChain(risks = [], content = '') {
     snippetRate: withSnippet.length ? verified / withSnippet.length : null,
     level: evidenceLevel(anchoredCount, total),
     items,
-    gaps: items.filter((item) => !item.anchored),
+    gaps: activeItems.filter((item) => !item.anchored),
     byKey: new Map(items.map((item) => [item.key, item])),
   }
 }
@@ -89,9 +92,11 @@ export function chainFromServer(risks = [], summary = {}) {
       paragraph: evidence.paragraph ?? risk?.source_location?.paragraph ?? null,
       snippet: String(risk?.source_location?.snippet ?? '').trim(),
       snippetVerified: evidence.snippet_verified ?? null,
+      dismissed: String(risk?.status || '') === 'dismissed',
     }
   })
-  const total = summary?.total ?? items.length
+  // active = 去掉「已忽略」的风险；徽标分母用 active，避免被忽略的风险拉低覆盖率
+  const total = summary?.active ?? summary?.total ?? items.length
   const anchored = summary?.anchored ?? items.filter((item) => item.anchored).length
   return {
     total,
@@ -103,7 +108,7 @@ export function chainFromServer(risks = [], summary = {}) {
     snippetRate: summary?.snippet_rate ?? null,
     level: summary?.level || evidenceLevel(anchored, total),
     items,
-    gaps: items.filter((item) => !item.anchored),
+    gaps: items.filter((item) => !item.anchored && !item.dismissed),
     byKey: new Map(items.map((item) => [item.key, item])),
     source: 'server',
   }

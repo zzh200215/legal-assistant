@@ -965,8 +965,8 @@ class ContractEvidenceGateTests(unittest.TestCase):
         return row
 
     @staticmethod
-    def _risk(paragraph=1, snippet="合同总金额为人民币一百万元"):
-        return {"clause_type": "payment", "risk_level": "high", "description": "描述",
+    def _risk(paragraph=1, snippet="合同总金额为人民币一百万元", level="high"):
+        return {"clause_type": "payment", "risk_level": level, "description": "描述",
                 "source_location": {"paragraph": paragraph, "snippet": snippet}}
 
     def _approve(self, row, acknowledged=None):
@@ -978,19 +978,29 @@ class ContractEvidenceGateTests(unittest.TestCase):
             headers=self.reviewer_headers, json=body,
         )
 
-    def test_approve_is_blocked_when_risk_has_no_anchor(self):
-        row = self._review([self._risk(paragraph=None, snippet="")])
-        response = self._approve(row)
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["error"]["code"], "LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED")
-        self.assertIn("1 条风险", response.json()["message"])
+    def test_high_risk_gap_cannot_be_acknowledged_away(self):
+        """高风险缺口必须补齐定位：勾选「已人工核对」也不放行。"""
+        row = self._review([self._risk(paragraph=None, snippet="", level="high")])
+        blocked = self._approve(row)
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(blocked.json()["error"]["code"], "LEGAL_REVIEW_HIGH_RISK_UNANCHORED")
+        self.assertIn("1 条高风险", blocked.json()["message"])
+
+        acknowledged = self._approve(row, acknowledged=True)
+        self.assertEqual(acknowledged.status_code, 409)
+        self.assertEqual(acknowledged.json()["error"]["code"], "LEGAL_REVIEW_HIGH_RISK_UNANCHORED")
         self.db.refresh(row)
         self.assertEqual(row.status, "pending_review")  # 状态没有被改
 
-    def test_approve_passes_after_acknowledging_gaps(self):
-        row = self._review([self._risk(paragraph=None, snippet="")])
-        response = self._approve(row, acknowledged=True)
-        self.assertEqual(response.status_code, 200)
+    def test_medium_gap_requires_acknowledgement(self):
+        row = self._review([self._risk(paragraph=None, snippet="", level="medium")])
+        blocked = self._approve(row)
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(blocked.json()["error"]["code"], "LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED")
+        self.assertIn("1 条风险", blocked.json()["message"])
+
+        acknowledged = self._approve(row, acknowledged=True)
+        self.assertEqual(acknowledged.status_code, 200)
         self.db.refresh(row)
         self.assertEqual(row.status, "lawyer_approved")
 
@@ -1003,7 +1013,7 @@ class ContractEvidenceGateTests(unittest.TestCase):
 
     def test_bulk_approve_is_blocked_by_single_gap(self):
         clean = self._review([self._risk()])
-        gap = self._review([self._risk(paragraph=None, snippet="")])
+        gap = self._review([self._risk(paragraph=None, snippet="", level="medium")])
         response = self.client.post(
             "/api/legal/review-queue/bulk-action",
             headers=self.reviewer_headers,
@@ -1013,6 +1023,7 @@ class ContractEvidenceGateTests(unittest.TestCase):
             ]},
         )
         self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED")
         self.db.refresh(clean)
         self.assertEqual(clean.status, "pending_review")  # 整批拒绝，不做部分成功
 

@@ -118,29 +118,44 @@ class ReviewActionIn(BaseModel):
     acknowledge_evidence_gaps: bool = False
 
 
-def _contract_review_evidence_gaps(db: Session, target_id: int) -> int:
-    """合同审查里没有条款定位的风险条数；其它类型/记录不存在返回 0。"""
+def _contract_review_evidence_gaps(db: Session, target_id: int) -> dict[str, int]:
+    """合同审查里没有条款定位的风险条数（整体 + 高风险）；其它类型/记录不存在返回 0。"""
+    empty = {"unanchored": 0, "unanchored_high": 0}
     row = db.query(ContractReview).filter(ContractReview.id == target_id).first()
     if row is None:
-        return 0
+        return empty
     try:
         risks = json.loads(row.risks_json or "[]")
     except (TypeError, ValueError):
         risks = []
     _, summary = annotate_contract_evidence(row.content or "", risks)
-    return int(summary["unanchored"])
+    return {
+        "unanchored": int(summary["unanchored"]),
+        "unanchored_high": int(summary.get("unanchored_high") or 0),
+    }
 
 
 def _require_evidence_ack(db: Session, target_type: str, target_id: int, action: str, acknowledged: bool) -> None:
-    if action != "approve" or target_type != "contract_review" or acknowledged:
+    """证据链门禁（分级）：高风险缺口必须补齐定位；中低风险缺口允许人工确认后通过。"""
+    if action != "approve" or target_type != "contract_review":
         return
     gaps = _contract_review_evidence_gaps(db, target_id)
-    if gaps:
+    if not gaps["unanchored"]:
+        return
+    if gaps["unanchored_high"]:
         raise api_error(
             409,
-            f"还有 {gaps} 条风险没有条款定位，请人工核对后再通过或先退回补充",
+            f"还有 {gaps['unanchored_high']} 条高风险没有条款定位，须补齐定位后才能通过；"
+            "中低风险缺口可人工核对确认",
+            code="LEGAL_REVIEW_HIGH_RISK_UNANCHORED",
+            detail=f"unanchored_high={gaps['unanchored_high']};unanchored={gaps['unanchored']}",
+        )
+    if not acknowledged:
+        raise api_error(
+            409,
+            f"还有 {gaps['unanchored']} 条风险没有条款定位，请人工核对后再通过或先退回补充",
             code="LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED",
-            detail=f"unanchored={gaps}",
+            detail=f"unanchored={gaps['unanchored']}",
         )
 
 

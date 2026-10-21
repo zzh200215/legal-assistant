@@ -159,3 +159,18 @@ test('resolveEvidenceChain 优先服务端；缺 evidence 字段时回退本地'
   const mixed = resolveEvidenceChain([serverRisk(1, true, true), risk({ paragraph: 1 })], SERVER_SUMMARY, CONTENT)
   assert.equal(mixed.source, 'client')
 })
+
+test('已忽略的风险不算缺口，也不进覆盖率分母（与后端同口径）', () => {
+  const dismissed = { ...risk({ paragraph: null }), status: 'dismissed', description: '误报风险' }
+  const chain = buildContractEvidenceChain([dismissed, risk({ paragraph: 1 })], CONTENT)
+  assert.equal(chain.total, 1)
+  assert.equal(chain.anchored, 1)
+  assert.equal(chain.gaps.length, 0)
+  assert.equal(chain.level, 'strong')
+
+  const serverChain = chainFromServer(
+    [serverRisk(1, true, true), { ...serverRisk(2, false, null), status: 'dismissed' }],
+    { ...SERVER_SUMMARY, total: 2, active: 1, unanchored: 0, unanchored_high: 0, level: 'strong' },
+  )
+  assert.equal(serverChain.gaps.length, 0)
+})

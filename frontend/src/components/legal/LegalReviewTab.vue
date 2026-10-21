@@ -86,10 +86,20 @@
           <section class="app-card-section detail-block evidence-block"><h3 class="app-card-section-title">证据 / 法源</h3><EvidenceReference v-for="reference in selectedReferences" :key="reference.source_id || reference.title" :reference="reference" :clickable="false" /><p v-if="!selectedReferences.length" class="review-muted">该审核对象没有附带法源引用。</p></section>
           <section class="app-card-section detail-block timeline-block"><h3 class="app-card-section-title">审核历史与批注</h3><ReviewTimeline :entries="reviewHistoryMap[reviewKey(selectedItem)] || []" /><div class="comment-box"><el-input v-model="commentDraft[reviewKey(selectedItem)]" type="textarea" :rows="3" placeholder="记录审核批注，不改变审核状态。" maxlength="2000" /><el-button size="small" :loading="commentLoading[reviewKey(selectedItem)]" @click="submitComment(selectedItem)">添加批注</el-button></div></section>
 
-          <section v-if="canReview && evidenceGaps(selectedItem)" class="app-card-section detail-block evidence-gap-block">
+          <section
+            v-if="canReview && evidenceGaps(selectedItem)"
+            class="app-card-section detail-block evidence-gap-block"
+            :class="{ 'is-blocking': highRiskGaps(selectedItem) }"
+          >
             <h3 class="app-card-section-title">证据链缺口</h3>
-            <p class="evidence-gap-text">这条审查还有 <strong>{{ evidenceGaps(selectedItem) }}</strong> 条风险没有条款定位。通过前需要人工核对：要么回到合同页补齐定位，要么在这里显式确认已逐条核对。</p>
-            <label class="evidence-gap-ack">
+            <p v-if="highRiskGaps(selectedItem)" class="evidence-gap-text">
+              还有 <strong>{{ highRiskGaps(selectedItem) }}</strong> 条<strong>高风险</strong>没有条款定位——必须回到合同页补齐定位后才能通过，人工勾选不能替代。
+              <template v-if="evidenceGaps(selectedItem) > highRiskGaps(selectedItem)">另有 {{ evidenceGaps(selectedItem) - highRiskGaps(selectedItem) }} 条中低风险缺口，可人工核对确认。</template>
+            </p>
+            <p v-else class="evidence-gap-text">
+              这条审查还有 <strong>{{ evidenceGaps(selectedItem) }}</strong> 条中低风险没有条款定位。通过前需人工核对并勾选确认；也可以先退回补充，让提交人补齐定位。
+            </p>
+            <label v-if="!highRiskGaps(selectedItem)" class="evidence-gap-ack">
               <input v-model="gapAcknowledged[reviewKey(selectedItem)]" type="checkbox" />
               已人工核对无定位风险（{{ evidenceGaps(selectedItem) }} 条）
             </label>
@@ -150,10 +160,17 @@ const {
 // 证据链门禁：无条款定位的风险必须人工核对后才能通过（服务端同样校验，前端只负责少走一趟）
 const gapAcknowledged = ref({})
 const evidenceGaps = (item) => Number(item?.evidence_summary?.unanchored || 0)
-const canApprove = (item) => evidenceGaps(item) === 0 || Boolean(gapAcknowledged.value[reviewKey(item)])
+const highRiskGaps = (item) => Number(item?.evidence_summary?.unanchored_high || 0)
+// 分级门禁：高风险缺口必须补定位（勾选不放行）；中低风险缺口允许人工确认
+const canApprove = (item) => highRiskGaps(item) === 0
+  && (evidenceGaps(item) === 0 || Boolean(gapAcknowledged.value[reviewKey(item)]))
 const approveReview = async (item) => {
-  if (!canApprove(item)) {
-    ElMessage.warning(`还有 ${evidenceGaps(item)} 条风险没有条款定位，请先核对并勾选确认`)
+  if (highRiskGaps(item)) {
+    ElMessage.warning(`还有 ${highRiskGaps(item)} 条高风险没有条款定位，须先补齐定位`)
+    return
+  }
+  if (evidenceGaps(item) && !gapAcknowledged.value[reviewKey(item)]) {
+    ElMessage.warning(`还有 ${evidenceGaps(item)} 条中低风险没有条款定位，请先核对并勾选确认`)
     return
   }
   await reviewAction(item, 'approve', evidenceGaps(item) ? { acknowledge_evidence_gaps: true } : {})
@@ -340,6 +357,8 @@ defineExpose({ refresh: () => Promise.all([loadReviewQueue(), loadReviewStats()]
 }
 
 .evidence-gap-block { border-left: 3px solid var(--color-warning); background: var(--color-warning-light); }
+.evidence-gap-block.is-blocking { border-left-color: var(--color-danger); background: var(--color-danger-light); }
+.evidence-gap-block.is-blocking .evidence-gap-text strong { color: var(--color-danger); }
 .evidence-gap-text { margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.7; }
 .evidence-gap-text strong { color: var(--color-warning); }
 .evidence-gap-ack { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-text); font-size: var(--text-xs); cursor: pointer; }

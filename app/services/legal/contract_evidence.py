@@ -16,6 +16,8 @@ from typing import Any
 
 SNIPPET_MATCH_LIMIT = 80
 LEVELS = ("strong", "partial", "weak", "none")
+# 已被律师判定不适用的风险（忽略/驳回）不再计入缺口，否则误报的高风险会让审核永远过不了
+GAP_EXCLUDED_STATUSES = {"dismissed"}
 
 
 def _normalize(text: Any) -> str:
@@ -45,6 +47,8 @@ def annotate_contract_evidence(content: str, risks: Any) -> tuple[list[dict[str,
     anchored_count = 0
     snippet_count = 0
     verified_count = 0
+    unanchored_by_level: dict[str, int] = {}
+    dismissed_count = 0
     for risk in items:
         location = risk.get("source_location") if isinstance(risk.get("source_location"), dict) else {}
         paragraph = location.get("paragraph")
@@ -53,6 +57,11 @@ def annotate_contract_evidence(content: str, risks: Any) -> tuple[list[dict[str,
         verified = _snippet_verified(snippet, normalized_content)
         if anchored:
             anchored_count += 1
+        elif str(risk.get("status") or "") in GAP_EXCLUDED_STATUSES:
+            dismissed_count += 1
+        else:
+            level = str(risk.get("risk_level") or "unknown")
+            unanchored_by_level[level] = unanchored_by_level.get(level, 0) + 1
         if verified is not None:
             snippet_count += 1
             verified_count += 1 if verified else 0
@@ -65,14 +74,21 @@ def annotate_contract_evidence(content: str, risks: Any) -> tuple[list[dict[str,
         annotated.append(enriched)
 
     total = len(annotated)
+    active = total - dismissed_count  # 忽略掉的风险不参与覆盖率与缺口统计
+    gaps_total = sum(unanchored_by_level.values())
     summary = {
         "total": total,
+        "active": active,
         "anchored": anchored_count,
-        "unanchored": total - anchored_count,
+        "unanchored": gaps_total,
         "snippets": snippet_count,
         "verified": verified_count,
-        "located_rate": round(anchored_count / total, 4) if total else 0.0,
+        "located_rate": round(anchored_count / active, 4) if active else 0.0,
         "snippet_rate": round(verified_count / snippet_count, 4) if snippet_count else None,
-        "level": _level(anchored_count, total),
+        "level": _level(anchored_count, active),
+        # 缺口按等级拆开：高风险缺口是「必须补定位」，中低风险允许人工确认后通过
+        "unanchored_high": unanchored_by_level.get("high", 0),
+        "unanchored_by_level": unanchored_by_level,
+        "dismissed": dismissed_count,
     }
     return annotated, summary

@@ -31,13 +31,33 @@ const CONTRACT_ROW = {
   summary: '付款条款存在高风险，需人工复核。',
   confidence: 78,
   risks: [{
-    id: 1, label: '付款条款', clause_type: 'payment', risk_level: 'high', status: 'open',
+    id: 1, label: '付款条款', clause_type: 'payment', risk_level: 'medium', status: 'open',
     description: '付款节点缺少验收条件。', suggestion: '补充验收标准与付款条件。',
     source_location: { paragraph: null, snippet: '' },
     evidence: { anchored: false, paragraph: null, snippet_verified: null },
   }],
   // 服务端读时下发的证据链统计：1 条风险、0 条有定位 → 审核通过前必须人工核对
-  evidence_summary: { total: 1, anchored: 0, unanchored: 1, snippets: 0, verified: 0, located_rate: 0, snippet_rate: null, level: 'none' },
+  evidence_summary: { total: 1, anchored: 0, unanchored: 1, unanchored_high: 0, unanchored_by_level: { medium: 1 }, snippets: 0, verified: 0, located_rate: 0, snippet_rate: null, level: 'none' },
+  references: [],
+}
+
+const HIGH_GAP_ROW = {
+  id: 994,
+  target_type: 'contract_review',
+  title: 'U3探针：高风险无定位合同',
+  content: '双方约定违约金按日千分之五计算。',
+  case_id: 3,
+  status: 'needs_lawyer_review',
+  summary: '违约金条款风险极高。',
+  confidence: 70,
+  risks: [{
+    id: 2, label: '违约责任', clause_type: 'breach', risk_level: 'high', status: 'open',
+    description: '违约金比例过高。', suggestion: '调整为 LPR 四倍以内。',
+    source_location: { paragraph: null, snippet: '' },
+    evidence: { anchored: false, paragraph: null, snippet_verified: null },
+  }],
+  // 高风险缺口：勾选也不能放行，必须补齐定位
+  evidence_summary: { total: 1, anchored: 0, unanchored: 1, unanchored_high: 1, unanchored_by_level: { high: 1 }, snippets: 0, verified: 0, located_rate: 0, snippet_rate: null, level: 'none' },
   references: [],
 }
 
@@ -179,7 +199,7 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
     if (method === 'GET' && path === '/legal/review-queue') {
-      await route.fulfill({ json: success([CONSULT_ROW, CONTRACT_ROW]) })
+      await route.fulfill({ json: success([CONSULT_ROW, CONTRACT_ROW, HIGH_GAP_ROW]) })
       return
     }
     if (method === 'GET' && path === '/legal/review-stats') {
@@ -196,6 +216,10 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
     if (method === 'GET' && path === '/legal/review-queue/contract_review/992/history') {
+      await route.fulfill({ json: success({ history: [] }) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/review-queue/contract_review/994/history') {
       await route.fulfill({ json: success({ history: [] }) })
       return
     }
@@ -354,6 +378,13 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
     action: 'approve',
     acknowledge_evidence_gaps: true,
   })
+
+  // Step 6: 高风险缺口不可勾选放行——必须补齐定位
+  await page.locator('.queue-item', { hasText: HIGH_GAP_ROW.title }).click()
+  await expect(page.getByText('必须回到合同页补齐定位')).toBeVisible()
+  await expect(page.locator('.evidence-gap-block.is-blocking')).toBeVisible()
+  await expect(page.getByRole('checkbox', { name: /已人工核对无定位风险/ })).toHaveCount(0)
+  await expect(page.locator('.review-actions').getByRole('button', { name: '通过', exact: true })).toBeDisabled()
 
   // 门户 tab 按需加载：点开后 branding 请求使用正确 org 5（而非默认 org 1）
   // 客户门户在「更多案件工具」下拉里（LegalWorkspace.vue:70-75，非 tab 按钮）

@@ -61,6 +61,31 @@ class AnnotateContractEvidenceTest(unittest.TestCase):
         risks, _ = annotate_contract_evidence(CONTENT, [_risk(snippet="合同总金额 为人民币 一百万元")])
         self.assertTrue(risks[0]["evidence"]["snippet_verified"])
 
+    def test_gap_counts_are_split_by_level(self):
+        risks, summary = annotate_contract_evidence(CONTENT, [
+            _risk(paragraph=None, snippet="", level="high"),
+            _risk(paragraph=None, snippet="", level="medium"),
+            _risk(paragraph=None, snippet="", level="medium"),
+            _risk(),
+        ])
+        self.assertEqual(summary["unanchored"], 3)
+        self.assertEqual(summary["unanchored_high"], 1)
+        self.assertEqual(summary["unanchored_by_level"]["medium"], 2)
+        self.assertFalse(risks[0]["evidence"]["anchored"])
+
+    def test_dismissed_risks_do_not_count_as_gaps(self):
+        """律师已判定不适用的风险（dismissed）不算缺口，否则误报的高风险会让审核永远过不了。"""
+        dismissed = _risk(paragraph=None, snippet="")
+        dismissed["status"] = "dismissed"
+        risks, summary = annotate_contract_evidence(CONTENT, [dismissed, _risk()])
+        self.assertEqual(summary["total"], 2)
+        self.assertEqual(summary["active"], 1)
+        self.assertEqual(summary["unanchored"], 0)
+        self.assertEqual(summary["unanchored_high"], 0)
+        self.assertEqual(summary["dismissed"], 1)
+        self.assertEqual(summary["level"], "strong")  # 生效风险全都有定位
+        self.assertFalse(risks[0]["evidence"]["anchored"])  # 仍如实标注没有定位
+
     def test_level_thresholds(self):
         two_of_three = [_risk(), _risk(paragraph=2, snippet=""), _risk(paragraph=None, snippet="")]
         _, summary = annotate_contract_evidence(CONTENT, two_of_three)

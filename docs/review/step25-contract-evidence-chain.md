@@ -111,32 +111,43 @@ step21 的规则层读数：**53 条风险里只有 25 条带条款定位（47.2
 
 §6 第 4 条说的「提示不是阻断」也收口了：**无条款定位的风险现在会挡住审核通过**。
 
-### 9.1 服务端（权威）
+### 9.1 服务端（权威，按等级分级）
 
-- `POST /legal/review-queue/{type}/{id}/actions`：`approve` 前检查该合同审查的 `evidence_summary.unanchored`；
-  >0 且请求体没有 `acknowledge_evidence_gaps: true` → **409** `LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED`
-  （`detail: unanchored=N`，message：「还有 N 条风险没有条款定位，请人工核对后再通过或先退回补充」）。
-- `POST /review-queue/bulk-action`：整批里只要有一条未确认就整批拒绝——避免「部分成功」这种难以解释的中间态。
-- 错误码进注册表（`app/core/error_codes.py`），前端提示直接可读。
-- 只拦 `approve`：`return/offline/close` 不受影响（退回补充恰恰是缺口场景的正确出口）。
+`approve` 前读该合同审查的 `evidence_summary`，按缺口等级分两种处理：
+
+| 缺口 | 规则 | 返回 |
+| --- | --- | --- |
+| **高风险缺口**（`unanchored_high > 0`） | **必须补齐定位**，勾选「已人工核对」也不放行 | 409 `LEGAL_REVIEW_HIGH_RISK_UNANCHORED`（detail 带 high/total） |
+| 中低风险缺口（`unanchored > 0`，high=0）且未确认 | 允许人工核对后通过，但要显式确认 | 409 `LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED` |
+| 中低风险缺口 + `acknowledge_evidence_gaps: true` | 放行 | 200 |
+| 无缺口 | 放行 | 200 |
+
+- **已忽略的风险不计入缺口**（`status = dismissed`）：律师判定误报后不该被它永久卡住；这类风险仍如实标注「没有定位」，但不进覆盖率分母与缺口数。
+- `POST /review-queue/bulk-action`：整批里只要有一条触发上述拦截就整批拒绝，避免「部分成功」这类难以解释的中间态。
+- 两个错误码都进注册表（`app/core/error_codes.py`），前端提示直接可读。
+- 只拦 `approve`：`return/offline/close` 不受影响——退回补充恰恰是缺口场景的正确出口。
 
 ### 9.2 前端（少走一趟）
 
 ![审核台的证据链门禁](step25-evidence-gate.png)
 
 
-- 审核台选中合同审查时，若 `evidence_summary.unanchored > 0`，详情里出现「证据链缺口」区块：说明 + 待勾选确认。
-- 「通过」按钮在勾选前是禁用的；勾选后点击会在请求体里带 `acknowledge_evidence_gaps: true`。
-- 状态按审核项 key 保存，切换条目不会串。
+- 缺口项在详情里出现「证据链缺口」区块，两种形态：
+  - **红色（阻断）**：高风险缺口 → 文案「必须回到合同页补齐定位，人工勾选不能替代」，**不提供勾选框**，「通过」直接禁用；
+  - **琥珀（可确认）**：中低风险缺口 → 勾选框「已人工核对无定位风险（N 条）」，勾选前「通过」禁用。
+- 勾选后点击通过，请求体带 `acknowledge_evidence_gaps: true`；高风险项即使伪造该字段也会被服务端 409 拒绝（前端只是少走一趟）。
+- 确认状态按审核项 key 保存，切换条目不会串。
 
 ### 9.3 验证
 
 | 层 | 用例 |
 | --- | --- |
-| 后端 API | 4 例：无锚点 → 409 且状态不变；勾选后 → 200 且 `lawyer_approved`；全有定位 → 不需确认直接通过；批量里混一条缺口 → 整批 409 且干净的也没被改 |
-| e2e | `u3-workflow`：选中合同审查 → 断言「证据链缺口」可见、通过按钮禁用 → 勾选 → 可用 → 提交，断言载荷含 `acknowledge_evidence_gaps: true` |
+| 后端 API | 4 例：高风险缺口 → 409 `HIGH_RISK_UNANCHORED`（带不带确认都一样）；中风险缺口 → 未确认 409、确认后 200；全有定位 → 直接 200；批量混一条中风险缺口 → 整批 409 且干净的那条也没被改 |
+| 后端纯函数 | 10 例：含「已忽略风险不计缺口」「按等级拆分缺口数」 |
+| e2e | `u3-workflow` 两段：中风险缺口 → 按钮禁用 → 勾选 → 可用 → 载荷含 `acknowledge_evidence_gaps: true`；高风险缺口 → 红色阻断、**没有勾选框**、按钮禁用 |
 
 ### 9.4 边界
 
 - 门禁只看「有没有定位」，不看「定位对不对」——snippet 仍可能匹配到重复句（§6 第 3 条）。
-- 提示语不区分风险等级：1 条 high 与 1 条 low 的缺口消耗同样的确认动作；后续可按等级分级（high 必须补定位，low 允许确认）。
+- 中低风险仍只有「勾选确认」这一条路，没有「在这里直接补一条定位」的入口——补定位还得回合同页点段落。
+- 等级取自风险的 `risk_level`；如果模型把本该 high 的风险标成 low，门禁也就拦不住了（这是上游判断问题，不是门禁能解决的）。
