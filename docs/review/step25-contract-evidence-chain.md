@@ -122,6 +122,9 @@ step21 的规则层读数：**53 条风险里只有 25 条带条款定位（47.2
 
 ### 9.2 前端（少走一趟）
 
+![审核台的证据链门禁](step25-evidence-gate.png)
+
+
 - 审核台选中合同审查时，若 `evidence_summary.unanchored > 0`，详情里出现「证据链缺口」区块：说明 + 待勾选确认。
 - 「通过」按钮在勾选前是禁用的；勾选后点击会在请求体里带 `acknowledge_evidence_gaps: true`。
 - 状态按审核项 key 保存，切换条目不会串。
