@@ -86,7 +86,16 @@
           <section class="app-card-section detail-block evidence-block"><h3 class="app-card-section-title">证据 / 法源</h3><EvidenceReference v-for="reference in selectedReferences" :key="reference.source_id || reference.title" :reference="reference" :clickable="false" /><p v-if="!selectedReferences.length" class="review-muted">该审核对象没有附带法源引用。</p></section>
           <section class="app-card-section detail-block timeline-block"><h3 class="app-card-section-title">审核历史与批注</h3><ReviewTimeline :entries="reviewHistoryMap[reviewKey(selectedItem)] || []" /><div class="comment-box"><el-input v-model="commentDraft[reviewKey(selectedItem)]" type="textarea" :rows="3" placeholder="记录审核批注，不改变审核状态。" maxlength="2000" /><el-button size="small" :loading="commentLoading[reviewKey(selectedItem)]" @click="submitComment(selectedItem)">添加批注</el-button></div></section>
 
-          <footer v-if="canReview" class="review-actions"><div><strong>审核决定</strong><span>AI 只提供建议，最终结论由审核律师确认。</span></div><div><el-button type="success" @click="reviewAction(selectedItem, 'approve')">通过</el-button><el-button type="warning" @click="reviewAction(selectedItem, 'return')">退回补充</el-button><el-button type="info" @click="reviewAction(selectedItem, 'offline')">转线下</el-button></div></footer>
+          <section v-if="canReview && evidenceGaps(selectedItem)" class="app-card-section detail-block evidence-gap-block">
+            <h3 class="app-card-section-title">证据链缺口</h3>
+            <p class="evidence-gap-text">这条审查还有 <strong>{{ evidenceGaps(selectedItem) }}</strong> 条风险没有条款定位。通过前需要人工核对：要么回到合同页补齐定位，要么在这里显式确认已逐条核对。</p>
+            <label class="evidence-gap-ack">
+              <input v-model="gapAcknowledged[reviewKey(selectedItem)]" type="checkbox" />
+              已人工核对无定位风险（{{ evidenceGaps(selectedItem) }} 条）
+            </label>
+          </section>
+
+          <footer v-if="canReview" class="review-actions"><div><strong>审核决定</strong><span>AI 只提供建议，最终结论由审核律师确认。</span></div><div><el-button type="success" :disabled="!canApprove(selectedItem)" @click="approveReview(selectedItem)">通过</el-button><el-button type="warning" @click="reviewAction(selectedItem, 'return')">退回补充</el-button><el-button type="info" @click="reviewAction(selectedItem, 'offline')">转线下</el-button></div></footer>
           <p v-else class="review-readonly-note">当前账号可以查看本人提交的审核记录和批注，最终决定由审核律师完成。</p>
         </div>
       </section>
@@ -137,6 +146,18 @@ const {
   commentDraft, commentLoading, loadReviewQueue, loadReviewStats, reviewers, loadReviewers, assignReview,
   bulkAssignReview, bulkReviewAction,
 } = useLegalReviewQueue({ client: legalWorkspace, message: ElMessage, prompt: ElMessageBox.prompt, targetLabel, caseId: computed(() => props.caseId), canReview, filters: computed(() => queueFilters.value) })
+
+// 证据链门禁：无条款定位的风险必须人工核对后才能通过（服务端同样校验，前端只负责少走一趟）
+const gapAcknowledged = ref({})
+const evidenceGaps = (item) => Number(item?.evidence_summary?.unanchored || 0)
+const canApprove = (item) => evidenceGaps(item) === 0 || Boolean(gapAcknowledged.value[reviewKey(item)])
+const approveReview = async (item) => {
+  if (!canApprove(item)) {
+    ElMessage.warning(`还有 ${evidenceGaps(item)} 条风险没有条款定位，请先核对并勾选确认`)
+    return
+  }
+  await reviewAction(item, 'approve', evidenceGaps(item) ? { acknowledge_evidence_gaps: true } : {})
+}
 // 审核队列三态（ux-audit P1-3/M-13）：加载失败与"无待处理"分离，失败可重试
 const queueStatus = computed(() => {
   if (queueQuery.isLoading.value) return 'loading'
@@ -317,4 +338,9 @@ defineExpose({ refresh: () => Promise.all([loadReviewQueue(), loadReviewStats()]
   .app-page-head-actions { width: 100%; margin-left: 0; }
   .assignment-bar select, .assignment-bar input { min-width: 0; width: 100%; }
 }
+
+.evidence-gap-block { border-left: 3px solid var(--color-warning); background: var(--color-warning-light); }
+.evidence-gap-text { margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.7; }
+.evidence-gap-text strong { color: var(--color-warning); }
+.evidence-gap-ack { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-text); font-size: var(--text-xs); cursor: pointer; }
 </style>

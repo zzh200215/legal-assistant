@@ -124,7 +124,7 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel, case
     },
   })
 
-  const reviewAction = async (row, action) => {
+  const reviewAction = async (row, action, extra = {}) => {
     const labels = { approve: '通过', return: '退回补充', offline: '转线下', close: '关闭' }
     try {
       const { value: note } = await prompt('审核意见（可选）', `${labels[action]} - ${targetLabel(row.target_type)} #${row.id}`, {
@@ -133,7 +133,7 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel, case
       await actionMutation.mutate({
         type: row.target_type,
         id: row.id,
-        body: { action, note: note || null },
+        body: { action, note: note || null, ...extra },
       })
     } catch (error) {
       // 用户取消输入框：静默。API 错误由 actionMutation 的 onError 统一弹提示，此处不重复

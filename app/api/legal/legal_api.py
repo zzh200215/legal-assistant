@@ -28,6 +28,7 @@ from app.models.legal import (
     LegalSourceFavorite,
 )
 from app.models.user import User
+from app.services.legal.contract_evidence import annotate_contract_evidence
 from app.services.legal.legal_service import (
     DISCLAIMER,
     compare_contracts,
@@ -113,6 +114,34 @@ class DraftCommentStatusIn(BaseModel):
 class ReviewActionIn(BaseModel):
     action: str
     note: str | None = Field(default=None, max_length=2000)
+    # 合同审查专用：无条款定位的风险须人工核对后显式确认，才允许通过
+    acknowledge_evidence_gaps: bool = False
+
+
+def _contract_review_evidence_gaps(db: Session, target_id: int) -> int:
+    """合同审查里没有条款定位的风险条数；其它类型/记录不存在返回 0。"""
+    row = db.query(ContractReview).filter(ContractReview.id == target_id).first()
+    if row is None:
+        return 0
+    try:
+        risks = json.loads(row.risks_json or "[]")
+    except (TypeError, ValueError):
+        risks = []
+    _, summary = annotate_contract_evidence(row.content or "", risks)
+    return int(summary["unanchored"])
+
+
+def _require_evidence_ack(db: Session, target_type: str, target_id: int, action: str, acknowledged: bool) -> None:
+    if action != "approve" or target_type != "contract_review" or acknowledged:
+        return
+    gaps = _contract_review_evidence_gaps(db, target_id)
+    if gaps:
+        raise api_error(
+            409,
+            f"还有 {gaps} 条风险没有条款定位，请人工核对后再通过或先退回补充",
+            code="LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED",
+            detail=f"unanchored={gaps}",
+        )
 
 
 class ReviewAssignmentIn(BaseModel):
@@ -139,6 +168,7 @@ class ReviewBulkActionIn(BaseModel):
     items: list[ReviewQueueBulkItem] = Field(min_length=1, max_length=100)
     action: str
     note: str | None = Field(default=None, max_length=2000)
+    acknowledge_evidence_gaps: bool = False
 
 
 class ReviewCommentIn(BaseModel):
@@ -1329,6 +1359,9 @@ def bulk_assign_review(req: ReviewBulkAssignmentIn, db: Session = Depends(get_db
 
 @router.post("/review-queue/bulk-action")
 def bulk_review_action(req: ReviewBulkActionIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # 批量通过不能绕过「无定位须人工核对」：整批里只要有一条未确认就拒绝，避免部分成功难以解释
+    for item in req.items:
+        _require_evidence_ack(db, item.target_type, int(item.target_id), req.action, req.acknowledge_evidence_gaps)
     try:
         return legal_workspace_read_module.bulk_review_action(
             db, current_user, items=[item.model_dump() for item in req.items], action=req.action, note=req.note,
@@ -1343,6 +1376,7 @@ def bulk_review_action(req: ReviewBulkActionIn, db: Session = Depends(get_db), c
 
 @router.post("/review-queue/{target_type}/{target_id}/actions")
 def review_action(target_type: str, target_id: int, req: ReviewActionIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _require_evidence_ack(db, target_type, target_id, req.action, req.acknowledge_evidence_gaps)
     try:
         result = legal_workspace_read_module.apply_review_action(
             db, current_user, target_type=target_type, target_id=target_id,

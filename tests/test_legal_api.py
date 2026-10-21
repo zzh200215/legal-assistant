@@ -905,3 +905,114 @@ class LegalApiTests(unittest.TestCase):
     def test_source_relations_not_found(self):
         response = self.client.get("/api/legal/sources/999999/relations", headers=self.admin_headers)
         self.assertEqual(response.status_code, 404)
+
+class ContractEvidenceGateTests(unittest.TestCase):
+    """合同审查通过前置：无条款定位的风险必须人工核对（`acknowledge_evidence_gaps`）。"""
+
+    def setUp(self):
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        self.TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        Base.metadata.create_all(bind=engine)
+        self.db = self.TestingSessionLocal()
+
+        self.submitter = User(
+            username="gate_submitter", email="gate_submitter@example.com",
+            hashed_password=hash_password("secret"), role="user",
+        )
+        self.reviewer = User(
+            username="gate_reviewer", email="gate_reviewer@example.com",
+            hashed_password=hash_password("secret"), role="admin",
+        )
+        self.db.add_all([self.submitter, self.reviewer])
+        self.db.commit()
+        self.db.refresh(self.submitter)
+        self.db.refresh(self.reviewer)
+
+        def override_get_db():
+            db = self.TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.client = TestClient(app)
+        self.reviewer_headers = {"Authorization": f"Bearer {create_access_token({'sub': self.reviewer.id})}"}
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        self.db.close()
+
+    def _review(self, risks, status="pending_review"):
+        row = ContractReview(
+            user_id=self.submitter.id,
+            title="证据链门禁用例",
+            content="合同总金额为人民币一百万元。",
+            summary="摘要",
+            risks_json=json.dumps(risks, ensure_ascii=False),
+            references_json="[]",
+            status=status,
+            version=1,
+        )
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    @staticmethod
+    def _risk(paragraph=1, snippet="合同总金额为人民币一百万元"):
+        return {"clause_type": "payment", "risk_level": "high", "description": "描述",
+                "source_location": {"paragraph": paragraph, "snippet": snippet}}
+
+    def _approve(self, row, acknowledged=None):
+        body = {"action": "approve"}
+        if acknowledged is not None:
+            body["acknowledge_evidence_gaps"] = acknowledged
+        return self.client.post(
+            f"/api/legal/review-queue/contract_review/{row.id}/actions",
+            headers=self.reviewer_headers, json=body,
+        )
+
+    def test_approve_is_blocked_when_risk_has_no_anchor(self):
+        row = self._review([self._risk(paragraph=None, snippet="")])
+        response = self._approve(row)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED")
+        self.assertIn("1 条风险", response.json()["message"])
+        self.db.refresh(row)
+        self.assertEqual(row.status, "pending_review")  # 状态没有被改
+
+    def test_approve_passes_after_acknowledging_gaps(self):
+        row = self._review([self._risk(paragraph=None, snippet="")])
+        response = self._approve(row, acknowledged=True)
+        self.assertEqual(response.status_code, 200)
+        self.db.refresh(row)
+        self.assertEqual(row.status, "lawyer_approved")
+
+    def test_approve_without_gaps_needs_no_acknowledgement(self):
+        row = self._review([self._risk()])
+        response = self._approve(row)
+        self.assertEqual(response.status_code, 200)
+        self.db.refresh(row)
+        self.assertEqual(row.status, "lawyer_approved")
+
+    def test_bulk_approve_is_blocked_by_single_gap(self):
+        clean = self._review([self._risk()])
+        gap = self._review([self._risk(paragraph=None, snippet="")])
+        response = self.client.post(
+            "/api/legal/review-queue/bulk-action",
+            headers=self.reviewer_headers,
+            json={"action": "approve", "items": [
+                {"target_type": "contract_review", "target_id": clean.id},
+                {"target_type": "contract_review", "target_id": gap.id},
+            ]},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.db.refresh(clean)
+        self.assertEqual(clean.status, "pending_review")  # 整批拒绝，不做部分成功
+

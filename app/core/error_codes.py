@@ -24,6 +24,8 @@ SIGN_PROVIDER_UNAVAILABLE     = "SIGN_PROVIDER_UNAVAILABLE"
 
 # ── 权限与范围 ────────────────────────────────────────────────────────────────
 LEGAL_RESOURCE_SCOPE_DENIED   = "LEGAL_RESOURCE_SCOPE_DENIED"
+# 合同审查证据链：无条款定位的风险未人工核对，不允许通过
+LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED = "LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED"
 
 # ── Open API ──────────────────────────────────────────────────────────────────
 API_KEY_INVALID               = "API_KEY_INVALID"
@@ -58,6 +60,7 @@ ACCOUNT_DISABLED              = "ACCOUNT_DISABLED"
 
 
 _DEFAULT_MESSAGES: dict[str, str] = {
+    LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED: "还有风险没有条款定位，请人工核对后再通过",
     TIME_ENTRY_ALREADY_RUNNING:  "您已有一条运行中的计时，请先结束或暂停后再开始新计时",
     INVOICE_IMMUTABLE:           "已发送/已付款/已作废的账单不可修改，如需更正请作废后重新开票",
     LEGAL_CASE_ARCHIVED:         "案件已归档，不可新建计时、账单、日期或门户，如需操作请先恢复案件",

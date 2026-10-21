@@ -23,6 +23,7 @@ const CONSULT_ROW = {
 
 const CONTRACT_ROW = {
   id: 992,
+  target_type: 'contract_review',
   title: 'U3探针：技术服务合同',
   content: '甲方应按期支付服务费，但付款不以验收为前提。',
   case_id: 3,
@@ -32,8 +33,11 @@ const CONTRACT_ROW = {
   risks: [{
     id: 1, label: '付款条款', clause_type: 'payment', risk_level: 'high', status: 'open',
     description: '付款节点缺少验收条件。', suggestion: '补充验收标准与付款条件。',
-    source_location: { paragraph: 1 },
+    source_location: { paragraph: null, snippet: '' },
+    evidence: { anchored: false, paragraph: null, snippet_verified: null },
   }],
+  // 服务端读时下发的证据链统计：1 条风险、0 条有定位 → 审核通过前必须人工核对
+  evidence_summary: { total: 1, anchored: 0, unanchored: 1, snippets: 0, verified: 0, located_rate: 0, snippet_rate: null, level: 'none' },
   references: [],
 }
 
@@ -175,7 +179,7 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
     if (method === 'GET' && path === '/legal/review-queue') {
-      await route.fulfill({ json: success([CONSULT_ROW]) })
+      await route.fulfill({ json: success([CONSULT_ROW, CONTRACT_ROW]) })
       return
     }
     if (method === 'GET' && path === '/legal/review-stats') {
@@ -189,6 +193,15 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
     }
     if (method === 'GET' && path === '/legal/review-queue/consultation/991/history') {
       await route.fulfill({ json: success({ history: [] }) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/review-queue/contract_review/992/history') {
+      await route.fulfill({ json: success({ history: [] }) })
+      return
+    }
+    if (method === 'POST' && path === '/legal/review-queue/contract_review/992/actions') {
+      requests.contractApprove = request.postDataJSON()
+      await route.fulfill({ json: success({ ...CONTRACT_ROW, status: 'lawyer_approved' }) })
       return
     }
 
@@ -325,6 +338,22 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   await promptDialog.getByRole('button', { name: '确认' }).click()
   await expect(page.getByText('操作成功')).toBeVisible()
   expect(requests.consultApprove).toEqual({ action: 'approve', note: '事实清楚，予以通过' })
+
+  // Step 5: 合同审查的证据链门禁——无条款定位必须先勾选人工核对才能通过
+  await page.locator('.queue-item', { hasText: CONTRACT_ROW.title }).click()
+  await expect(page.getByText('证据链缺口')).toBeVisible()
+  const contractApprove = page.locator('.review-actions').getByRole('button', { name: '通过', exact: true })
+  await expect(contractApprove).toBeDisabled()
+  await page.getByRole('checkbox', { name: /已人工核对无定位风险/ }).check()
+  await expect(contractApprove).toBeEnabled()
+  await contractApprove.click()
+  const gateDialog = page.getByRole('dialog')
+  await gateDialog.locator('input, textarea').last().fill('已核对无定位风险，确认通过')
+  await gateDialog.getByRole('button', { name: '确认' }).click()
+  await expect.poll(() => requests.contractApprove).toMatchObject({
+    action: 'approve',
+    acknowledge_evidence_gaps: true,
+  })
 
   // 门户 tab 按需加载：点开后 branding 请求使用正确 org 5（而非默认 org 1）
   // 客户门户在「更多案件工具」下拉里（LegalWorkspace.vue:70-75，非 tab 按钮）
