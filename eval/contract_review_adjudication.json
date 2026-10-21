@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-21T21:10:00+08:00",
+  "source": {
+    "review_output": "eval/outputs/contract_review_review.json",
+    "sheet": "eval/outputs/contract_review_spotcheck_sheet.md",
+    "sheet_generated_at": "2026-10-20T13:21:00+08:00",
+    "review_run": "scripts/run_contract_review_review.py"
+  },
+  "adjudicator": {
+    "kind": "ai",
+    "id": "deepseek-v4.1-flash",
+    "label": "AI 独立复核（非人工）",
+    "date": "2026-10-21",
+    "scope": "14 条抽检：7 条有据性 + 7 条质量",
+    "note": "由 AI 代理完成，不冒充人工标注。人工在抽检表里填 `- 人工结论：` 后以人工为准（评分脚本优先读人工）。",
+    "rubric": {
+      "faithfulness": "只判「事实性主张」：合同写了什么、没写什么、写在哪。评价性/风险性表述（可能、不足以覆盖、风险极高）本身不扣分；但把原文没有的事实（条款、数字、主体）说成有 → 错误；摘要里关于自身输出的陈述（如「识别 8 类条款」）要与实际清单一致，不一致 → 错误。",
+      "quality": "三条同时满足才算可接受（pass）：①覆盖——该合同相关的核心条款类型都要点到（空壳合同按八大类衡量）；②事实——无编造、无误读；③可执行——建议里有具体要素（金额/期限/比例/主体/条款措辞），通篇「建议补充」不算。",
+      "external_knowledge": "引用外部法律基准（如 LPR 四倍、司法实践比例）不按「编造」处理，但属于应有来源的表述，记备注；模型自行推导的数值（如日 0.3% → 年化 109.5%）按可复核推导处理。",
+      "verdict_values": "correct=正确/可接受（质量即 pass）；wrong=错误/不可接受（质量即 review 或 fail）；unknown=无法判断（不进一致率分母）。"
+    }
+  },
+  "entries": [
+    {
+      "id": "contract-1-grounding",
+      "kind": "faithfulness",
+      "review_id": 1,
+      "verdict": "wrong",
+      "confidence": "high",
+      "evidence": "合同原文只有主体、金额、付款、违约、争议五段；审查实际产出 3 条风险（payment/breach/dispute_resolution），条款覆盖 0.375。",
+      "rationale": "摘要称「共识别 8 类条款」，与自身风险清单（3 类）和原文（无交付、无知识产权、无保密、无终止）都不符——这是关于自身输出的可核事实，判无据。其余事实（上限 10% 即 26.8 万、阶段验收后付 108 万）均可核。"
+    },
+    {
+      "id": "contract-1-quality",
+      "kind": "quality",
+      "review_id": 1,
+      "verdict": "wrong",
+      "confidence": "high",
+      "evidence": "3 条风险覆盖 3/8 类；建议为「考虑提高违约金上限」「确认双方对仲裁地无异议」；摘要虚报 8 类。",
+      "rationale": "覆盖不足（漏交付、知识产权、保密、终止四类主要缺失）、摘要与清单不自洽、建议无具体数值或措辞。作为交付给用户的审查结果不可接受。"
+    },
+    {
+      "id": "contract-2-grounding",
+      "kind": "faithfulness",
+      "review_id": 2,
+      "verdict": "correct",
+      "confidence": "high",
+      "evidence": "原文一句：This is a test contract with payment terms and breach clauses.",
+      "rationale": "摘要与 9 条风险的事实前提（未约定付款/交付/赔偿/保密/知识产权/终止/争议解决，仅提及 breach clauses）都能在原文核实。「不具备可执行基础」是评价，其事实前提成立；措辞偏重但不构成编造。"
+    },
+    {
+      "id": "contract-2-quality",
+      "kind": "quality",
+      "review_id": 2,
+      "verdict": "correct",
+      "confidence": "medium",
+      "evidence": "8 类条款全覆盖；建议带具体参数：违约金以实际损失为限、赔偿上限不超合同总额 100%、索赔通知 15 日、保密期不少于 3 年、解约补救期 10 个工作日。",
+      "rationale": "对一份一行测试合同，输出已做到覆盖完整、事实无误、建议可落地（要素 + 参数），可接受。"
+    },
+    {
+      "id": "contract-3-grounding",
+      "kind": "faithfulness",
+      "review_id": 3,
+      "verdict": "correct",
+      "confidence": "medium",
+      "evidence": "原文：签约后付 100 万、验收后付 108 万；违约按日 0.3%、上限总额 10%；争议提交上海仲裁委员会。",
+      "rationale": "事实性主张（付款节点、日 0.3%、上限 10%、仲裁机构）均可核；「年化 109.5%」是 0.3%×365 的可复核推导；LPR 四倍/14.8% 属外部法律基准，按口径不计无据，但应标注来源。"
+    },
+    {
+      "id": "contract-3-quality",
+      "kind": "quality",
+      "review_id": 3,
+      "verdict": "correct",
+      "confidence": "high",
+      "evidence": "8 类覆盖；每条建议带具体动作：付款节点改为「签署并生效后 X 日」、违约金调整为 LPR 四倍、赔偿上限不高于合同总额、仲裁条款补全称与规则。",
+      "rationale": "覆盖、事实、可执行三条都满足；「X 日」这类占位符需产品侧替换，但不影响可接受性。"
+    },
+    {
+      "id": "contract-4-grounding",
+      "kind": "faithfulness",
+      "review_id": 4,
+      "verdict": "correct",
+      "confidence": "high",
+      "evidence": "原文：甲方与乙方签订服务合同，服务期一年。",
+      "rationale": "摘要「仅载明服务期一年，其余核心条款缺失」与原文一致；8 条「合同未约定 X」均可核（原文确实没有）。"
+    },
+    {
+      "id": "contract-4-quality",
+      "kind": "quality",
+      "review_id": 4,
+      "verdict": "wrong",
+      "confidence": "medium",
+      "evidence": "8 条建议全部是「明确…要素」式清单，无任何金额、期限、比例或条款措辞；8 条风险描述结构完全相同。",
+      "rationale": "覆盖与事实没问题，但可执行性不足：对一份一句话合同，同样的「建议补充」可以套到任何合同上，用户拿不到可操作动作（先补哪条、补成什么样）。判不可接受，与两位裁判的 review 一致。"
+    },
+    {
+      "id": "contract-5-grounding",
+      "kind": "faithfulness",
+      "review_id": 5,
+      "verdict": "correct",
+      "confidence": "high",
+      "evidence": "原文：甲方与乙方签订服务合同，服务期一年。",
+      "rationale": "「缺乏全部八大必备条款」「服务期虽有约定但无起止日期」均可核；结论性表述有事实前提支撑。"
+    },
+    {
+      "id": "contract-5-quality",
+      "kind": "quality",
+      "review_id": 5,
+      "verdict": "correct",
+      "confidence": "medium",
+      "evidence": "建议带参数：违约金日 0.05%、赔偿上限不超过合同总额 100%、保密期不低于 2 年、宽限期；付款/验收仍用「X 日」占位。",
+      "rationale": "比 contract-4 多出可执行参数，覆盖完整、事实无误，可接受；占位符需替换。"
+    },
+    {
+      "id": "contract-6-grounding",
+      "kind": "faithfulness",
+      "review_id": 6,
+      "verdict": "correct",
+      "confidence": "high",
+      "evidence": "原文：甲方与乙方签订服务合同，服务期一年。",
+      "rationale": "因「合同原文仅一句」而判定八大条款缺失，与原文一致；未出现原文没有的条款或数字。"
+    },
+    {
+      "id": "contract-6-quality",
+      "kind": "quality",
+      "review_id": 6,
+      "verdict": "correct",
+      "confidence": "medium",
+      "evidence": "建议带参数：违约金不超过实际损失 30%、异议期 5 个工作日、持续 30 日未整改可解约、保密期不低于 2 年、可要求职业责任险。",
+      "rationale": "覆盖与事实无误，建议含具体参数与条件，可接受。"
+    },
+    {
+      "id": "contract-7-grounding",
+      "kind": "faithfulness",
+      "review_id": 7,
+      "verdict": "correct",
+      "confidence": "high",
+      "evidence": "原文：服务期一年、费用 50 万分两期支付、任何一方违约需承担违约责任。",
+      "rationale": "「仅约定总额与两期支付」「违约仅有原则性表述」均可核；4/8 条给出原文定位且 snippet 与原文一致，其余标明无定位（未编造定位）。"
+    },
+    {
+      "id": "contract-7-quality",
+      "kind": "quality",
+      "review_id": 7,
+      "verdict": "correct",
+      "confidence": "high",
+      "evidence": "建议带参数：首期/二期 60%/40%、签约后 5 个工作日、逾期付款日万分之五、违约每日 0.1%、补救期 15 日、保密违约金 10 万元。",
+      "rationale": "覆盖 8 类、定位 50% 且可核、建议含比例与期限，可接受。"
+    }
+  ]
+}

@@ -7,6 +7,7 @@
 - 新增：`scripts/run_contract_review_review.py`（规则层 + 跨模型裁判 + 人工抽检表）
 - 改动：`scripts/run_cross_judge.py` 的 `JudgeClient` 增加 `max_tokens` 参数（默认 1024 不变）
 - 产物：`eval/outputs/contract_review_review.json`、`eval/outputs/contract_review_spotcheck_sheet.md`（均在 `.gitignore` 内，可按第 6 节重建）
+- 后续：第三层（人工/独立裁决）由 [step24](step24-contract-review-adjudication.md) 以 **AI 独立复核**完成（非人工），一致率 glm 13/14、qwen 7/14
 
 ---
 

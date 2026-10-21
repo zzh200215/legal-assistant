@@ -11,6 +11,12 @@
 用法：
   python -B scripts/score_human_review.py --sheet eval/outputs/divergence_review_sheet.md
   python -B scripts/score_human_review.py --sheet <填好的副本> --json human_review_score.json
+
+没有人工结论时，可先用 --verdicts 注入一份独立裁决（例如 `eval/contract_review_adjudication.json`）：
+  python -B scripts/score_human_review.py --sheet eval/outputs/contract_review_spotcheck_sheet.md \
+      --verdicts eval/contract_review_adjudication.json --json eval/outputs/contract_review_score.json
+此时报告抬头与 JSON 都会标明裁决来源（`adjudicator.kind=ai|human`），不会把 AI 复核写成人工；
+表里若有已填的人工结论，人工优先，裁决只补空缺。
 """
 
 from __future__ import annotations
@@ -121,6 +127,65 @@ def parse_sheet(text: str) -> list[dict[str, Any]]:
     return entries
 
 
+_VERDICT_ALIASES = {
+    "correct": "correct",
+    "正确": "correct",
+    "pass": "correct",
+    "通过": "correct",
+    "wrong": "wrong",
+    "错误": "wrong",
+    "fail": "wrong",
+    "review": "wrong",
+    "不通过": "wrong",
+    "unknown": "unknown",
+    "无法判断": "unknown",
+}
+
+
+def load_verdicts(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """读独立裁决文件（`--verdicts`）：返回 id→条目 与 adjudicator 元信息。"""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    entries = payload.get("entries") or []
+    if not isinstance(entries, list):
+        raise ValueError("裁决文件格式错误：`entries` 必须是数组")
+    verdicts: dict[str, dict[str, Any]] = {}
+    for item in entries:
+        entry_id = str(item.get("id") or "").strip()
+        if not entry_id:
+            raise ValueError("裁决文件里有条目缺少 `id`")
+        verdicts[entry_id] = item
+    return verdicts, payload.get("adjudicator") or {}
+
+
+def apply_verdicts(entries: list[dict[str, Any]], verdicts: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """把裁决注入为人工结论：只补空行，表里已填的人工结论优先。"""
+    applied: list[str] = []
+    skipped: list[str] = []
+    unmapped: list[str] = []
+    for entry in entries:
+        verdict = verdicts.get(entry["id"] or "")
+        if not verdict:
+            continue
+        if entry["human"] in {"correct", "wrong", "unknown"}:
+            skipped.append(entry["id"])
+            continue
+        mapped = _VERDICT_ALIASES.get(str(verdict.get("verdict", "")).strip().lower())
+        if mapped is None:
+            unmapped.append(entry["id"])
+            continue
+        entry["human"] = mapped
+        entry["human_source"] = "adjudication"
+        entry["adjudication_rationale"] = verdict.get("rationale") or ""
+        applied.append(entry["id"])
+    known_ids = {entry["id"] for entry in entries}
+    return {
+        "applied": applied,
+        "skipped_human_filled": skipped,
+        "unmapped_verdicts": unmapped,
+        "unknown_ids": sorted(set(verdicts) - known_ids),
+    }
+
+
 def wilson_interval(numerator: int, denominator: int, z: float = 1.96) -> tuple[float, float] | None:
     """Wilson 得分区间（默认 95%）。小样本下比正态近似稳，且不会越出 [0,1]。
 
@@ -196,8 +261,8 @@ def build_result(entries: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def print_report(result: dict[str, Any]) -> None:
-    print("=== 人工抽检一致率（AI 裁判 vs 人工）===")
+def print_report(result: dict[str, Any], label: str = "人工") -> None:
+    print(f"=== 抽检一致率（AI 裁判 vs {label}）===")
     print(
         f"条目总数 {result['entries_total']}｜已表态 {result['filled']}"
         f"（正确 {result['filled_correct']} / 错误 {result['filled_wrong']}）"
@@ -209,7 +274,7 @@ def print_report(result: dict[str, Any]) -> None:
         )
     for side in result["sides"]:
         summary = result["agreement"][side]
-        print(f"基准 {side}：人工同意率 = {_rate_text(summary)}（分子 {summary['numerator']} / 分母 {summary['denominator']}）")
+        print(f"基准 {side}：{label}同意率 = {_rate_text(summary)}（分子 {summary['numerator']} / 分母 {summary['denominator']}）")
         if summary["disagreed_entries"]:
             print(f"    与 {side} 不同向的条目（{len(summary['disagreed_entries'])} 条）：" + "、".join(summary["disagreed_entries"]))
     for kind, per_side in result["agreement_per_kind"].items():
@@ -218,11 +283,11 @@ def print_report(result: dict[str, Any]) -> None:
     if result["unparsed_sides_entries"]:
         print("  警告：以下条目读不到裁判判罚，已排除在分母外：" + "、".join(result["unparsed_sides_entries"]))
     if result["filled"] == 0:
-        print("提示：表里还没有人工表态，两个基准的分母都是 0，一致率均为 n/a。")
+        print(f"提示：表里还没有{label}表态，两个基准的分母都是 0，一致率均为 n/a。")
 
 
-def print_acceptance(result: dict[str, Any], threshold: float) -> None:
-    """验收口径：两个基准的人工同意率都达到阈值，且各自分母不为 0。
+def print_acceptance(result: dict[str, Any], threshold: float, label: str = "人工") -> None:
+    """验收口径：两个基准的同意率都达到阈值，且各自分母不为 0。
 
     点估计按诊断文档口径（≥0.8 即达成）；同时给出 95% Wilson 区间——
     样本只有 ~24 条，若点估计达成但区间下界低于阈值，会额外标注"小样本达成"，
@@ -255,14 +320,20 @@ def print_acceptance(result: dict[str, Any], threshold: float) -> None:
         for caveat in caveats:
             print(f"  备注：{caveat}（样本量有限，结论按点估计口径成立）。")
     else:
-        print(f"结论：尚未达成 ≥ {threshold}（补填人工结论或复核分歧条目后再看）。")
+        print(f"结论：尚未达成 ≥ {threshold}（补填{label}结论或复核分歧条目后再看）。")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="计算人工抽检与 AI 裁判的一致率")
+    parser = argparse.ArgumentParser(description="计算抽检结论（人工/独立裁决）与 AI 裁判的一致率")
     parser.add_argument("--sheet", default="eval/outputs/divergence_review_sheet.md")
     parser.add_argument("--json", default=None, help="把结果同时写成 JSON")
     parser.add_argument("--threshold", type=float, default=0.8, help="验收阈值（默认 0.8，诊断文档口径）")
+    parser.add_argument(
+        "--verdicts",
+        default=None,
+        help="独立裁决 JSON（如 eval/contract_review_adjudication.json）：只补表里空缺的条目，人工优先",
+    )
+    parser.add_argument("--label", default=None, help="裁决来源标签（默认取裁决文件的 adjudicator.label，否则「人工」）")
     args = parser.parse_args()
 
     path = ROOT / args.sheet if not Path(args.sheet).is_absolute() else Path(args.sheet)
@@ -273,10 +344,41 @@ def main() -> int:
     if not entries:
         print(f"{path} 里没有解析到任何 `### N. <题名>｜…` 条目")
         return 2
+
+    label = args.label
+    adjudication: dict[str, Any] | None = None
+    if args.verdicts:
+        verdicts_path = Path(args.verdicts) if Path(args.verdicts).is_absolute() else ROOT / args.verdicts
+        if not verdicts_path.exists():
+            print(f"找不到裁决文件：{verdicts_path}")
+            return 1
+        try:
+            verdicts, adjudicator = load_verdicts(verdicts_path)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"裁决文件不可用：{exc}")
+            return 2
+        stats = apply_verdicts(entries, verdicts)
+        label = label or adjudicator.get("label") or adjudicator.get("id") or "独立裁决"
+        adjudication = {"source_file": str(verdicts_path), "adjudicator": adjudicator, **stats}
+        print(
+            f"裁决来源：{adjudicator.get('label') or '独立裁决'}"
+            f"（kind={adjudicator.get('kind', 'unknown')}, id={adjudicator.get('id', '-')}）"
+            f"｜注入 {len(stats['applied'])} 条"
+            f"｜人工已填跳过 {len(stats['skipped_human_filled'])} 条"
+        )
+        if stats["unknown_ids"]:
+            print("  警告：裁决文件里有清单中不存在的 id：" + "、".join(stats["unknown_ids"]))
+        if stats["unmapped_verdicts"]:
+            print("  警告：以下条目的 verdict 无法识别，已跳过：" + "、".join(stats["unmapped_verdicts"]))
+    label = label or "人工"
+
     result = build_result(entries)
     result["sheet"] = str(path)
-    print_report(result)
-    print_acceptance(result, args.threshold)
+    result["verdict_label"] = label
+    if adjudication:
+        result["adjudication"] = adjudication
+    print_report(result, label)
+    print_acceptance(result, args.threshold, label)
     result["threshold"] = args.threshold
     result["accepted"] = all(
         result["agreement"][side]["denominator"] > 0

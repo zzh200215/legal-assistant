@@ -583,7 +583,13 @@ class TestSloMetrics(unittest.TestCase):
         # 天级：行所在天（09-20）须完整，用次日零时作为聚合锚点
         day_now = self.NOW.replace(day=21, hour=0, minute=0, second=0, microsecond=0)
         ops_aggregation_service.aggregate_metric(self.db, "day", "llm_calls", now=day_now)
-        stats = ops_aggregation_service.slo_rates(self.db, metric_name="llm_calls", days=30)
+        # 窗口按真实 now 算（slo_series 内部调用 _utcnow）：不钉住时钟的话，
+        # 2026-09-20 的数据在 2026-10-21 之后就会滑出 30 天窗口，用例随日期自然过期。
+        with patch(
+            "app.services.observability.ops_aggregation_service._utcnow",
+            return_value=self.NOW + timedelta(hours=1),
+        ):
+            stats = ops_aggregation_service.slo_rates(self.db, metric_name="llm_calls", days=30)
         # slo_rates 按 (org, labels) 分组；整体口径 = Σnumerator / Σdenominator
         self.assertGreaterEqual(len(stats["items"]), 1)
         numerator = sum(item["numerator"] for item in stats["items"])
@@ -917,12 +923,16 @@ class TestOrgIsolation(unittest.TestCase):
         ops_aggregation_service.aggregate_metric(self.db, "hour", "agent_runs", now=self.NOW)
         day_now = self.NOW.replace(day=21, hour=0, minute=0, second=0, microsecond=0)
         ops_aggregation_service.aggregate_metric(self.db, "day", "agent_runs", now=day_now)
-        stats_org1 = ops_aggregation_service.slo_rates(self.db, metric_name="agent_runs", days=30, org_id=1)
-        for item in stats_org1["items"]:
-            self.assertEqual(item["org_id"], 1)
-        self.assertEqual(sum(item["denominator"] for item in stats_org1["items"]), 3)
-        stats_org2 = ops_aggregation_service.slo_rates(self.db, metric_name="agent_runs", days=30, org_id=2)
-        self.assertEqual(sum(item["denominator"] for item in stats_org2["items"]), 1)
+        with patch(
+            "app.services.observability.ops_aggregation_service._utcnow",
+            return_value=self.NOW + timedelta(hours=1),
+        ):
+            stats_org1 = ops_aggregation_service.slo_rates(self.db, metric_name="agent_runs", days=30, org_id=1)
+            for item in stats_org1["items"]:
+                self.assertEqual(item["org_id"], 1)
+            self.assertEqual(sum(item["denominator"] for item in stats_org1["items"]), 3)
+            stats_org2 = ops_aggregation_service.slo_rates(self.db, metric_name="agent_runs", days=30, org_id=2)
+            self.assertEqual(sum(item["denominator"] for item in stats_org2["items"]), 1)
 
 
 if __name__ == "__main__":
