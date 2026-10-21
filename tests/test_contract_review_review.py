@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from scripts.run_contract_review_review import (
     aggregate_rules,
     dedupe_reviews,
+    evaluate_summary_claims,
+    extract_summary_claims,
     normalize_quality,
     rule_metrics,
 )
@@ -82,6 +84,50 @@ class RuleMetricsTest(unittest.TestCase):
         self.assertTrue(rule_metrics(_row(review_policy_snapshot_json='{"party_role": "甲方"}'), "")["has_policy_snapshot"])
 
 
+class SummaryClaimsTest(unittest.TestCase):
+    """摘要自述（识别 N 类条款 / N 项高风险）必须与清单对得上——零模型可核。"""
+
+    RISKS = [
+        _risk(level="high", clause="payment"),
+        _risk(level="medium", clause="breach"),
+        _risk(level="low", clause="dispute_resolution"),
+    ]
+
+    def test_claims_are_extracted_with_arabic_and_chinese_numerals(self):
+        self.assertEqual(extract_summary_claims("共识别8类条款")["claimed_clause_types"], 8)
+        self.assertEqual(extract_summary_claims("共识别八类条款")["claimed_clause_types"], 8)
+        self.assertEqual(extract_summary_claims("共识别7项高风险")["claimed_high"], 7)
+        self.assertEqual(extract_summary_claims("共识别 12 项审查提示")["claimed_risks"], 12)
+        self.assertIsNone(extract_summary_claims("本合同缺失交付条款")["claimed_clause_types"])
+
+    def test_overclaimed_coverage_is_flagged(self):
+        # 真实案例 contract-1：摘要称 8 类，清单只有 3 类（两个裁判都放过的那种错）
+        result = evaluate_summary_claims("共识别8类条款，其中付款条款存在风险。", self.RISKS)
+        self.assertTrue(result["checked"])
+        self.assertFalse(result["consistent"])
+        self.assertEqual(result["actual_clause_types"], 3)
+        self.assertIn("8 类条款", result["mismatches"][0])
+
+    def test_consistent_claim_passes(self):
+        result = evaluate_summary_claims("共识别7项高风险事项。", self.RISKS)
+        self.assertTrue(result["checked"])
+        self.assertFalse(result["consistent"])  # 实际 high 只有 1 条
+        ok = evaluate_summary_claims("共识别1项高风险事项。", self.RISKS)
+        self.assertTrue(ok["consistent"])
+
+    def test_no_claim_is_not_counted(self):
+        result = evaluate_summary_claims("本合同结构不完整，建议补充条款。", self.RISKS)
+        self.assertFalse(result["checked"])
+        self.assertIsNone(result["consistent"])
+        self.assertEqual(result["mismatches"], [])
+
+    def test_rule_metrics_carries_claims(self):
+        row = _row(summary="共识别8类条款", risks_json=json.dumps(self.RISKS, ensure_ascii=False))
+        metrics = rule_metrics(row, "正文")
+        self.assertEqual(metrics["summary_claims"]["claimed_clause_types"], 8)
+        self.assertFalse(metrics["summary_claims"]["consistent"])
+
+
 class AggregateTest(unittest.TestCase):
     def test_aggregate_rates_use_risk_denominator(self):
         content = "甲方应付款。"
@@ -97,6 +143,18 @@ class AggregateTest(unittest.TestCase):
         self.assertEqual(agg["anchor_rate"], 0.5)
         self.assertEqual(agg["reviews_without_anchor"], 1)
         self.assertEqual(agg["suggestion_rate"], 0.5)
+
+    def test_aggregate_counts_summary_claim_mismatches(self):
+        content = "甲方应付款。"
+        rows = [
+            _row(id=1, summary="共识别8类条款", risks_json=json.dumps([_risk(clause="payment")], ensure_ascii=False)),
+            _row(id=2, summary="共识别1类条款", risks_json=json.dumps([_risk(clause="payment")], ensure_ascii=False)),
+            _row(id=3, summary="无数字自述", risks_json=json.dumps([_risk(clause="payment")], ensure_ascii=False)),
+        ]
+        agg = aggregate_rules([rule_metrics(row, content) for row in rows])
+        self.assertEqual(agg["summary_claims_checked"], 2)
+        self.assertEqual(agg["summary_claims_consistent"], 1)
+        self.assertEqual([item["review_id"] for item in agg["summary_claims_mismatches"]], [1])
 
 
 class DedupeTest(unittest.TestCase):

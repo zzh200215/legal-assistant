@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 import time
 from collections import Counter
@@ -88,6 +89,70 @@ def _row_refs(row: ContractReview) -> list[dict[str, Any]]:
 
 # ---------------------------------------------------------------- 规则层（零模型调用）
 
+_CN_NUMERALS = {
+    "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+}
+_NUM = r"[0-9]+|[零一二两三四五六七八九十]"
+# 摘要里对自身输出的「数字自述」——用户唯一能直接验证的事实，必须与清单对得上。
+_CLAIM_CLAUSE_TYPES = re.compile(rf"识别\s*({_NUM})\s*类")
+_CLAIM_HIGH = re.compile(rf"({_NUM})\s*项?\s*高风险")
+_CLAIM_TOTAL_RISKS = re.compile(rf"识别\s*({_NUM})\s*项\s*(?:审查)?(?:风险|提示)")
+
+
+def _to_int(token: str | None) -> int | None:
+    if not token:
+        return None
+    if token.isdigit():
+        return int(token)
+    return _CN_NUMERALS.get(token)
+
+
+def extract_summary_claims(summary: str) -> dict[str, int | None]:
+    """从摘要里抽「识别 N 类条款 / N 项高风险 / N 项审查提示」这三类可核数字。"""
+    text = summary or ""
+    clause = _CLAIM_CLAUSE_TYPES.search(text)
+    high = _CLAIM_HIGH.search(text)
+    total = _CLAIM_TOTAL_RISKS.search(text)
+    return {
+        "claimed_clause_types": _to_int(clause.group(1)) if clause else None,
+        "claimed_high": _to_int(high.group(1)) if high else None,
+        "claimed_risks": _to_int(total.group(1)) if total else None,
+    }
+
+
+def evaluate_summary_claims(summary: str, risks: list[dict[str, Any]]) -> dict[str, Any]:
+    """摘要自述 vs 实际清单：不一致就是「把没审到的说成审到了」。
+
+    这一步不需要模型：摘要说「识别 8 类条款」，风险清单只有 3 类，属于可直接核实的
+    对用户陈述错误。2026-10-21 的合同审查评审里，两个裁判在「有据性」轴上都放过了
+    这类错误（见 docs/review/step24-contract-review-adjudication.md）。
+    """
+    claims = extract_summary_claims(summary)
+    actual_clause_types = len({str(risk.get("clause_type")) for risk in risks if risk.get("clause_type")})
+    actual_high = sum(1 for risk in risks if risk.get("risk_level") == "high")
+    actual_risks = len(risks)
+    checks = (
+        ("claimed_clause_types", "类条款", actual_clause_types),
+        ("claimed_high", "项高风险", actual_high),
+        ("claimed_risks", "项风险", actual_risks),
+    )
+    mismatches = [
+        f"摘要称 {claims[key]} {label}，清单实际 {actual}"
+        for key, label, actual in checks
+        if claims[key] is not None and claims[key] != actual
+    ]
+    checked = any(claims[key] is not None for key, _, _ in checks)
+    return {
+        **claims,
+        "actual_clause_types": actual_clause_types,
+        "actual_high": actual_high,
+        "actual_risks": actual_risks,
+        "checked": checked,
+        "consistent": None if not checked else not mismatches,
+        "mismatches": mismatches,
+    }
+
 
 def rule_metrics(row: ContractReview, content: str) -> dict[str, Any]:
     risks = _row_risks(row)
@@ -146,6 +211,7 @@ def rule_metrics(row: ContractReview, content: str) -> dict[str, Any]:
         "refs_superseded": refs_superseded,
         "refs_unverified": refs_unverified,
         "has_policy_snapshot": bool((row.review_policy_snapshot_json or "").strip() not in {"", "{}"}),
+        "summary_claims": evaluate_summary_claims(row.summary or "", risks),
         "created_at": str(row.created_at or ""),
     }
 
@@ -160,6 +226,17 @@ def aggregate_rules(rows: list[dict[str, Any]]) -> dict[str, Any]:
     snippet_verified = sum(row["snippet_verified"] for row in rows)
     suggestions = sum(row["suggestions"] for row in rows)
     refs_total = sum(row["refs"] for row in rows)
+    claims = [row.get("summary_claims") or {} for row in rows]
+    claims_checked = sum(1 for item in claims if item.get("checked"))
+    claims_consistent = sum(1 for item in claims if item.get("consistent") is True)
+    claims_mismatches = [
+        {
+            "review_id": row["review_id"],
+            "detail": item.get("mismatches") or [],
+        }
+        for row, item in zip(rows, claims)
+        if item.get("consistent") is False
+    ]
     by_level: Counter[str] = Counter()
     by_clause: Counter[str] = Counter()
     for row in rows:
@@ -187,6 +264,9 @@ def aggregate_rules(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "reviews_with_policy_snapshot": sum(1 for row in rows if row["has_policy_snapshot"]),
         "content_chars_avg": round(sum(row["content_chars"] for row in rows) / total, 1),
         "summary_chars_avg": round(sum(row["summary_chars"] for row in rows) / total, 1),
+        "summary_claims_checked": claims_checked,
+        "summary_claims_consistent": claims_consistent,
+        "summary_claims_mismatches": claims_mismatches,
     }
 
 
@@ -582,6 +662,16 @@ def print_summary(report: dict[str, Any]) -> None:
         f"        引用 {rules['references_total']} 条（带 source_id {rules['refs_with_source']}、"
         f"当前有效 {rules['refs_current']}、已废止 {rules['refs_superseded']}、无核验字段 {rules['refs_unverified']}）；"
         f"条款类型覆盖均值 {rules['clause_coverage_avg']}，未出现 {rules['clause_types_never_seen']}"
+    )
+    print(
+        f"        摘要自述核对 {rules['summary_claims_checked']}/{rules['reviews']} 条"
+        f"（一致 {rules['summary_claims_consistent']} 条）"
+        + (
+            "；不一致："
+            + "、".join(f"#{item['review_id']} {'/'.join(item['detail'])}" for item in rules["summary_claims_mismatches"])
+            if rules["summary_claims_mismatches"]
+            else ""
+        )
     )
     if "skipped" in report.get("judge_layer", {}):
         print(f"裁判层：跳过（{report['judge_layer']['skipped']}）")
