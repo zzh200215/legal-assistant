@@ -7,7 +7,7 @@
         <h1 class="app-page-title">待处理审核</h1>
         <p class="app-page-sub">AI 提供分析与依据，审核律师作出最终决定。</p>
       </div>
-      <div v-if="canReview && reviewStats" class="app-page-head-actions review-summary-counts"><span><strong>{{ reviewStats.sla?.active_count ?? reviewQueue.length }}</strong> 待处理</span><span><strong>{{ reviewStats.sla?.overdue_count || 0 }}</strong> 逾期</span><span><strong>{{ reviewStats.sla?.due_soon_count || 0 }}</strong> 24h内到期</span><span v-if="noEvidenceConsultations"><strong>{{ noEvidenceConsultations }}</strong> 无依据咨询</span><span><strong>{{ reviewStats.sla?.unassigned_count || 0 }}</strong> 未分配</span><span><strong>{{ reviewStats.sla?.average_turnaround_hours ?? '—' }}</strong> 平均小时</span></div>
+      <div v-if="canReview && reviewStats" class="app-page-head-actions review-summary-counts"><span><strong>{{ reviewStats.sla?.active_count ?? reviewQueue.length }}</strong> 待处理</span><span><strong>{{ reviewStats.sla?.overdue_count || 0 }}</strong> 逾期</span><span><strong>{{ reviewStats.sla?.due_soon_count || 0 }}</strong> 24h内到期</span><button v-if="noEvidenceConsultations" type="button" class="summary-chip" :class="{ active: queueFilters.evidence === 'none' }" @click="toggleEvidenceFilter"><strong>{{ noEvidenceConsultations }}</strong> 无依据咨询</button><span><strong>{{ reviewStats.sla?.unassigned_count || 0 }}</strong> 未分配</span><span><strong>{{ reviewStats.sla?.average_turnaround_hours ?? '—' }}</strong> 平均小时</span></div>
     </header>
 
     <div class="review-flow"><span>案件信息</span><i>›</i><span>AI 分析结果</span><i>›</i><span>问题与风险</span><i>›</i><span>证据 / 法源</span><i>›</i><span>审核决定</span></div>
@@ -24,6 +24,7 @@
             <input v-model="queueFilters.search" type="search" placeholder="搜索案件或标题" aria-label="搜索审核队列" />
             <select v-model="queueFilters.status" aria-label="筛选审核状态"><option value="">进行中</option><option value="pending_review,needs_lawyer_review">待律师处理</option><option value="needs_facts">待补充事实</option><option value="lawyer_approved,offline_consultation,archived">已完成</option></select>
             <select v-model="queueFilters.overdue" aria-label="筛选逾期状态"><option value="">全部时限</option><option :value="true">仅逾期</option><option value="due_soon">24小时内到期</option><option :value="false">未逾期</option></select>
+            <select v-model="queueFilters.evidence" aria-label="筛选依据等级"><option value="">全部依据</option><option value="none">无依据</option><option value="weak">依据弱</option><option value="partial">部分</option><option value="strong">强</option></select>
           </div>
           <div v-if="canReview && selectedKeys.length" class="bulk-toolbar">
             <span class="bulk-count">已选 {{ selectedKeys.length }} 项</span>
@@ -33,7 +34,7 @@
             <button type="button" class="bulk-action" :disabled="bulkLoading" @click="bulkAction('return')">批量退回</button>
             <button type="button" class="bulk-action" :disabled="bulkLoading" @click="clearSelection">清除</button>
           </div>
-          <QueryStateView :status="queueStatus" :error="queueError" empty-text="当前没有待处理审核。" min-height="120px" @retry="loadReviewQueue">
+          <QueryStateView :status="queueStatus" :error="queueError" :empty-text="queueFilters.evidence ? '没有符合依据筛选的咨询。' : '当前没有待处理审核。'" min-height="120px" @retry="loadReviewQueue">
             <div class="queue-items">
               <button v-for="item in reviewQueue" :key="reviewKey(item)" class="queue-item app-thread" :class="{ 'is-active': selectedItem === item }" type="button" @click="selectItem(item)">
                 <span class="queue-item-top">
@@ -141,13 +142,14 @@ const router = useRouter()
 const { can } = useCapabilities()
 const auth = useAuthStore()
 const canReview = computed(() => can(CAPABILITY.WORKSPACE_REVIEW) || ['admin', 'reviewer'].includes(auth.currentUser?.legal_role))
-const queueFilters = ref({ search: '', status: '', overdue: '' })
+const queueFilters = ref({ search: '', status: '', overdue: '', evidence: '' })
 // 咨询证据链信号：none=无依据、weak=依据弱（partial/strong 不打扰队列）
 const CHAIN_SIGNALS = {
   none: { label: '无依据', className: 'is-danger' },
   weak: { label: '依据弱', className: 'is-warning' },
 }
 const chainSignal = (item) => (item?.target_type === 'consultation' ? CHAIN_SIGNALS[item?.evidence_summary?.level] || null : null)
+const toggleEvidenceFilter = () => { queueFilters.value.evidence = queueFilters.value.evidence === 'none' ? '' : 'none' }
 const displayChainLevel = (summary) => summary?.level || 'none'
 const noEvidenceConsultations = computed(() => (reviewQueue.value || []).filter(
   (item) => item.target_type === 'consultation' && displayChainLevel(item.evidence_summary) === 'none',
@@ -396,4 +398,8 @@ defineExpose({ refresh: () => Promise.all([loadReviewQueue(), loadReviewStats()]
 
 .queue-chain { flex: 0 0 auto; }
 .chain-detail { margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--text-xs); }
+
+.summary-chip { display: inline-flex; align-items: baseline; gap: 4px; padding: 2px 8px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.summary-chip:hover { color: var(--color-danger); }
+.summary-chip.active { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-danger-light, rgba(214, 69, 69, 0.08)); }
 </style>

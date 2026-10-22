@@ -1206,7 +1206,7 @@ class LegalWorkspaceReadModule:
     def review_queue(
         self, db: Session, user: User, case_id: int | None = None, assigned_to: int | None = None,
         status: str | None = None, overdue: bool | None = None, search: str | None = None,
-        sla: str | None = None,
+        sla: str | None = None, evidence_level: str | None = None,
     ) -> list[dict]:
         reviewer = self._is_legal_reviewer(db, user)
         if user.organization_id:
@@ -1280,6 +1280,13 @@ class LegalWorkspaceReadModule:
                     if needle not in haystack:
                         continue
                 items.append(item)
+        if evidence_level:
+            # 只作用于咨询（合同/文书没有 evidence_summary）；语义：只看该依据等级的咨询
+            items = [
+                item for item in items
+                if item.get("target_type") == "consultation"
+                and (item.get("evidence_summary") or {}).get("level") == evidence_level
+            ]
         return sorted(items, key=lambda item: str(item.get("created_at") or ""), reverse=True)
 
     def bulk_assign_reviewers(self, db: Session, user: User, *, items: list[dict], reviewer_id: int | None, due_at=None) -> list[dict]:

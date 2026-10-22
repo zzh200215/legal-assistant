@@ -186,3 +186,46 @@ class ListConsultationsEvidenceFilterTests(unittest.TestCase):
     def test_invalid_level_rejected(self):
         response = self.client.get("/api/legal/consultations?evidence_level=whatever", headers=self.headers)
         self.assertEqual(response.status_code, 422)
+
+    def _add_pending(self, question, references):
+        db = self.Session()
+        db.add(LegalConsultation(
+            user_id=self.user_id, question=question, category="labor",
+            known_facts_json="[]", missing_facts_json="[]",
+            references_json=json.dumps(references, ensure_ascii=False),
+            advice="建议。", risk_level="low", status="pending_review",
+        ))
+        db.commit()
+        db.close()
+
+    def test_review_queue_filters_by_evidence_level(self):
+        """队列筛选与服务端同一口径：只看该等级的咨询，合同/文书不返回。"""
+        from app.models.legal import ContractReview
+
+        self._add_pending("待审：无依据咨询", [])
+        self._add_pending("待审：有依据咨询", [{"title": "劳动合同法", "status": "active"}])
+        db = self.Session()
+        db.add(ContractReview(
+            user_id=self.user_id, title="待审合同", content="正文", summary="",
+            risks_json="[]", references_json="[]", status="pending_review", version=1,
+        ))
+        db.commit()
+        db.close()
+
+        none_rows = self.client.get(
+            "/api/legal/review-queue?evidence_level=none", headers=self.headers,
+        ).json()["data"]
+        self.assertEqual([row["question"] for row in none_rows], ["待审：无依据咨询"])
+        self.assertEqual(none_rows[0]["target_type"], "consultation")
+
+        cited_rows = self.client.get(
+            "/api/legal/review-queue?evidence_level=partial", headers=self.headers,
+        ).json()["data"]
+        self.assertEqual([row["question"] for row in cited_rows], ["待审：有依据咨询"])
+
+        all_rows = self.client.get("/api/legal/review-queue", headers=self.headers).json()["data"]
+        self.assertEqual(len(all_rows), 3)  # 两条咨询 + 一条合同，无筛选时都在
+
+    def test_review_queue_invalid_evidence_level_rejected(self):
+        response = self.client.get("/api/legal/review-queue?evidence_level=whatever", headers=self.headers)
+        self.assertEqual(response.status_code, 422)

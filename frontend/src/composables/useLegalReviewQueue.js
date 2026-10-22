@@ -26,6 +26,7 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel, case
           ? { overdue: filters.value.overdue }
           : {}),
       ...(filters?.value?.search ? { search: filters.value.search } : {}),
+      ...(filters?.value?.evidence ? { evidence_level: filters.value.evidence } : {}),
     } }),
     staleTime: 15 * 1000,
   })

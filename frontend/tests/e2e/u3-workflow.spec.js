@@ -235,7 +235,11 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
     if (method === 'GET' && path === '/legal/review-queue') {
-      await route.fulfill({ json: success([CONSULT_ROW, CONSULT_NO_REF_ROW, CONTRACT_ROW, HIGH_GAP_ROW]) })
+      const queueRows = [CONSULT_ROW, CONSULT_NO_REF_ROW, CONTRACT_ROW, HIGH_GAP_ROW]
+      const level = url.searchParams.get('evidence_level')
+      await route.fulfill({ json: success(level
+        ? queueRows.filter((row) => row.target_type === 'consultation' && (row.evidence_summary?.level || 'none') === level)
+        : queueRows) })
       return
     }
     if (method === 'GET' && path === '/legal/review-stats') {
@@ -248,6 +252,11 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
     if (method === 'GET' && path === '/legal/review-queue/consultation/991/history') {
+      await route.fulfill({ json: success({ history: [] }) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/review-queue/consultation/989/history') {
+      // 依据筛选后自动选中无依据咨询（989），会拉一次审核历史
       await route.fulfill({ json: success({ history: [] }) })
       return
     }
@@ -419,6 +428,15 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   await promptDialog.getByRole('button', { name: '确认' }).click()
   await expect(page.getByText('操作成功')).toBeVisible()
   expect(requests.consultApprove).toEqual({ action: 'approve', note: '事实清楚，予以通过' })
+
+  // 依据筛选：无依据 → 队列只剩咨询；复位后恢复全部
+  const evidenceFilter = page.locator('select[aria-label="筛选依据等级"]')
+  await evidenceFilter.selectOption('none')
+  await expect(page.locator('.queue-item')).toHaveCount(1)
+  await expect(page.locator('.queue-item')).toContainText(CONSULT_NO_REF_ROW.question)
+  await expect(page.locator('.review-summary-counts .summary-chip')).toHaveClass(/active/)
+  await evidenceFilter.selectOption('')
+  await expect(page.locator('.queue-item')).toHaveCount(4)
 
   // Step 5: 合同审查的证据链门禁——无条款定位必须先勾选人工核对才能通过
   await page.locator('.queue-item', { hasText: CONTRACT_ROW.title }).click()

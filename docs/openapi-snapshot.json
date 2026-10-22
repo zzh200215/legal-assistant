@@ -7006,6 +7006,25 @@
               ],
               "title": "Sla"
             }
+          },
+          {
+            "name": "evidence_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(none|weak|partial|strong)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看该证据链等级的咨询（none=无依据）",
+              "title": "Evidence Level"
+            },
+            "description": "只看该证据链等级的咨询（none=无依据）"
           }
         ],
         "responses": {
