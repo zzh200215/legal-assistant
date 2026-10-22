@@ -27,7 +27,6 @@ from app.models.legal import (
     LegalSource,
 )
 from app.models.legal_domain import (
-    ContractRiskItem,
     LegalClaim,
     LegalEvidence,
     LegalFact,
@@ -40,6 +39,7 @@ from app.services.legal.legal_domain_service import (
     finalize_consultation_trace,
     persist_consultation_artifacts,
     persist_draft_artifacts,
+    get_risk_items,
     persist_review_artifacts,
     update_risk_item_status,
 )
@@ -118,17 +118,20 @@ class LegalDomainServiceTests(unittest.TestCase):
         review = self._create_review()
         persist_review_artifacts(self.db, review, risks=[HIGH_RISK, LOW_RISK], refs=[self.ref])
 
-        items = self.db.query(ContractRiskItem).filter(ContractRiskItem.review_id == review.id).all()
+        items = get_risk_items(self.db, review.id)
         self.assertEqual(len(items), 2)
-        by_sev = {i.severity: i for i in items}
-        # 模型输出不自动确认；高严重度进入审核队列
-        self.assertEqual(by_sev["high"].status, "needs_review")
-        self.assertEqual(by_sev["low"].status, "open")
-        self.assertEqual(by_sev["high"].category, "breach")
-        self.assertEqual(by_sev["high"].recommendation, "降低违约金")
-        self.assertIn("snippet", json.loads(by_sev["high"].evidence_json))
-        self.assertIn("100%", by_sev["high"].original_text_excerpt)
-        self.assertEqual(by_sev["high"].source, "model")
+        by_sev = {item["severity"]: item for item in items}
+        # 模型输出不自动确认；高严重度进入审核队列（状态由严重度派生）
+        self.assertEqual(by_sev["high"]["status"], "needs_review")
+        self.assertEqual(by_sev["low"]["status"], "open")
+        self.assertEqual(by_sev["high"]["category"], "breach")
+        self.assertEqual(by_sev["high"]["recommendation"], "降低违约金")
+        self.assertIn("snippet", by_sev["high"]["evidence"])
+        self.assertIn("100%", by_sev["high"]["original_text_excerpt"])
+        self.assertEqual(by_sev["high"]["source"], "model")
+        # 单一存储：风险只存在 risks_json，id 是稳定下标（1 基）
+        self.assertEqual([item["id"] for item in items], [1, 2])
+        self.assertNotIn("risk_item", review.risks_json)
 
         # 原始模型快照
         self.db.refresh(review)
@@ -155,13 +158,9 @@ class LegalDomainServiceTests(unittest.TestCase):
         review = self._create_review()
         with patch.object(get_settings(), "LEGAL_RISK_REVIEW_SEVERITIES", "low"):
             persist_review_artifacts(self.db, review, risks=[HIGH_RISK, LOW_RISK], refs=[self.ref])
-            by_sev = {
-                item.severity: item
-                for item in self.db.query(ContractRiskItem)
-                .filter(ContractRiskItem.review_id == review.id).all()
-            }
-            self.assertEqual(by_sev["low"].status, "needs_review")
-            self.assertEqual(by_sev["high"].status, "open")
+            by_sev = {item["severity"]: item for item in get_risk_items(self.db, review.id)}
+            self.assertEqual(by_sev["low"]["status"], "needs_review")
+            self.assertEqual(by_sev["high"]["status"], "open")
             # 发布门禁按同一集合统计未处理项：改配置后 low 未处理即挡住发布
             self.read_module.apply_review_action(
                 self.db, self.user, target_type="contract_review", target_id=review.id,
@@ -231,10 +230,7 @@ class LegalDomainServiceTests(unittest.TestCase):
         self.assertFalse(verdict["ok"])
         self.assertTrue(any("风险项" in r for r in verdict["reasons"]))
         # 处理后可通过
-        item = self.db.query(ContractRiskItem).filter(
-            ContractRiskItem.review_id == review.id, ContractRiskItem.severity == "high",
-        ).first()
-        update_risk_item_status(self.db, self.user, item.id, "accept", "已接受该风险")
+        update_risk_item_status(self.db, self.user, review.id, 0, "accept", "已接受该风险")
         verdict = assert_publishable(self.db, self.user, "contract_review", review.id)
         self.assertTrue(verdict["ok"])
 
@@ -250,22 +246,23 @@ class LegalDomainServiceTests(unittest.TestCase):
     def test_risk_item_status_transition_records_reviewer(self):
         review = self._create_review()
         persist_review_artifacts(self.db, review, risks=[HIGH_RISK], refs=[])
-        item = self.db.query(ContractRiskItem).first()
-        result = update_risk_item_status(self.db, self.user, item.id, "dismiss", "不属于本所负责范围")
+        result = update_risk_item_status(self.db, self.user, review.id, 0, "dismiss", "不属于本所负责范围")
         self.assertEqual(result["status"], "dismissed")
         self.assertEqual(result["reviewer_id"], self.user.id)
         self.assertIsNotNone(result["resolved_at"])
         self.assertEqual(result["resolution_note"], "不属于本所负责范围")
         # 关联的 risk_warning claim 同步为已确认
-        claim = self.db.query(LegalClaim).filter(LegalClaim.risk_item_id == item.id).first()
+        claim = self.db.query(LegalClaim).filter(
+            LegalClaim.source_type == "contract_review", LegalClaim.source_id == review.id,
+            LegalClaim.claim_type == "risk_warning",
+        ).first()
         self.assertEqual(claim.status, "approved")
 
     def test_risk_item_invalid_action_rejected(self):
         review = self._create_review()
         persist_review_artifacts(self.db, review, risks=[LOW_RISK], refs=[])
-        item = self.db.query(ContractRiskItem).first()
         with self.assertRaises(ValueError):
-            update_risk_item_status(self.db, self.user, item.id, "explode", None)
+            update_risk_item_status(self.db, self.user, review.id, 0, "explode", None)
 
     # ── 验收8：内容修改产生新版本并要求重新审核 ─────────────────────────────────
 
@@ -417,10 +414,10 @@ class LegalDomainServiceTests(unittest.TestCase):
         self.assertEqual(review.status, "pending_review")
         self.assertIsNone(review.reviewed_version)
         # 旧版本风险项被取代
-        old_items = self.db.query(ContractRiskItem).filter(
-            ContractRiskItem.review_id == review.id, ContractRiskItem.status == "dismissed",
-        ).all()
-        self.assertGreaterEqual(len(old_items), 1)
+        new_risks = json.loads(review.risks_json)
+        self.assertEqual(len(new_risks), 1)
+        self.assertEqual(new_risks[0]["risk_level"], "low")  # 新版本风险整体替换
+        self.assertIsNone(review.reviewed_version)  # 新版本须重新审核
         # 重新审核通过后可发布
         self.read_module.apply_review_action(
             self.db, self.user, target_type="contract_review", target_id=review.id,

@@ -295,6 +295,10 @@ const diffTarget = ref(null)
 const canResolveRisks = computed(() => structuredRiskItems.value.some((item) => item.can_resolve))
 const selectedStructuredRisk = computed(() => {
   if (!selectedRisk.value) return null
+  // 风险项由后端从 risks_json 按下标派生（id = 下标 + 1），优先按下标匹配，避免内容重复时错配
+  const index = (contractResult.value?.risks || []).indexOf(selectedRisk.value)
+  const byIndex = structuredRiskItems.value.find((item) => item.index === index)
+  if (byIndex) return byIndex
   return structuredRiskItems.value.find((item) => item.id === selectedRisk.value.id
     || item.original_text_excerpt === selectedRisk.value.source_location?.snippet
     || (item.category === selectedRisk.value.clause_type && item.summary === selectedRisk.value.description)) || null

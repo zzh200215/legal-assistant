@@ -1,4 +1,7 @@
-"""P1 法律业务统一模型：Claim / Evidence / Reference / Fact / ContractRiskItem。
+"""P1 法律业务统一模型：Claim / Evidence / Reference / Fact。
+
+合同审查的风险与证据统一存在 `legal_contract_reviews.risks_json`（单一存储），
+不再维护独立的 contract_risk_items 表。
 
 设计原则（对应 P1 需求）：
 - 事实、证据、主张（Claim）、法源引用、合同风险项各自独立成表，可查询、可关联、可审核；
@@ -78,8 +81,6 @@ class LegalClaim(Base):
     # 多态回指原工作台行（consultation / contract_review / draft）。
     source_type = Column(String(32), nullable=False, index=True)
     source_id = Column(Integer, nullable=False, index=True)
-    # 关联合同风险项（无 FK，指向 contract_risk_items，与项目多态/无FK列惯例一致）。
-    risk_item_id = Column(Integer, nullable=True, index=True)
     claim_type = Column(String(24), nullable=False, index=True,
                         comment="legal_conclusion / risk_warning / fact_to_confirm")
     title = Column(String(256), nullable=True)
@@ -127,39 +128,3 @@ class LegalReference(Base):
     source_version_snapshot = Column(String(512), nullable=True,
                                      comment="引用时法源版本/状态/生效日期快照，JSON")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class ContractRiskItem(Base):
-    """合同审查风险项，统一结构化为可审核实体。"""
-
-    __tablename__ = "contract_risk_items"
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    case_id = Column(Integer, ForeignKey("legal_cases.id"), nullable=True, index=True)
-    contract_id = Column(Integer, ForeignKey("legal_contracts.id"), nullable=True, index=True)
-    contract_version_id = Column(Integer, ForeignKey("legal_contract_versions.id"), nullable=True, index=True)
-    review_id = Column(Integer, ForeignKey("legal_contract_reviews.id"), nullable=False, index=True,
-                       comment="所属合同审查")
-    clause_id = Column(Integer, ForeignKey("legal_contract_clauses.id"), nullable=True, index=True)
-    category = Column(String(32), nullable=False, index=True,
-                      comment="payment/delivery/breach/compensation/confidentiality/ip/termination/dispute_resolution/other")
-    severity = Column(String(16), nullable=False, default="medium", index=True,
-                      comment="low / medium / high / critical")
-    title = Column(String(256), nullable=True)
-    summary = Column(Text, nullable=True)
-    evidence_json = Column(Text, nullable=True, comment="结构化证据/原文定位，JSON")
-    recommendation = Column(Text, nullable=True)
-    suggested_revision = Column(Text, nullable=True, comment="建议修改文本")
-    original_text_excerpt = Column(String(1000), nullable=True, comment="受限原文摘录")
-    legal_basis_json = Column(Text, nullable=True, comment="法条依据引用数组，JSON")
-    source = Column(String(16), nullable=False, default="model", comment="model / rule / human")
-    status = Column(String(24), nullable=False, default="open", index=True,
-                    comment="open / needs_review / accepted / mitigated / dismissed")
-    review_status = Column(String(24), nullable=True, comment="审核队列镜像：needs_review=在审核队列")
-    reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    resolved_at = Column(DateTime(timezone=True), nullable=True)
-    resolution_note = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

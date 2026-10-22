@@ -13,7 +13,6 @@ import app.models  # noqa: F401
 from app.core.database import Base
 from app.models.legal import LegalSource, LegalReviewAction
 from app.models.legal_domain import (
-    ContractRiskItem,
     LegalClaim,
     LegalEvidence,
     LegalFact,
@@ -43,17 +42,16 @@ class LegalDomainModelTests(unittest.TestCase):
         self.assertIn("claim_id", LegalEvidence.__table__.columns.keys())
         self.assertIn("fact_id", LegalEvidence.__table__.columns.keys())
         self.assertIn("claim_type", LegalClaim.__table__.columns.keys())
-        self.assertIn("risk_item_id", LegalClaim.__table__.columns.keys())
         self.assertIn("source_id", LegalReference.__table__.columns.keys())
         self.assertIn("claim_id", LegalReference.__table__.columns.keys())
-        self.assertIn("review_id", ContractRiskItem.__table__.columns.keys())
-        self.assertIn("contract_version_id", ContractRiskItem.__table__.columns.keys())
-        self.assertIn("severity", ContractRiskItem.__table__.columns.keys())
         # 扩展列
         self.assertIn("expiration_date", LegalSource.__table__.columns.keys())
         self.assertIn("applicability_scope", LegalSource.__table__.columns.keys())
         self.assertIn("canonical_identifier", LegalSource.__table__.columns.keys())
         self.assertIn("target_version", LegalReviewAction.__table__.columns.keys())
+        # 风险统一存 legal_contract_reviews.risks_json（20261220_0089 删表），不再有独立风险项表
+        self.assertNotIn("contract_risk_items", Base.metadata.tables)
+        self.assertNotIn("risk_item_id", LegalClaim.__table__.columns.keys())
 
     def test_claim_confidence_defaults_null(self):
         # 置信度无法可靠提供时不伪造精确分数

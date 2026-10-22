@@ -15,7 +15,6 @@ from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.legal import ContractReview, LegalCase, LegalDraft, LegalSource
-from app.models.legal_domain import ContractRiskItem
 from app.models.org import Organization, OrganizationMember
 from app.models.user import User
 from app.services.legal.legal_domain_service import persist_review_artifacts
@@ -131,18 +130,16 @@ class LegalDomainApiTests(unittest.TestCase):
 
     def test_risk_item_action_requires_reviewer_role(self):
         review = self._create_review(risks=[HIGH_RISK])
-        item = self.db.query(ContractRiskItem).first()
         response = self.client.post(
-            f"/api/legal/contract-reviews/{review.id}/risk-items/{item.id}/action",
+            f"/api/legal/contract-reviews/{review.id}/risk-items/1/action",
             json={"action": "accept", "note": "ok"}, headers=self.member_headers,
         )
         self.assertEqual(response.status_code, 403)
 
     def test_risk_item_action_by_admin(self):
         review = self._create_review(risks=[HIGH_RISK])
-        item = self.db.query(ContractRiskItem).first()
         response = self.client.post(
-            f"/api/legal/contract-reviews/{review.id}/risk-items/{item.id}/action",
+            f"/api/legal/contract-reviews/{review.id}/risk-items/1/action",
             json={"action": "accept", "note": "已接受"}, headers=self.admin_headers,
         )
         self.assertEqual(response.status_code, 200)
@@ -150,9 +147,8 @@ class LegalDomainApiTests(unittest.TestCase):
 
     def test_risk_item_action_unknown_action_rejected(self):
         review = self._create_review(risks=[HIGH_RISK])
-        item = self.db.query(ContractRiskItem).first()
         response = self.client.post(
-            f"/api/legal/contract-reviews/{review.id}/risk-items/{item.id}/action",
+            f"/api/legal/contract-reviews/{review.id}/risk-items/1/action",
             json={"action": "explode"}, headers=self.admin_headers,
         )
         self.assertEqual(response.status_code, 400)
@@ -180,9 +176,8 @@ class LegalDomainApiTests(unittest.TestCase):
             f"/api/legal/review-queue/contract_review/{review.id}/actions",
             json={"action": "approve", "note": "ok"}, headers=self.admin_headers,
         )
-        item = self.db.query(ContractRiskItem).first()
         self.client.post(
-            f"/api/legal/contract-reviews/{review.id}/risk-items/{item.id}/action",
+            f"/api/legal/contract-reviews/{review.id}/risk-items/1/action",
             json={"action": "accept", "note": "已接受"}, headers=self.admin_headers,
         )
         response = self.client.post(f"/api/legal/contract-reviews/{review.id}/publish", headers=self.admin_headers)

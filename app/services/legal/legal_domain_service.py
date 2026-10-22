@@ -27,7 +27,6 @@ from app.models.legal import (
 )
 from app.models.legal_contract import LegalContractVersion
 from app.models.legal_domain import (
-    ContractRiskItem,
     LegalClaim,
     LegalEvidence,
     LegalFact,
@@ -224,18 +223,18 @@ def persist_review_artifacts(
     risks: list[dict],
     refs: list[dict],
 ) -> None:
-    """合同审查：risk items + references + 高/严重风险项的 risk_warning claims + evidences。"""
+    """合同审查：高风险项的 risk_warning claims + evidences + references。
+
+    风险本身只存 `legal_contract_reviews.risks_json`（单一存储，见 20261022_0101 迁移）；
+    这里只为需要律师复核的高/严重风险派生 claim 与 evidence（claim 通过 source_type/source_id
+    归属审查记录，不再有 risk_item_id）。
+    """
     model_snapshot = _build_model_snapshot(db, action="legal_contract_review", input_text=review.content)
     review.model_snapshot_json = model_snapshot
+    # 单一存储：风险清单只落 risks_json（迁移 20261022_0101 删掉了 contract_risk_items）
+    review.risks_json = json.dumps(risks or [], ensure_ascii=False)
+    db.add(review)
     org_id = _org_for_case(db, review.case_id)
-    # 反向定位关联合同版本（LegalContractVersion.source_review_id -> review），供 Contract<->RiskItem 关联查询。
-    contract_link = (
-        db.query(LegalContractVersion)
-        .filter(LegalContractVersion.source_review_id == review.id)
-        .first()
-    )
-    contract_id = contract_link.contract_id if contract_link else None
-    contract_version_id = contract_link.id if contract_link else None
 
     for item in risks or []:
         if not isinstance(item, dict):
@@ -243,43 +242,30 @@ def persist_review_artifacts(
         severity = item.get("risk_level")
         if severity not in SEVERITIES:
             severity = "medium"
-        needs_review = severity in review_severities()
-        status = "needs_review" if needs_review else "open"
+        if severity not in review_severities():
+            continue
         loc = item.get("source_location") or {}
         snippet = loc.get("snippet")
-        risk_row = ContractRiskItem(
+        claim = LegalClaim(
             organization_id=org_id, user_id=review.user_id, case_id=review.case_id,
-            contract_id=contract_id, contract_version_id=contract_version_id,
-            review_id=review.id, category=item.get("clause_type") or "other",
-            severity=severity, title=item.get("label"), summary=item.get("description"),
-            evidence_json=json.dumps(loc, ensure_ascii=False),
-            recommendation=item.get("suggestion"),
-            original_text_excerpt=str(snippet)[:1000] if snippet else None,
-            source="model", status=status, review_status=status,
+            source_type="contract_review", source_id=review.id,
+            claim_type="risk_warning", title=item.get("label"),
+            summary=item.get("description"), statement=item.get("description"),
+            status="needs_review", review_status="needs_review", source="model",
+            model_snapshot_json=model_snapshot,
+            limitations_json=json.dumps(["模型风险提示，未经律师审核确认"], ensure_ascii=False),
         )
-        db.add(risk_row)
+        db.add(claim)
         db.flush()
-        if needs_review:
-            claim = LegalClaim(
+        if loc or snippet:
+            db.add(LegalEvidence(
                 organization_id=org_id, user_id=review.user_id, case_id=review.case_id,
-                source_type="contract_review", source_id=review.id, risk_item_id=risk_row.id,
-                claim_type="risk_warning", title=item.get("label"),
-                summary=item.get("description"), statement=item.get("description"),
-                status="needs_review", review_status="needs_review", source="model",
-                model_snapshot_json=model_snapshot,
-                limitations_json=json.dumps(["模型风险提示，未经律师审核确认"], ensure_ascii=False),
-            )
-            db.add(claim)
-            db.flush()
-            if loc or snippet:
-                db.add(LegalEvidence(
-                    organization_id=org_id, user_id=review.user_id, case_id=review.case_id,
-                    claim_id=claim.id, kind="support", description=item.get("description"),
-                    extraction_method="model",
-                    source_type="document" if loc.get("paragraph") else "clause",
-                    loc_json=json.dumps(loc, ensure_ascii=False),
-                    excerpt=str(snippet)[:1000] if snippet else None,
-                ))
+                claim_id=claim.id, kind="support", description=item.get("description"),
+                extraction_method="model",
+                source_type="document" if loc.get("paragraph") else "clause",
+                loc_json=json.dumps(loc, ensure_ascii=False),
+                excerpt=str(snippet)[:1000] if snippet else None,
+            ))
     for ref in refs or []:
         _add_reference(db, ref, org_id=org_id, user_id=review.user_id, case_id=review.case_id)
     db.commit()
@@ -317,19 +303,38 @@ def persist_draft_artifacts(
 
 # ── 查询聚合 ──────────────────────────────────────────────────────────────────
 
-def serialize_risk_item(item: ContractRiskItem) -> dict:
+def risk_status(risk: dict) -> str:
+    """风险项状态：已处置（accepted/mitigated/dismissed）以写入为准，其余按严重度派生。
+
+    高风险不允许停留在「open」——它是审核队列的入口（needs_review），旧数据里写成 open
+    的也在这里归一，避免绕过发布门禁。
+    """
+    status = str(risk.get("status") or "").strip()
+    if status in RISK_ITEM_RESOLVED:
+        return status
+    severity = risk.get("risk_level") if risk.get("risk_level") in SEVERITIES else "medium"
+    return "needs_review" if severity in review_severities() else "open"
+
+
+def serialize_risk_item(review: ContractReview, risk: dict, index: int) -> dict:
+    """从 `risks_json` 的元素派生结构化风险项（单一存储，无独立表）。"""
+    severity = risk.get("risk_level") if risk.get("risk_level") in SEVERITIES else "medium"
+    location = risk.get("source_location") if isinstance(risk.get("source_location"), dict) else {}
+    snippet = str(location.get("snippet") or "")[:1000] or None
+    status = risk_status(risk)
     return {
-        "id": item.id, "organization_id": item.organization_id, "case_id": item.case_id,
-        "contract_id": item.contract_id, "contract_version_id": item.contract_version_id,
-        "review_id": item.review_id, "clause_id": item.clause_id,
-        "category": item.category, "severity": item.severity, "title": item.title,
-        "summary": item.summary, "evidence": _json_parse(item.evidence_json, {}),
-        "recommendation": item.recommendation, "suggested_revision": item.suggested_revision,
-        "original_text_excerpt": item.original_text_excerpt,
-        "legal_basis": _json_parse(item.legal_basis_json, []),
-        "source": item.source, "status": item.status, "review_status": item.review_status,
-        "reviewer_id": item.reviewer_id, "resolved_at": item.resolved_at,
-        "resolution_note": item.resolution_note, "created_at": item.created_at,
+        "id": index + 1, "index": index,
+        "organization_id": None, "case_id": review.case_id,
+        "contract_id": None, "contract_version_id": None,
+        "review_id": review.id, "clause_id": None,
+        "category": risk.get("clause_type") or "other", "severity": severity,
+        "title": risk.get("label"), "summary": risk.get("description"),
+        "evidence": location, "recommendation": risk.get("suggestion"),
+        "suggested_revision": None, "original_text_excerpt": snippet,
+        "legal_basis": risk.get("legal_basis") or [],
+        "source": "model", "status": status, "review_status": status if status == "needs_review" else None,
+        "reviewer_id": risk.get("reviewer_id"), "resolved_at": risk.get("resolved_at"),
+        "resolution_note": risk.get("resolution_note"), "created_at": review.created_at,
     }
 
 
@@ -337,7 +342,7 @@ def serialize_claim(claim: LegalClaim) -> dict:
     return {
         "id": claim.id, "organization_id": claim.organization_id, "case_id": claim.case_id,
         "source_type": claim.source_type, "source_id": claim.source_id,
-        "risk_item_id": claim.risk_item_id, "claim_type": claim.claim_type,
+        "claim_type": claim.claim_type,
         "title": claim.title, "summary": claim.summary, "statement": claim.statement,
         "confidence": float(claim.confidence) if claim.confidence is not None else None,
         "assumptions": _json_parse(claim.assumptions_json, []),
@@ -389,9 +394,11 @@ def get_case_domain(db: Session, case_id: int) -> dict:
     references = (
         db.query(LegalReference).filter(LegalReference.case_id == case_id).order_by(LegalReference.id.desc()).all()
     )
-    risk_items = (
-        db.query(ContractRiskItem).filter(ContractRiskItem.case_id == case_id).order_by(ContractRiskItem.id.desc()).all()
-    )
+    risk_items = [
+        item
+        for review in db.query(ContractReview).filter(ContractReview.case_id == case_id).order_by(ContractReview.id.desc()).all()
+        for item in get_risk_items(db, review.id, review=review)
+    ]
     return {
         "case_id": case_id,
         "facts": [{
@@ -401,15 +408,20 @@ def get_case_domain(db: Session, case_id: int) -> dict:
         "claims": [serialize_claim(c) for c in claims],
         "evidences": [serialize_evidence(e) for e in evidences],
         "references": [serialize_reference(r) for r in references],
-        "risk_items": [serialize_risk_item(r) for r in risk_items],
+        "risk_items": risk_items,
     }
 
 
-def get_risk_items(db: Session, review_id: int) -> list[dict]:
+def get_risk_items(db: Session, review_id: int, review: ContractReview | None = None) -> list[dict]:
+    """合同审查的结构化风险项：从 `risks_json` 派生（按下标稳定编号，1 基）。"""
+    row = review or db.get(ContractReview, review_id)
+    if row is None:
+        return []
+    risks = _json_parse(row.risks_json, [])
     return [
-        serialize_risk_item(item)
-        for item in db.query(ContractRiskItem).filter(ContractRiskItem.review_id == review_id)
-        .order_by(ContractRiskItem.severity.desc(), ContractRiskItem.id.asc()).all()
+        serialize_risk_item(row, risk, index)
+        for index, risk in enumerate(risks)
+        if isinstance(risk, dict)
     ]
 
 
@@ -424,25 +436,44 @@ def get_claims_for_target(db: Session, source_type: str, source_id: int) -> list
 
 # ── 审核状态机 ────────────────────────────────────────────────────────────────
 
-def update_risk_item_status(db: Session, user, risk_item_id: int, action: str, note: str | None = None) -> dict:
-    """风险项状态流转：accept/mitigate/dismiss。仅审核角色可调用（API 层校验）。"""
-    item = db.get(ContractRiskItem, risk_item_id)
-    if not item:
+def update_risk_item_status(
+    db: Session, user, review_id: int, risk_index: int, action: str, note: str | None = None,
+) -> dict:
+    """风险项状态流转：accept/mitigate/dismiss，直接写回 `risks_json[risk_index]`。
+
+    `risk_index` 是 0 基下标（API 暴露的 `id = index + 1`）。仅审核角色可调用（API 层校验）。
+    """
+    review = db.get(ContractReview, review_id)
+    if review is None:
         raise LookupError("RISK_ITEM_NOT_FOUND")
+    risks = _json_parse(review.risks_json, [])
+    if not 0 <= risk_index < len(risks) or not isinstance(risks[risk_index], dict):
+        raise LookupError("RISK_ITEM_NOT_FOUND")
+    risk = risks[risk_index]
+    current = risk_status(risk)
     if action not in RISK_ITEM_ACTIONS:
         raise ValueError("RISK_ITEM_ACTION_INVALID")
-    if item.status in RISK_ITEM_RESOLVED:
+    if current in RISK_ITEM_RESOLVED:
         raise ValueError("RISK_ITEM_ALREADY_RESOLVED")
+
     target = RISK_ITEM_ACTIONS[action]
-    item.status = target
-    item.review_status = target
-    item.reviewer_id = user.id
-    item.resolved_at = utc_now()
-    item.resolution_note = note
-    # 同步关联的 risk_warning claim（claim.risk_item_id -> risk item）。
+    risk["status"] = target
+    risk["reviewer_id"] = user.id
+    risk["resolved_at"] = utc_now().isoformat()
+    risk["resolution_note"] = note
+    review.risks_json = json.dumps(risks, ensure_ascii=False)
+    db.add(review)
+
+    # 同步由该风险派生的 risk_warning claim（无外键：按 source + 标题/描述匹配）
     claim = (
         db.query(LegalClaim)
-        .filter(LegalClaim.risk_item_id == item.id)
+        .filter(
+            LegalClaim.source_type == "contract_review",
+            LegalClaim.source_id == review_id,
+            LegalClaim.claim_type == "risk_warning",
+            LegalClaim.title == risk.get("label"),
+            LegalClaim.summary == risk.get("description"),
+        )
         .first()
     )
     if claim and claim.status not in CLAIM_STATUS_RESOLVED:
@@ -451,31 +482,17 @@ def update_risk_item_status(db: Session, user, risk_item_id: int, action: str, n
         claim.reviewer_id = user.id
         claim.reviewed_at = utc_now()
     db.commit()
-    db.refresh(item)
-    return serialize_risk_item(item)
+    db.refresh(review)
+    return serialize_risk_item(review, risk, risk_index)
 
 
 def supersede_artifacts(db: Session, user, source_type: str, source_id: int) -> None:
-    """内容进入新版本时，把旧版本未决的 risk items / claims 标记为被取代。
+    """内容进入新版本时，把旧版本未决的 claims 标记为被取代。
 
-    - contract_risk_items：open/needs_review -> dismissed（记操作者/原因）；
-    - legal_claims：未决 claim -> superseded。
-    使"审核通过后修改需重新审核"可被追溯，且旧版本风险项不再阻塞新版本发布。
+    风险清单本身随新版本**整体替换**（risks_json 是单一存储），旧风险不再单独保留状态；
+    可追溯性依赖审核动作日志与 claims：未决 claim -> superseded。
     """
-    items = (
-        db.query(ContractRiskItem)
-        .filter(
-            ContractRiskItem.review_id == source_id,
-            ContractRiskItem.status.in_(("open", "needs_review")),
-        )
-        .all()
-    )
-    for item in items:
-        item.status = "dismissed"
-        item.review_status = None
-        item.reviewer_id = user.id
-        item.resolved_at = utc_now()
-        item.resolution_note = "内容已修改进入新版本，本风险项随旧版本被取代"
+
     claims = (
         db.query(LegalClaim)
         .filter(
@@ -512,14 +529,13 @@ def assert_publishable(db: Session, user, target_type: str, target_id: int) -> d
         reasons.append("内容自审核通过后已修改，需重新审核后再发布")
 
     if target_type == "contract_review":
-        unresolved = (
-            db.query(ContractRiskItem)
-            .filter(
-                ContractRiskItem.review_id == target_id,
-                ContractRiskItem.severity.in_(review_severities()),
-                ContractRiskItem.status.in_(("open", "needs_review")),
-            )
-            .count()
+        risks = _json_parse(row.risks_json, [])
+        unresolved = sum(
+            1
+            for risk in risks
+            if isinstance(risk, dict)
+            and (risk.get("risk_level") if risk.get("risk_level") in SEVERITIES else "medium") in review_severities()
+            and risk_status(risk) in ("open", "needs_review")
         )
         if unresolved:
             reasons.append(f"存在 {unresolved} 项未处理的高/严重风险项，不可发布")

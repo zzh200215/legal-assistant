@@ -62,7 +62,7 @@ from app.models.legal_contract import (
     LegalSignParty,
     LegalSignRequest,
 )
-from app.models.legal_domain import ContractRiskItem, LegalClaim, LegalEvidence, LegalFact, LegalReference
+from app.models.legal_domain import LegalClaim, LegalEvidence, LegalFact, LegalReference
 from app.models.legal_notifications import (
     LegalNotificationEvent,
     LegalNotificationPolicy,
@@ -195,7 +195,6 @@ __all__ = [
     "LegalEvidence",
     "LegalClaim",
     "LegalReference",
-    "ContractRiskItem",
     "LegalTimeEntry",
     "LegalBillingRule",
     "LegalInvoice",

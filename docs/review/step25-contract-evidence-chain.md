@@ -190,4 +190,4 @@ body: { "paragraph": 2, "snippet": "双方未约定交付标准。" }
 
 - 锚点粒度是**整段**：片段取该段前 200 字，不是用户框选的句子/字符区间（真正的字符级定位要 `source_location.start/end`，见 §6 第 3 条）。
 - 补定位会**覆盖**该风险原有的 `source_location`，没有保留历史（审核动作有审计日志，但风险字段本身没有版本）。
-- 只写 `risks_json`；结构化的 `contract_risk_items.evidence_json` 没有同步（两份存储仍然是历史包袱）。
+- ~~只写 `risks_json`，结构化的 `contract_risk_items.evidence_json` 没有同步（两份存储是历史包袱）~~：该双存储已在 [step26](step26-merge-contract-risk-storage.md) 合并——删除 `contract_risk_items`，风险与处置状态统一在 `risks_json`。

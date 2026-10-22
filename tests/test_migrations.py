@@ -72,7 +72,7 @@ class MigrationChainTests(unittest.TestCase):
         from app.core.auth import hash_password
         from app.core.database import Base
         from app.models.legal import LegalCase, LegalConsultation, ContractReview
-        from app.models.legal_domain import ContractRiskItem, LegalFact
+        from app.models.legal_domain import LegalFact
         from app.models.org import Organization
         from app.models.user import User
 
@@ -119,20 +119,33 @@ class MigrationChainTests(unittest.TestCase):
         mig = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mig)
 
+        # 当前 models 已删表（20261022_0101），这里用迁移自带的 Core 定义重建历史表再验证回填
+        import sqlalchemy as _sa
+
+        legacy_metadata = _sa.MetaData()
+        legacy_risks = mig._legacy_risk_items_table(legacy_metadata)
+        legacy_metadata.create_all(bind=engine)
+
         mig._backfill(engine)
 
-        items = db.query(ContractRiskItem).filter(ContractRiskItem.review_id == review.id).all()
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0].severity, "high")
-        self.assertEqual(items[0].status, "needs_review")
-        self.assertEqual(items[0].category, "breach")
-        self.assertEqual(items[0].recommendation, "y")
-        self.assertIn("违约条款", items[0].original_text_excerpt)
+        import sqlalchemy as _sa
+
+        def _risk_rows():
+            with engine.connect() as conn:
+                return conn.execute(
+                    _sa.select(legacy_risks).where(legacy_risks.c.review_id == review.id)
+                ).mappings().all()
+
+        rows = _risk_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["severity"], "high")
+        self.assertEqual(rows[0]["status"], "needs_review")
+        self.assertEqual(rows[0]["category"], "breach")
+        self.assertEqual(rows[0]["recommendation"], "y")
+        self.assertIn("违约条款", rows[0]["original_text_excerpt"])
         # 幂等：重复回填不重复插入
         mig._backfill(engine)
-        self.assertEqual(
-            db.query(ContractRiskItem).filter(ContractRiskItem.review_id == review.id).count(), 1,
-        )
+        self.assertEqual(len(_risk_rows()), 1)
         facts = db.query(LegalFact).filter(LegalFact.consultation_id == consult.id).all()
         self.assertEqual(len(facts), 2)
         self.assertEqual({f.fact_type for f in facts}, {"known", "missing"})

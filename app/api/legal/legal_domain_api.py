@@ -2,8 +2,8 @@
 
 端点（均挂 /api/legal）：
   GET  /cases/{case_id}/domain                               案件事实/证据/主张/引用/风险项聚合
-  GET  /contract-reviews/{item_id}/risk-items               结构化风险项列表
-  POST /contract-reviews/{item_id}/risk-items/{risk_id}/action  律师处理风险项（accept/mitigate/dismiss）
+  GET  /contract-reviews/{item_id}/risk-items               结构化风险项列表（由 risks_json 派生，id=下标+1）
+  POST /contract-reviews/{item_id}/risk-items/{risk_id}/action  律师处理风险项（accept/mitigate/dismiss，写回 risks_json）
   POST /contract-reviews/{item_id}/publish                  发布合同审查结论（审核门禁）
   POST /drafts/{item_id}/mark-final                         文书定稿（审核门禁）
   GET  /consultations/{item_id}/claims                      主张追溯
@@ -21,7 +21,6 @@ from app.core.api_response import api_error
 from app.core.auth import get_current_user, verify_case_access
 from app.core.database import get_db
 from app.models.legal import ContractReview, LegalConsultation, LegalDraft, LegalReviewAction
-from app.models.legal_domain import ContractRiskItem
 from app.models.user import User
 from app.services.observability.audit_log_service import AuditLogService
 from app.services.legal.legal_domain_service import (
@@ -91,7 +90,7 @@ def case_domain(case_id: int, db: Session = Depends(get_db), current_user: User 
 @router.get("/contract-reviews/{item_id}/risk-items")
 def list_risk_items(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     review = _load_owned_row(db, current_user, ContractReview, item_id, "contract_review")
-    rows = get_risk_items(db, item_id)
+    rows = get_risk_items(db, item_id, review=review)
     from app.models.org import OrganizationMember
     member = db.query(OrganizationMember).filter(
         OrganizationMember.organization_id == current_user.organization_id,
@@ -114,11 +113,11 @@ def handle_risk_item(item_id: int, risk_id: int, req: RiskActionIn, db: Session 
     if current_user.role not in {"admin", "dept_admin"} and not (member and member.legal_role in {"admin", "reviewer"}):
         raise api_error(403, "仅审核律师或管理员可处理风险项", code="LEGAL_RISK_REVIEW_FORBIDDEN")
     _load_owned_row(db, current_user, ContractReview, item_id, "contract_review")
-    risk = db.get(ContractRiskItem, risk_id)
-    if not risk or risk.review_id != item_id:
-        raise api_error(404, "风险项不存在", code="RISK_ITEM_NOT_FOUND")
     try:
-        result = legal_domain_service.update_risk_item_status(db, current_user, risk_id, req.action, req.note)
+        # 风险项由 risks_json 按下标派生，暴露的 id = index + 1
+        result = legal_domain_service.update_risk_item_status(
+            db, current_user, item_id, risk_id - 1, req.action, req.note,
+        )
     except LookupError:
         raise api_error(404, "风险项不存在", code="RISK_ITEM_NOT_FOUND")
     except ValueError as exc:

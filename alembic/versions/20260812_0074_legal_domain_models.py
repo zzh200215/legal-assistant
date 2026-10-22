@@ -27,6 +27,43 @@ depends_on = None
 SEVERITIES = ("low", "medium", "high", "critical")
 
 
+
+def _legacy_risk_items_table(metadata: "sa.MetaData") -> "sa.Table":
+    """contract_risk_items 的 Core 定义。
+
+    历史迁移不能依赖 `app.models` 里的 ORM 类——该类已在 20261220_0089 删除（风险并入
+    legal_contract_reviews.risks_json），但本迁移仍需可独立执行。
+    """
+    return sa.Table(
+        "contract_risk_items", metadata,
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("organization_id", sa.Integer()),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("case_id", sa.Integer()),
+        sa.Column("contract_id", sa.Integer()),
+        sa.Column("contract_version_id", sa.Integer()),
+        sa.Column("review_id", sa.Integer(), nullable=False),
+        sa.Column("clause_id", sa.Integer()),
+        sa.Column("category", sa.String(32), nullable=False),
+        sa.Column("severity", sa.String(16), nullable=False),
+        sa.Column("title", sa.String(256)),
+        sa.Column("summary", sa.Text()),
+        sa.Column("evidence_json", sa.Text()),
+        sa.Column("recommendation", sa.Text()),
+        sa.Column("suggested_revision", sa.Text()),
+        sa.Column("original_text_excerpt", sa.String(1000)),
+        sa.Column("legal_basis_json", sa.Text()),
+        sa.Column("source", sa.String(16), nullable=False),
+        sa.Column("status", sa.String(24), nullable=False),
+        sa.Column("review_status", sa.String(24)),
+        sa.Column("reviewer_id", sa.Integer()),
+        sa.Column("resolved_at", sa.DateTime(timezone=True)),
+        sa.Column("resolution_note", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+        sa.Column("updated_at", sa.DateTime(timezone=True)),
+    )
+
+
 def _severe(severity: str) -> bool:
     return severity in ("high", "critical")
 
@@ -252,7 +289,9 @@ def _backfill(bind) -> None:
       部分失败后重跑最多造成部分遗漏，旧数据仍可经 JSON 列读取。
     """
     from app.models.legal import ContractReview, LegalConsultation, LegalDraft, LegalCase
-    from app.models.legal_domain import ContractRiskItem, LegalFact, LegalReference
+    from app.models.legal_domain import LegalFact, LegalReference
+
+    risk_items = _legacy_risk_items_table(sa.MetaData())
 
     session = Session(bind=bind)
     try:
@@ -263,7 +302,10 @@ def _backfill(bind) -> None:
         # 1) contract_risk_items + legal_references from contract reviews
         for review in session.query(ContractReview).all():
             org_id = case_org.get(review.case_id) if review.case_id else None
-            if session.query(ContractRiskItem).filter(ContractRiskItem.review_id == review.id).count() == 0:
+            existing = session.execute(
+                sa.select(sa.func.count()).select_from(risk_items).where(risk_items.c.review_id == review.id)
+            ).scalar()
+            if not existing:
                 for item in _json_list(review.risks_json):
                     if not isinstance(item, dict):
                         continue
@@ -273,7 +315,7 @@ def _backfill(bind) -> None:
                     status = "needs_review" if _severe(severity) else "open"
                     loc = item.get("source_location") or {}
                     snippet = loc.get("snippet")
-                    session.add(ContractRiskItem(
+                    session.execute(risk_items.insert().values(
                         organization_id=org_id,
                         user_id=review.user_id,
                         case_id=review.case_id,
