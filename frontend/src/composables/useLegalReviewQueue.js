@@ -20,7 +20,11 @@ export function useLegalReviewQueue({ client, message, prompt, targetLabel, case
     fetcher: () => client.listLegalReviewQueue({ params: {
       ...(caseId?.value ? { case_id: caseId.value } : {}),
       ...(filters?.value?.status ? { status: filters.value.status } : {}),
-      ...(filters?.value?.overdue !== '' && filters?.value?.overdue !== undefined ? { overdue: filters.value.overdue } : {}),
+      ...(filters?.value?.overdue === 'due_soon'
+        ? { sla: 'due_soon' }
+        : filters?.value?.overdue !== '' && filters?.value?.overdue !== undefined
+          ? { overdue: filters.value.overdue }
+          : {}),
       ...(filters?.value?.search ? { search: filters.value.search } : {}),
     } }),
     staleTime: 15 * 1000,

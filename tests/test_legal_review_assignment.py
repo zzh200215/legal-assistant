@@ -113,6 +113,35 @@ class LegalReviewAssignmentTests(unittest.TestCase):
         self.assertEqual(stats.status_code, 200, stats.text)
         self.assertIn("sla", stats.json()["data"])
         self.assertEqual(stats.json()["data"]["sla"]["overdue_count"], 1)
+        self.assertEqual(stats.json()["data"]["sla"]["due_soon_count"], 0)
+
+    def test_due_soon_is_flagged_and_filterable(self):
+        """24 小时内到期：sla_state=due_soon、给出剩余小时数、可按 sla=due_soon 过滤。"""
+        from datetime import timedelta
+
+        from app.core.time import utc_now
+
+        self.row.review_due_at = utc_now() + timedelta(hours=6)
+        self.db.commit()
+
+        queue = self.client.get("/api/legal/review-queue", headers=self.admin_headers)
+        self.assertEqual(queue.status_code, 200, queue.text)
+        item = queue.json()["data"][0]
+        self.assertEqual(item["sla_state"], "due_soon")
+        self.assertFalse(item["review_overdue"])
+        self.assertTrue(5 < item["review_due_in_hours"] < 7)
+
+        filtered = self.client.get("/api/legal/review-queue?sla=due_soon", headers=self.admin_headers)
+        self.assertEqual(len(filtered.json()["data"]), 1)
+        overdue_only = self.client.get("/api/legal/review-queue?sla=overdue", headers=self.admin_headers)
+        self.assertEqual(overdue_only.json()["data"], [])
+
+        stats = self.client.get("/api/legal/review-stats", headers=self.reviewer_headers)
+        self.assertEqual(stats.json()["data"]["sla"]["due_soon_count"], 1)
+
+    def test_invalid_sla_filter_rejected(self):
+        response = self.client.get("/api/legal/review-queue?sla=whatever", headers=self.admin_headers)
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":

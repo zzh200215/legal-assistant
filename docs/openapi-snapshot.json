@@ -6970,6 +6970,23 @@
               ],
               "title": "Search"
             }
+          },
+          {
+            "name": "sla",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(overdue|due_soon)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sla"
+            }
           }
         ],
         "responses": {
@@ -29959,7 +29976,7 @@
           "action": {
             "type": "string",
             "title": "Action",
-            "description": "accept / mitigate / dismiss"
+            "description": "accept / mitigate / dismiss / reopen（撤销处置）"
           },
           "note": {
             "anyOf": [

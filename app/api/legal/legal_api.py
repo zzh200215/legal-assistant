@@ -1398,8 +1398,8 @@ def resubmit_draft(item_id: int, req: DraftIn, db: Session = Depends(get_db), cu
 
 
 @router.get("/review-queue")
-def review_queue(case_id: int | None = Query(default=None), assigned_to: int | None = Query(default=None), status: str | None = Query(default=None), overdue: bool | None = Query(default=None), search: str | None = Query(default=None, max_length=120), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return legal_workspace_read_module.review_queue(db, current_user, case_id=case_id, assigned_to=assigned_to, status=status, overdue=overdue, search=search)
+def review_queue(case_id: int | None = Query(default=None), assigned_to: int | None = Query(default=None), status: str | None = Query(default=None), overdue: bool | None = Query(default=None), search: str | None = Query(default=None, max_length=120), sla: str | None = Query(default=None, pattern="^(overdue|due_soon)$"), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return legal_workspace_read_module.review_queue(db, current_user, case_id=case_id, assigned_to=assigned_to, status=status, overdue=overdue, search=search, sla=sla)
 
 
 @router.get("/review-queue/reviewers")

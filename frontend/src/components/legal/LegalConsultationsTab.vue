@@ -64,6 +64,7 @@
 
                 <section class="app-answer-section">
                   <p class="app-answer-kicker">参考依据</p>
+                  <p v-if="consultResult.evidence_summary?.references" class="chain-line">{{ chainDetail(consultResult.evidence_summary) }}</p>
                   <div v-if="referenceItems.length" class="app-evidence-list">
                     <div v-for="r in referenceItems" :key="r.source_id || r.title" class="app-evidence ref-item">
                       <div class="app-evidence-head">
@@ -113,6 +114,11 @@
                   <el-table-column prop="risk_level" label="风险" width="80">
                     <template #default="{ row }">
                       <el-tag :type="riskTagType(row.risk_level)" size="small">{{ riskLabel(row.risk_level) }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="依据" width="150">
+                    <template #default="{ row }">
+                      <el-tag size="small" effect="plain" :type="chainTagType(row.evidence_summary)">{{ chainText(row.evidence_summary) }}</el-tag>
                     </template>
                   </el-table-column>
                   <el-table-column prop="status" label="状态" width="120">
@@ -165,6 +171,24 @@ import {
   sourceStatusType, sourceStatusLabel, statusTagType, statusLabel,
 } from '../../composables/useLegalWorkspacePresentation'
 
+// 咨询侧证据链（服务端 evidence_summary）：强/部分/弱/无引用 → 标签语义
+const CHAIN_TAG_TYPES = { strong: 'success', partial: 'warning', weak: 'danger', none: 'info' }
+const chainTagType = (summary) => CHAIN_TAG_TYPES[summary?.level] || 'info'
+const chainText = (summary) => {
+  if (!summary || summary.level === 'none') return '无引用'
+  const refs = `${summary.references} 条引用`
+  return summary.sentences ? `${refs} · ${summary.attributed}/${summary.sentences} 句` : refs
+}
+const chainDetail = (summary) => {
+  const parts = []
+  if (summary.sentences) parts.push(`句级溯源 ${summary.attributed}/${summary.sentences} 句`)
+  else parts.push('未生成句级溯源')
+  if (summary.faithfulness === 'pass') parts.push('忠实度通过')
+  else if (summary.faithfulness === 'fail') parts.push(`忠实度未通过（${summary.unsupported} 处）`)
+  else parts.push('忠实度未校验')
+  if (!summary.active_references) parts.push('引用均已失效')
+  return parts.join(' · ')
+}
 const confidenceTagType = (score) => {
   if (score >= 80) return 'success'
   if (score >= 55) return 'warning'
@@ -357,4 +381,6 @@ onMounted(() => {
 .history-body {
   padding-top: var(--space-3);
 }
+
+.chain-line { margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--text-xs); }
 </style>

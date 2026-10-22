@@ -19,6 +19,16 @@ const CONSULT_ROW = {
   references: [],
   advice: '公司单方解除劳动合同应依法支付经济补偿。',
   disclaimer_level: 'standard',
+  // SLA：6 小时后到期 → 审核队列应显示「24h内到期 / 剩 6 小时」
+  review_due_at: '2026-10-22T10:00:00',
+  review_due_in_hours: 6,
+  sla_state: 'due_soon',
+  review_overdue: false,
+  // 咨询侧证据链摘要（服务端派生）：1 条有效引用、4 句里 3 句有溯源、忠实度通过
+  evidence_summary: {
+    references: 1, active_references: 1, sentences: 4, attributed: 3,
+    attributed_rate: 0.75, faithfulness: 'pass', unsupported: 0, level: 'partial',
+  },
 }
 
 const CONTRACT_ROW = {
@@ -304,6 +314,10 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   await page.getByPlaceholder(/例如：我在公司工作了3年/).fill(CONSULT_ROW.question)
   await page.getByRole('button', { name: '提交咨询', exact: true }).click()
   await expect(page.getByText('公司单方解除劳动合同应依法支付经济补偿。')).toBeVisible()
+  // 咨询侧证据链：结果卡显示句级溯源与忠实度，历史列表有「依据」列
+  await expect(page.locator('.chain-line')).toContainText('句级溯源 3/4 句')
+  await expect(page.locator('.history-card')).toContainText('依据')
+  await expect(page.locator('.history-card')).toContainText('1 条引用 · 3/4 句')
   expect(requests.consult).toEqual({ question: CONSULT_ROW.question, case_id: 3 })
 
   await page.getByRole('button', { name: '提交律师审核', exact: true }).click()
@@ -354,7 +368,11 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   // Step 4: 审核队列通过（新 UI 的队列项是 .queue-item 按钮并自动选中首项，决定按钮在详情 footer：
   // LegalReviewTab.vue:28 列表、:174-183 自动选中、:71 通过按钮）
   await page.locator('.legal-matter-tab', { hasText: '审核' }).click()
-  await expect(page.locator('.queue-item', { hasText: CONSULT_ROW.question })).toBeVisible()
+  const consultationQueueItem = page.locator('.queue-item', { hasText: CONSULT_ROW.question })
+  await expect(consultationQueueItem).toBeVisible()
+  // SLA 提醒：24h 内到期标签 + 相对剩余时间
+  await expect(consultationQueueItem.getByText('24h内到期')).toBeVisible()
+  await expect(consultationQueueItem.getByText('剩 6 小时')).toBeVisible()
   await expect(page.locator('.review-actions')).toBeVisible()
   await page.locator('.review-actions').getByRole('button', { name: '通过', exact: true }).click()
   const promptDialog = page.getByRole('dialog')

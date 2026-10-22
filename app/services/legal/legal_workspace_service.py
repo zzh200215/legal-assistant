@@ -30,6 +30,7 @@ from app.models.legal_contract import LegalReviewPolicy, LegalReviewPolicyVersio
 from app.models.user import User
 from app.models.org import LegalMemberRole, OrganizationMember
 from app.services.observability.audit_log_service import AuditLogService
+from app.services.legal.consultation_evidence import summarize_consultation_evidence
 from app.services.legal.contract_evidence import annotate_contract_evidence
 from app.services.legal.legal_service import (
     DISCLAIMER,
@@ -48,6 +49,9 @@ from app.services.legal.legal_service import (
 )
 from app.services.legal.legal_reference_service import enrich_references, parse_citation_numbers
 from app.services.rag.agentic_judge import check_faithfulness
+
+# SLA：距离到期 <=24 小时算「即将到期」，用于提醒与筛选
+REVIEW_DUE_SOON_HOURS = 24
 from app.services.legal.legal_domain_service import finalize_consultation_trace, legal_domain_service
 from app.services.billing.subscription_service import subscription_service
 from app.services.legal.matter_service import matter_service
@@ -148,6 +152,8 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "faithfulness": _json_or(getattr(row, "faithfulness_json", None), "{}"),
             # 证据可核验性：生成时算好的确定性统计（老记录返回 {}，前端不渲染该提示）。
             "evidence": _json_or(getattr(row, "evidence_json", None), "{}"),
+            # 证据链摘要：引用 / 句级覆盖 / 忠实度 → 等级（读时派生，不写库）
+            "evidence_summary": summarize_consultation_evidence(row),
         }
     if isinstance(row, ContractReview):
         # 证据链：读时现算（不写库、不迁移），每条风险补 evidence，顶层给聚合统计。
@@ -1200,6 +1206,7 @@ class LegalWorkspaceReadModule:
     def review_queue(
         self, db: Session, user: User, case_id: int | None = None, assigned_to: int | None = None,
         status: str | None = None, overdue: bool | None = None, search: str | None = None,
+        sla: str | None = None,
     ) -> list[dict]:
         reviewer = self._is_legal_reviewer(db, user)
         if user.organization_id:
@@ -1247,10 +1254,25 @@ class LegalWorkspaceReadModule:
                         item["case_title"] = matter.title
                         item["case_status"] = matter.status
                 due_at = getattr(row, "review_due_at", None)
-                item["review_overdue"] = bool(due_at and due_at < utc_now() and row.status in ("pending_review", "needs_lawyer_review", "needs_facts"))
+                active = row.status in ("pending_review", "needs_lawyer_review", "needs_facts")
+                item["review_overdue"] = bool(due_at and due_at < utc_now() and active)
+                item["review_due_in_hours"] = (
+                    round((due_at - utc_now()).total_seconds() / 3600, 1)
+                    if due_at and active else None
+                )
+                item["sla_state"] = (
+                    None if item["review_due_in_hours"] is None
+                    else "overdue" if item["review_due_in_hours"] < 0
+                    else "due_soon" if item["review_due_in_hours"] <= REVIEW_DUE_SOON_HOURS
+                    else "on_time"
+                )
                 if overdue is True and not item["review_overdue"]:
                     continue
                 if overdue is False and item["review_overdue"]:
+                    continue
+                if sla == "due_soon" and item["sla_state"] != "due_soon":
+                    continue
+                if sla == "overdue" and item["sla_state"] != "overdue":
                     continue
                 if search:
                     needle = search.strip().lower()
@@ -1282,6 +1304,7 @@ class LegalWorkspaceReadModule:
         queue = self.review_queue(db, user)
         active = [item for item in queue if item.get("status") in {"pending_review", "needs_lawyer_review", "needs_facts"}]
         overdue_count = sum(1 for item in active if item.get("review_overdue"))
+        due_soon_count = sum(1 for item in active if item.get("sla_state") == "due_soon")
         assigned_count = sum(1 for item in active if item.get("reviewer_id"))
         due_count = sum(1 for item in active if item.get("review_due_at"))
         completed = []
@@ -1295,6 +1318,7 @@ class LegalWorkspaceReadModule:
         average_hours = round(sum(completed) / len(completed), 1) if completed else None
         return {
             "active_count": len(active), "overdue_count": overdue_count,
+            "due_soon_count": due_soon_count,
             "assigned_count": assigned_count, "unassigned_count": len(active) - assigned_count,
             "due_count": due_count, "average_turnaround_hours": average_hours,
             "overdue_rate": round(overdue_count / len(active), 4) if active else 0,
