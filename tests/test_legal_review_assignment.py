@@ -115,6 +115,55 @@ class LegalReviewAssignmentTests(unittest.TestCase):
         self.assertEqual(stats.json()["data"]["sla"]["overdue_count"], 1)
         self.assertEqual(stats.json()["data"]["sla"]["due_soon_count"], 0)
 
+    def test_submit_review_notifies_reviewers_for_uncited_consultation(self):
+        """无依据咨询提交审核 → 同组织审核律师收到站内通知；提交人自己收不到。"""
+        from app.models.legal_notifications import LegalNotificationEvent
+
+        response = self.client.post(
+            f"/api/legal/review-queue/consultation/{self.row.id}/actions",
+            json={"action": "submit_review", "note": "提交审核"}, headers=self.editor_headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.user_id == self.reviewer.id,
+        ).all()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].title, "无依据咨询待审核")
+        self.assertEqual(events[0].reference_type, "consultation")
+        self.assertEqual(events[0].reference_id, self.row.id)
+        self.assertIn("没有关联法源引用", events[0].body)
+        self.assertEqual(
+            self.db.query(LegalNotificationEvent).filter(
+                LegalNotificationEvent.user_id == self.client_user.id,
+            ).count(), 0,
+        )
+
+        # 通知中心接口能查到
+        notifications = self.client.get("/api/developer/notifications/me", headers=self.reviewer_headers)
+        self.assertEqual(notifications.status_code, 200, notifications.text)
+        titles = [item["title"] for item in notifications.json()["data"]["items"]]
+        self.assertIn("无依据咨询待审核", titles)
+
+    def test_submit_review_with_citations_does_not_notify(self):
+        import json as _json
+
+        from app.models.legal_notifications import LegalNotificationEvent
+
+        self.row.references_json = _json.dumps([{"title": "劳动合同法", "status": "active"}], ensure_ascii=False)
+        self.row.status = "draft"
+        self.db.commit()
+        response = self.client.post(
+            f"/api/legal/review-queue/consultation/{self.row.id}/actions",
+            json={"action": "submit_review", "note": "提交审核"}, headers=self.editor_headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            self.db.query(LegalNotificationEvent).filter(
+                LegalNotificationEvent.user_id == self.reviewer.id,
+            ).count(), 0,
+        )
+
     def test_due_soon_is_flagged_and_filterable(self):
         """24 小时内到期：sla_state=due_soon、给出剩余小时数、可按 sla=due_soon 过滤。"""
         from datetime import timedelta

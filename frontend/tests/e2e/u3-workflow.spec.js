@@ -147,7 +147,19 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
     }
     // 通知铃铛首屏加载（US-002）
     if (method === 'GET' && path === '/developer/notifications/me') {
-      await route.fulfill({ json: success({ items: [], unread: 0 }) })
+      await route.fulfill({ json: success({
+        unread: 1,
+        items: [{
+          id: 1, title: '无依据咨询待审核',
+          body: '「U3探针：无依据咨询待审核」没有关联法源引用，审核前请要求补充依据或直接退回。',
+          status: 'delivered', reference_type: 'consultation', reference_id: 989,
+          case_id: 3, created_at: '2026-10-22T12:00:00',
+        }],
+      }) })
+      return
+    }
+    if (method === 'POST' && path === '/developer/notifications/1/read') {
+      await route.fulfill({ json: success({ id: 1, status: 'read' }) })
       return
     }
 
@@ -212,6 +224,11 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
 
     // U-3 step 4: 审核队列通过（与 submit_review 共用上面同一个 matcher，按 action 分发）
 
+    if (method === 'GET' && path === '/legal/consultations/989') {
+      // 通知直达：按 consultation_id 恢复结果卡
+      await route.fulfill({ json: success(CONSULT_NO_REF_ROW) })
+      return
+    }
     if (method === 'GET' && path === '/legal/consultations') {
       await route.fulfill({ json: success([CONSULT_ROW, CONSULT_ROW_NO_REF]) })
       return
@@ -467,6 +484,13 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   await expect.poll(() => requests.portalBranding).toBe('/legal/orgs/5/portal-branding')
   // CaseHeader（LegalWorkspace.vue:58）也渲染「负责人」，限定在门户面板内断言
   await expect(page.locator('.matter-panel').getByText('负责人')).toBeVisible()
+
+  // 通知：无依据咨询待审核 → 点击直达该咨询结果卡
+  await page.locator('.bell-pill').click()
+  await expect(page.locator('.bell-panel')).toContainText('无依据咨询待审核')
+  await page.locator('.bell-item', { hasText: '无依据咨询待审核' }).click()
+  await expect(page).toHaveURL(/tab=consultation/)
+  await expect(page).toHaveURL(/consultation_id=989/)
 
   expect(unexpectedApiRequests).toEqual([])
   expect(failedResponses).toEqual([])

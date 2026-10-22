@@ -7,6 +7,7 @@ checks, source selection, LLM execution, persistence, and audit records.
 
 import json
 import difflib
+import logging
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -52,6 +53,8 @@ from app.services.rag.agentic_judge import check_faithfulness
 
 # SLA：距离到期 <=24 小时算「即将到期」，用于提醒与筛选
 REVIEW_DUE_SOON_HOURS = 24
+
+logger = logging.getLogger(__name__)
 from app.services.legal.legal_domain_service import finalize_consultation_trace, legal_domain_service
 from app.services.billing.subscription_service import subscription_service
 from app.services.legal.matter_service import matter_service
@@ -1439,7 +1442,50 @@ class LegalWorkspaceReadModule:
             title=f"审核动作：{action}", summary=f"{previous} -> {status}",
         )
         self.audit.log(db, user, f"legal_review_{action}", target_type=target_type, target_id=target_id, detail=f"{previous}->{status}")
+        if action == "submit_review" and target_type == "consultation":
+            # 通知失败不回滚审核提交：主流程优先，异常只记录
+            try:
+                self._notify_evidence_missing(db, user, row)
+            except Exception:
+                logger.exception("无依据咨询通知发送失败: consultation_id=%s", row.id)
         return serialize_workspace_row(row)
+
+    def _notify_evidence_missing(self, db: Session, user: User, row: LegalConsultation) -> None:
+        """提交审核时，无依据咨询给同组织审核律师发站内通知（一次版本一条，幂等）。
+
+        只提示、不阻断：审核律师仍可通过/退回；通知标题直接写明「无依据咨询」。
+        """
+        from app.services.legal.consultation_evidence import summarize_consultation_evidence
+        from app.services.notification.notification_service import notification_service
+
+        if summarize_consultation_evidence(row)["level"] != "none":
+            return
+        if not user.organization_id:
+            return
+        recipients = (
+            db.query(OrganizationMember.user_id)
+            .filter(
+                OrganizationMember.organization_id == user.organization_id,
+                OrganizationMember.legal_role.in_([LegalMemberRole.admin.value, LegalMemberRole.reviewer.value]),
+                OrganizationMember.user_id != user.id,
+            )
+            .all()
+        )
+        question = (row.question or "").strip()
+        body = f"「{question[:40]}」没有关联法源引用，审核前请要求补充依据或直接退回。"
+        for (recipient_id,) in recipients:
+            notification_service.create_notification(
+                db=db,
+                organization_id=user.organization_id,
+                user_id=recipient_id,
+                event_type="approval",
+                title="无依据咨询待审核",
+                body=body,
+                case_id=getattr(row, "case_id", None),
+                reference_type="consultation",
+                reference_id=row.id,
+                business_version=getattr(row, "version", None),
+            )
 
     def add_review_comment(self, db: Session, user: User, *, target_type: str, target_id: int, note: str) -> dict:
         row = target_query(db, target_type, target_id)
