@@ -1448,6 +1448,12 @@ class LegalWorkspaceReadModule:
                 self._notify_evidence_missing(db, user, row)
             except Exception:
                 logger.exception("无依据咨询通知发送失败: consultation_id=%s", row.id)
+        if action == "return" and target_type == "consultation":
+            # 退回后反向通知提交人：无依据的写明「需要补充依据」
+            try:
+                self._notify_consultation_returned(db, user, row, note)
+            except Exception:
+                logger.exception("咨询退回通知发送失败: consultation_id=%s", row.id)
         return serialize_workspace_row(row)
 
     def _notify_evidence_missing(self, db: Session, user: User, row: LegalConsultation) -> None:
@@ -1486,6 +1492,37 @@ class LegalWorkspaceReadModule:
                 reference_id=row.id,
                 business_version=getattr(row, "version", None),
             )
+
+    def _notify_consultation_returned(self, db: Session, user: User, row: LegalConsultation, note: str | None) -> None:
+        """退回后通知提交人：无依据的明确要求补充依据，其余提示查看审核意见。
+
+        自己退回自己的咨询不通知；通知失败由调用方兜底记录。
+        """
+        from app.services.legal.consultation_evidence import summarize_consultation_evidence
+        from app.services.notification.notification_service import notification_service
+
+        if row.user_id == user.id or not user.organization_id:
+            return
+        question = (row.question or "").strip()
+        if summarize_consultation_evidence(row)["level"] == "none":
+            title = "咨询被退回：需要补充依据"
+            body = f"「{question[:40]}」没有关联法源引用，已被退回，请补充依据后重新提交。"
+        else:
+            title = "咨询被退回，请查看审核意见"
+            detail = (note or "").strip()[:80] or "请查看审核意见后重新提交。"
+            body = f"「{question[:40]}」被退回：{detail}"
+        notification_service.create_notification(
+            db=db,
+            organization_id=user.organization_id,
+            user_id=row.user_id,
+            event_type="approval",
+            title=title,
+            body=body,
+            case_id=getattr(row, "case_id", None),
+            reference_type="consultation",
+            reference_id=row.id,
+            business_version=getattr(row, "version", None),
+        )
 
     def add_review_comment(self, db: Session, user: User, *, target_type: str, target_id: int, note: str) -> dict:
         row = target_query(db, target_type, target_id)

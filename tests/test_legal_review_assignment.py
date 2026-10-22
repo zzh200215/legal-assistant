@@ -182,6 +182,44 @@ class LegalReviewAssignmentTests(unittest.TestCase):
         self.assertEqual(entries[0]["action"], "return")
         self.assertIn("补充法源依据", entries[0]["note"])
 
+        # 反向通知：提交人收到「需要补充依据」
+        from app.models.legal_notifications import LegalNotificationEvent
+
+        events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.user_id == self.client_user.id,
+        ).all()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].title, "咨询被退回：需要补充依据")
+        self.assertEqual(events[0].reference_type, "consultation")
+        self.assertEqual(events[0].reference_id, self.row.id)
+        self.assertIn("没有关联法源引用", events[0].body)
+        # 审核律师自己不会收到反向通知
+        self.assertEqual(
+            self.db.query(LegalNotificationEvent).filter(
+                LegalNotificationEvent.user_id == self.reviewer.id,
+            ).count(), 0,
+        )
+
+    def test_return_with_citations_sends_generic_review_note(self):
+        import json as _json
+
+        from app.models.legal_notifications import LegalNotificationEvent
+
+        self.row.references_json = _json.dumps([{"title": "劳动合同法", "status": "active"}], ensure_ascii=False)
+        self.db.commit()
+        response = self.client.post(
+            f"/api/legal/review-queue/consultation/{self.row.id}/actions",
+            json={"action": "return", "note": "事实描述需要补充时间线"},
+            headers=self.reviewer_headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.user_id == self.client_user.id,
+        ).all()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].title, "咨询被退回，请查看审核意见")
+        self.assertIn("事实描述需要补充时间线", events[0].body)
+
     def test_due_soon_is_flagged_and_filterable(self):
         """24 小时内到期：sla_state=due_soon、给出剩余小时数、可按 sla=due_soon 过滤。"""
         from datetime import timedelta
