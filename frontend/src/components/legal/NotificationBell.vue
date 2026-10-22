@@ -29,6 +29,11 @@
             <div class="bell-item-title">{{ n.title }}</div>
             <div v-if="n.body" class="bell-item-body">{{ n.body }}</div>
             <div class="bell-item-time">{{ formatTime(n.created_at) }}</div>
+            <div v-if="canRequestEvidence(n)" class="bell-item-actions">
+              <button type="button" class="bell-item-action" :disabled="returning[n.id]" @click.stop="requestEvidence(n)">
+                {{ returning[n.id] ? '退回中…' : '要求补充依据' }}
+              </button>
+            </div>
           </div>
         </div>
         <div v-else class="bell-empty">暂无通知</div>
@@ -78,6 +83,29 @@ const markRead = async (n) => {
   } catch (error) {
     console.error('[notification] 标记已读失败', error)
     ElMessage.error('标记已读失败，请重试')
+  }
+}
+
+// 「无依据咨询」通知支持一键退回：要求提交人补充法源依据（服务端校验审核权限）
+const returning = ref({})
+const canRequestEvidence = (n) => (
+  n.reference_type === 'consultation' && n.title === '无依据咨询待审核' && !n.returned
+)
+const requestEvidence = async (n) => {
+  if (!n.reference_id) return
+  returning.value = { ...returning.value, [n.id]: true }
+  try {
+    await api.submitLegalReviewAction('consultation', n.reference_id, {
+      action: 'return',
+      note: '无依据咨询：请补充法源依据后重新提交审核',
+    })
+    n.returned = true
+    await markRead(n)
+    ElMessage.success('已退回，要求补充依据')
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.error?.message || error?.message || '退回失败，请重试')
+  } finally {
+    returning.value = { ...returning.value, [n.id]: false }
   }
 }
 
@@ -349,4 +377,9 @@ onUnmounted(() => {
   opacity: 0;
   transform: translateY(-4px);
 }
+
+.bell-item-actions { margin-top: 6px; }
+.bell-item-action { padding: 3px 10px; border: 1px solid var(--color-warning); border-radius: var(--radius-sm); background: transparent; color: var(--color-warning); font-size: 12px; cursor: pointer; }
+.bell-item-action:hover:not(:disabled) { background: var(--color-warning-light); }
+.bell-item-action:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>

@@ -52,7 +52,12 @@
                   {{ item.case_id ? `案件 ${item.case_id}` : '工作台' }} · {{ formatTime(item.created_at) }}
                 </span>
               </button>
-              <button v-if="isUnread(item)" class="notification-read" type="button" @click="markRead(item)">标记已读</button>
+              <div class="notification-actions">
+                <button v-if="canRequestEvidence(item)" class="notification-request" type="button" :disabled="returning[item.id]" @click="requestEvidence(item)">
+                  {{ returning[item.id] ? '退回中…' : '要求补充依据' }}
+                </button>
+                <button v-if="isUnread(item)" class="notification-read" type="button" @click="markRead(item)">标记已读</button>
+              </div>
             </article>
           </div>
         </QueryStateView>
@@ -154,6 +159,29 @@ const markAllRead = async () => {
   }
 }
 
+// 无依据咨询通知：一键退回（要求提交人补充法源依据）
+const returning = ref({})
+const canRequestEvidence = (item) => (
+  item.reference_type === 'consultation' && item.title === '无依据咨询待审核' && !item.returned
+)
+const requestEvidence = async (item) => {
+  if (!item.reference_id) return
+  returning.value = { ...returning.value, [item.id]: true }
+  try {
+    await api.submitLegalReviewAction('consultation', item.reference_id, {
+      action: 'return',
+      note: '无依据咨询：请补充法源依据后重新提交审核',
+    })
+    item.returned = true
+    await markRead(item)
+    ElMessage.success('已退回，要求补充依据')
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    returning.value = { ...returning.value, [item.id]: false }
+  }
+}
+
 const openNotification = async (item) => {
   await markRead(item)
   if (item.reference_type === 'workflow_run') {
@@ -164,7 +192,12 @@ const openNotification = async (item) => {
       router.push({ path: '/tasks', query: { workflow_id: workflowId } })
     }
   } else if (item.case_id) {
-    router.push({ path: '/legal-workspace', query: { case_id: String(item.case_id) } })
+    const query = { case_id: String(item.case_id) }
+    if (item.reference_type === 'consultation' && item.reference_id) {
+      query.tab = 'consultation'
+      query.consultation_id = String(item.reference_id)
+    }
+    router.push({ path: '/legal-workspace', query })
   }
 }
 
@@ -206,4 +239,9 @@ onMounted(load)
   .notification-toolbar { align-items: stretch; }
   .notification-refresh { align-self: end; margin-left: 0; }
 }
+
+.notification-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.notification-request { padding: 4px 10px; border: 1px solid var(--color-warning); border-radius: var(--radius-sm); background: transparent; color: var(--color-warning); font-size: var(--text-xs); cursor: pointer; }
+.notification-request:hover:not(:disabled) { background: var(--color-warning-light); }
+.notification-request:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>

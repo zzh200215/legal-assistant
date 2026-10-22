@@ -164,6 +164,24 @@ class LegalReviewAssignmentTests(unittest.TestCase):
             ).count(), 0,
         )
 
+    def test_reviewer_can_return_uncited_consultation(self):
+        """通知里的「要求补充依据」走的就是 return 动作：审核律师可退回，状态与历史可查。"""
+        response = self.client.post(
+            f"/api/legal/review-queue/consultation/{self.row.id}/actions",
+            json={"action": "return", "note": "无依据咨询：请补充法源依据后重新提交审核"},
+            headers=self.reviewer_headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["data"]["status"], "returned_for_facts")
+
+        history = self.client.get(
+            f"/api/legal/review-queue/consultation/{self.row.id}/history", headers=self.reviewer_headers,
+        )
+        self.assertEqual(history.status_code, 200, history.text)
+        entries = history.json()["data"]["history"]
+        self.assertEqual(entries[0]["action"], "return")
+        self.assertIn("补充法源依据", entries[0]["note"])
+
     def test_due_soon_is_flagged_and_filterable(self):
         """24 小时内到期：sla_state=due_soon、给出剩余小时数、可按 sla=due_soon 过滤。"""
         from datetime import timedelta

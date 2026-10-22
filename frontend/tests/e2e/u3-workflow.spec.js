@@ -193,6 +193,12 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       await route.fulfill({ json: success({ ...CONSULT_ROW, status: 'pending_review' }) })
       return
     }
+    if (method === 'POST' && path === '/legal/review-queue/consultation/989/actions') {
+      // 通知里的「要求补充依据」一键退回
+      requests.consultReturn = request.postDataJSON()
+      await route.fulfill({ json: success({ ...CONSULT_NO_REF_ROW, status: 'returned_for_facts' }) })
+      return
+    }
     if (method === 'POST' && path === '/legal/review-queue/consultation/991/actions') {
       const body = request.postDataJSON()
       if (body?.action === 'submit_review') {
@@ -488,6 +494,14 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   // 通知：无依据咨询待审核 → 点击直达该咨询结果卡
   await page.locator('.bell-pill').click()
   await expect(page.locator('.bell-panel')).toContainText('无依据咨询待审核')
+  // 一键退回：要求提交人补充法源依据
+  await page.locator('.bell-item-action').click()
+  await expect.poll(() => requests.consultReturn).toMatchObject({
+    action: 'return',
+    note: '无依据咨询：请补充法源依据后重新提交审核',
+  })
+  await expect(page.getByText('已退回，要求补充依据')).toBeVisible()
+  await expect(page.locator('.bell-item-action')).toHaveCount(0)
   await page.locator('.bell-item', { hasText: '无依据咨询待审核' }).click()
   await expect(page).toHaveURL(/tab=consultation/)
   await expect(page).toHaveURL(/consultation_id=989/)
