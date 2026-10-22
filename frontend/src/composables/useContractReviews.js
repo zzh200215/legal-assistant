@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery } from '../query/useQuery.js'
 import { useMutation } from '../query/useMutation.js'
 import { qk, qkPrefix } from '../query/keys'
@@ -14,6 +14,24 @@ export function useContractReviews({ client, message, caseId }) {
   const contractVersionMap = ref({})
   const resubmitDraftForm = ref({})
   const resubmitLoading = ref({})
+  // 跨审查风险统计：折叠展开时按需拉取，切案件后重新取
+  const riskStats = ref(null)
+  const riskStatsLoading = ref(false)
+  const loadRiskStats = async () => {
+    if (riskStatsLoading.value) return
+    riskStatsLoading.value = true
+    try {
+      const response = await client.getContractRiskStats({
+        params: caseId?.value ? { case_id: caseId.value } : undefined,
+      })
+      riskStats.value = response?.data || null
+    } catch {
+      riskStats.value = null
+    } finally {
+      riskStatsLoading.value = false
+    }
+  }
+  watch(caseId, () => { riskStats.value = null })
 
   const reviewsQuery = useQuery({
     key: () => qk.legal.contractReviews(caseId?.value || null),
@@ -136,6 +154,9 @@ export function useContractReviews({ client, message, caseId }) {
     contractVersionMap,
     resubmitDraftForm,
     resubmitLoading,
+    riskStats,
+    riskStatsLoading,
+    loadRiskStats,
     loadContractReviews,
     submitContractReview,
     onExpandContractReview,

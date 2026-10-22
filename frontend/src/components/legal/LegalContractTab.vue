@@ -204,6 +204,41 @@
       </details>
     </template>
 
+    <!-- 跨审查风险统计：只读派生视图，展开时按当前作用域（本人 / 案件）拉取 -->
+    <details class="contract-fold risk-stats-details" @toggle="onRiskStatsToggle">
+      <summary>风险统计 <span v-if="riskStats">共 {{ riskStats.risks }} 条风险 · 高 {{ riskStats.high_total }}</span><span v-else>跨审查汇总</span></summary>
+      <section class="app-card fold-card">
+        <div class="app-card-head">
+          <h2>跨审查风险统计</h2>
+          <span class="app-card-head-meta">{{ riskStats?.reviews || 0 }} 条审查 · {{ riskStats?.scope === 'case' ? '当前案件' : '本人记录' }}</span>
+        </div>
+        <div class="app-card-body">
+          <p v-if="riskStatsLoading" class="stats-empty">正在汇总…</p>
+          <p v-else-if="!riskStats || !riskStats.risks" class="stats-empty">暂无风险数据，完成一次合同审查后这里会汇总各条风险。</p>
+          <template v-else>
+            <div class="stats-grid">
+              <div class="stat-tile"><span class="stat-value">{{ riskStats.risks }}</span><span class="stat-label">风险总数</span></div>
+              <div class="stat-tile"><span class="stat-value">{{ riskStats.high_total }}</span><span class="stat-label">高/严重</span></div>
+              <div class="stat-tile"><span class="stat-value" :class="{ 'is-warn': riskStats.pending_high > 0 }">{{ riskStats.pending_high }}</span><span class="stat-label">高风险待处理</span></div>
+              <div class="stat-tile"><span class="stat-value" :class="{ 'is-warn': riskStats.unanchored > 0 }">{{ riskStats.unanchored }}</span><span class="stat-label">无条款定位</span></div>
+              <div class="stat-tile"><span class="stat-value">{{ Math.round((riskStats.located_rate || 0) * 100) }}%</span><span class="stat-label">定位率</span></div>
+            </div>
+            <div class="severity-bars">
+              <div v-for="level in ['critical', 'high', 'medium', 'low']" :key="level" class="severity-row">
+                <span class="severity-name">{{ riskLabel(level) }}</span>
+                <div class="severity-track"><div class="severity-fill" :class="`is-${level}`" :style="{ width: severityWidth(level) }" /></div>
+                <span class="severity-count">{{ riskStats.by_severity[level] }}</span>
+              </div>
+            </div>
+            <div v-if="riskStats.by_clause_type?.length" class="clause-stats">
+              <span class="clause-stats-label">高发条款</span>
+              <span v-for="item in riskStats.by_clause_type" :key="item.clause_type" class="app-tag">{{ clauseLabel(item.clause_type) }} {{ item.count }}</span>
+            </div>
+          </template>
+        </div>
+      </section>
+    </details>
+
     <details class="contract-fold comparison-details">
       <summary>合同版本对比</summary>
       <section class="app-card fold-card">
@@ -263,9 +298,20 @@ const { quotaHint, loadQuota } = useQuota()
 const { openSourceDetail } = useLegalSourceDetail()
 const {
   contractForm, contractLoading, contractResult, contractReviews, reviewsQuery, uploadLoading, contractVersionMap,
-  resubmitDraftForm, resubmitLoading, loadContractReviews, submitContractReview: runContractReview,
+  resubmitDraftForm, resubmitLoading, riskStats, riskStatsLoading, loadRiskStats,
+  loadContractReviews, submitContractReview: runContractReview,
   onExpandContractReview, submitContractResubmit, handleContractUpload: uploadContractReview,
 } = useContractReviews({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
+
+// 风险统计：展开时才拉，避免每次进合同页都多打一个聚合接口
+const onRiskStatsToggle = (event) => {
+  if (event.target.open) void loadRiskStats()
+}
+const severityWidth = (level) => {
+  const total = riskStats.value?.risks || 0
+  if (!total) return '0%'
+  return `${Math.round(((riskStats.value?.by_severity?.[level] || 0) / total) * 100)}%`
+}
 
 // LLM 审查约需 20-30 秒，阶段性提示缓解等待焦虑（ux-audit M-6）
 const contractStageText = useStagedProgress(contractLoading, [
@@ -642,4 +688,24 @@ onMounted(openLatestContractReview)
 
 .anchor-current { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.6; }
 .anchor-hint { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--color-primary-light); color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.6; }
+
+/* 跨审查风险统计 */
+.stats-empty { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.7; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: var(--space-2); margin-bottom: var(--space-3); }
+.stat-tile { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-light); border-radius: var(--radius-sm); background: var(--color-bg-subtle); }
+.stat-value { font-size: var(--text-lg); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--color-text-primary); line-height: 1.2; }
+.stat-value.is-warn { color: var(--color-warning); }
+.stat-label { font-size: var(--text-xs); color: var(--color-text-secondary); }
+.severity-bars { display: grid; gap: 6px; margin-bottom: var(--space-3); }
+.severity-row { display: grid; grid-template-columns: 52px 1fr 32px; align-items: center; gap: var(--space-2); }
+.severity-name { font-size: var(--text-xs); color: var(--color-text-secondary); }
+.severity-track { height: 6px; border-radius: 3px; background: var(--color-bg-subtle); overflow: hidden; }
+.severity-fill { height: 100%; border-radius: 3px; background: var(--color-primary); transition: width 0.2s ease; }
+.severity-fill.is-critical { background: var(--color-danger); }
+.severity-fill.is-high { background: var(--color-warning); }
+.severity-fill.is-medium { background: var(--color-primary); }
+.severity-fill.is-low { background: var(--color-text-tertiary); }
+.severity-count { font-size: var(--text-xs); color: var(--color-text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+.clause-stats { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.clause-stats-label { font-size: var(--text-xs); color: var(--color-text-secondary); }
 </style>

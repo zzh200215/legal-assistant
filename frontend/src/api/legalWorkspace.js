@@ -93,6 +93,9 @@ export default {
   listContractReviews(config = {}) {
     return http.get('/legal/contract-reviews', config)
   },
+  getContractRiskStats(config = {}) {
+    return http.get('/legal/contract-reviews/risk-stats', config)
+  },
   uploadContractReview(file, title, caseId, options = {}) {
     const form = new FormData()
     form.append('file', file)

@@ -5240,6 +5240,74 @@
         }
       }
     },
+    "/api/legal/consultations/{item_id}/faithfulness": {
+      "post": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "Check Consultation Faithfulness Api",
+        "description": "生成后忠实度校验（copilot 第四层）。\n\n刻意**不放在创建咨询的同一个请求里**：判官是一次完整 LLM 往返（真机约 10s），\n放进去会让「提问→答案」多等一个数量级。前端拿到答案后再调这里，标记从「校验中」\n翻成结论；判官不可用时返回 available=false 且**不落库**，前端显示「未校验」。",
+        "operationId": "check_consultation_faithfulness_api_api_legal_consultations__item_id__faithfulness_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "true 时忽略已存结论重新判一次",
+              "default": false,
+              "title": "Refresh"
+            },
+            "description": "true 时忽略已存结论重新判一次"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/consultations/{item_id}/followup": {
       "post": {
         "tags": [
@@ -5513,6 +5581,59 @@
         }
       }
     },
+    "/api/legal/contract-reviews/risk-stats": {
+      "get": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "Contract Review Risk Stats",
+        "description": "跨审查风险统计（只读派生视图）。\n\n- 不传 case_id：本人工作台记录（list_rows 默认按提交人隔离）；\n- 传 case_id：该案件下可见记录（案件成员可见，verify_case_access 由 list_rows 内部校验）。",
+        "operationId": "contract_review_risk_stats_api_legal_contract_reviews_risk_stats_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/contract-reviews/{item_id}": {
       "get": {
         "tags": [
@@ -5581,6 +5702,81 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/contract-reviews/{item_id}/risks/{risk_index}/anchor": {
+      "post": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "Anchor Contract Risk",
+        "description": "就地补定位：把风险锚到合同原文的某一段，写回 risks_json 并重算 evidence_summary。\n\n校验片段确实来自该段（去空白后是子串），避免「随便指一段」把缺口刷成有定位。",
+        "operationId": "anchor_contract_risk_api_legal_contract_reviews__item_id__risks__risk_index__anchor_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "risk_index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Risk Index"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskAnchorIn"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -6850,6 +7046,81 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ReviewAssignmentIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/review-queue/{target_type}/{target_id}/case": {
+      "patch": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "Associate Review Case",
+        "description": "将孤立待审核记录归入案件（ux-audit L-17）：提交人本人或审核律师可操作。",
+        "operationId": "associate_review_case_api_legal_review_queue__target_type___target_id__case_patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "target_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target Type"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Target Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewAssociateCaseIn"
               }
             }
           }
@@ -14699,6 +14970,57 @@
         }
       }
     },
+    "/api/analytics/funnel/summary": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Funnel Summary",
+        "description": "产品漏斗汇总（ux-audit 需补充信息）：注册/登录/建案/咨询/审核事件计数 + 门户访问。\n\n转化率在展示层按 events 中的 total/unique_users 计算；门户访问复用 legal_portal_access_logs。",
+        "operationId": "funnel_summary_api_analytics_funnel_summary_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "统计天数",
+              "default": 30,
+              "title": "Days"
+            },
+            "description": "统计天数"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analytics/tokens/global-stats": {
       "get": {
         "tags": [
@@ -14793,6 +15115,82 @@
             }
           }
         }
+      }
+    },
+    "/api/analytics/consultations/evidence-stats": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Consultation Evidence Stats",
+        "description": "咨询答复的「证据可核验性」分布（在线指标，见 docs/review/step17）。\n\n只聚合生成时算好的确定性统计，不重算、不改写记录；老记录（无 evidence_json）\n单独计数，不摊进比率分母。",
+        "operationId": "consultation_evidence_stats_api_analytics_consultations_evidence_stats_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "统计天数",
+              "default": 30,
+              "title": "Days"
+            },
+            "description": "统计天数"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analytics/retrieval-index/stats": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Retrieval Index Stats",
+        "description": "检索索引（内存 BM25）的运行计数：构建/失败/陈旧丢弃/TTL 重建/回退扫描。\n\n只读进程内计数，不含查询内容或正文；用于判断「偶发回退全表扫描」是否还在发生。",
+        "operationId": "retrieval_index_stats_api_analytics_retrieval_index_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
       }
     },
     "/api/analytics/workflows/overview": {
@@ -18013,8 +18411,7 @@
                   "type": "number"
                 },
                 {
-                  "type": "string",
-                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                  "type": "string"
                 }
               ],
               "title": "Amount"
@@ -23555,12 +23952,10 @@
             "title": "Error Category"
           },
           "decision": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Decision"
           },
           "summary": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Summary"
           },
@@ -23662,12 +24057,10 @@
             "title": "Input Hash"
           },
           "task_summary": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Task Summary"
           },
           "result_summary": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Result Summary"
           },
@@ -24078,7 +24471,6 @@
             "default": false
           },
           "state": {
-            "additionalProperties": true,
             "type": "object",
             "title": "State"
           }
@@ -24107,12 +24499,10 @@
       "AgentEvalReviewRequest": {
         "properties": {
           "evaluation_input": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Evaluation Input"
           },
           "expected_outcome": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Expected Outcome"
           },
@@ -24187,7 +24577,6 @@
           "selected_skill": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -24219,7 +24608,6 @@
             "title": "Purpose"
           },
           "action_input_preview": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Action Input Preview"
           }
@@ -24301,12 +24689,10 @@
             "title": "Final Answer"
           },
           "artifacts": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Artifacts"
           },
           "supervisor_plan": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Supervisor Plan"
           },
@@ -24486,12 +24872,10 @@
             "title": "Final Answer"
           },
           "artifacts": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Artifacts"
           },
           "supervisor_plan": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Supervisor Plan"
           },
@@ -24846,8 +25230,7 @@
                 "minimum": 0.0
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -24862,8 +25245,7 @@
                 "minimum": 0.0
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -25284,7 +25666,6 @@
           "invoice_snapshot": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -25344,7 +25725,6 @@
           },
           "conflicts": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -25536,6 +25916,28 @@
               }
             ],
             "title": "Case Id"
+          },
+          "contract_review_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Review Id"
+          },
+          "draft_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Id"
           }
         },
         "type": "object",
@@ -25688,7 +26090,6 @@
           "review_policy_override": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -26008,7 +26409,6 @@
           },
           "matches": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -26116,7 +26516,6 @@
           },
           "pages": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -26125,7 +26524,6 @@
           },
           "regions": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -26134,7 +26532,6 @@
           },
           "tables": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -26143,7 +26540,6 @@
           },
           "clauses": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -26152,7 +26548,6 @@
           },
           "warnings": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -27071,7 +27466,6 @@
           },
           "dlp_findings": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -27449,8 +27843,7 @@
                 "minimum": 0.0
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "string"
               }
             ],
             "title": "Discount Amount",
@@ -27464,8 +27857,7 @@
                 "minimum": 0.0
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "string"
               }
             ],
             "title": "Tax Rate",
@@ -27874,7 +28266,6 @@
       "MCPPolicyDraftRequest": {
         "properties": {
           "policy": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Policy"
           }
@@ -27921,7 +28312,6 @@
             "description": "MCP 工具名"
           },
           "arguments": {
-            "additionalProperties": true,
             "type": "object",
             "title": "Arguments",
             "description": "工具参数"
@@ -28085,7 +28475,6 @@
           "evaluation_gate": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -28534,8 +28923,7 @@
                 "exclusiveMinimum": 0.0
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "string"
               }
             ],
             "title": "Amount"
@@ -28677,7 +29065,6 @@
           },
           "items": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -28952,7 +29339,6 @@
           "rollout": {
             "anyOf": [
               {
-                "additionalProperties": true,
                 "type": "object"
               },
               {
@@ -28963,7 +29349,6 @@
           },
           "variables_schema": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -29044,7 +29429,6 @@
           },
           "variables_schema": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -29053,7 +29437,6 @@
           },
           "experiment_refs": {
             "items": {
-              "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
@@ -29105,8 +29488,7 @@
                 "exclusiveMinimum": 0.0
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "string"
               }
             ],
             "title": "Amount"
@@ -29144,8 +29526,7 @@
                 "exclusiveMinimum": 0.0
               },
               {
-                "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "type": "string"
               }
             ],
             "title": "Amount"
@@ -29311,6 +29692,11 @@
               }
             ],
             "title": "Note"
+          },
+          "acknowledge_evidence_gaps": {
+            "type": "boolean",
+            "title": "Acknowledge Evidence Gaps",
+            "default": false
           }
         },
         "type": "object",
@@ -29348,6 +29734,20 @@
         "type": "object",
         "title": "ReviewAssignmentIn"
       },
+      "ReviewAssociateCaseIn": {
+        "properties": {
+          "case_id": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Case Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "case_id"
+        ],
+        "title": "ReviewAssociateCaseIn"
+      },
       "ReviewBulkActionIn": {
         "properties": {
           "items": {
@@ -29374,6 +29774,11 @@
               }
             ],
             "title": "Note"
+          },
+          "acknowledge_evidence_gaps": {
+            "type": "boolean",
+            "title": "Acknowledge Evidence Gaps",
+            "default": false
           }
         },
         "type": "object",
@@ -29554,6 +29959,29 @@
           "action"
         ],
         "title": "RiskActionIn"
+      },
+      "RiskAnchorIn": {
+        "properties": {
+          "paragraph": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Paragraph"
+          },
+          "snippet": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Snippet"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paragraph",
+          "snippet"
+        ],
+        "title": "RiskAnchorIn",
+        "description": "就地补定位：段落序号（1 基）+ 该段原文片段。"
       },
       "RollbackVersionRequest": {
         "properties": {
@@ -31702,6 +32130,8 @@
     "JOB_NOT_FOUND",
     "LEGAL_CASE_ARCHIVED",
     "LEGAL_RESOURCE_SCOPE_DENIED",
+    "LEGAL_REVIEW_EVIDENCE_GAPS_UNACKNOWLEDGED",
+    "LEGAL_REVIEW_HIGH_RISK_UNANCHORED",
     "NOT_FOUND",
     "PORTAL_LINK_UNAVAILABLE",
     "PORTAL_OTP_INVALID",

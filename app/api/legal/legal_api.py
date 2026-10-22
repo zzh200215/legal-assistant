@@ -39,6 +39,7 @@ from app.services.legal.legal_service import (
 from app.services.observability.audit_log_service import AuditLogService
 from app.services.legal.legal_retrieval_service import legal_retrieval_service
 from app.services.legal.legal_knowledge_graph_service import legal_knowledge_graph_service
+from app.services.legal.contract_risk_stats import summarize_contract_risk_stats
 from app.services.legal.legal_workspace_service import (
     legal_workspace_module,
     legal_workspace_read_module,
@@ -997,6 +998,23 @@ def create_contract_review(req: ContractReviewIn, db: Session = Depends(get_db),
 @router.get("/contract-reviews")
 def list_contract_reviews(case_id: int | None = Query(default=None), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return legal_workspace_read_module.list_rows(db, current_user, "contract_review", case_id=case_id)
+
+
+@router.get("/contract-reviews/risk-stats")
+def contract_review_risk_stats(
+    case_id: int | None = Query(default=None),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """跨审查风险统计（只读派生视图）。
+
+    - 不传 case_id：本人工作台记录（list_rows 默认按提交人隔离）；
+    - 传 case_id：该案件下可见记录（案件成员可见，verify_case_access 由 list_rows 内部校验）。
+    """
+    rows = legal_workspace_read_module.list_rows(db, current_user, "contract_review", case_id=case_id)
+    stats = summarize_contract_risk_stats(rows)
+    stats["scope"] = "case" if case_id is not None else "mine"
+    stats["case_id"] = case_id
+    return stats
 
 
 @router.get("/contract-reviews/{item_id}")

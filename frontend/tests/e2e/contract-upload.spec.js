@@ -23,6 +23,24 @@ const REVIEW = {
   version: 1,
 }
 
+const RISK_STATS = {
+  reviews: 2,
+  risks: 3,
+  by_severity: { critical: 0, high: 2, medium: 1, low: 0 },
+  by_status: { needs_review: 2, open: 1, accepted: 0, mitigated: 0, dismissed: 0 },
+  by_clause_type: [{ clause_type: 'breach', count: 2 }, { clause_type: 'payment', count: 1 }],
+  anchored: 2,
+  unanchored: 1,
+  located_rate: 0.6667,
+  high_total: 2,
+  pending_high: 2,
+  reviews_with_gaps: 1,
+  by_evidence_level: { strong: 1, partial: 1, weak: 0, none: 0 },
+  scope: 'case',
+  case_id: 3,
+  generated_at: '2026-10-22T03:00:00+00:00',
+}
+
 test('合同审查：上传文件触发 multipart 审查并渲染结果', async ({ page }) => {
   const requests = {}
   const unexpected = []
@@ -59,6 +77,11 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
     if (method === 'POST' && path === '/legal/contract-reviews/upload') {
       requests.upload = request.postDataBuffer().toString('utf8')
       return route.fulfill({ json: success(REVIEW) })
+    }
+
+    if (method === 'GET' && path === '/legal/contract-reviews/risk-stats') {
+      requests.riskStats = url.searchParams.get('case_id')
+      return route.fulfill({ json: success(RISK_STATS) })
     }
 
     if (method === 'POST' && path === '/legal/contract-reviews/1/risks/1/anchor') {
@@ -128,6 +151,14 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
   await expect(page.locator('.evidence-chain')).toHaveText('2/2 有定位')
   await expect(page.locator('.risk-location--missing')).toHaveCount(0)
   await expect(page.locator('.evidence-gap-toggle')).toBeDisabled()
+
+  // 跨审查风险统计：展开时才请求，数字来自服务端派生视图
+  await page.locator('.risk-stats-details summary').click()
+  await expect(page.locator('.risk-stats-details .stat-value').first()).toHaveText('3')
+  await expect(page.locator('.risk-stats-details')).toContainText('2 条审查 · 当前案件')
+  await expect(page.locator('.risk-stats-details').getByText('高/严重')).toBeVisible()
+  await expect(page.locator('.severity-row').nth(1).locator('.severity-count')).toHaveText('2')
+  await expect.poll(() => requests.riskStats).toBe('3')
   await expect(page.getByText('合同文件审查完成')).toBeVisible()
   expect(requests.upload).toBeDefined()
   expect(requests.upload).toContain('联调合同.txt')

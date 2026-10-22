@@ -257,6 +257,8 @@
  * @property {number} user_id
  * @typedef {Object} ConsultationIn
  * @property {number | null}= case_id
+ * @property {number | null}= contract_review_id
+ * @property {number | null}= draft_id
  * @property {string} question
  * @typedef {Object} ContractCompareIn
  * @property {string} content_a
@@ -748,12 +750,16 @@
  * @property {string} source
  * @property {string} task_key
  * @typedef {Object} ReviewActionIn
+ * @property {boolean}= acknowledge_evidence_gaps
  * @property {string} action
  * @property {string | null}= note
  * @typedef {Object} ReviewAssignmentIn
  * @property {string | null}= due_at
  * @property {number | null}= reviewer_id
+ * @typedef {Object} ReviewAssociateCaseIn
+ * @property {number} case_id
  * @typedef {Object} ReviewBulkActionIn
+ * @property {boolean}= acknowledge_evidence_gaps
  * @property {string} action
  * @property {Array<ReviewQueueBulkItem>} items
  * @property {string | null}= note
@@ -777,6 +783,9 @@
  * @typedef {Object} RiskActionIn
  * @property {string} action
  * @property {string | null}= note
+ * @typedef {Object} RiskAnchorIn
+ * @property {number} paragraph
+ * @property {string} snippet
  * @typedef {Object} RollbackVersionRequest
  * @property {number | null}= target_version_id
  * @typedef {Object} RolloutVersionRequest
