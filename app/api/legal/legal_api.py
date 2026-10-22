@@ -1003,15 +1003,17 @@ def list_contract_reviews(case_id: int | None = Query(default=None), db: Session
 @router.get("/contract-reviews/risk-stats")
 def contract_review_risk_stats(
     case_id: int | None = Query(default=None),
+    days: int | None = Query(default=None, ge=1, le=365, description="只看近 N 天（含按周趋势）"),
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     """跨审查风险统计（只读派生视图）。
 
     - 不传 case_id：本人工作台记录（list_rows 默认按提交人隔离）；
-    - 传 case_id：该案件下可见记录（案件成员可见，verify_case_access 由 list_rows 内部校验）。
+    - 传 case_id：该案件下可见记录（案件成员可见，verify_case_access 由 list_rows 内部校验）；
+    - 传 days：按 created_at 过滤时间窗，并返回按周分桶的 trend。
     """
     rows = legal_workspace_read_module.list_rows(db, current_user, "contract_review", case_id=case_id)
-    stats = summarize_contract_risk_stats(rows)
+    stats = summarize_contract_risk_stats(rows, days=days)
     stats["scope"] = "case" if case_id is not None else "mine"
     stats["case_id"] = case_id
     return stats

@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -76,6 +77,39 @@ class SummarizeRiskStatsTests(unittest.TestCase):
         self.assertEqual(stats["by_clause_type"][0], {"clause_type": "payment", "count": 3})
         self.assertEqual(len(stats["by_clause_type"]), 5)
 
+    def test_window_filters_old_reviews(self):
+        now = datetime(2026, 10, 22, 4, 0, 0)
+        old = _row([_risk()])
+        old["created_at"] = now - timedelta(days=40)
+        recent = _row([_risk(), _risk()])
+        recent["created_at"] = now - timedelta(days=2)
+        stats = summarize_contract_risk_stats([old, recent], days=30, now=now)
+        self.assertEqual(stats["reviews"], 1)
+        self.assertEqual(stats["risks"], 2)
+        self.assertEqual(stats["window"], {"days": 30})
+
+    def test_trend_buckets_by_week(self):
+        now = datetime(2026, 10, 22, 4, 0, 0)
+        rows = []
+        for age_days, risks in ((0, 2), (8, 1), (15, 3)):
+            row = _row([_risk() for _ in range(risks)])
+            row["created_at"] = now - timedelta(days=age_days)
+            rows.append(row)
+        stats = summarize_contract_risk_stats(rows, days=30, now=now)
+        trend = stats["trend"]
+        self.assertEqual(len(trend), 5)  # ceil(30/7) = 5 周
+        self.assertEqual(trend[4]["risks"], 2)  # 本周
+        self.assertEqual(trend[3]["risks"], 1)  # 1 周前
+        self.assertEqual(trend[2]["risks"], 3)  # 2 周前
+        self.assertEqual(trend[4]["high"], 2)
+        self.assertEqual(set(trend[0]), {"week_start", "reviews", "risks", "high"})
+        self.assertLess(trend[0]["week_start"], trend[4]["week_start"])
+
+    def test_trend_defaults_to_eight_weeks_without_days(self):
+        stats = summarize_contract_risk_stats([_row([_risk()])])
+        self.assertEqual(stats["window"], {"days": None})
+        self.assertEqual(len(stats["trend"]), 8)
+
     def test_unknown_severity_falls_back_to_medium(self):
         stats = summarize_contract_risk_stats([_row([_risk(severity="weird")])])
         self.assertEqual(stats["by_severity"]["medium"], 1)
@@ -147,6 +181,26 @@ class RiskStatsApiTests(unittest.TestCase):
         self.assertEqual(data["unanchored"], 2)
         self.assertEqual(data["pending_high"], 2)
         self.assertEqual(data["reviews_with_gaps"], 2)
+
+    def test_days_window_filters_old_reviews(self):
+        from app.core.time import utc_now
+
+        old = ContractReview(
+            user_id=self.user.id, title="旧记录", content="旧合同", summary="",
+            risks_json=json.dumps([{"clause_type": "breach", "risk_level": "high", "description": "旧风险"}], ensure_ascii=False),
+            references_json="[]", status="pending_review", version=1,
+            created_at=utc_now() - timedelta(days=40),
+        )
+        self.db.add(old)
+        self.db.commit()
+
+        response = self.client.get("/api/legal/contract-reviews/risk-stats?days=30", headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["reviews"], 2)  # 40 天前那条被排除
+        self.assertEqual(data["risks"], 3)
+        self.assertEqual(data["window"], {"days": 30})
+        self.assertEqual(len(data["trend"]), 5)
 
     def test_other_user_sees_empty_stats(self):
         response = self.client.get("/api/legal/contract-reviews/risk-stats", headers=self.other_headers)

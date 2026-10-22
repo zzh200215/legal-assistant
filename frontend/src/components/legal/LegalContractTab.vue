@@ -206,11 +206,18 @@
 
     <!-- 跨审查风险统计：只读派生视图，展开时按当前作用域（本人 / 案件）拉取 -->
     <details class="contract-fold risk-stats-details" @toggle="onRiskStatsToggle">
-      <summary>风险统计 <span v-if="riskStats">共 {{ riskStats.risks }} 条风险 · 高 {{ riskStats.high_total }}</span><span v-else>跨审查汇总</span></summary>
+      <summary>风险统计 <span v-if="riskStats">共 {{ riskStats.risks }} 条风险 · 高 {{ riskStats.high_total }}<template v-if="riskStatsDays"> · 近{{ riskStatsDays }}天</template></span><span v-else>跨审查汇总</span></summary>
       <section class="app-card fold-card">
         <div class="app-card-head">
           <h2>跨审查风险统计</h2>
           <span class="app-card-head-meta">{{ riskStats?.reviews || 0 }} 条审查 · {{ riskStats?.scope === 'case' ? '当前案件' : '本人记录' }}</span>
+        </div>
+        <div class="stats-range" role="group" aria-label="统计时间范围">
+          <button
+            v-for="option in RISK_STATS_RANGES" :key="option.label" type="button"
+            class="stats-range-btn" :class="{ active: riskStatsDays === option.value }"
+            @click="setRiskStatsRange(option.value)"
+          >{{ option.label }}</button>
         </div>
         <div class="app-card-body">
           <p v-if="riskStatsLoading" class="stats-empty">正在汇总…</p>
@@ -228,6 +235,22 @@
                 <span class="severity-name">{{ riskLabel(level) }}</span>
                 <div class="severity-track"><div class="severity-fill" :class="`is-${level}`" :style="{ width: severityWidth(level) }" /></div>
                 <span class="severity-count">{{ riskStats.by_severity[level] }}</span>
+              </div>
+            </div>
+            <div v-if="riskStats.trend?.length" class="trend-chart">
+              <div class="trend-heading">
+                <span>风险趋势</span>
+                <span class="trend-legend"><i class="trend-dot is-high" />高风险 <i class="trend-dot is-risk" />风险总数</span>
+              </div>
+              <div class="trend-bars">
+                <div v-for="bucket in riskStats.trend" :key="bucket.week_start" class="trend-col" :title="`${bucket.week_start} 起：${bucket.risks} 条风险、${bucket.high} 条高/严重`">
+                  <div class="trend-track">
+                    <div class="trend-fill is-risk" :style="{ height: trendHeight(bucket.risks) }">
+                      <div class="trend-fill is-high" :style="{ height: trendHighHeight(bucket) }" />
+                    </div>
+                  </div>
+                  <span class="trend-label">{{ trendLabel(bucket.week_start) }}</span>
+                </div>
               </div>
             </div>
             <div v-if="riskStats.by_clause_type?.length" class="clause-stats">
@@ -298,15 +321,28 @@ const { quotaHint, loadQuota } = useQuota()
 const { openSourceDetail } = useLegalSourceDetail()
 const {
   contractForm, contractLoading, contractResult, contractReviews, reviewsQuery, uploadLoading, contractVersionMap,
-  resubmitDraftForm, resubmitLoading, riskStats, riskStatsLoading, loadRiskStats,
+  resubmitDraftForm, resubmitLoading, riskStats, riskStatsLoading, riskStatsDays, loadRiskStats,
   loadContractReviews, submitContractReview: runContractReview,
   onExpandContractReview, submitContractResubmit, handleContractUpload: uploadContractReview,
 } = useContractReviews({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
 
 // 风险统计：展开时才拉，避免每次进合同页都多打一个聚合接口
+const RISK_STATS_RANGES = [
+  { label: '近7天', value: 7 },
+  { label: '近30天', value: 30 },
+  { label: '全部', value: null },
+]
 const onRiskStatsToggle = (event) => {
   if (event.target.open) void loadRiskStats()
 }
+const setRiskStatsRange = (days) => {
+  if (riskStatsDays.value === days) return
+  void loadRiskStats(days)
+}
+const trendMax = computed(() => Math.max(1, ...(riskStats.value?.trend || []).map((bucket) => bucket.risks)))
+const trendHeight = (risks) => `${Math.max(2, Math.round((risks / trendMax.value) * 48))}px`
+const trendHighHeight = (bucket) => (bucket.risks ? `${Math.round((bucket.high / bucket.risks) * 100)}%` : '0%')
+const trendLabel = (weekStart) => String(weekStart || '').slice(5)
 const severityWidth = (level) => {
   const total = riskStats.value?.risks || 0
   if (!total) return '0%'
@@ -708,4 +744,22 @@ onMounted(openLatestContractReview)
 .severity-count { font-size: var(--text-xs); color: var(--color-text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
 .clause-stats { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .clause-stats-label { font-size: var(--text-xs); color: var(--color-text-secondary); }
+
+.stats-range { display: inline-flex; gap: 2px; padding: 2px; margin: 0 var(--space-3) var(--space-2); border: 1px solid var(--color-border-light); border-radius: var(--radius-sm); background: var(--color-bg-subtle); width: fit-content; }
+.stats-range-btn { padding: 2px 10px; border: 0; border-radius: calc(var(--radius-sm) - 2px); background: transparent; color: var(--color-text-secondary); font-size: var(--text-xs); cursor: pointer; }
+.stats-range-btn:hover { color: var(--color-text-primary); }
+.stats-range-btn.active { background: var(--color-bg-elevated); color: var(--color-text-primary); font-weight: 600; box-shadow: inset 0 0 0 1px var(--color-border-light); }
+.trend-chart { margin-bottom: var(--space-3); }
+.trend-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); font-size: var(--text-xs); color: var(--color-text-secondary); }
+.trend-legend { display: inline-flex; align-items: center; gap: 4px; }
+.trend-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-left: 8px; }
+.trend-dot.is-high { background: var(--color-danger); }
+.trend-dot.is-risk { background: var(--color-primary); }
+.trend-bars { display: flex; align-items: flex-end; gap: var(--space-2); height: 64px; }
+.trend-col { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
+.trend-track { display: flex; align-items: flex-end; width: 100%; height: 48px; }
+.trend-fill { width: 100%; border-radius: 2px 2px 0 0; }
+.trend-fill.is-risk { background: color-mix(in srgb, var(--color-primary) 55%, transparent); }
+.trend-fill.is-high { display: flex; align-items: flex-start; background: var(--color-danger); }
+.trend-label { font-size: 10px; color: var(--color-text-tertiary); white-space: nowrap; }
 </style>

@@ -3,9 +3,9 @@
 > 一句话：不新建表、不加写入，把多条合同审查的 `risks_json` 在读取时汇总成一份统计——风险总数、等级分布、状态分布、高发条款、定位率、高风险待处理——前端在合同页展开「风险统计」即可看。
 
 - 日期：2026-10-22
-- 后端：`app/services/legal/contract_risk_stats.py`（聚合函数）、`app/api/legal/legal_api.py`（`GET /api/legal/contract-reviews/risk-stats`）
+- 后端：`app/services/legal/contract_risk_stats.py`（聚合 + 时间窗/趋势）、`app/api/legal/legal_api.py`（`GET /api/legal/contract-reviews/risk-stats`）
 - 前端：`LegalContractTab.vue` 新增「风险统计」折叠区；`useContractReviews` 增加按需加载；`legalWorkspace.getContractRiskStats`
-- 测试：`tests/test_contract_risk_stats.py`（7 例）、`frontend/tests/e2e/contract-upload.spec.js`（统计面板断言）
+- 测试：`tests/test_contract_risk_stats.py`（11 例，含时间窗与趋势）、`frontend/tests/e2e/contract-upload.spec.js`（统计面板 + 时间窗断言）
 - 契约：`docs/openapi-snapshot.json` 重基线（新增 7 条路由，全部 additive）
 
 ---
@@ -13,13 +13,14 @@
 ## 1. 接口
 
 ```
-GET /api/legal/contract-reviews/risk-stats?case_id=<可选>
+GET /api/legal/contract-reviews/risk-stats?case_id=<可选>&days=<可选，1-365>
 ```
 
 | 参数 | 作用域 |
 | --- | --- |
 | 不传 `case_id` | 本人工作台记录（`list_rows` 默认按提交人隔离） |
 | 传 `case_id` | 该案件下可见记录（案件成员可见，`verify_case_access` 由 `list_rows` 内部校验） |
+| 传 `days` | 只统计 `created_at` 在近 N 天内的审查，并返回按周分桶的 `trend` |
 
 返回（`{success, data}` 包装，`data` 示例）：
 
@@ -32,9 +33,16 @@ GET /api/legal/contract-reviews/risk-stats?case_id=<可选>
   "anchored": 2, "unanchored": 1, "located_rate": 0.6667,
   "high_total": 2, "pending_high": 2, "reviews_with_gaps": 1,
   "by_evidence_level": {"strong": 1, "partial": 1, "weak": 0, "none": 0},
-  "scope": "case", "case_id": 3, "generated_at": "2026-10-22T03:00:00+00:00"
+  "scope": "case", "case_id": 3, "generated_at": "2026-10-22T03:00:00+00:00",
+  "window": {"days": 30},
+  "trend": [
+    {"week_start": "2026-10-19", "reviews": 2, "risks": 3, "high": 2},
+    {"week_start": "2026-10-12", "reviews": 1, "risks": 2, "high": 0}
+  ]
 }
 ```
+
+`trend` 规则：桶数 `ceil(days/7)`、封顶 12（不传 days 时按近 8 周），最新一周在最后；`week_start` 是该周起点（UTC 日期）。
 
 ## 2. 口径（与证据链、门禁一致）
 
@@ -63,14 +71,16 @@ GET /api/legal/contract-reviews/risk-stats?case_id=<可选>
 - 四条等级进度条（critical 红、high 橙、medium 主色、low 灰），宽度按占比；
 - 「高发条款」标签行（前 5）；
 - 空态：「暂无风险数据，完成一次合同审查后这里会汇总各条风险。」
+- **时间窗**：近7天 / 近30天 / 全部，切换即重新请求（`days=7|30`，全部不带该参数），摘要里显示「近7天」；
+- **趋势**：按周分桶的柱状图，柱高 = 该周风险数，柱内红色段 = 高/严重占比，悬停显示 `周起点：N 条风险、M 条高/严重`。
 
 ## 5. 验证
 
 | 项 | 结果 |
 | --- | --- |
-| 聚合单测 | 7 例：空输入、等级/状态归一（high+open → needs_review）、dismissed 保留、定位率、高风险待处理、条款 Top5、未知等级回落 medium |
-| 接口测试 | 本人记录统计正确；他人看不到（空统计）；无权限案件 403/404 |
-| e2e | `contract-upload`：展开统计 → 断言风险总数 3、`2 条审查 · 当前案件`、high 计数 2、请求携带 `case_id=3` |
+| 聚合单测 | 11 例：空输入、等级/状态归一（high+open → needs_review）、dismissed 保留、定位率、高风险待处理、条款 Top5、未知等级回落 medium、时间窗过滤、按周分桶、无 days 默认 8 周 |
+| 接口测试 | 本人记录统计正确；他人看不到（空统计）；无权限案件 403/404；`days=30` 排除 40 天前记录并返回 5 个周桶 |
+| e2e | `contract-upload`：展开统计 → 断言风险总数 3、`2 条审查 · 当前案件`、high 计数 2、请求携带 `case_id=3`；趋势 1 个周桶；切「近7天」→ 请求带 `days=7`、摘要与激活态更新 |
 | 契约 | `openapi-snapshot.json` 重基线（7 条新增路由全部 additive，无 breaking）；`types:check` 一致 |
 | 门禁 | 见本次提交说明（`scripts/check_all.py`） |
 
@@ -78,6 +88,6 @@ GET /api/legal/contract-reviews/risk-stats?case_id=<可选>
 
 1. **只统计前 50 条审查**：复用 `list_rows` 的 `limit(50)`，不是全库统计。
 2. **按读取时扫描**：没有缓存/物化，每条审查的 `risks_json` 都要反序列化；数据量大时需要物化视图。
-3. **没有时间维度**：不按「近 30 天 / 本周新增」切片，也不做趋势；需要时加 `created_from/created_to` 过滤。
+3. **时间维度只有粗粒度窗口**：近 7/30 天 + 按周趋势；没有自定义起止日期、没有同比/环比，也不区分「新建」与「复审」。
 4. **只看得到自己/案件范围**：统计的可见性完全继承 `list_rows`，不会跨租户聚合。
 5. **未覆盖咨询/文书**：这是合同审查专用视图，咨询与起草的风险提示不在其中。

@@ -14,16 +14,19 @@ export function useContractReviews({ client, message, caseId }) {
   const contractVersionMap = ref({})
   const resubmitDraftForm = ref({})
   const resubmitLoading = ref({})
-  // 跨审查风险统计：折叠展开时按需拉取，切案件后重新取
+  // 跨审查风险统计：折叠展开时按需拉取，切案件/切时间窗后重新取
   const riskStats = ref(null)
   const riskStatsLoading = ref(false)
-  const loadRiskStats = async () => {
+  const riskStatsDays = ref(null)
+  const loadRiskStats = async (days = riskStatsDays.value) => {
     if (riskStatsLoading.value) return
+    riskStatsDays.value = days ?? null
     riskStatsLoading.value = true
     try {
-      const response = await client.getContractRiskStats({
-        params: caseId?.value ? { case_id: caseId.value } : undefined,
-      })
+      const params = {}
+      if (caseId?.value) params.case_id = caseId.value
+      if (riskStatsDays.value) params.days = riskStatsDays.value
+      const response = await client.getContractRiskStats({ params: Object.keys(params).length ? params : undefined })
       riskStats.value = response?.data || null
     } catch {
       riskStats.value = null
@@ -156,6 +159,7 @@ export function useContractReviews({ client, message, caseId }) {
     resubmitLoading,
     riskStats,
     riskStatsLoading,
+    riskStatsDays,
     loadRiskStats,
     loadContractReviews,
     submitContractReview,

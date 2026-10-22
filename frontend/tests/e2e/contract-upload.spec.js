@@ -36,6 +36,10 @@ const RISK_STATS = {
   pending_high: 2,
   reviews_with_gaps: 1,
   by_evidence_level: { strong: 1, partial: 1, weak: 0, none: 0 },
+  window: { days: null },
+  trend: [
+    { week_start: '2026-10-19', reviews: 2, risks: 3, high: 2 },
+  ],
   scope: 'case',
   case_id: 3,
   generated_at: '2026-10-22T03:00:00+00:00',
@@ -81,6 +85,7 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
 
     if (method === 'GET' && path === '/legal/contract-reviews/risk-stats') {
       requests.riskStats = url.searchParams.get('case_id')
+      requests.riskStatsDays = url.searchParams.get('days')
       return route.fulfill({ json: success(RISK_STATS) })
     }
 
@@ -159,6 +164,12 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
   await expect(page.locator('.risk-stats-details').getByText('高/严重')).toBeVisible()
   await expect(page.locator('.severity-row').nth(1).locator('.severity-count')).toHaveText('2')
   await expect.poll(() => requests.riskStats).toBe('3')
+  // 时间窗：切近7天后重新请求，摘要与趋势跟着更新
+  await expect(page.locator('.trend-col')).toHaveCount(1)
+  await page.getByRole('button', { name: '近7天' }).click()
+  await expect.poll(() => requests.riskStatsDays).toBe('7')
+  await expect(page.locator('.risk-stats-details summary')).toContainText('近7天')
+  await expect(page.locator('.stats-range-btn.active')).toHaveText('近7天')
   await expect(page.getByText('合同文件审查完成')).toBeVisible()
   expect(requests.upload).toBeDefined()
   expect(requests.upload).toContain('联调合同.txt')
