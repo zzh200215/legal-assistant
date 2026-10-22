@@ -31,6 +31,17 @@ const CONSULT_ROW = {
   },
 }
 
+// 无引用咨询：历史列表「依据」列应显示「无引用」，可单独筛出
+const CONSULT_ROW_NO_REF = {
+  ...CONSULT_ROW,
+  id: 990,
+  question: 'U3探针：没有法源依据的咨询',
+  evidence_summary: {
+    references: 0, active_references: 0, sentences: 0, attributed: 0,
+    attributed_rate: null, faithfulness: 'unchecked', unsupported: 0, level: 'none',
+  },
+}
+
 const CONTRACT_ROW = {
   id: 992,
   target_type: 'contract_review',
@@ -187,7 +198,7 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
     // U-3 step 4: 审核队列通过（与 submit_review 共用上面同一个 matcher，按 action 分发）
 
     if (method === 'GET' && path === '/legal/consultations') {
-      await route.fulfill({ json: success([CONSULT_ROW]) })
+      await route.fulfill({ json: success([CONSULT_ROW, CONSULT_ROW_NO_REF]) })
       return
     }
     if (method === 'GET' && path === '/legal/contract-reviews') {
@@ -318,6 +329,15 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   await expect(page.locator('.chain-line')).toContainText('句级溯源 3/4 句')
   await expect(page.locator('.history-card')).toContainText('依据')
   await expect(page.locator('.history-card')).toContainText('1 条引用 · 3/4 句')
+  // 无引用咨询可单独列出：计数 + 一键筛选 + 表格只剩一条
+  const historyCard = page.locator('.history-card')
+  await expect(historyCard).toContainText('无引用 1 条')
+  await expect(historyCard).toContainText('无引用')
+  await historyCard.getByRole('button', { name: /无引用 1/ }).click()
+  await expect(historyCard.locator('.el-table__row')).toHaveCount(1)
+  await expect(historyCard).toContainText(CONSULT_ROW_NO_REF.question)
+  await historyCard.getByRole('button', { name: /无引用 1/ }).click()
+  await expect(historyCard.locator('.el-table__row')).toHaveCount(2)
   expect(requests.consult).toEqual({ question: CONSULT_ROW.question, case_id: 3 })
 
   await page.getByRole('button', { name: '提交律师审核', exact: true }).click()

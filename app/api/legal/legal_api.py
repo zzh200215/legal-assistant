@@ -959,8 +959,21 @@ def followup_consultation(item_id: int, req: FollowupIn, db: Session = Depends(g
 
 
 @router.get("/consultations")
-def list_consultations(case_id: int | None = Query(default=None), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return legal_workspace_read_module.list_rows(db, current_user, "consultation", case_id=case_id)
+def list_consultations(
+    case_id: int | None = Query(default=None),
+    evidence_level: str | None = Query(
+        default=None, pattern="^(none|weak|partial|strong)$",
+        description="按咨询证据链等级筛选（none=无引用）",
+    ),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    rows = legal_workspace_read_module.list_rows(db, current_user, "consultation", case_id=case_id)
+    if evidence_level:
+        rows = [
+            row for row in rows
+            if (row.get("evidence_summary") or {}).get("level") == evidence_level
+        ]
+    return rows
 
 
 @router.get("/consultations/{item_id}")

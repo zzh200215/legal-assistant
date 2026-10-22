@@ -5216,6 +5216,25 @@
               ],
               "title": "Case Id"
             }
+          },
+          {
+            "name": "evidence_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(none|weak|partial|strong)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按咨询证据链等级筛选（none=无引用）",
+              "title": "Evidence Level"
+            },
+            "description": "按咨询证据链等级筛选（none=无引用）"
           }
         ],
         "responses": {

@@ -89,3 +89,82 @@ class SummarizeConsultationEvidenceTests(unittest.TestCase):
         self.assertIn("evidence_summary", payload)
         self.assertEqual(payload["evidence_summary"]["level"], "strong")
         self.assertEqual(payload["evidence_summary"]["references"], 1)
+
+
+class ListConsultationsEvidenceFilterTests(unittest.TestCase):
+    """列表接口按证据链等级筛选：无引用咨询可单独列出。"""
+
+    def setUp(self):
+        from fastapi.testclient import TestClient
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+
+        import app.models  # noqa: F401
+        from app.core.auth import create_access_token, hash_password
+        from app.core.database import Base, get_db
+        from app.main import app
+        from app.models.user import User
+
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:", future=True,
+            connect_args={"check_same_thread": False}, poolclass=StaticPool,
+        )
+        Base.metadata.create_all(bind=engine)
+        self.Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        db = self.Session()
+        self.user = User(username="chain_filter", email="chain_filter@example.com",
+                         hashed_password=hash_password("secret"), role="user")
+        db.add(self.user)
+        db.flush()
+        self.user_id = self.user.id
+        db.add_all([
+            LegalConsultation(
+                user_id=self.user_id, question="有引用的咨询", category="labor",
+                known_facts_json="[]", missing_facts_json="[]",
+                references_json=json.dumps([{"title": "劳动合同法", "status": "active"}], ensure_ascii=False),
+                advice="应支付补偿。", risk_level="medium", status="draft",
+                attribution_json=json.dumps({"total_sentences": 4, "matched_sentences": 4, "sentences": []}),
+            ),
+            LegalConsultation(
+                user_id=self.user_id, question="没有引用的咨询", category="labor",
+                known_facts_json="[]", missing_facts_json="[]", references_json="[]",
+                advice="建议咨询律师。", risk_level="low", status="draft",
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        def override_get_db():
+            session = self.Session()
+            try:
+                yield session
+            finally:
+                session.close()
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.client = TestClient(app)
+        self.headers = {"Authorization": f"Bearer {create_access_token({'sub': self.user_id})}"}
+
+    def tearDown(self):
+        from app.core.database import get_db
+        from app.main import app
+
+        app.dependency_overrides.clear()
+
+    def test_filter_none_returns_only_uncited(self):
+        response = self.client.get("/api/legal/consultations?evidence_level=none", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        rows = response.json()["data"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["question"], "没有引用的咨询")
+        self.assertEqual(rows[0]["evidence_summary"]["level"], "none")
+
+    def test_filter_strong_returns_cited(self):
+        response = self.client.get("/api/legal/consultations?evidence_level=strong", headers=self.headers)
+        self.assertEqual(len(response.json()["data"]), 1)
+        self.assertEqual(response.json()["data"][0]["question"], "有引用的咨询")
+
+    def test_invalid_level_rejected(self):
+        response = self.client.get("/api/legal/consultations?evidence_level=whatever", headers=self.headers)
+        self.assertEqual(response.status_code, 422)
