@@ -332,6 +332,9 @@ def serialize_review_action(action: LegalReviewAction) -> dict:
         "target_type": action.target_type, "target_id": action.target_id,
         "action": action.action, "note": action.note, "from_status": action.from_status,
         "to_status": action.to_status, "created_at": action.created_at,
+        "target_version": action.target_version,
+        "risk_index": getattr(action, "risk_index", None),
+        "risk_title": getattr(action, "risk_title", None),
     }
 
 

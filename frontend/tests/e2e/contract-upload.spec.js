@@ -76,7 +76,29 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
     if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/matters/3/activity') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/contract-reviews/1/versions') return route.fulfill({ json: success([]) })
-    if (method === 'GET' && path === '/legal/contract-reviews/1/risk-items') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/contract-reviews/1/risk-items') {
+      return route.fulfill({ json: success([
+        { id: 1, index: 0, category: 'payment', severity: 'high', title: '付款条款', summary: '付款节点未明确', status: 'needs_review', can_resolve: true, history: [] },
+      ]) })
+    }
+    if (method === 'POST' && path === '/legal/contract-reviews/1/risk-items/1/action') {
+      const body = request.postDataJSON()
+      requests.riskAction = body
+      const base = {
+        id: 1, index: 0, category: 'payment', severity: 'high', title: '付款条款', summary: '付款节点未明确',
+        can_resolve: true,
+      }
+      const acceptEntry = { id: 7, action: 'risk_accept', note: '合同审查工作区处理', risk_index: 0, risk_title: '付款条款', actor_name: '测试律师', created_at: '2026-10-22T04:00:00' }
+      if (body.action === 'reopen') {
+        return route.fulfill({ json: success({
+          ...base, status: 'needs_review',
+          history: [{ id: 8, action: 'risk_reopen', note: '合同审查工作区处理', risk_index: 0, risk_title: '付款条款', actor_name: '测试律师', created_at: '2026-10-22T04:10:00' }, acceptEntry],
+        }) })
+      }
+      return route.fulfill({ json: success({
+        ...base, status: 'accepted', history: [acceptEntry],
+      }) })
+    }
 
     if (method === 'POST' && path === '/legal/contract-reviews/upload') {
       requests.upload = request.postDataBuffer().toString('utf8')
@@ -156,6 +178,18 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
   await expect(page.locator('.evidence-chain')).toHaveText('2/2 有定位')
   await expect(page.locator('.risk-location--missing')).toHaveCount(0)
   await expect(page.locator('.evidence-gap-toggle')).toBeDisabled()
+
+  // 逐条处置：接受风险 → 写动作接口 → 处置记录可见
+  await page.locator('.risk-issue').filter({ hasText: '付款条款' }).click()
+  await page.getByRole('button', { name: '接受风险' }).click()
+  await expect.poll(() => requests.riskAction).toEqual({ action: 'accept', note: '合同审查工作区处理' })
+  await expect(page.locator('.risk-history')).toContainText('接受风险')
+  await expect(page.locator('.risk-history')).toContainText('测试律师')
+  // 撤销处置：回到待审核，动作也留痕
+  await page.getByRole('button', { name: '撤销处置' }).click()
+  await expect.poll(() => requests.riskAction).toEqual({ action: 'reopen', note: '合同审查工作区处理' })
+  await expect(page.locator('.risk-disposition')).toContainText('待审核')
+  await expect(page.locator('.risk-history')).toContainText('撤销处置')
 
   // 跨审查风险统计：展开时才请求，数字来自服务端派生视图
   await page.locator('.risk-stats-details summary').click()

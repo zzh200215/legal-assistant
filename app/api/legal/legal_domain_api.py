@@ -3,7 +3,7 @@
 端点（均挂 /api/legal）：
   GET  /cases/{case_id}/domain                               案件事实/证据/主张/引用/风险项聚合
   GET  /contract-reviews/{item_id}/risk-items               结构化风险项列表（由 risks_json 派生，id=下标+1）
-  POST /contract-reviews/{item_id}/risk-items/{risk_id}/action  律师处理风险项（accept/mitigate/dismiss，写回 risks_json）
+  POST /contract-reviews/{item_id}/risk-items/{risk_id}/action  律师处理风险项（accept/mitigate/dismiss/reopen，写回 risks_json 并落动作）
   POST /contract-reviews/{item_id}/publish                  发布合同审查结论（审核门禁）
   POST /drafts/{item_id}/mark-final                         文书定稿（审核门禁）
   GET  /consultations/{item_id}/claims                      主张追溯
@@ -36,7 +36,7 @@ audit = AuditLogService()
 
 
 class RiskActionIn(BaseModel):
-    action: str = Field(description="accept / mitigate / dismiss")
+    action: str = Field(description="accept / mitigate / dismiss / reopen（撤销处置）")
     note: str | None = Field(default=None, max_length=2000)
 
 

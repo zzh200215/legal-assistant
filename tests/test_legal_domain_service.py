@@ -257,6 +257,44 @@ class LegalDomainServiceTests(unittest.TestCase):
             LegalClaim.claim_type == "risk_warning",
         ).first()
         self.assertEqual(claim.status, "approved")
+        # 逐条追溯：处置动作写入 legal_review_actions（带风险下标/标题）
+        action = self.db.query(LegalReviewAction).filter(
+            LegalReviewAction.target_type == "contract_review",
+            LegalReviewAction.target_id == review.id,
+        ).first()
+        self.assertEqual(action.action, "risk_dismiss")
+        self.assertEqual(action.risk_index, 0)
+        self.assertEqual(action.risk_title, "违约责任")
+        self.assertEqual(action.from_status, "needs_review")
+        self.assertEqual(action.to_status, "dismissed")
+        self.assertEqual(action.note, "不属于本所负责范围")
+        self.assertIsNotNone(result["history"])
+        self.assertEqual(result["history"][0]["action"], "risk_dismiss")
+        self.assertEqual(result["history"][0]["actor_name"], "lawyer")
+
+    def test_risk_item_reopen_restores_pending_state(self):
+        review = self._create_review()
+        persist_review_artifacts(self.db, review, risks=[HIGH_RISK], refs=[])
+        update_risk_item_status(self.db, self.user, review.id, 0, "dismiss", "误判")
+        reopened = update_risk_item_status(self.db, self.user, review.id, 0, "reopen", "重新评估")
+        self.assertEqual(reopened["status"], "needs_review")
+        self.assertIsNone(reopened["reviewer_id"])
+        self.assertIsNone(reopened["resolution_note"])
+        actions = [
+            item.action for item in self.db.query(LegalReviewAction).filter(
+                LegalReviewAction.target_type == "contract_review",
+                LegalReviewAction.target_id == review.id,
+            ).order_by(LegalReviewAction.id.asc()).all()
+        ]
+        self.assertEqual(actions, ["risk_dismiss", "risk_reopen"])
+        # 撤销后回到待审核 → 仍会阻塞发布
+        self.assertFalse(assert_publishable(self.db, self.user, "contract_review", review.id)["ok"])
+
+    def test_risk_item_reopen_requires_resolved_state(self):
+        review = self._create_review()
+        persist_review_artifacts(self.db, review, risks=[HIGH_RISK], refs=[])
+        with self.assertRaises(ValueError):
+            update_risk_item_status(self.db, self.user, review.id, 0, "reopen", None)
 
     def test_risk_item_invalid_action_rejected(self):
         review = self._create_review()

@@ -143,7 +143,19 @@ class LegalDomainApiTests(unittest.TestCase):
             json={"action": "accept", "note": "已接受"}, headers=self.admin_headers,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["data"]["status"], "accepted")
+        payload = response.json()["data"]
+        self.assertEqual(payload["status"], "accepted")
+        self.assertEqual(payload["history"][0]["action"], "risk_accept")
+        self.assertEqual(payload["history"][0]["risk_index"], 0)
+        self.assertTrue(payload["history"][0]["actor_name"])
+
+        # 审核历史接口同样能看到该处置动作
+        history = self.client.get(
+            f"/api/legal/review-queue/contract_review/{review.id}/history", headers=self.admin_headers,
+        ).json()["data"]["history"]
+        risk_actions = [item for item in history if item["action"].startswith("risk_")]
+        self.assertEqual(len(risk_actions), 1)
+        self.assertEqual(risk_actions[0]["risk_title"], "违约责任")
 
     def test_risk_item_action_unknown_action_rejected(self):
         review = self._create_review(risks=[HIGH_RISK])

@@ -23,9 +23,11 @@ from app.models.legal import (
     LegalCase,
     LegalConsultation,
     LegalDraft,
+    LegalReviewAction,
     LegalSource,
 )
 from app.models.legal_contract import LegalContractVersion
+from app.models.user import User
 from app.models.legal_domain import (
     LegalClaim,
     LegalEvidence,
@@ -52,6 +54,7 @@ CLAIM_STATUS_RESOLVED = ("approved", "rejected", "unsupported", "superseded", "c
 # risk item 生命周期：open -> accepted / mitigated / dismissed；high/critical 创建即 needs_review
 RISK_ITEM_ACTIONS = {"accept": "accepted", "mitigate": "mitigated", "dismiss": "dismissed"}
 RISK_ITEM_RESOLVED = {"accepted", "mitigated", "dismissed"}
+RISK_ITEM_REOPEN = "reopen"
 
 
 def _json_parse(raw: str | None, fallback):
@@ -303,6 +306,36 @@ def persist_draft_artifacts(
 
 # ── 查询聚合 ──────────────────────────────────────────────────────────────────
 
+def _risk_action_history(db: Session, review_id: int) -> dict[int, list[dict]]:
+    """该审查下按风险下标归组的处置动作（含操作人名），供风险项详情直接展示。"""
+    rows = (
+        db.query(LegalReviewAction, User)
+        .outerjoin(User, User.id == LegalReviewAction.reviewer_id)
+        .filter(
+            LegalReviewAction.target_type == "contract_review",
+            LegalReviewAction.target_id == review_id,
+            LegalReviewAction.risk_index.isnot(None),
+        )
+        .order_by(LegalReviewAction.created_at.desc(), LegalReviewAction.id.desc())
+        .all()
+    )
+    grouped: dict[int, list[dict]] = {}
+    for action, actor in rows:
+        grouped.setdefault(int(action.risk_index), []).append({
+            "id": action.id,
+            "action": action.action,
+            "note": action.note,
+            "from_status": action.from_status,
+            "to_status": action.to_status,
+            "risk_index": action.risk_index,
+            "risk_title": action.risk_title,
+            "reviewer_id": action.reviewer_id,
+            "actor_name": (actor.full_name or actor.username) if actor else None,
+            "created_at": action.created_at,
+        })
+    return grouped
+
+
 def risk_status(risk: dict) -> str:
     """风险项状态：已处置（accepted/mitigated/dismissed）以写入为准，其余按严重度派生。
 
@@ -418,11 +451,15 @@ def get_risk_items(db: Session, review_id: int, review: ContractReview | None = 
     if row is None:
         return []
     risks = _json_parse(row.risks_json, [])
-    return [
-        serialize_risk_item(row, risk, index)
-        for index, risk in enumerate(risks)
-        if isinstance(risk, dict)
-    ]
+    history = _risk_action_history(db, row.id)
+    items = []
+    for index, risk in enumerate(risks):
+        if not isinstance(risk, dict):
+            continue
+        item = serialize_risk_item(row, risk, index)
+        item["history"] = history.get(index, [])
+        items.append(item)
+    return items
 
 
 def get_claims_for_target(db: Session, source_type: str, source_id: int) -> list[dict]:
@@ -451,18 +488,40 @@ def update_risk_item_status(
         raise LookupError("RISK_ITEM_NOT_FOUND")
     risk = risks[risk_index]
     current = risk_status(risk)
-    if action not in RISK_ITEM_ACTIONS:
-        raise ValueError("RISK_ITEM_ACTION_INVALID")
-    if current in RISK_ITEM_RESOLVED:
-        raise ValueError("RISK_ITEM_ALREADY_RESOLVED")
-
-    target = RISK_ITEM_ACTIONS[action]
+    severity = risk.get("risk_level") if risk.get("risk_level") in SEVERITIES else "medium"
+    if action == RISK_ITEM_REOPEN:
+        if current not in RISK_ITEM_RESOLVED:
+            raise ValueError("RISK_ITEM_NOT_RESOLVED")
+        # 撤销处置：回到待处理（高风险仍进审核队列），清空处置字段，历史保留在动作表
+        target = "needs_review" if severity in review_severities() else "open"
+        risk["reviewer_id"] = None
+        risk["resolved_at"] = None
+        risk["resolution_note"] = None
+    else:
+        if action not in RISK_ITEM_ACTIONS:
+            raise ValueError("RISK_ITEM_ACTION_INVALID")
+        if current in RISK_ITEM_RESOLVED:
+            raise ValueError("RISK_ITEM_ALREADY_RESOLVED")
+        target = RISK_ITEM_ACTIONS[action]
+        risk["reviewer_id"] = user.id
+        risk["resolved_at"] = utc_now().isoformat()
+        risk["resolution_note"] = note
     risk["status"] = target
-    risk["reviewer_id"] = user.id
-    risk["resolved_at"] = utc_now().isoformat()
-    risk["resolution_note"] = note
     review.risks_json = json.dumps(risks, ensure_ascii=False)
     db.add(review)
+    # 逐条追溯：处置动作落 legal_review_actions（带风险下标/标题快照）
+    db.add(LegalReviewAction(
+        reviewer_id=user.id,
+        target_type="contract_review",
+        target_id=review.id,
+        action=f"risk_{action}",
+        note=note,
+        from_status=current,
+        to_status=target,
+        target_version=getattr(review, "version", None),
+        risk_index=risk_index,
+        risk_title=(str(risk.get("label"))[:256] if risk.get("label") else None),
+    ))
 
     # 同步由该风险派生的 risk_warning claim（无外键：按 source + 标题/描述匹配）
     claim = (
@@ -483,7 +542,9 @@ def update_risk_item_status(
         claim.reviewed_at = utc_now()
     db.commit()
     db.refresh(review)
-    return serialize_risk_item(review, risk, risk_index)
+    item = serialize_risk_item(review, risk, risk_index)
+    item["history"] = _risk_action_history(db, review.id).get(risk_index, [])
+    return item
 
 
 def supersede_artifacts(db: Session, user, source_type: str, source_id: int) -> None:

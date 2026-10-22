@@ -344,4 +344,7 @@ class LegalReviewAction(Base):
     to_status = Column(String(32), nullable=False)
     # P1：审核动作绑定的业务版本号，使"审核通过后修改需重新审核"可被校验与追溯。
     target_version = Column(Integer, nullable=True, comment="审核对象业务版本号")
+    # 风险项处置（accept/mitigate/dismiss）定位到具体风险，便于逐条追溯
+    risk_index = Column(Integer, nullable=True, comment="风险项在 risks_json 中的下标（0 基）")
+    risk_title = Column(String(256), nullable=True, comment="风险项标题快照")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

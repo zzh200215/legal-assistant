@@ -30,6 +30,7 @@ export const sourceTypeLabel = (type) => label({
 }, type)
 export const actionLabel = (action) => label({
   approve: '通过', return: '退回补充', offline: '转线下', close: '关闭', submit_review: '提交审核', comment: '批注',
+  risk_accept: '接受风险', risk_mitigate: '已修改缓释', risk_dismiss: '忽略风险', risk_reopen: '撤销处置',
 }, action)
 export const formatDate = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : ''
 

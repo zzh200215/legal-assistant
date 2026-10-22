@@ -3,7 +3,7 @@
     <li v-for="entry in entries" :key="entry.id || `${entry.action}-${entry.created_at}`" class="review-entry">
       <span class="timeline-marker" :class="`action-${entry.action}`" aria-hidden="true"></span>
       <div class="review-entry-content">
-        <div class="review-entry-heading"><strong>{{ actionLabel(entry.action) }}</strong><time>{{ formatDate(entry.created_at) }}</time></div>
+        <div class="review-entry-heading"><strong>{{ actionLabel(entry.action) }}<template v-if="entry.risk_title"> · {{ entry.risk_title }}</template></strong><time>{{ formatDate(entry.created_at) }}</time></div>
         <p v-if="entry.note">{{ entry.note }}</p>
         <span v-if="entry.actor_name" class="review-actor">{{ entry.actor_name }}</span>
       </div>

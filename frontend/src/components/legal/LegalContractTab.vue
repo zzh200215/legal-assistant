@@ -119,8 +119,20 @@
                 <el-button size="small" :disabled="isRiskResolved(selectedStructuredRisk)" @click="resolveSelectedRisk('accept')">接受风险</el-button>
                 <el-button size="small" :disabled="isRiskResolved(selectedStructuredRisk)" @click="resolveSelectedRisk('mitigate')">已修改缓释</el-button>
                 <el-button size="small" :disabled="isRiskResolved(selectedStructuredRisk)" @click="resolveSelectedRisk('dismiss')">忽略风险</el-button>
+                <el-button v-if="isRiskResolved(selectedStructuredRisk)" size="small" @click="resolveSelectedRisk('reopen')">撤销处置</el-button>
               </div>
               <p v-if="selectedStructuredRisk.resolution_note" class="resolution-note">{{ selectedStructuredRisk.resolution_note }}</p>
+              <div v-if="selectedStructuredRisk.history?.length" class="risk-history">
+                <h5>处置记录</h5>
+                <ol>
+                  <li v-for="entry in selectedStructuredRisk.history" :key="entry.id" class="risk-history-item">
+                    <span class="risk-history-action">{{ actionLabel(entry.action) }}</span>
+                    <span v-if="entry.actor_name" class="risk-history-actor">{{ entry.actor_name }}</span>
+                    <time>{{ formatDate(entry.created_at) }}</time>
+                    <p v-if="entry.note" class="risk-history-note">{{ entry.note }}</p>
+                  </li>
+                </ol>
+              </div>
             </div>
             <div class="detail-section evidence-section">
               <h5>法律依据</h5>
@@ -306,7 +318,7 @@ import EvidenceReference from './EvidenceReference.vue'
 import DocumentVersion from './DocumentVersion.vue'
 import DocumentDiff from './DocumentDiff.vue'
 import { useContractReviews } from '../../composables/useContractReviews'
-import { useContractRiskPresentation, clauseLabel, formatDate, riskLabel, statusLabel } from '../../composables/useLegalWorkspacePresentation'
+import { useContractRiskPresentation, actionLabel, clauseLabel, formatDate, riskLabel, statusLabel } from '../../composables/useLegalWorkspacePresentation'
 import { EVIDENCE_CHAIN_LEVELS, evidenceForRisk, resolveEvidenceChain } from '../../composables/useContractEvidence'
 import { useContractComparison } from '../../composables/useContractComparison'
 import { useQuota } from '../../composables/useQuota'
@@ -762,4 +774,12 @@ onMounted(openLatestContractReview)
 .trend-fill.is-risk { background: color-mix(in srgb, var(--color-primary) 55%, transparent); }
 .trend-fill.is-high { display: flex; align-items: flex-start; background: var(--color-danger); }
 .trend-label { font-size: 10px; color: var(--color-text-tertiary); white-space: nowrap; }
+
+.risk-history { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px dashed var(--color-border-light); }
+.risk-history h5 { margin: 0 0 var(--space-2); }
+.risk-history ol { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.risk-history-item { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-secondary); }
+.risk-history-action { font-weight: 600; color: var(--color-text-primary); }
+.risk-history-item time { margin-left: auto; color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
+.risk-history-note { flex-basis: 100%; margin: 0; color: var(--color-text-secondary); line-height: 1.6; }
 </style>
