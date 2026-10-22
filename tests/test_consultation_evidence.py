@@ -165,6 +165,24 @@ class ListConsultationsEvidenceFilterTests(unittest.TestCase):
         self.assertEqual(len(response.json()["data"]), 1)
         self.assertEqual(response.json()["data"][0]["question"], "有引用的咨询")
 
+    def test_review_queue_carries_chain_signal(self):
+        """审核队列行带 evidence_summary，前端才能给无依据咨询打标签。"""
+        db = self.Session()
+        db.add(LegalConsultation(
+            user_id=self.user_id, question="待审：无依据咨询", category="labor",
+            known_facts_json="[]", missing_facts_json="[]", references_json="[]",
+            advice="建议咨询律师。", risk_level="low", status="pending_review",
+        ))
+        db.commit()
+        db.close()
+
+        response = self.client.get("/api/legal/review-queue", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        rows = [row for row in response.json()["data"] if row["target_type"] == "consultation"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["evidence_summary"]["level"], "none")
+        self.assertEqual(rows[0]["evidence_summary"]["references"], 0)
+
     def test_invalid_level_rejected(self):
         response = self.client.get("/api/legal/consultations?evidence_level=whatever", headers=self.headers)
         self.assertEqual(response.status_code, 422)

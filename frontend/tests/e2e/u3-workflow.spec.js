@@ -42,6 +42,21 @@ const CONSULT_ROW_NO_REF = {
   },
 }
 
+// 审核队列里的无依据咨询：应显示「无依据」标签，页头出现「无依据咨询」计数
+const CONSULT_NO_REF_ROW = {
+  ...CONSULT_ROW_NO_REF,
+  id: 989,
+  question: 'U3探针：无依据咨询待审核',
+  status: 'needs_lawyer_review',
+  review_due_in_hours: null,
+  sla_state: null,
+  review_overdue: false,
+  evidence_summary: {
+    references: 0, active_references: 0, sentences: 0, attributed: 0,
+    attributed_rate: null, faithfulness: 'unchecked', unsupported: 0, level: 'none',
+  },
+}
+
 const CONTRACT_ROW = {
   id: 992,
   target_type: 'contract_review',
@@ -220,7 +235,7 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       return
     }
     if (method === 'GET' && path === '/legal/review-queue') {
-      await route.fulfill({ json: success([CONSULT_ROW, CONTRACT_ROW, HIGH_GAP_ROW]) })
+      await route.fulfill({ json: success([CONSULT_ROW, CONSULT_NO_REF_ROW, CONTRACT_ROW, HIGH_GAP_ROW]) })
       return
     }
     if (method === 'GET' && path === '/legal/review-stats') {
@@ -393,6 +408,10 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   // SLA 提醒：24h 内到期标签 + 相对剩余时间
   await expect(consultationQueueItem.getByText('24h内到期')).toBeVisible()
   await expect(consultationQueueItem.getByText('剩 6 小时')).toBeVisible()
+  // 咨询证据链信号：无依据的咨询在队列里直接标出来，页头有计数
+  const noRefQueueItem = page.locator('.queue-item', { hasText: CONSULT_NO_REF_ROW.question })
+  await expect(noRefQueueItem.locator('.queue-chain')).toHaveText('无依据')
+  await expect(page.locator('.review-summary-counts')).toContainText('无依据咨询')
   await expect(page.locator('.review-actions')).toBeVisible()
   await page.locator('.review-actions').getByRole('button', { name: '通过', exact: true }).click()
   const promptDialog = page.getByRole('dialog')

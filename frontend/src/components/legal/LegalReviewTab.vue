@@ -7,7 +7,7 @@
         <h1 class="app-page-title">待处理审核</h1>
         <p class="app-page-sub">AI 提供分析与依据，审核律师作出最终决定。</p>
       </div>
-      <div v-if="canReview && reviewStats" class="app-page-head-actions review-summary-counts"><span><strong>{{ reviewStats.sla?.active_count ?? reviewQueue.length }}</strong> 待处理</span><span><strong>{{ reviewStats.sla?.overdue_count || 0 }}</strong> 逾期</span><span><strong>{{ reviewStats.sla?.due_soon_count || 0 }}</strong> 24h内到期</span><span><strong>{{ reviewStats.sla?.unassigned_count || 0 }}</strong> 未分配</span><span><strong>{{ reviewStats.sla?.average_turnaround_hours ?? '—' }}</strong> 平均小时</span></div>
+      <div v-if="canReview && reviewStats" class="app-page-head-actions review-summary-counts"><span><strong>{{ reviewStats.sla?.active_count ?? reviewQueue.length }}</strong> 待处理</span><span><strong>{{ reviewStats.sla?.overdue_count || 0 }}</strong> 逾期</span><span><strong>{{ reviewStats.sla?.due_soon_count || 0 }}</strong> 24h内到期</span><span v-if="noEvidenceConsultations"><strong>{{ noEvidenceConsultations }}</strong> 无依据咨询</span><span><strong>{{ reviewStats.sla?.unassigned_count || 0 }}</strong> 未分配</span><span><strong>{{ reviewStats.sla?.average_turnaround_hours ?? '—' }}</strong> 平均小时</span></div>
     </header>
 
     <div class="review-flow"><span>案件信息</span><i>›</i><span>AI 分析结果</span><i>›</i><span>问题与风险</span><i>›</i><span>证据 / 法源</span><i>›</i><span>审核决定</span></div>
@@ -39,7 +39,7 @@
                 <span class="queue-item-top">
                   <input v-if="canReview" class="queue-check" type="checkbox" :checked="isSelected(item)" :aria-label="`选择${item.title || item.question || item.id}`" @click.stop="toggleSelection(item)" />
                   <span class="app-thread-title">{{ item.question || item.title || item.content?.slice(0, 85) || '待审核记录' }}</span>
-                  <span class="app-tag is-info queue-type">{{ targetLabel(item.target_type) }}</span>
+                  <span class="app-tag is-info queue-type">{{ targetLabel(item.target_type) }}</span><span v-if="chainSignal(item)" class="app-tag queue-chain" :class="chainSignal(item).className">{{ chainSignal(item).label }}</span>
                 </span>
                 <span class="app-thread-meta"><span class="app-tag" :class="statusTagClass(item.status)">{{ statusLabel(item.status) }}</span><span v-if="item.reviewer_id" class="app-tag">已分配</span><span v-if="item.review_overdue" class="app-tag is-danger">逾期</span><span v-else-if="item.sla_state === 'due_soon'" class="app-tag is-warning">24h内到期</span><span v-if="item.review_due_in_hours !== null && item.review_due_in_hours !== undefined" class="queue-due" :class="{ 'is-danger': item.review_overdue }">{{ dueText(item.review_due_in_hours) }}</span><time class="queue-time">{{ formatDate(item.created_at) }}</time></span>
               </button>
@@ -52,7 +52,7 @@
       <section v-if="selectedItem" class="app-card review-detail-pane">
         <div class="app-card-head detail-header">
           <h2 class="detail-title">{{ selectedItem.title || selectedItem.question || '审核对象' }}</h2>
-          <div class="app-card-head-meta detail-header-actions"><span class="app-tag is-info">{{ targetLabel(selectedItem.target_type) }}</span><button v-if="selectedItem.case_id" type="button" class="case-link" @click="openCase(selectedItem.case_id)">回到案件</button><span class="app-tag detail-status" :class="statusTagClass(selectedItem.status)">{{ statusLabel(selectedItem.status) }}</span></div>
+          <div class="app-card-head-meta detail-header-actions"><span class="app-tag is-info">{{ targetLabel(selectedItem.target_type) }}</span><span v-if="chainSignal(selectedItem)" class="app-tag queue-chain" :class="chainSignal(selectedItem).className">{{ chainSignal(selectedItem).label }}</span><button v-if="selectedItem.case_id" type="button" class="case-link" @click="openCase(selectedItem.case_id)">回到案件</button><span class="app-tag detail-status" :class="statusTagClass(selectedItem.status)">{{ statusLabel(selectedItem.status) }}</span></div>
         </div>
         <div class="app-card-body detail-body">
           <div class="detail-case-context"><span>所属案件</span><strong>{{ selectedItem.case_title || '未关联案件' }}</strong>
@@ -83,7 +83,7 @@
 
           <section class="app-card-section detail-block ai-analysis-block"><div class="ai-analysis-heading"><h3 class="app-card-section-title">AI分析摘要</h3><span class="app-tag is-info">仅作审核参考</span></div><p>{{ selectedItem.summary || selectedItem.advice || '当前对象未提供单独的分析摘要，请结合提交内容、风险和法源核对。' }}</p><div v-if="missingItems(selectedItem).length" class="missing-facts"><strong>待补充信息</strong><span v-for="item in missingItems(selectedItem)" :key="item" class="app-tag is-pending">{{ item }}</span></div></section>
 
-          <section class="app-card-section detail-block evidence-block"><h3 class="app-card-section-title">证据 / 法源</h3><EvidenceReference v-for="reference in selectedReferences" :key="reference.source_id || reference.title" :reference="reference" :clickable="false" /><p v-if="!selectedReferences.length" class="review-muted">该审核对象没有附带法源引用。</p></section>
+          <section class="app-card-section detail-block evidence-block"><h3 class="app-card-section-title">证据 / 法源</h3><p v-if="selectedItem.evidence_summary" class="chain-detail">{{ chainDetail(selectedItem.evidence_summary) }}</p><EvidenceReference v-for="reference in selectedReferences" :key="reference.source_id || reference.title" :reference="reference" :clickable="false" /><p v-if="!selectedReferences.length" class="review-muted">该审核对象没有附带法源引用。</p></section>
           <section class="app-card-section detail-block timeline-block"><h3 class="app-card-section-title">审核历史与批注</h3><ReviewTimeline :entries="reviewHistoryMap[reviewKey(selectedItem)] || []" /><div class="comment-box"><el-input v-model="commentDraft[reviewKey(selectedItem)]" type="textarea" :rows="3" placeholder="记录审核批注，不改变审核状态。" maxlength="2000" /><el-button size="small" :loading="commentLoading[reviewKey(selectedItem)]" @click="submitComment(selectedItem)">添加批注</el-button></div></section>
 
           <section
@@ -142,6 +142,25 @@ const { can } = useCapabilities()
 const auth = useAuthStore()
 const canReview = computed(() => can(CAPABILITY.WORKSPACE_REVIEW) || ['admin', 'reviewer'].includes(auth.currentUser?.legal_role))
 const queueFilters = ref({ search: '', status: '', overdue: '' })
+// 咨询证据链信号：none=无依据、weak=依据弱（partial/strong 不打扰队列）
+const CHAIN_SIGNALS = {
+  none: { label: '无依据', className: 'is-danger' },
+  weak: { label: '依据弱', className: 'is-warning' },
+}
+const chainSignal = (item) => (item?.target_type === 'consultation' ? CHAIN_SIGNALS[item?.evidence_summary?.level] || null : null)
+const displayChainLevel = (summary) => summary?.level || 'none'
+const noEvidenceConsultations = computed(() => (reviewQueue.value || []).filter(
+  (item) => item.target_type === 'consultation' && displayChainLevel(item.evidence_summary) === 'none',
+).length)
+const chainDetail = (summary) => {
+  const parts = [summary.references ? `引用 ${summary.references} 条` : '无引用']
+  if (summary.sentences) parts.push(`句级溯源 ${summary.attributed}/${summary.sentences} 句`)
+  else parts.push('未生成句级溯源')
+  if (summary.faithfulness === 'pass') parts.push('忠实度通过')
+  else if (summary.faithfulness === 'fail') parts.push(`忠实度未通过（${summary.unsupported} 处）`)
+  else parts.push('忠实度未校验')
+  return parts.join(' · ')
+}
 // SLA 相对时间：给审核律师「还剩多久 / 超时多久」的直接读数
 const dueText = (hours) => {
   if (hours === null || hours === undefined) return ''
@@ -374,4 +393,7 @@ defineExpose({ refresh: () => Promise.all([loadReviewQueue(), loadReviewStats()]
 .queue-due.is-danger { color: var(--color-danger); }
 .detail-due { margin-left: var(--space-2); }
 .app-tag.is-warning { border-color: var(--color-warning); color: var(--color-warning); }
+
+.queue-chain { flex: 0 0 auto; }
+.chain-detail { margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--text-xs); }
 </style>
