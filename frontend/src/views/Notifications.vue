@@ -56,6 +56,7 @@
                 <button v-if="canRequestEvidence(item)" class="notification-request" type="button" :disabled="returning[item.id]" @click="requestEvidence(item)">
                   {{ returning[item.id] ? '退回中…' : '要求补充依据' }}
                 </button>
+                <button v-if="canGoSupplement(item)" class="notification-request" type="button" @click="goSupplement(item)">去补充</button>
                 <button v-if="isUnread(item)" class="notification-read" type="button" @click="markRead(item)">标记已读</button>
               </div>
             </article>
@@ -161,16 +162,42 @@ const markAllRead = async () => {
 
 // 无依据咨询通知：一键退回（要求提交人补充法源依据）
 const returning = ref({})
+const FORWARD_KEYS = ['review_consultation_uncited', 'review_consultation_weak']
+const FORWARD_TITLES = ['无依据咨询待审核', '依据偏弱的咨询待审核']
 const canRequestEvidence = (item) => (
-  item.reference_type === 'consultation' && item.title === '无依据咨询待审核' && !item.returned
+  item.reference_type === 'consultation'
+  && (FORWARD_KEYS.includes(item.template_key) || FORWARD_TITLES.includes(item.title))
+  && !item.returned
 )
+const canGoSupplement = (item) => (
+  item.reference_type === 'consultation'
+  && (item.template_key === 'consultation_returned_supplement' || item.title === '咨询被退回：需要补充依据')
+)
+const supplementNote = (item) => (
+  item.template_key === 'review_consultation_weak' || item.title === '依据偏弱的咨询待审核'
+    ? '依据偏弱：请补充法源依据后重新提交审核'
+    : '无依据咨询：请补充法源依据后重新提交审核'
+)
+const goSupplement = async (item) => {
+  await markRead(item)
+  if (!item.case_id) return
+  router.push({
+    path: '/legal-workspace',
+    query: {
+      case_id: String(item.case_id),
+      tab: 'consultation',
+      consultation_id: String(item.reference_id || ''),
+      supplement: '1',
+    },
+  })
+}
 const requestEvidence = async (item) => {
   if (!item.reference_id) return
   returning.value = { ...returning.value, [item.id]: true }
   try {
     await api.submitLegalReviewAction('consultation', item.reference_id, {
       action: 'return',
-      note: '无依据咨询：请补充法源依据后重新提交审核',
+      note: supplementNote(item),
     })
     item.returned = true
     await markRead(item)
@@ -197,6 +224,7 @@ const openNotification = async (item) => {
       query.tab = 'consultation'
       query.consultation_id = String(item.reference_id)
     }
+    if (canGoSupplement(item)) query.supplement = '1'
     router.push({ path: '/legal-workspace', query })
   }
 }

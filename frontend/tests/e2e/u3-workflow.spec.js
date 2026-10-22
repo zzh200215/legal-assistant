@@ -148,18 +148,30 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
     // 通知铃铛首屏加载（US-002）
     if (method === 'GET' && path === '/developer/notifications/me') {
       await route.fulfill({ json: success({
-        unread: 1,
-        items: [{
-          id: 1, title: '无依据咨询待审核',
-          body: '「U3探针：无依据咨询待审核」没有关联法源引用，审核前请要求补充依据或直接退回。',
-          status: 'delivered', reference_type: 'consultation', reference_id: 989,
-          case_id: 3, created_at: '2026-10-22T12:00:00',
-        }],
+        unread: 2,
+        items: [
+          {
+            id: 1, title: '无依据咨询待审核',
+            body: '「U3探针：无依据咨询待审核」没有关联法源引用，审核前请要求补充依据或直接退回。',
+            status: 'delivered', reference_type: 'consultation', reference_id: 989,
+            case_id: 3, template_key: 'review_consultation_uncited', created_at: '2026-10-22T12:00:00',
+          },
+          {
+            id: 2, title: '咨询被退回：需要补充依据',
+            body: '「U3探针：无依据咨询待审核」没有关联法源引用，已被退回，请补充依据后重新提交。',
+            status: 'delivered', reference_type: 'consultation', reference_id: 989,
+            case_id: 3, template_key: 'consultation_returned_supplement', created_at: '2026-10-22T12:10:00',
+          },
+        ],
       }) })
       return
     }
     if (method === 'POST' && path === '/developer/notifications/1/read') {
       await route.fulfill({ json: success({ id: 1, status: 'read' }) })
+      return
+    }
+    if (method === 'POST' && path === '/developer/notifications/2/read') {
+      await route.fulfill({ json: success({ id: 2, status: 'read' }) })
       return
     }
 
@@ -495,16 +507,22 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   await page.locator('.bell-pill').click()
   await expect(page.locator('.bell-panel')).toContainText('无依据咨询待审核')
   // 一键退回：要求提交人补充法源依据
-  await page.locator('.bell-item-action').click()
+  await page.locator('.bell-item').first().getByRole('button', { name: '要求补充依据' }).click()
   await expect.poll(() => requests.consultReturn).toMatchObject({
     action: 'return',
     note: '无依据咨询：请补充法源依据后重新提交审核',
   })
   await expect(page.getByText('已退回，要求补充依据')).toBeVisible()
-  await expect(page.locator('.bell-item-action')).toHaveCount(0)
-  await page.locator('.bell-item', { hasText: '无依据咨询待审核' }).click()
+  await expect(page.getByRole('button', { name: '要求补充依据' })).toHaveCount(0)
+  await page.locator('.bell-item').first().click()
   await expect(page).toHaveURL(/tab=consultation/)
   await expect(page).toHaveURL(/consultation_id=989/)
+
+  // 反向通知「去补充」：直达结果卡并预填追问框
+  await page.locator('.bell-pill').click()
+  await page.locator('.bell-item', { hasText: '咨询被退回：需要补充依据' }).getByRole('button', { name: '去补充' }).click()
+  await expect(page).toHaveURL(/supplement=1/)
+  await expect(page.getByPlaceholder('针对此咨询追问...')).toHaveValue('请补充相关法源依据后重新回答上述问题。')
 
   expect(unexpectedApiRequests).toEqual([])
   expect(failedResponses).toEqual([])

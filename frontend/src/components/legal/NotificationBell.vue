@@ -29,9 +29,12 @@
             <div class="bell-item-title">{{ n.title }}</div>
             <div v-if="n.body" class="bell-item-body">{{ n.body }}</div>
             <div class="bell-item-time">{{ formatTime(n.created_at) }}</div>
-            <div v-if="canRequestEvidence(n)" class="bell-item-actions">
-              <button type="button" class="bell-item-action" :disabled="returning[n.id]" @click.stop="requestEvidence(n)">
+            <div v-if="canRequestEvidence(n) || canGoSupplement(n)" class="bell-item-actions">
+              <button v-if="canRequestEvidence(n)" type="button" class="bell-item-action" :disabled="returning[n.id]" @click.stop="requestEvidence(n)">
                 {{ returning[n.id] ? '退回中…' : '要求补充依据' }}
+              </button>
+              <button v-if="canGoSupplement(n)" type="button" class="bell-item-action" @click.stop="goSupplement(n)">
+                去补充
               </button>
             </div>
           </div>
@@ -88,16 +91,44 @@ const markRead = async (n) => {
 
 // 「无依据咨询」通知支持一键退回：要求提交人补充法源依据（服务端校验审核权限）
 const returning = ref({})
+const FORWARD_KEYS = ['review_consultation_uncited', 'review_consultation_weak']
+const FORWARD_TITLES = ['无依据咨询待审核', '依据偏弱的咨询待审核']
+const SUPPLEMENT_KEYS = ['consultation_returned_supplement']
 const canRequestEvidence = (n) => (
-  n.reference_type === 'consultation' && n.title === '无依据咨询待审核' && !n.returned
+  n.reference_type === 'consultation'
+  && (FORWARD_KEYS.includes(n.template_key) || FORWARD_TITLES.includes(n.title))
+  && !n.returned
 )
+const canGoSupplement = (n) => (
+  n.reference_type === 'consultation'
+  && (SUPPLEMENT_KEYS.includes(n.template_key) || n.title === '咨询被退回：需要补充依据')
+)
+const supplementNote = (n) => (
+  n.template_key === 'review_consultation_weak' || n.title === '依据偏弱的咨询待审核'
+    ? '依据偏弱：请补充法源依据后重新提交审核'
+    : '无依据咨询：请补充法源依据后重新提交审核'
+)
+const goSupplement = async (n) => {
+  await markRead(n)
+  if (!n.case_id) return
+  router.push({
+    path: '/legal-workspace',
+    query: {
+      case_id: String(n.case_id),
+      tab: 'consultation',
+      consultation_id: String(n.reference_id || ''),
+      supplement: '1',
+    },
+  })
+  open.value = false
+}
 const requestEvidence = async (n) => {
   if (!n.reference_id) return
   returning.value = { ...returning.value, [n.id]: true }
   try {
     await api.submitLegalReviewAction('consultation', n.reference_id, {
       action: 'return',
-      note: '无依据咨询：请补充法源依据后重新提交审核',
+      note: supplementNote(n),
     })
     n.returned = true
     await markRead(n)
@@ -127,6 +158,7 @@ const openNotification = async (n) => {
   if (tab && n.case_id) {
     const query = { case_id: String(n.case_id), tab }
     if (n.reference_type === 'consultation' && n.reference_id) query.consultation_id = String(n.reference_id)
+    if (canGoSupplement(n)) query.supplement = '1'
     router.push({ path: '/legal-workspace', query })
     open.value = false
     return

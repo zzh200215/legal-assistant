@@ -84,7 +84,7 @@
               </div>
 
               <div class="followup-section">
-                <el-input v-model="followupQuestion" placeholder="针对此咨询追问..." :disabled="followupLoading">
+                <el-input ref="followupInputRef" v-model="followupQuestion" placeholder="针对此咨询追问..." :disabled="followupLoading">
                   <template #append>
                     <el-button :loading="followupLoading" @click="submitFollowup">追问</el-button>
                   </template>
@@ -153,7 +153,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -290,6 +290,21 @@ watch(() => consultResult.value?.id, (id) => {
     router.replace({ query: { ...route.query, consultation_id: undefined } })
   }
 })
+
+// 通知「去补充」直达：带 supplement=1 时把追问框预填好并聚焦
+const followupInputRef = ref(null)
+const supplementApplied = ref(false)
+const applySupplementPrefill = async () => {
+  if (route.query.supplement !== '1' || supplementApplied.value || !consultResult.value) return
+  followupQuestion.value = '请补充相关法源依据后重新回答上述问题。'
+  supplementApplied.value = true
+  await nextTick()
+  followupInputRef.value?.focus?.()
+}
+watch([() => consultResult.value?.id, () => route.query.supplement], () => {
+  supplementApplied.value = false
+  void applySupplementPrefill()
+}, { immediate: true })
 
 // 内联校验（ux-audit M-11）：问题必填即时提示，替代提交后的全局 toast
 const consultFormRef = ref(null)

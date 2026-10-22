@@ -1464,7 +1464,9 @@ class LegalWorkspaceReadModule:
         from app.services.legal.consultation_evidence import summarize_consultation_evidence
         from app.services.notification.notification_service import notification_service
 
-        if summarize_consultation_evidence(row)["level"] != "none":
+        summary = summarize_consultation_evidence(row)
+        level = summary["level"]
+        if level not in ("none", "weak"):
             return
         if not user.organization_id:
             return
@@ -1478,19 +1480,31 @@ class LegalWorkspaceReadModule:
             .all()
         )
         question = (row.question or "").strip()
-        body = f"「{question[:40]}」没有关联法源引用，审核前请要求补充依据或直接退回。"
+        if level == "none":
+            title = "无依据咨询待审核"
+            body = f"「{question[:40]}」没有关联法源引用，审核前请要求补充依据或直接退回。"
+            template_key = "review_consultation_uncited"
+        else:
+            covered = (
+                f"句级溯源 {summary['attributed']}/{summary['sentences']} 句"
+                if summary["sentences"] else "未生成句级溯源"
+            )
+            title = "依据偏弱的咨询待审核"
+            body = f"「{question[:40]}」法源依据偏弱（{covered}），审核前请留意依据是否充分。"
+            template_key = "review_consultation_weak"
         for (recipient_id,) in recipients:
             notification_service.create_notification(
                 db=db,
                 organization_id=user.organization_id,
                 user_id=recipient_id,
                 event_type="approval",
-                title="无依据咨询待审核",
+                title=title,
                 body=body,
                 case_id=getattr(row, "case_id", None),
                 reference_type="consultation",
                 reference_id=row.id,
                 business_version=getattr(row, "version", None),
+                template_key=template_key,
             )
 
     def _notify_consultation_returned(self, db: Session, user: User, row: LegalConsultation, note: str | None) -> None:
@@ -1507,10 +1521,12 @@ class LegalWorkspaceReadModule:
         if summarize_consultation_evidence(row)["level"] == "none":
             title = "咨询被退回：需要补充依据"
             body = f"「{question[:40]}」没有关联法源引用，已被退回，请补充依据后重新提交。"
+            template_key = "consultation_returned_supplement"
         else:
             title = "咨询被退回，请查看审核意见"
             detail = (note or "").strip()[:80] or "请查看审核意见后重新提交。"
             body = f"「{question[:40]}」被退回：{detail}"
+            template_key = "consultation_returned"
         notification_service.create_notification(
             db=db,
             organization_id=user.organization_id,
@@ -1522,6 +1538,7 @@ class LegalWorkspaceReadModule:
             reference_type="consultation",
             reference_id=row.id,
             business_version=getattr(row, "version", None),
+            template_key=template_key,
         )
 
     def add_review_comment(self, db: Session, user: User, *, target_type: str, target_id: int, note: str) -> dict:

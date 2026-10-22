@@ -133,6 +133,7 @@ class LegalReviewAssignmentTests(unittest.TestCase):
         self.assertEqual(events[0].reference_type, "consultation")
         self.assertEqual(events[0].reference_id, self.row.id)
         self.assertIn("没有关联法源引用", events[0].body)
+        self.assertEqual(events[0].template_key, "review_consultation_uncited")
         self.assertEqual(
             self.db.query(LegalNotificationEvent).filter(
                 LegalNotificationEvent.user_id == self.client_user.id,
@@ -144,6 +145,29 @@ class LegalReviewAssignmentTests(unittest.TestCase):
         self.assertEqual(notifications.status_code, 200, notifications.text)
         titles = [item["title"] for item in notifications.json()["data"]["items"]]
         self.assertIn("无依据咨询待审核", titles)
+
+    def test_submit_review_notifies_for_weak_evidence(self):
+        """依据偏弱（有引用但句级覆盖 <50%）也提醒审核律师，标题与模板键区分于无依据。"""
+        import json as _json
+
+        from app.models.legal_notifications import LegalNotificationEvent
+
+        self.row.references_json = _json.dumps([{"title": "劳动合同法", "status": "active"}], ensure_ascii=False)
+        self.row.attribution_json = _json.dumps({"total_sentences": 10, "matched_sentences": 2})
+        self.row.status = "draft"
+        self.db.commit()
+        response = self.client.post(
+            f"/api/legal/review-queue/consultation/{self.row.id}/actions",
+            json={"action": "submit_review", "note": "提交审核"}, headers=self.editor_headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.user_id == self.reviewer.id,
+        ).all()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].title, "依据偏弱的咨询待审核")
+        self.assertEqual(events[0].template_key, "review_consultation_weak")
+        self.assertIn("句级溯源 2/10 句", events[0].body)
 
     def test_submit_review_with_citations_does_not_notify(self):
         import json as _json
@@ -190,6 +214,7 @@ class LegalReviewAssignmentTests(unittest.TestCase):
         ).all()
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].title, "咨询被退回：需要补充依据")
+        self.assertEqual(events[0].template_key, "consultation_returned_supplement")
         self.assertEqual(events[0].reference_type, "consultation")
         self.assertEqual(events[0].reference_id, self.row.id)
         self.assertIn("没有关联法源引用", events[0].body)
@@ -218,6 +243,7 @@ class LegalReviewAssignmentTests(unittest.TestCase):
         ).all()
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].title, "咨询被退回，请查看审核意见")
+        self.assertEqual(events[0].template_key, "consultation_returned")
         self.assertIn("事实描述需要补充时间线", events[0].body)
 
     def test_due_soon_is_flagged_and_filterable(self):
