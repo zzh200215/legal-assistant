@@ -9,13 +9,14 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.models.legal import LegalCase
-from app.models.legal_contract import LegalContract, LegalContractMilestone
+from app.models.legal import ContractReview, LegalCase
+from app.models.legal_contract import LegalContract, LegalContractMilestone, LegalContractVersion
 from app.models.legal_portal import LegalCaseMember
 
 
@@ -38,6 +39,55 @@ def serialize_contract(contract: LegalContract) -> dict[str, Any]:
         "created_at": contract.created_at,
         "updated_at": contract.updated_at,
     }
+
+
+def _review_summary(review: ContractReview) -> dict[str, Any]:
+    """台账用的审查摘要：状态 + 风险数量 + 无定位数量（读 risks_json，不落库）。"""
+    try:
+        risks = json.loads(review.risks_json or "[]")
+    except (TypeError, ValueError):
+        risks = []
+    risks = [risk for risk in risks if isinstance(risk, dict)]
+    high = sum(1 for risk in risks if risk.get("risk_level") in ("high", "critical"))
+    unanchored = sum(1 for risk in risks if not (risk.get("source_location") or {}).get("paragraph"))
+    return {
+        "id": review.id,
+        "status": review.status,
+        "version": review.version,
+        "risks_total": len(risks),
+        "risks_high": high,
+        "risks_unanchored": unanchored,
+        "reviewed_at": review.reviewed_at,
+        "updated_at": review.updated_at,
+    }
+
+
+def _attach_latest_reviews(db: Session, contracts: list[LegalContract], items: list[dict]) -> None:
+    """给台账行补「最近一次审查」：版本 -> source_review_id -> 审查摘要（批量查询，避免 N+1）。"""
+    contract_ids = [contract.id for contract in contracts]
+    if not contract_ids:
+        return
+    versions = (
+        db.query(LegalContractVersion)
+        .filter(
+            LegalContractVersion.contract_id.in_(contract_ids),
+            LegalContractVersion.source_review_id.isnot(None),
+        )
+        .order_by(LegalContractVersion.version_no.desc(), LegalContractVersion.id.desc())
+        .all()
+    )
+    latest_by_contract: dict[int, LegalContractVersion] = {}
+    for version in versions:
+        latest_by_contract.setdefault(version.contract_id, version)
+    review_ids = {version.source_review_id for version in latest_by_contract.values()}
+    reviews = {
+        review.id: review
+        for review in db.query(ContractReview).filter(ContractReview.id.in_(review_ids)).all()
+    } if review_ids else {}
+    for contract, item in zip(contracts, items):
+        version = latest_by_contract.get(contract.id)
+        review = reviews.get(version.source_review_id) if version else None
+        item["review"] = _review_summary(review) if review is not None else None
 
 
 def serialize_milestone(milestone: LegalContractMilestone) -> dict[str, Any]:
@@ -104,8 +154,10 @@ def list_visible_contracts(
         .limit(page_size)
         .all()
     )
+    items = [serialize_contract(contract) for contract in rows]
+    _attach_latest_reviews(db, rows, items)
     return {
-        "items": [serialize_contract(contract) for contract in rows],
+        "items": items,
         "total": total,
         "page": page,
         "page_size": page_size,

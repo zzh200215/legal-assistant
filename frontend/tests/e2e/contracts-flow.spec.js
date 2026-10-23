@@ -7,8 +7,9 @@ import { test, expect } from '@playwright/test'
 const success = (data) => ({ success: true, data })
 
 const CONTRACTS = [
-  { id: 1, contract_no: 'HT-2026-001', title: '劳动合同模板联调', counterparty: '某科技有限公司', status: 'active', organization_id: 5, case_id: 3, updated_at: '2026-08-07T10:00:00' },
-  { id: 2, contract_no: 'HT-2026-002', title: '采购协议联调', counterparty: '某供应链公司', status: 'draft', organization_id: 5, case_id: 3, updated_at: '2026-08-06T10:00:00' },
+  { id: 1, contract_no: 'HT-2026-001', title: '劳动合同模板联调', counterparty: '某科技有限公司', status: 'active', organization_id: 5, case_id: 3, updated_at: '2026-08-07T10:00:00',
+    review: { id: 71, status: 'needs_lawyer_review', version: 2, risks_total: 3, risks_high: 1, risks_unanchored: 2, reviewed_at: null } },
+  { id: 2, contract_no: 'HT-2026-002', title: '采购协议联调', counterparty: '某供应链公司', status: 'draft', organization_id: 5, case_id: 3, updated_at: '2026-08-06T10:00:00', review: null },
 ]
 let VERSIONS = [
   { id: 11, contract_id: 1, organization_id: 5, version_no: 1, source_type: 'text_snapshot', parse_status: 'ready', version_note: '首版', created_at: '2026-08-05T09:00:00' },
@@ -85,6 +86,13 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
   // 列表（带 case 过滤）+ 签署禁用（特性开关 false）
   await expect(page.getByText('劳动合同模板联调')).toBeVisible()
   await expect(page.getByText('采购协议联调')).toBeVisible()
+  // 台账跨案件视图：最近审查状态 + 风险摘要
+  const ledgerRow = page.locator('.el-table__row', { hasText: '劳动合同模板联调' })
+  await expect(ledgerRow).toContainText('需律师审核')
+  await expect(ledgerRow).toContainText('3 条')
+  await expect(ledgerRow).toContainText('高 1')
+  await expect(ledgerRow).toContainText('无定位 2')
+  await expect(page.locator('.el-table__row', { hasText: '采购协议联调' })).toContainText('未审查')
   expect(requests.listContracts).toBe('3')
   const signBtn = page.getByRole('button', { name: '签署', exact: true }).first()
   await expect(signBtn).toBeDisabled()

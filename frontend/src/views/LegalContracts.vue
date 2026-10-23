@@ -16,6 +16,25 @@
           <el-table-column prop="title" label="合同名称" min-width="180" show-overflow-tooltip />
           <el-table-column prop="counterparty" label="相对方" min-width="140" show-overflow-tooltip />
           <el-table-column prop="status" label="状态" width="100" />
+          <el-table-column label="关联案件" width="100">
+            <template #default="{ row }">{{ row.case_id ? `#${row.case_id}` : '未关联' }}</template>
+          </el-table-column>
+          <el-table-column label="最近审查" width="120">
+            <template #default="{ row }">
+              <span v-if="row.review" class="app-tag" :class="reviewTagClass(row.review)">{{ reviewStatusText(row.review) }}</span>
+              <span v-else class="muted">未审查</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="风险" width="150">
+            <template #default="{ row }">
+              <span v-if="row.review">
+                {{ row.review.risks_total }} 条
+                <span v-if="row.review.risks_high" class="risk-high"> · 高 {{ row.review.risks_high }}</span>
+                <span v-if="row.review.risks_unanchored" class="risk-gap"> · 无定位 {{ row.review.risks_unanchored }}</span>
+              </span>
+              <span v-else class="muted">—</span>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="230">
             <template #default="{ row }">
               <el-button size="small" text type="primary" @click="openVersions(row)">版本</el-button>
@@ -105,7 +124,18 @@ import 'element-plus/es/components/tooltip/style/css'
 import api from '../api'
 
 const props = defineProps({ orgId: { type: Number, required: true }, caseId: { type: Number, required: false, default: null } })
-const contracts = ref([]); const loading = ref(false); const saving = ref(false)
+const contracts = ref([]); const REVIEW_STATUS_LABELS = {
+  draft: '草稿', pending_review: '待审核', needs_lawyer_review: '需律师审核', needs_facts: '待补充事实',
+  lawyer_approved: '律师通过', returned_for_facts: '退回补充', offline_consultation: '转线下', archived: '已归档',
+}
+const reviewStatusText = (review) => (review ? REVIEW_STATUS_LABELS[review.status] || review.status : '未审查')
+const reviewTagClass = (review) => {
+  if (!review) return ''
+  if (review.status === 'lawyer_approved') return 'is-ok'
+  if (review.status === 'returned_for_facts') return 'is-danger'
+  return 'is-warning'
+}
+const loading = ref(false); const saving = ref(false)
 const signingEnabled = ref(false)
 const createVisible = ref(false); const versionsVisible = ref(false); const diffVisible = ref(false); const milestonesVisible = ref(false); const signingVisible = ref(false)
 const selected = ref(null); const versions = ref([]); const milestones = ref([]); const versionText = ref(''); const diffBase = ref(null); const diffTarget = ref(null); const diffResult = ref(null)
@@ -139,4 +169,7 @@ onMounted(loadFeatures)
 .diff-result { max-height: 360px; margin: 0; overflow: auto; padding: var(--space-4); border: 1px solid var(--color-border-light); border-radius: var(--radius-lg); background: var(--color-surface-subtle); color: var(--color-text-secondary); font-family: var(--font-mono); font-size: var(--text-xs); line-height: 1.7; white-space: pre-wrap; }
 .signing-version { width: 100%; }
 .signing-alert { margin-bottom: var(--space-4); }
+
+.risk-high { color: var(--color-danger); }
+.risk-gap { color: var(--color-warning); }
 </style>
