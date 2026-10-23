@@ -90,8 +90,20 @@
               @click="toggleEvidenceGap"
             >无定位 {{ evidenceChain.unanchored }}</button>
           </div>
+          <div v-if="canResolveRisks && selectedRiskIndexes.length" class="risk-bulk-bar">
+            <span>已选 {{ selectedRiskIndexes.length }} 项</span>
+            <el-button size="small" :loading="bulkRiskLoading" @click="bulkResolveRisks('accept')">接受</el-button>
+            <el-button size="small" :loading="bulkRiskLoading" @click="bulkResolveRisks('mitigate')">缓释</el-button>
+            <el-button size="small" :loading="bulkRiskLoading" @click="bulkResolveRisks('dismiss')">忽略</el-button>
+            <el-button size="small" text @click="clearRiskSelection">清除</el-button>
+          </div>
           <div class="risk-list" aria-label="审查风险列表">
-            <RiskIssueItem v-for="issue in filteredRisks" :key="issue.id || `${issue.clause_type}-${issue.source_location?.paragraph}`" :issue="issue" :active="selectedRisk === issue" :evidence="evidenceForRisk(evidenceChain, issue)" @select="selectRisk" />
+            <div v-for="issue in filteredRisks" :key="issue.id || `${issue.clause_type}-${issue.source_location?.paragraph}`" class="risk-row">
+              <label v-if="canResolveRisks" class="risk-select">
+                <input type="checkbox" :checked="isRiskSelected(issue)" :aria-label="`选择风险：${issue.label || issue.description || ''}`" @change="toggleRiskSelection(issue)" @click.stop />
+              </label>
+              <RiskIssueItem :issue="issue" :active="selectedRisk === issue" :evidence="evidenceForRisk(evidenceChain, issue)" @select="selectRisk" />
+            </div>
             <div v-if="!filteredRisks.length" class="risk-empty">未发现符合筛选条件的风险项。</div>
           </div>
 
@@ -468,6 +480,38 @@ const copySuggestionToRevision = async () => {
   if (!revisionDraft.value.includes(suggestion)) revisionDraft.value += suggestion
   ElMessage.success('已加入修订稿参考')
 }
+// 批量处置：按风险下标选择（后端 id = 下标 + 1）
+const selectedRiskIndexes = ref([])
+const bulkRiskLoading = ref(false)
+const riskIndexOf = (issue) => (contractResult.value?.risks || []).indexOf(issue)
+const isRiskSelected = (issue) => selectedRiskIndexes.value.includes(riskIndexOf(issue))
+const toggleRiskSelection = (issue) => {
+  const index = riskIndexOf(issue)
+  if (index < 0) return
+  selectedRiskIndexes.value = selectedRiskIndexes.value.includes(index)
+    ? selectedRiskIndexes.value.filter((item) => item !== index)
+    : [...selectedRiskIndexes.value, index]
+}
+const clearRiskSelection = () => { selectedRiskIndexes.value = [] }
+const bulkResolveRisks = async (action) => {
+  if (!contractResult.value?.id || !selectedRiskIndexes.value.length || bulkRiskLoading.value) return
+  bulkRiskLoading.value = true
+  try {
+    const riskIds = selectedRiskIndexes.value.map((index) => index + 1)
+    const { data } = await legalWorkspace.bulkUpdateContractRiskItems(contractResult.value.id, {
+      risk_ids: riskIds, action, note: '合同审查工作区批量处理',
+    })
+    const updated = new Map((data || []).map((item) => [item.id, item]))
+    structuredRiskItems.value = structuredRiskItems.value.map((item) => updated.get(item.id) || item)
+    selectedRiskIndexes.value = []
+    ElMessage.success(`已批量处理 ${riskIds.length} 条风险`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.error?.message || error.response?.data?.detail || '批量处理失败')
+  } finally {
+    bulkRiskLoading.value = false
+  }
+}
+
 const resolveSelectedRisk = async (action) => {
   if (!contractResult.value?.id || !selectedStructuredRisk.value || riskActionLoading.value) return
   riskActionLoading.value = true
@@ -782,4 +826,10 @@ onMounted(openLatestContractReview)
 .risk-history-action { font-weight: 600; color: var(--color-text-primary); }
 .risk-history-item time { margin-left: auto; color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
 .risk-history-note { flex-basis: 100%; margin: 0; color: var(--color-text-secondary); line-height: 1.6; }
+
+.risk-bulk-bar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-light); background: var(--color-bg-subtle); font-size: var(--text-xs); color: var(--color-text-secondary); }
+.risk-row { display: flex; align-items: stretch; }
+.risk-select { display: flex; align-items: center; padding: 0 4px 0 10px; cursor: pointer; }
+.risk-select input { width: 14px; height: 14px; cursor: pointer; }
+.risk-row .risk-issue { flex: 1; }
 </style>

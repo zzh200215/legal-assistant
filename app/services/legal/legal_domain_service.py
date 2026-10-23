@@ -306,6 +306,31 @@ def persist_draft_artifacts(
 
 # ── 查询聚合 ──────────────────────────────────────────────────────────────────
 
+def _apply_risk_transition(risk: dict, action: str, user, note: str | None) -> str:
+    """校验并应用一次风险状态转换，返回目标状态（不改 DB）。"""
+    current = risk_status(risk)
+    severity = risk.get("risk_level") if risk.get("risk_level") in SEVERITIES else "medium"
+    if action == RISK_ITEM_REOPEN:
+        if current not in RISK_ITEM_RESOLVED:
+            raise ValueError("RISK_ITEM_NOT_RESOLVED")
+        # 撤销处置：回到待处理（高风险仍进审核队列），清空处置字段，历史保留在动作表
+        target = "needs_review" if severity in review_severities() else "open"
+        risk["reviewer_id"] = None
+        risk["resolved_at"] = None
+        risk["resolution_note"] = None
+    else:
+        if action not in RISK_ITEM_ACTIONS:
+            raise ValueError("RISK_ITEM_ACTION_INVALID")
+        if current in RISK_ITEM_RESOLVED:
+            raise ValueError("RISK_ITEM_ALREADY_RESOLVED")
+        target = RISK_ITEM_ACTIONS[action]
+        risk["reviewer_id"] = user.id
+        risk["resolved_at"] = utc_now().isoformat()
+        risk["resolution_note"] = note
+    risk["status"] = target
+    return target
+
+
 def _risk_action_history(db: Session, review_id: int) -> dict[int, list[dict]]:
     """该审查下按风险下标归组的处置动作（含操作人名），供风险项详情直接展示。"""
     rows = (
@@ -488,25 +513,7 @@ def update_risk_item_status(
         raise LookupError("RISK_ITEM_NOT_FOUND")
     risk = risks[risk_index]
     current = risk_status(risk)
-    severity = risk.get("risk_level") if risk.get("risk_level") in SEVERITIES else "medium"
-    if action == RISK_ITEM_REOPEN:
-        if current not in RISK_ITEM_RESOLVED:
-            raise ValueError("RISK_ITEM_NOT_RESOLVED")
-        # 撤销处置：回到待处理（高风险仍进审核队列），清空处置字段，历史保留在动作表
-        target = "needs_review" if severity in review_severities() else "open"
-        risk["reviewer_id"] = None
-        risk["resolved_at"] = None
-        risk["resolution_note"] = None
-    else:
-        if action not in RISK_ITEM_ACTIONS:
-            raise ValueError("RISK_ITEM_ACTION_INVALID")
-        if current in RISK_ITEM_RESOLVED:
-            raise ValueError("RISK_ITEM_ALREADY_RESOLVED")
-        target = RISK_ITEM_ACTIONS[action]
-        risk["reviewer_id"] = user.id
-        risk["resolved_at"] = utc_now().isoformat()
-        risk["resolution_note"] = note
-    risk["status"] = target
+    target = _apply_risk_transition(risk, action, user, note)
     review.risks_json = json.dumps(risks, ensure_ascii=False)
     db.add(review)
     # 逐条追溯：处置动作落 legal_review_actions（带风险下标/标题快照）
@@ -545,6 +552,49 @@ def update_risk_item_status(
     item = serialize_risk_item(review, risk, risk_index)
     item["history"] = _risk_action_history(db, review.id).get(risk_index, [])
     return item
+
+
+def bulk_update_risk_item_status(
+    db: Session, user, review_id: int, risk_indexes: list[int], action: str, note: str | None = None,
+) -> list[dict]:
+    """批量处置风险项：先整体校验（全有或全无），再逐条写回并各记一条动作。"""
+    review = db.get(ContractReview, review_id)
+    if review is None:
+        raise LookupError("RISK_ITEM_NOT_FOUND")
+    risks = _json_parse(review.risks_json, [])
+    # 1) 全量校验：任何一条不合法都不改数据
+    prepared: list[tuple[int, dict, str]] = []
+    for index in risk_indexes:
+        if not 0 <= index < len(risks) or not isinstance(risks[index], dict):
+            raise LookupError("RISK_ITEM_NOT_FOUND")
+        risk = risks[index]
+        target = _apply_risk_transition(risk, action, user, note)  # 会就地改 risk，失败前已改则回滚
+        prepared.append((index, risk, target))
+    # 校验失败时可能已改过部分 risk：重新从 DB 读一遍覆盖，避免半改状态
+    risks = _json_parse(review.risks_json, [])
+    results = []
+    for index, _risk, target in prepared:
+        risk = risks[index]
+        previous = risk_status(risk)
+        target = _apply_risk_transition(risk, action, user, note)
+        db.add(LegalReviewAction(
+            reviewer_id=user.id, target_type="contract_review", target_id=review.id,
+            action=f"risk_{action}", note=note, from_status=previous, to_status=target,
+            target_version=getattr(review, "version", None), risk_index=index,
+            risk_title=(str(risk.get("label"))[:256] if risk.get("label") else None),
+        ))
+        results.append((index, risk))
+    review.risks_json = json.dumps(risks, ensure_ascii=False)
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+    history = _risk_action_history(db, review.id)
+    items = []
+    for index, risk in results:
+        item = serialize_risk_item(review, risk, index)
+        item["history"] = history.get(index, [])
+        items.append(item)
+    return items
 
 
 def supersede_artifacts(db: Session, user, source_type: str, source_id: int) -> None:
@@ -626,6 +676,7 @@ class LegalDomainService:
     get_risk_items = staticmethod(get_risk_items)
     get_claims_for_target = staticmethod(get_claims_for_target)
     update_risk_item_status = staticmethod(update_risk_item_status)
+    bulk_update_risk_item_status = staticmethod(bulk_update_risk_item_status)
     supersede_artifacts = staticmethod(supersede_artifacts)
     assert_publishable = staticmethod(assert_publishable)
 

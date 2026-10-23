@@ -79,6 +79,14 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
     if (method === 'GET' && path === '/legal/contract-reviews/1/risk-items') {
       return route.fulfill({ json: success([
         { id: 1, index: 0, category: 'payment', severity: 'high', title: '付款条款', summary: '付款节点未明确', status: 'needs_review', can_resolve: true, history: [] },
+        { id: 2, index: 1, category: 'delivery', severity: 'medium', title: '交付与验收', summary: '未约定交付标准', status: 'open', can_resolve: true, history: [] },
+      ]) })
+    }
+    if (method === 'POST' && path === '/legal/contract-reviews/1/risk-items/bulk-action') {
+      requests.riskBulk = request.postDataJSON()
+      return route.fulfill({ json: success([
+        { id: 1, index: 0, category: 'payment', severity: 'high', title: '付款条款', summary: '付款节点未明确', status: 'accepted', can_resolve: true, history: [{ id: 9, action: 'risk_accept', note: '合同审查工作区批量处理', risk_index: 0, risk_title: '付款条款', actor_name: '测试律师', created_at: '2026-10-22T04:20:00' }] },
+        { id: 2, index: 1, category: 'delivery', severity: 'medium', title: '交付与验收', summary: '未约定交付标准', status: 'accepted', can_resolve: true, history: [{ id: 10, action: 'risk_accept', note: '合同审查工作区批量处理', risk_index: 1, risk_title: '交付与验收', actor_name: '测试律师', created_at: '2026-10-22T04:20:00' }] },
       ]) })
     }
     if (method === 'POST' && path === '/legal/contract-reviews/1/risk-items/1/action') {
@@ -190,6 +198,17 @@ test('合同审查：上传文件触发 multipart 审查并渲染结果', async 
   await expect.poll(() => requests.riskAction).toEqual({ action: 'reopen', note: '合同审查工作区处理' })
   await expect(page.locator('.risk-disposition')).toContainText('待审核')
   await expect(page.locator('.risk-history')).toContainText('撤销处置')
+
+  // 批量处置：勾选两条风险 → 批量接受
+  await page.getByRole('checkbox', { name: /选择风险/ }).first().check()
+  await page.getByRole('checkbox', { name: /选择风险/ }).nth(1).check()
+  await expect(page.locator('.risk-bulk-bar')).toContainText('已选 2 项')
+  await page.getByRole('button', { name: '接受', exact: true }).click()
+  await expect.poll(() => requests.riskBulk).toEqual({
+    risk_ids: [1, 2], action: 'accept', note: '合同审查工作区批量处理',
+  })
+  await expect(page.locator('.risk-bulk-bar')).toHaveCount(0)
+  await expect(page.locator('.risk-disposition')).toContainText('已接受')
 
   // 跨审查风险统计：展开时才请求，数字来自服务端派生视图
   await page.locator('.risk-stats-details summary').click()

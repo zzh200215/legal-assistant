@@ -786,6 +786,10 @@
  * @typedef {Object} RiskAnchorIn
  * @property {number} paragraph
  * @property {string} snippet
+ * @typedef {Object} RiskBulkActionIn
+ * @property {string} action
+ * @property {string | null}= note
+ * @property {Array<number>} risk_ids
  * @typedef {Object} RollbackVersionRequest
  * @property {number | null}= target_version_id
  * @typedef {Object} RolloutVersionRequest

@@ -529,10 +529,27 @@ def portal_get_content(
 
     org = db.query(Organization).filter(Organization.id == link.organization_id).first()
     billing = _portal_billing_snapshot(db, link)
+    case = None
+    if link.case_id:
+        from app.models.legal import LegalCase
+
+        case_row = db.query(LegalCase).filter(
+            LegalCase.id == link.case_id,
+            LegalCase.organization_id == link.organization_id,
+        ).first()
+        if case_row is not None:
+            case = {
+                "id": case_row.id,
+                "title": case_row.title,
+                "status": case_row.status,
+                "case_type": case_row.case_type,
+                "updated_at": case_row.updated_at,
+            }
 
     return {
         "link_id": link.id,
         "case_id": link.case_id,
+        "case": case,
         "progress_updates": progress_updates,
         "documents": documents,
         # 保留旧版 invoice 字段，同时提供 P3 完整对账结构。

@@ -21622,6 +21622,72 @@
         }
       }
     },
+    "/api/legal/contract-reviews/{item_id}/risk-items/bulk-action": {
+      "post": {
+        "tags": [
+          "Legal Domain Model"
+        ],
+        "summary": "Bulk Handle Risk Items",
+        "description": "批量处置风险项：全有或全无；每条写一条风险动作（可逐条追溯）。",
+        "operationId": "bulk_handle_risk_items_api_legal_contract_reviews__item_id__risk_items_bulk_action_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskBulkActionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/contract-reviews/{item_id}/risk-items/{risk_id}/action": {
       "post": {
         "tags": [
@@ -30019,8 +30085,7 @@
           "note": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 2000
+                "type": "string"
               },
               {
                 "type": "null"
@@ -30057,6 +30122,43 @@
         ],
         "title": "RiskAnchorIn",
         "description": "就地补定位：段落序号（1 基）+ 该段原文片段。"
+      },
+      "RiskBulkActionIn": {
+        "properties": {
+          "risk_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Risk Ids",
+            "description": "风险项 id（= 下标 + 1）"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action",
+            "description": "accept / mitigate / dismiss / reopen"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "risk_ids",
+          "action"
+        ],
+        "title": "RiskBulkActionIn"
       },
       "RollbackVersionRequest": {
         "properties": {

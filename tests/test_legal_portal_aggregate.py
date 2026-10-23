@@ -170,6 +170,9 @@ class PortalAggregateTests(unittest.TestCase):
         self.assertIn("案件文书", docs)
         self.assertNotIn("禁用文书", docs)
         self.assertNotIn("其他案件文书", docs)
+        # 案件概览：标题/状态随内容返回，客户端首屏可显示
+        self.assertEqual(data["case"]["title"], "聚合案件")
+        self.assertEqual(data["case"]["status"], "in_progress")
 
     def test_non_aggregate_link_returns_only_its_items(self):
         raw, _ = self._make_link(aggregate_case=0, items=[

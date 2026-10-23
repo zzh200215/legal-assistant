@@ -26,6 +26,13 @@ HIGH_RISK = {
 }
 
 
+MEDIUM_RISK = {
+    "clause_type": "payment", "label": "付款条款", "risk_level": "medium",
+    "description": "付款节点不明确", "source_location": {"paragraph": 1, "snippet": "合同正文"},
+    "suggestion": "明确付款节点", "status": "open",
+}
+
+
 class LegalDomainApiTests(unittest.TestCase):
     def setUp(self):
         engine = create_engine(
@@ -164,6 +171,57 @@ class LegalDomainApiTests(unittest.TestCase):
             json={"action": "explode"}, headers=self.admin_headers,
         )
         self.assertEqual(response.status_code, 400)
+
+    # ── 批量处置风险项 ─────────────────────────────────────────────────────────
+
+    def test_bulk_risk_action_accepts_all_and_records_history(self):
+        review = self._create_review(risks=[HIGH_RISK, MEDIUM_RISK])
+        items = self.client.get(f"/api/legal/contract-reviews/{review.id}/risk-items", headers=self.admin_headers).json()["data"]
+        self.assertEqual([item["id"] for item in items], [1, 2])
+
+        response = self.client.post(
+            f"/api/legal/contract-reviews/{review.id}/risk-items/bulk-action",
+            json={"risk_ids": [1, 2], "action": "accept", "note": "批量接受"},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertEqual([item["status"] for item in data], ["accepted", "accepted"])
+        self.assertEqual([item["history"][0]["risk_index"] for item in data], [0, 1])
+        self.assertEqual(data[0]["history"][0]["action"], "risk_accept")
+
+        # 撤销批量处置：回到待处理
+        reopened = self.client.post(
+            f"/api/legal/contract-reviews/{review.id}/risk-items/bulk-action",
+            json={"risk_ids": [1, 2], "action": "reopen", "note": "撤回"},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(reopened.status_code, 200, reopened.text)
+        self.assertEqual(
+            [item["status"] for item in reopened.json()["data"]],
+            ["needs_review", "open"],
+        )
+
+    def test_bulk_risk_action_is_all_or_nothing(self):
+        review = self._create_review(risks=[HIGH_RISK, MEDIUM_RISK])
+        response = self.client.post(
+            f"/api/legal/contract-reviews/{review.id}/risk-items/bulk-action",
+            json={"risk_ids": [1, 99], "action": "dismiss"},
+            headers=self.admin_headers,
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "RISK_ITEM_NOT_FOUND")
+        items = self.client.get(f"/api/legal/contract-reviews/{review.id}/risk-items", headers=self.admin_headers).json()["data"]
+        self.assertEqual([item["status"] for item in items], ["needs_review", "open"])
+
+    def test_bulk_risk_action_requires_reviewer(self):
+        review = self._create_review(risks=[HIGH_RISK])
+        response = self.client.post(
+            f"/api/legal/contract-reviews/{review.id}/risk-items/bulk-action",
+            json={"risk_ids": [1], "action": "accept"},
+            headers=self.member_headers,
+        )
+        self.assertEqual(response.status_code, 403)
 
     # ── 发布门禁（服务端强制）──────────────────────────────────────────────────
 

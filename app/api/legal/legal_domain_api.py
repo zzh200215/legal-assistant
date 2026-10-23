@@ -37,6 +37,13 @@ audit = AuditLogService()
 
 class RiskActionIn(BaseModel):
     action: str = Field(description="accept / mitigate / dismiss / reopen（撤销处置）")
+    note: str | None = None
+
+
+class RiskBulkActionIn(BaseModel):
+    risk_ids: list[int] = Field(min_length=1, max_length=100, description="风险项 id（= 下标 + 1）")
+    action: str = Field(description="accept / mitigate / dismiss / reopen")
+    note: str | None = None
     note: str | None = Field(default=None, max_length=2000)
 
 
@@ -100,6 +107,36 @@ def list_risk_items(item_id: int, db: Session = Depends(get_db), current_user: U
     for item in rows:
         item["can_resolve"] = can_resolve
     return rows
+
+
+@router.post("/contract-reviews/{item_id}/risk-items/bulk-action")
+def bulk_handle_risk_items(
+    item_id: int, req: RiskBulkActionIn,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """批量处置风险项：全有或全无；每条写一条风险动作（可逐条追溯）。"""
+    from app.models.org import OrganizationMember
+
+    member = db.query(OrganizationMember).filter(
+        OrganizationMember.organization_id == current_user.organization_id,
+        OrganizationMember.user_id == current_user.id,
+    ).first() if current_user.organization_id else None
+    if current_user.role not in {"admin", "dept_admin"} and not (member and member.legal_role in {"admin", "reviewer"}):
+        raise api_error(403, "仅审核律师或管理员可处理风险项", code="LEGAL_RISK_REVIEW_FORBIDDEN")
+    _load_owned_row(db, current_user, ContractReview, item_id, "contract_review")
+    try:
+        results = legal_domain_service.bulk_update_risk_item_status(
+            db, current_user, item_id, [risk_id - 1 for risk_id in req.risk_ids], req.action, req.note,
+        )
+    except LookupError:
+        raise api_error(404, "风险项不存在", code="RISK_ITEM_NOT_FOUND")
+    except ValueError as exc:
+        raise api_error(400, str(exc), code="RISK_ITEM_ACTION_INVALID")
+    audit.log(
+        db, current_user, f"legal_risk_item_bulk_{req.action}", target_type="contract_review",
+        target_id=item_id, detail=f"risk_ids={req.risk_ids}",
+    )
+    return results
 
 
 @router.post("/contract-reviews/{item_id}/risk-items/{risk_id}/action")

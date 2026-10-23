@@ -80,6 +80,17 @@
         </div>
       </div>
 
+      <section v-if="portalContent.case" class="app-card portal-case-card">
+        <div class="app-card-head">
+          <h2>案件概览</h2>
+          <span class="app-tag is-info">{{ caseStatusLabel(portalContent.case.status) }}</span>
+        </div>
+        <div class="app-card-body portal-case-body">
+          <p class="portal-case-title">{{ portalContent.case.title }}</p>
+          <p class="muted">最近更新：{{ formatDate(portalContent.case.updated_at) || '—' }}</p>
+        </div>
+      </section>
+
       <section class="app-card">
         <div class="app-card-head">
           <h2>进展更新</h2>
@@ -434,6 +445,8 @@ const billingSummary = computed(() => portalContent.value.billing || (portalCont
   total_outstanding: portalContent.value.invoice.outstanding_amount,
 } : null))
 const billingInvoices = computed(() => portalContent.value.billing?.invoices || (portalContent.value.invoice ? [portalContent.value.invoice] : []))
+const CASE_STATUS_LABELS = { in_progress: '进行中', closed: '已结案', archived: '已归档' }
+const caseStatusLabel = (status) => CASE_STATUS_LABELS[status] || status || '进行中'
 const formatDate = (v) => {
   if (!v) return ''
   return String(v).replace('T', ' ').slice(0, 16)
@@ -908,4 +921,7 @@ onUnmounted(() => {
     gap: var(--space-1);
   }
 }
+
+.portal-case-body { display: grid; gap: 4px; }
+.portal-case-title { margin: 0; color: var(--color-text); font-size: var(--text-md); font-weight: 600; }
 </style>

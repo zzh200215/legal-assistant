@@ -118,6 +118,9 @@ export default {
   listContractRiskItems(id, config = {}) {
     return http.get(`/legal/contract-reviews/${id}/risk-items`, config)
   },
+  bulkUpdateContractRiskItems(id, payload, options = {}) {
+    return http.post(`/legal/contract-reviews/${id}/risk-items/bulk-action`, payload, { headers: idempotencyHeaders(options) })
+  },
   updateContractRiskItem(id, riskId, payload, options = {}) {
     return http.post(`/legal/contract-reviews/${id}/risk-items/${riskId}/action`, payload, { headers: idempotencyHeaders(options) })
   },
