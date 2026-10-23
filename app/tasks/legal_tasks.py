@@ -72,6 +72,20 @@ def check_legal_deadline_reminders_task():
         db.close()
 
 
+@celery_app.task(name="check_legal_review_sla")
+@_beat_lock(task_name="check_legal_review_sla", ttl_seconds=1800)
+def check_legal_review_sla_task():
+    """每15分钟：给到期待审记录的审核人发「即将到期 / 已逾期」站内提醒（同阶段只发一次）。"""
+    _record_beat_heartbeat()
+    from app.services.legal.review_sla import scan_review_sla
+
+    db = SessionLocal()
+    try:
+        return scan_review_sla(db)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="scan_expired_portal_links")
 @_beat_lock(task_name="scan_expired_portal_links", ttl_seconds=7200)
 def scan_expired_portal_links_task():
