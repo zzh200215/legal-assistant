@@ -39,6 +39,7 @@ from app.services.legal.legal_service import (
 from app.services.observability.audit_log_service import AuditLogService
 from app.services.legal.legal_retrieval_service import legal_retrieval_service
 from app.services.legal.legal_knowledge_graph_service import legal_knowledge_graph_service
+from app.services.legal.consultation_evidence import attach_consultation_comparison
 from app.services.legal.contract_risk_stats import summarize_contract_risk_stats
 from app.services.legal.legal_workspace_service import (
     legal_workspace_module,
@@ -955,7 +956,7 @@ def followup_consultation(item_id: int, req: FollowupIn, db: Session = Depends(g
         if str(exc) == "QUOTA_EXCEEDED":
             raise api_error(429, "本月咨询配额已用完，请升级订阅", code="QUOTA_EXCEEDED")
         raise
-    return serialize(row)
+    return attach_consultation_comparison(db, serialize(row), row)
 
 
 @router.get("/consultations")
@@ -979,7 +980,8 @@ def list_consultations(
 @router.get("/consultations/{item_id}")
 def get_consultation(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:
-        return serialize(legal_workspace_read_module.get_row(db, current_user, "consultation", item_id))
+        row = legal_workspace_read_module.get_row(db, current_user, "consultation", item_id)
+        return attach_consultation_comparison(db, serialize(row), row)
     except LookupError:
         raise api_error(404, "法律咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
 

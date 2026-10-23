@@ -75,3 +75,65 @@ def summarize_consultation_evidence(row) -> dict:
         "unsupported": unsupported_count,
         "level": level,
     }
+
+
+def _reference_key(ref: dict) -> str:
+    return str(ref.get("source_id") or ref.get("title") or "")
+
+
+def _reference_digest(ref: dict) -> dict:
+    return {"title": ref.get("title"), "source_id": ref.get("source_id")}
+
+
+def compare_consultation_evidence(previous, current) -> dict:
+    """追问前后对比：引用增删 + 句级覆盖 + 等级/忠实度变化（读时派生）。"""
+    before = summarize_consultation_evidence(previous)
+    after = summarize_consultation_evidence(current)
+    prev_refs = [ref for ref in _json(getattr(previous, "references_json", None), []) if isinstance(ref, dict)]
+    cur_refs = [ref for ref in _json(getattr(current, "references_json", None), []) if isinstance(ref, dict)]
+    prev_map = {_reference_key(ref): ref for ref in prev_refs}
+    cur_map = {_reference_key(ref): ref for ref in cur_refs}
+    added = [_reference_digest(cur_map[key]) for key in cur_map.keys() - prev_map.keys()]
+    removed = [_reference_digest(prev_map[key]) for key in prev_map.keys() - cur_map.keys()]
+
+    def percent(summary: dict) -> int | None:
+        return None if summary["attributed_rate"] is None else round(summary["attributed_rate"] * 100)
+
+    before_rate, after_rate = percent(before), percent(after)
+    if before_rate is None and after_rate is None:
+        coverage = "未生成句级溯源"
+    else:
+        coverage = f"句级覆盖 {before_rate if before_rate is not None else '—'}% → {after_rate if after_rate is not None else '—'}%"
+    summary_text = (
+        f"引用 {before['references']} → {after['references']}（+{len(added)}/-{len(removed)}）"
+        f" · {coverage} · 等级 {before['level']} → {after['level']}"
+    )
+    return {
+        "parent_id": getattr(previous, "id", None),
+        "references": {
+            "before": before["references"],
+            "after": after["references"],
+            "added": added,
+            "removed": removed,
+        },
+        "attribution": {
+            "before": {"matched": before["attributed"], "total": before["sentences"], "rate": before_rate},
+            "after": {"matched": after["attributed"], "total": after["sentences"], "rate": after_rate},
+        },
+        "level": {"before": before["level"], "after": after["level"]},
+        "faithfulness": {"before": before["faithfulness"], "after": after["faithfulness"]},
+        "summary": summary_text,
+    }
+
+
+def attach_consultation_comparison(db, payload: dict, row) -> dict:
+    """给咨询 payload 挂上「与追问来源的对比」；没有 parent 或父记录不存在时原样返回。"""
+    parent_id = getattr(row, "parent_id", None)
+    if not parent_id or not isinstance(payload, dict):
+        return payload
+    from app.models.legal import LegalConsultation
+
+    parent = db.get(LegalConsultation, parent_id)
+    if parent is not None:
+        payload["comparison"] = compare_consultation_evidence(parent, row)
+    return payload

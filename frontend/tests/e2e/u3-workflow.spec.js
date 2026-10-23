@@ -242,6 +242,22 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
 
     // U-3 step 4: 审核队列通过（与 submit_review 共用上面同一个 matcher，按 action 分发）
 
+    if (method === 'POST' && path === '/legal/consultations/989/followup') {
+      requests.followup = request.postDataJSON()
+      await route.fulfill({ json: success({
+        ...CONSULT_NO_REF_ROW,
+        id: 988,
+        comparison: {
+          parent_id: 989,
+          references: { before: 0, after: 2, added: [{ title: '劳动合同法', source_id: 5 }], removed: [] },
+          attribution: { before: { matched: 0, total: 0, rate: null }, after: { matched: 3, total: 4, rate: 75 } },
+          level: { before: 'none', after: 'partial' },
+          faithfulness: { before: 'unchecked', after: 'pass' },
+          summary: '引用 0 → 2（+2/-0） · 句级覆盖 —% → 75% · 等级 none → partial',
+        },
+      }) })
+      return
+    }
     if (method === 'GET' && path === '/legal/consultations/989') {
       // 通知直达：按 consultation_id 恢复结果卡
       await route.fulfill({ json: success(CONSULT_NO_REF_ROW) })
@@ -523,6 +539,14 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
   await page.locator('.bell-item', { hasText: '咨询被退回：需要补充依据' }).getByRole('button', { name: '去补充' }).click()
   await expect(page).toHaveURL(/supplement=1/)
   await expect(page.getByPlaceholder('针对此咨询追问...')).toHaveValue('请补充相关法源依据后重新回答上述问题。')
+
+  // 追问后自动对比引用变化
+  await page.getByRole('button', { name: '追问', exact: true }).click()
+  await expect.poll(() => requests.followup).toEqual({ question: '请补充相关法源依据后重新回答上述问题。' })
+  await expect(page.locator('.comparison-block')).toContainText('补充前后对比')
+  await expect(page.locator('.comparison-block')).toContainText('+2/-0')
+  await expect(page.locator('.comparison-block')).toContainText('劳动合同法')
+  await expect(page.locator('.comparison-block')).toContainText('未校验 → 通过')
 
   expect(unexpectedApiRequests).toEqual([])
   expect(failedResponses).toEqual([])

@@ -4,7 +4,10 @@ import json
 import unittest
 
 from app.models.legal import LegalConsultation
-from app.services.legal.consultation_evidence import summarize_consultation_evidence
+from app.services.legal.consultation_evidence import (
+    compare_consultation_evidence,
+    summarize_consultation_evidence,
+)
 from app.services.legal.legal_workspace_service import serialize_workspace_row
 
 
@@ -165,6 +168,42 @@ class ListConsultationsEvidenceFilterTests(unittest.TestCase):
         self.assertEqual(len(response.json()["data"]), 1)
         self.assertEqual(response.json()["data"][0]["question"], "有引用的咨询")
 
+    def test_followup_detail_includes_comparison(self):
+        """追问记录带 parent_id，详情接口返回补充前后引用对比。"""
+        db = self.Session()
+        parent = LegalConsultation(
+            user_id=self.user_id, question="原咨询", category="labor",
+            known_facts_json="[]", missing_facts_json="[]",
+            references_json=json.dumps([{"title": "劳动合同法", "source_id": 1, "status": "active"}], ensure_ascii=False),
+            advice="原答复", risk_level="low", status="draft",
+        )
+        parent.attribution_json = json.dumps({"total_sentences": 4, "matched_sentences": 2})
+        db.add(parent)
+        db.flush()
+        child = LegalConsultation(
+            user_id=self.user_id, question="[追问] 补充材料", category="labor",
+            known_facts_json="[]", missing_facts_json="[]",
+            references_json=json.dumps([
+                {"title": "劳动合同法", "source_id": 1, "status": "active"},
+                {"title": "实施条例", "source_id": 2, "status": "active"},
+            ], ensure_ascii=False),
+            advice="补充后答复", risk_level="low", status="draft", parent_id=parent.id,
+        )
+        child.attribution_json = json.dumps({"total_sentences": 4, "matched_sentences": 4})
+        db.add(child)
+        db.commit()
+        child_id = child.id
+        db.close()
+
+        response = self.client.get(f"/api/legal/consultations/{child_id}", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertIn("comparison", data)
+        self.assertEqual(data["comparison"]["references"]["before"], 1)
+        self.assertEqual(data["comparison"]["references"]["after"], 2)
+        self.assertEqual([ref["title"] for ref in data["comparison"]["references"]["added"]], ["实施条例"])
+        self.assertEqual(data["comparison"]["level"], {"before": "partial", "after": "strong"})
+
     def test_review_queue_carries_chain_signal(self):
         """审核队列行带 evidence_summary，前端才能给无依据咨询打标签。"""
         db = self.Session()
@@ -229,3 +268,52 @@ class ListConsultationsEvidenceFilterTests(unittest.TestCase):
     def test_review_queue_invalid_evidence_level_rejected(self):
         response = self.client.get("/api/legal/review-queue?evidence_level=whatever", headers=self.headers)
         self.assertEqual(response.status_code, 422)
+
+
+class CompareConsultationEvidenceTests(unittest.TestCase):
+    """追问前后：引用增删、句级覆盖、等级/忠实度变化。"""
+
+    def _row(self, refs, total, matched, faithful=None):
+        row = LegalConsultation(
+            user_id=1, question="q", category="labor",
+            known_facts_json="[]", missing_facts_json="[]",
+            references_json=json.dumps(refs, ensure_ascii=False),
+            advice="a", risk_level="low", status="draft",
+        )
+        row.id = 12
+        row.attribution_json = json.dumps({"total_sentences": total, "matched_sentences": matched})
+        if faithful is not None:
+            row.faithfulness_json = json.dumps({"available": True, "faithful": faithful})
+        return row
+
+    def test_added_reference_and_coverage_improvement(self):
+        prev = self._row([{"title": "劳动合同法", "source_id": 1, "status": "active"}], 4, 2)
+        cur = self._row(
+            [{"title": "劳动合同法", "source_id": 1, "status": "active"},
+             {"title": "实施条例", "source_id": 2, "status": "active"}], 4, 4,
+        )
+        result = compare_consultation_evidence(prev, cur)
+        self.assertEqual(result["parent_id"], 12)
+        self.assertEqual(result["references"]["before"], 1)
+        self.assertEqual(result["references"]["after"], 2)
+        self.assertEqual([ref["title"] for ref in result["references"]["added"]], ["实施条例"])
+        self.assertEqual(result["references"]["removed"], [])
+        self.assertEqual(result["attribution"]["before"]["rate"], 50)
+        self.assertEqual(result["attribution"]["after"]["rate"], 100)
+        self.assertEqual(result["level"], {"before": "partial", "after": "strong"})
+        self.assertIn("引用 1 → 2（+1/-0）", result["summary"])
+        self.assertIn("50% → 100%", result["summary"])
+
+    def test_removed_reference_is_reported(self):
+        prev = self._row([{"title": "旧法", "source_id": 9, "status": "active"}], 2, 2)
+        cur = self._row([], 0, 0)
+        result = compare_consultation_evidence(prev, cur)
+        self.assertEqual([ref["title"] for ref in result["references"]["removed"]], ["旧法"])
+        self.assertEqual(result["level"], {"before": "strong", "after": "none"})
+        self.assertIn("100% → —%", result["summary"])
+
+    def test_faithfulness_change_is_reported(self):
+        prev = self._row([{"title": "劳动合同法", "source_id": 1}], 2, 1)
+        cur = self._row([{"title": "劳动合同法", "source_id": 1}], 2, 1, faithful=False)
+        result = compare_consultation_evidence(prev, cur)
+        self.assertEqual(result["faithfulness"], {"before": "unchecked", "after": "fail"})

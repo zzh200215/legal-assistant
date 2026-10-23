@@ -687,7 +687,7 @@ class LegalWorkspaceModule:
             case_id=previous.case_id, category=category, known_facts_json=json.dumps(known, ensure_ascii=False),
             missing_facts_json=json.dumps(missing, ensure_ascii=False),
             references_json=json.dumps(refs, ensure_ascii=False), advice=advice,
-            risk_level=risk, status=status,
+            risk_level=risk, status=status, parent_id=previous.id,
         )
         db.add(row)
         db.commit()

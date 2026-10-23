@@ -62,6 +62,22 @@
                   <span v-else class="app-tag is-ok">无缺失</span>
                 </section>
 
+                <section v-if="consultResult.comparison" class="app-answer-section comparison-block">
+                  <p class="app-answer-kicker">补充前后对比</p>
+                  <p class="comparison-summary">{{ consultResult.comparison.summary }}</p>
+                  <div v-if="consultResult.comparison.references.added?.length" class="comparison-refs">
+                    <span class="comparison-label">新增引用</span>
+                    <span v-for="ref in consultResult.comparison.references.added" :key="`add-${ref.source_id || ref.title}`" class="app-tag is-ok">{{ ref.title || `法源 ${ref.source_id}` }}</span>
+                  </div>
+                  <div v-if="consultResult.comparison.references.removed?.length" class="comparison-refs">
+                    <span class="comparison-label">移除引用</span>
+                    <span v-for="ref in consultResult.comparison.references.removed" :key="`del-${ref.source_id || ref.title}`" class="app-tag">{{ ref.title || `法源 ${ref.source_id}` }}</span>
+                  </div>
+                  <p class="comparison-meta">
+                    忠实度：{{ faithfulnessLabel(consultResult.comparison.faithfulness.before) }} → {{ faithfulnessLabel(consultResult.comparison.faithfulness.after) }}
+                  </p>
+                </section>
+
                 <section class="app-answer-section">
                   <p class="app-answer-kicker">参考依据</p>
                   <p v-if="consultResult.evidence_summary?.references" class="chain-line">{{ chainDetail(consultResult.evidence_summary) }}</p>
@@ -193,6 +209,8 @@ const chainText = (summary) => {
   const refs = `${summary.references} 条引用`
   return summary.sentences ? `${refs} · ${summary.attributed}/${summary.sentences} 句` : refs
 }
+const FAITHFULNESS_LABELS = { pass: '通过', fail: '未通过', unchecked: '未校验' }
+const faithfulnessLabel = (state) => FAITHFULNESS_LABELS[state] || state || '未校验'
 const chainDetail = (summary) => {
   const parts = []
   if (summary.sentences) parts.push(`句级溯源 ${summary.attributed}/${summary.sentences} 句`)
@@ -428,4 +446,9 @@ onMounted(() => {
 .chain-chip:hover:not(:disabled) { color: var(--color-text-primary); }
 .chain-chip.active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-light); }
 .chain-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.comparison-summary { margin: 0 0 var(--space-2); color: var(--color-text-primary); font-size: var(--text-sm); }
+.comparison-refs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-1); }
+.comparison-label { color: var(--color-text-secondary); font-size: var(--text-xs); }
+.comparison-meta { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); }
 </style>
