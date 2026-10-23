@@ -39,6 +39,7 @@ from app.services.legal.legal_service import (
     DRAFT_REQUIRED_FIELDS,
     _article_text_by_source,
     _reference_source_text,
+    attribute_sentences_to_references,
     compute_disclaimer_level,
     consultation_followup,
     consultation_payload,
@@ -667,6 +668,10 @@ class LegalWorkspaceModule:
         ).first()
         if not previous:
             raise LookupError("LEGAL_CONSULTATION_NOT_FOUND")
+        parent_id = previous.id
+        parent_status = previous.status
+        actor_id = user.id
+        org_id = user.organization_id
         # 追问前重验案件访问权限：用户若已从严格案件被撤销成员，不得继续追加内容。
         if previous.case_id:
             try:
@@ -682,12 +687,21 @@ class LegalWorkspaceModule:
         category, known, missing, refs, advice, risk, status = await consultation_followup(
             previous.question, previous.advice or "", question, sources, user_id=user.id, db=db,
         )
+        # 追问同样算句级映射：否则「补充前后对比」的覆盖率永远是 —，看不出补充效果
+        attribution: dict = {}
+        try:
+            attribution = attribute_sentences_to_references(
+                advice, refs, sources, article_text_by_source=_article_text_by_source(db, refs),
+            )
+        except Exception:
+            logger.exception("追问句级映射计算失败: consultation_id=%s", parent_id)
         row = LegalConsultation(
             user_id=user.id, question=f"{previous.question}\n\n[追问] {question}",
             case_id=previous.case_id, category=category, known_facts_json=json.dumps(known, ensure_ascii=False),
             missing_facts_json=json.dumps(missing, ensure_ascii=False),
             references_json=json.dumps(refs, ensure_ascii=False), advice=advice,
-            risk_level=risk, status=status, parent_id=previous.id,
+            risk_level=risk, status=status, parent_id=parent_id,
+            attribution_json=json.dumps(attribution, ensure_ascii=False) if attribution else None,
         )
         db.add(row)
         db.commit()
@@ -695,9 +709,9 @@ class LegalWorkspaceModule:
         legal_domain_service.persist_consultation_artifacts(
             db, row, known=known, missing=missing, refs=refs, risk_level=risk,
         )
-        subscription_service.record_usage(db, user.id, "consultation")
+        subscription_service.record_usage(db, actor_id, "consultation")
         matter_service.record_activity(
-            db, case_id=row.case_id, organization_id=user.organization_id, actor_id=user.id,
+            db, case_id=row.case_id, organization_id=org_id, actor_id=actor_id,
             event_type="consultation.followup_created", target_type="consultation", target_id=row.id,
             title="追加法律咨询", summary=question[:300],
         )
@@ -705,7 +719,57 @@ class LegalWorkspaceModule:
             db, user, "legal_followup_create", target_type="consultation",
             target_id=row.id, detail=f"followup to #{consultation_id}",
         )
+        if parent_status == "returned_for_facts":
+            # 退回后补充：把引用变化告诉审核律师；失败不影响追问结果
+            try:
+                self._notify_consultation_supplemented(
+                    db, org_id=org_id, actor_id=actor_id, parent_id=parent_id, row=row,
+                )
+            except Exception:
+                logger.exception("补充后通知审核律师失败: consultation_id=%s", row.id)
         return row
+
+    def _notify_consultation_supplemented(self, db: Session, *, org_id: int, actor_id: int, parent_id: int, row: LegalConsultation) -> None:
+        """退回后补充完成：给同组织审核律师发「引用 +N，覆盖 X%」的通知。"""
+        from app.services.legal.consultation_evidence import compare_consultation_evidence
+        from app.services.notification.notification_service import notification_service
+
+        parent = db.get(LegalConsultation, parent_id)
+        if parent is None or not org_id:
+            return
+        comparison = compare_consultation_evidence(parent, row)
+        added = len(comparison["references"]["added"])
+        removed = len(comparison["references"]["removed"])
+        rate = comparison["attribution"]["after"]["rate"]
+        rate_text = f"{rate}%" if rate is not None else "—"
+        title = f"咨询已补充依据：引用 +{added}，覆盖 {rate_text}"
+        if removed:
+            title += f"，移除 {removed}"
+        body = f"「{(row.question or '').strip()[:40]}」补充后：{comparison['summary']}。请重新审核。"
+        recipients = (
+            db.query(OrganizationMember.user_id)
+            .filter(
+                OrganizationMember.organization_id == org_id,
+                OrganizationMember.legal_role.in_([LegalMemberRole.admin.value, LegalMemberRole.reviewer.value]),
+                OrganizationMember.user_id != actor_id,
+            )
+            .all()
+        )
+        for (recipient_id,) in recipients:
+            notification_service.create_notification(
+                db=db,
+                organization_id=org_id,
+                user_id=recipient_id,
+                event_type="approval",
+                title=title,
+                body=body,
+                case_id=getattr(row, "case_id", None),
+                reference_type="consultation",
+                reference_id=row.id,
+                business_version=getattr(row, "version", None),
+                template_key="consultation_supplemented",
+            )
+
 
     async def resubmit_contract_review(
         self, db: Session, user: User, *, review_id: int, title: str, content: str,

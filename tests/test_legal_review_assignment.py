@@ -246,6 +246,79 @@ class LegalReviewAssignmentTests(unittest.TestCase):
         self.assertEqual(events[0].template_key, "consultation_returned")
         self.assertIn("事实描述需要补充时间线", events[0].body)
 
+    def test_supplement_after_return_notifies_reviewer_with_comparison(self):
+        """退回后补充：审核律师收到「引用 +1，覆盖 75%」的通知。"""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from app.models.legal_notifications import LegalNotificationEvent
+        from app.services.legal.legal_workspace_service import legal_workspace_module
+
+        self.row.status = "returned_for_facts"
+        self.db.commit()
+        parent_id = self.row.id
+        reviewer_id = self.reviewer.id
+
+        followup_result = (
+            "labor", [], [], [{"title": "劳动合同法", "source_id": 1, "status": "active"}],
+            "补充答复", "low", "draft",
+        )
+        attribution = {"total_sentences": 4, "matched_sentences": 3}
+        with patch(
+            "app.services.legal.legal_workspace_service.consultation_followup",
+            new=AsyncMock(return_value=followup_result),
+        ), patch(
+            "app.services.legal.legal_workspace_service.attribute_sentences_to_references",
+            return_value=attribution,
+        ), patch(
+            "app.services.legal.legal_workspace_service.subscription_service",
+        ) as subscription:
+            subscription.check_quota.return_value = True
+            row = asyncio.run(legal_workspace_module.create_consultation_followup(
+                self.db, self.client_user, consultation_id=self.row.id, question="补充材料",
+            ))
+
+        self.assertEqual(row.parent_id, parent_id)
+        events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.user_id == reviewer_id,
+        ).all()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].title, "咨询已补充依据：引用 +1，覆盖 75%")
+        self.assertEqual(events[0].template_key, "consultation_supplemented")
+        self.assertEqual(events[0].reference_id, row.id)
+        self.assertIn("引用 0 → 1", events[0].body)
+
+    def test_followup_without_return_does_not_notify(self):
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from app.models.legal_notifications import LegalNotificationEvent
+        from app.services.legal.legal_workspace_service import legal_workspace_module
+
+        self.reviewer_id_cached = self.reviewer.id
+        followup_result = (
+            "labor", [], [], [{"title": "劳动合同法", "source_id": 1, "status": "active"}],
+            "补充答复", "low", "draft",
+        )
+        with patch(
+            "app.services.legal.legal_workspace_service.consultation_followup",
+            new=AsyncMock(return_value=followup_result),
+        ), patch(
+            "app.services.legal.legal_workspace_service.attribute_sentences_to_references",
+            return_value={"total_sentences": 4, "matched_sentences": 3},
+        ), patch(
+            "app.services.legal.legal_workspace_service.subscription_service",
+        ) as subscription:
+            subscription.check_quota.return_value = True
+            asyncio.run(legal_workspace_module.create_consultation_followup(
+                self.db, self.client_user, consultation_id=self.row.id, question="再问一句",
+            ))
+        self.assertEqual(
+            self.db.query(LegalNotificationEvent).filter(
+                LegalNotificationEvent.user_id == self.reviewer_id_cached,
+            ).count(), 0,
+        )
+
     def test_due_soon_is_flagged_and_filterable(self):
         """24 小时内到期：sla_state=due_soon、给出剩余小时数、可按 sla=due_soon 过滤。"""
         from datetime import timedelta
