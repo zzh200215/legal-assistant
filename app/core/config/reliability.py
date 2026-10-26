@@ -66,6 +66,9 @@ class ReliabilitySettings(BaseSettings):
     # 邮件投递（EmailSendRequest 作为 Outbox）的重试与租约。
     EMAIL_DELIVERY_MAX_ATTEMPTS: int = Field(default=5, ge=1, le=20)
     EMAIL_DELIVERY_CLAIM_TTL_SECONDS: int = Field(default=300, ge=60, le=86400)
+    # 通知邮件里的「去处理」按钮深链前缀（如 https://legal.example.com）。
+    # 留空则不渲染按钮，邮件只保留文字提醒（不伪造不可点的链接）。
+    NOTIFICATION_EMAIL_ACTION_BASE_URL: str = ""
     # 死信台账保留天数：由 run_database_archive 执行
     # （archive_service._cleanup_email_dead_letters，受 DATABASE_ARCHIVE_ENABLED/DRY_RUN 约束）。
     # 仍被通知事件引用的死信会跳过，等事件本身过期后再删。

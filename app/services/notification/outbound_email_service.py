@@ -325,10 +325,12 @@ class OutboundEmailService:
         body: str,
         recipient: str,
         auto_approve: bool,
+        html_body: str | None = None,
     ) -> EmailSendRequest | None:
         """为通知事件创建 EmailDraft + EmailSendRequest（同事务）。
 
         返回请求；无可用 SMTP 连接器/策略禁止时返回 None（调用方决定降级路径）。
+        ``html_body`` 有值时草稿以 multipart/alternative 发送（纯文本 + HTML）。
         """
         policy = self._policy(db=db, organization_id=user.organization_id)
         if not policy or not policy.enabled:
@@ -352,6 +354,7 @@ class OutboundEmailService:
             subject=subject,
             recipient=recipient,
             content=body,
+            content_html=html_body or None,
             purpose="系统通知",
             status="draft",
             generation_type="notification_email",
@@ -557,6 +560,9 @@ class OutboundEmailService:
         message["Subject"] = request.subject
         message["Message-ID"] = message_id
         message.set_content(draft.content)
+        if draft.content_html:
+            # 有 HTML 版式时发 multipart/alternative：客户端不认 HTML 仍可读纯文本
+            message.add_alternative(draft.content_html, subtype="html")
         for att in self._attachments_for(db, request):
             content = _read_storage_bytes(att)
             if content:
@@ -867,6 +873,13 @@ class OutboundEmailService:
         request.error_code = None
         request.sanitized_error_message = None
 
+    def requeue_dead_letter(self, request: EmailSendRequest, *, db: Session) -> EmailSendRequest:
+        """把死信重置为待审批（权限由调用方校验；人工重试与运营看板共用）。"""
+        if request.status != EMAIL_REQ_DEAD_LETTER:
+            raise ValueError("只有死信状态可人工重试")
+        self._reset_dead_letter(request, db=db)
+        return request
+
     def manual_retry(self, request_id: int, *, db: Session, user: User) -> EmailSendRequest:
         """人工重试死信：校验权限（本人或同组织 admin），保留原幂等键，完整审计。"""
         request = db.query(EmailSendRequest).filter(EmailSendRequest.id == request_id).first()
@@ -876,9 +889,7 @@ class OutboundEmailService:
             raise ValueError("Send request is outside your organization")
         if request.user_id != user.id and user.role != "admin":
             raise ValueError("无权重试该投递")
-        if request.status != EMAIL_REQ_DEAD_LETTER:
-            raise ValueError("只有死信状态可人工重试")
-        self._reset_dead_letter(request, db=db)
+        self.requeue_dead_letter(request, db=db)
         db.commit()
         db.refresh(request)
         oplog_service.log(module="outbound_email", action="email_send_manual_retry", db=db,

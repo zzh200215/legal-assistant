@@ -13,6 +13,9 @@ class EmailDraft(Base):
     recipient = Column(String(256), nullable=True)
     cc = Column(String(512), nullable=True)
     content = Column(Text, nullable=False)
+    # HTML 版正文（通知邮件由内置模板渲染）：有值时以 multipart/alternative 发送，
+    # content 作为纯文本回退；业务草稿历来为 NULL，行为不变。
+    content_html = Column(Text, nullable=True)
     purpose = Column(String(512), nullable=True)
     key_points = Column(Text, nullable=True)
     need_action = Column(Boolean, nullable=True)

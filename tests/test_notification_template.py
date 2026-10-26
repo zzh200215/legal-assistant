@@ -1,5 +1,6 @@
 """通知模板测试：版本不可覆盖、locale fallback、参数校验、HTML 转义渲染。"""
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -134,24 +135,82 @@ if __name__ == "__main__":
 
 
 class EmailRenderFallbackTests(unittest.TestCase):
-    """邮件模板缺失时回退到事件标题/正文，而不是死信。"""
+    """邮件渲染优先级：数据库模板 → 内置 HTML 版式 → 事件标题/正文。"""
 
-    def test_unknown_template_key_falls_back_to_event_copy(self):
-        from app.models.legal_notifications import LegalNotificationEvent
-        from app.services.notification.notification_service import notification_service
-
+    def _db(self):
         engine = _engine()
         Base.metadata.create_all(engine)
+        self.addCleanup(engine.dispose)
         db = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
-        try:
-            event = LegalNotificationEvent(
-                organization_id=1, user_id=1, event_type="approval",
-                title="审核即将到期：合同 A（剩 6 小时）", body="sla:due_soon · 合同 #1",
-                channel="email", template_key="review_sla_due_soon",
-            )
-            subject, body = notification_service._render_email_content(db, event)
-            self.assertEqual(subject, event.title)
-            self.assertEqual(body, event.body)
-        finally:
-            db.close()
-            engine.dispose()
+        self.addCleanup(db.close)
+        return db
+
+    def _event(self, **kw):
+        from app.models.legal_notifications import LegalNotificationEvent
+
+        params = dict(
+            organization_id=1, user_id=1, event_type="approval",
+            title="审核即将到期：合同 A（剩 6 小时）", body="sla:due_soon · 合同 #1",
+            channel="email", reference_type="contract_review", reference_id=12,
+        )
+        params.update(kw)
+        return LegalNotificationEvent(**params)
+
+    def test_unknown_template_key_falls_back_to_event_copy(self):
+        from app.services.notification.notification_service import notification_service
+
+        db = self._db()
+        event = self._event(template_key="no_such_template_key")
+        subject, body, html = notification_service._render_email_content(db, event)
+        self.assertEqual(subject, event.title)
+        self.assertEqual(body, event.body)
+        self.assertIsNone(html)
+
+    def test_builtin_template_renders_html_alternative(self):
+        from app.services.notification.notification_service import notification_service
+
+        db = self._db()
+        event = self._event(template_key="review_sla_due_soon")
+        subject, body, html = notification_service._render_email_content(db, event)
+        self.assertEqual(subject, "【律智检】审核即将到期：合同 A（剩 6 小时）")
+        self.assertIn("审核即将到期", body)
+        self.assertIn("合同 #1", body)
+        self.assertIsNotNone(html)
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("合同 A", html)
+
+    def test_builtin_action_url_omitted_without_base_url(self):
+        from app.services.notification.email_templates import render_builtin_email
+        from app.core.config import get_settings
+
+        with patch.object(get_settings(), "NOTIFICATION_EMAIL_ACTION_BASE_URL", ""):
+            rendered = render_builtin_email("review_sla_overdue", params={"title": "t", "body": "b"})
+        self.assertNotIn("<a href=", rendered["html"])
+        self.assertNotIn("http", rendered["text"])
+
+    def test_builtin_action_url_uses_configured_base(self):
+        from app.services.notification.email_templates import action_url, render_builtin_email
+        from app.core.config import get_settings
+
+        with patch.object(get_settings(), "NOTIFICATION_EMAIL_ACTION_BASE_URL", "https://legal.example.com/"):
+            href = action_url("contract_review")
+            self.assertEqual(href, "https://legal.example.com/legal-workspace?view=review")
+            rendered = render_builtin_email("review_sla_due_soon",
+                                            params={"title": "t", "body": "b", "action_url": href})
+        self.assertIn('href="https://legal.example.com/legal-workspace?view=review"', rendered["html"])
+        self.assertIn(href, rendered["text"])
+
+    def test_database_template_takes_precedence_over_builtin(self):
+        from app.services.notification.notification_service import notification_service
+
+        db = self._db()
+        notification_template_service.create_template(
+            db=db, channel="email", template_key="review_sla_due_soon",
+            subject_template="到期：{{title}}", body_template="运营覆写文案：{{body}}",
+            locale="zh-CN", status="active",
+        )
+        subject, body, html = notification_service._render_email_content(
+            db, self._event(template_key="review_sla_due_soon"))
+        self.assertEqual(subject, "到期：审核即将到期：合同 A（剩 6 小时）")
+        self.assertIn("运营覆写文案", body)
+        self.assertIsNone(html)

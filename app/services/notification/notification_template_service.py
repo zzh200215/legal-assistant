@@ -154,7 +154,11 @@ class NotificationTemplateService:
         self.validate_params(params, template.params_schema_json)
 
         values: dict[str, str] = {}
-        for match in _PLACEHOLDER_RE.finditer(template.body_template):
+        # 占位符来源合并主题与正文：只在主题里出现的变量（如 {{title}}）也要替换，
+        # 否则主题会把 {{...}} 原样发出去。
+        for match in _PLACEHOLDER_RE.finditer(
+            f"{template.body_template or ''}\n{template.subject_template or ''}"
+        ):
             key = match.group(1)
             raw = params.get(key)
             if raw is None:

@@ -146,6 +146,20 @@ class NotificationService:
                           detail=f"error_code={error_code or 'unknown'}; reason={reason}")
         _record_delivery_metric(event, "dead_letter")
 
+    def requeue_dead_letter(self, db: Session, event: LegalNotificationEvent) -> None:
+        """死信 → pending 重排（人工重试；权限由调用方校验）。
+
+        只重置投递列与尝试次数，不改业务内容；幂等键保留，重复创建仍被去重。
+        """
+        if event.status != STATUS_DEAD_LETTER:
+            raise NotificationStateError(f"只有死信状态可重排: {event.status}")
+        self.transition(db=db, event=event, to=STATUS_PENDING)
+        event.attempt = 0
+        event.next_retry_at = None
+        event.error_code = None
+        event.sanitized_error_message = None
+        event.claim_expires_at = None
+
     # ── 创建通知（幂等键去重）─────────────────────────────────────────
 
     @staticmethod
@@ -495,14 +509,15 @@ class NotificationService:
             self.mark_dead_letter(db, event, reason="用户无邮箱，无法发送邮件通知", error_code="NO_USER_EMAIL")
             return "failed"
 
-        subject, body = self._render_email_content(db, event)
+        subject, body, html_body = self._render_email_content(db, event)
         if subject is None:
             self.mark_dead_letter(db, event, reason="通知模板渲染失败", error_code="TEMPLATE_ERROR")
             return "failed"
 
-        # DLP 门禁（含收件人）：block → dead letter；review → 强制人工审批
+        # DLP 门禁（含收件人）：block → dead letter；review → 强制人工审批。
+        # HTML 版同样纳入扫描：正文文字相同，但链接/标签也要过一遍。
         from app.services.notification.dlp_scanner import dlp_scanner
-        dlp = dlp_scanner.scan(payloads=[subject, body, user.email], action="block")
+        dlp = dlp_scanner.scan(payloads=[subject, body, html_body or "", user.email], action="block")
         if dlp.blocked:
             self.mark_dead_letter(db, event, reason="通知内容命中高风险 DLP 策略",
                                   error_code="DLP_BLOCKED")
@@ -513,6 +528,7 @@ class NotificationService:
         request = outbound_email_service.create_notification_email(
             db=db, user=user, notification_event=event,
             subject=subject, body=body, recipient=user.email, auto_approve=auto_approve,
+            html_body=html_body,
         )
         if request is None:
             self.mark_dead_letter(db, event, reason="无可用 SMTP 连接器或外发策略禁用",
@@ -529,22 +545,44 @@ class NotificationService:
             seconds=get_settings().NOTIFICATION_CLAIM_TTL_SECONDS)
         return "skipped"
 
-    def _render_email_content(self, db: Session, event: LegalNotificationEvent) -> tuple[str | None, str | None]:
-        """渲染邮件通知内容：配置了模板则按模板渲染，否则用事件标题/正文。"""
+    def _render_email_content(self, db: Session,
+                              event: LegalNotificationEvent) -> tuple[str | None, str | None, str | None]:
+        """渲染邮件通知内容，返回 ``(subject, text, html)``。
+
+        优先级：数据库模板（运营可覆写文案，纯文本）→ 内置 HTML 版式 → 事件标题/正文。
+        HTML 缺失时 html 为 None，邮件按纯文本发送（不伪造 HTML 版）。
+        """
+        params = {
+            "title": event.title,
+            "body": event.body or "",
+            "reference_id": str(event.reference_id or ""),
+        }
         if not event.template_key:
-            return event.title, event.body or ""
+            return event.title, event.body or "", None
         try:
             from app.services.notification.notification_template_service import notification_template_service
-            rendered = notification_template_service.render(
+
+            if notification_template_service.resolve(
                 db=db, channel=CHANNEL_EMAIL, template_key=event.template_key,
                 locale=event.locale or "zh-CN",
-                params={"title": event.title, "body": event.body or "",
-                        "reference_id": str(event.reference_id or "")},
-            )
-            return rendered.get("subject") or event.title, rendered.get("body") or ""
-        except Exception as exc:  # noqa: BLE001 - 模板缺失/失败时回退到事件标题与正文
-            logger.warning("通知模板渲染失败，回退到事件标题/正文 event_id=%s: %s", event.id, exc)
-            return event.title, event.body or ""
+            ) is not None:
+                rendered = notification_template_service.render(
+                    db=db, channel=CHANNEL_EMAIL, template_key=event.template_key,
+                    locale=event.locale or "zh-CN", params=params,
+                )
+                return rendered.get("subject") or event.title, rendered.get("body") or "", None
+        except Exception as exc:  # noqa: BLE001 - 数据库模板异常不应阻断邮件
+            logger.warning("数据库模板渲染失败 event_id=%s: %s", event.id, exc)
+
+        from app.services.notification.email_templates import action_url, render_builtin_email
+
+        builtin = render_builtin_email(event.template_key, params={
+            **params, "action_url": action_url(event.reference_type),
+        })
+        if builtin is not None:
+            return builtin["subject"] or event.title, builtin["text"], builtin["html"]
+        # 内置模板也没有：回退到事件标题/正文（原来返回 None 会直接死信）
+        return event.title, event.body or "", None
 
     def _dispatch_external_channel(self, db: Session, event: LegalNotificationEvent) -> str:
         """微信/飞书通知：保留既有占位投递（无真实出站凭据，标记为 sent）。"""
