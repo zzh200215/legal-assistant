@@ -4,13 +4,29 @@
     <section class="app-card">
       <div class="app-card-head">
         <h2>合同列表</h2>
-        <span class="app-card-head-meta">{{ contracts.length }} 份</span>
+        <span class="app-card-head-meta">{{ total }} 份</span>
         <div class="contract-actions">
           <el-button size="small" :loading="loading" @click="loadContracts">刷新</el-button>
           <el-button size="small" type="primary" @click="createVisible = true">新建合同</el-button>
         </div>
       </div>
       <div class="app-card-body">
+        <div class="contract-filters" aria-label="合同台账筛选">
+          <select v-model="filters.review_status" aria-label="按审查状态筛选">
+            <option value="">全部审查状态</option>
+            <option value="draft">草稿</option>
+            <option value="pending_review">待审核</option>
+            <option value="needs_lawyer_review">需律师审核</option>
+            <option value="lawyer_approved">律师通过</option>
+            <option value="returned_for_facts">退回补充</option>
+          </select>
+          <select v-model="filters.risk" aria-label="按风险筛选">
+            <option value="">全部风险</option>
+            <option value="high">有高风险</option>
+            <option value="unanchored">有无定位风险</option>
+            <option value="none">未审查</option>
+          </select>
+        </div>
         <el-table v-loading="loading" :data="contracts" stripe size="small">
           <el-table-column prop="contract_no" label="合同编号" width="150" />
           <el-table-column prop="title" label="合同名称" min-width="180" show-overflow-tooltip />
@@ -124,7 +140,9 @@ import 'element-plus/es/components/tooltip/style/css'
 import api from '../api'
 
 const props = defineProps({ orgId: { type: Number, required: true }, caseId: { type: Number, required: false, default: null } })
-const contracts = ref([]); const REVIEW_STATUS_LABELS = {
+const contracts = ref([])
+const total = ref(0)
+const filters = ref({ review_status: '', risk: '' }); const REVIEW_STATUS_LABELS = {
   draft: '草稿', pending_review: '待审核', needs_lawyer_review: '需律师审核', needs_facts: '待补充事实',
   lawyer_approved: '律师通过', returned_for_facts: '退回补充', offline_consultation: '转线下', archived: '已归档',
 }
@@ -142,7 +160,22 @@ const selected = ref(null); const versions = ref([]); const milestones = ref([])
 const createForm = ref({ title: '', counterparty: '', contract_type: '', contract_no: '' })
 const signRequests = ref([]); const signForm = ref({ contract_version_id: null, party_name: '', phone_masked: '' })
 
-const loadContracts = async () => { if (!props.orgId) return; loading.value = true; try { const { data } = await api.listLegalContracts(props.orgId, props.caseId); contracts.value = data.items || [] } catch (e) { ElMessage.error(e.response?.data?.detail || '合同加载失败') } finally { loading.value = false } }
+const loadContracts = async () => {
+  if (!props.orgId) return
+  loading.value = true
+  try {
+    const { data } = await api.listLegalContracts(props.orgId, props.caseId, {
+      review_status: filters.value.review_status,
+      risk: filters.value.risk,
+    })
+    contracts.value = data.items || []
+    total.value = data.total ?? contracts.value.length
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '合同加载失败')
+  } finally {
+    loading.value = false
+  }
+}
 const createContract = async () => { if (!createForm.value.title.trim()) return ElMessage.warning('请输入合同名称'); saving.value = true; try { await api.createLegalContract(props.orgId, { ...createForm.value, case_id: props.caseId || null, contract_no: createForm.value.contract_no || null }); createVisible.value = false; createForm.value = { title: '', counterparty: '', contract_type: '', contract_no: '' }; await loadContracts() } catch (e) { ElMessage.error(e.response?.data?.detail || '合同创建失败') } finally { saving.value = false } }
 const loadVersions = async (contract) => { selected.value = contract; const { data } = await api.listLegalContractVersions(contract.id); versions.value = data || [] }
 const openVersions = async (contract) => { try { await loadVersions(contract); versionsVisible.value = true } catch { ElMessage.error('版本加载失败') } }
@@ -154,6 +187,7 @@ const openSigning = async (contract) => { try { await loadVersions(contract); co
 const createAndSendSignRequest = async () => { if (!signForm.value.contract_version_id || !signForm.value.party_name.trim() || !signForm.value.phone_masked.trim()) return ElMessage.warning('请填写版本、签署方和已核验手机号'); saving.value = true; try { const { data } = await api.createSignRequest(selected.value.id, { contract_version_id: signForm.value.contract_version_id, parties: [{ name: signForm.value.party_name.trim(), phone_masked: signForm.value.phone_masked.trim(), sign_order: 1 }] }); await api.sendSignRequest(data.id); const result = await api.listSignRequests(selected.value.id); signRequests.value = result.data || []; ElMessage.success('签署请求已提交给服务商') } catch (e) { ElMessage.error(e.response?.data?.detail || '签署请求创建失败') } finally { saving.value = false } }
 const loadFeatures = async () => { try { const { data } = await api.getFeatureFlags(); signingEnabled.value = !!data.signing_enabled } catch { /* 特性开关不可用时保持默认关闭 */ } }
 watch(() => [props.orgId, props.caseId], loadContracts, { immediate: true })
+watch(filters, loadContracts, { deep: true })
 onMounted(loadFeatures)
 </script>
 
@@ -172,4 +206,7 @@ onMounted(loadFeatures)
 
 .risk-high { color: var(--color-danger); }
 .risk-gap { color: var(--color-warning); }
+
+.contract-filters { display: flex; align-items: center; gap: var(--space-2); padding-bottom: var(--space-3); }
+.contract-filters select { height: 30px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }
 </style>

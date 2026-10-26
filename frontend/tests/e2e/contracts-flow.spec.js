@@ -49,7 +49,10 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
     if (method === 'GET' && path === '/legal/features') return route.fulfill({ json: success({ signing_enabled: false }) })
     if (method === 'GET' && path === '/legal/orgs/5/contracts') {
       requests.listContracts = url.searchParams.get('case_id')
-      return route.fulfill({ json: success({ items: CONTRACTS, total: 2, page: 1, page_size: 20 }) })
+      requests.reviewStatus = url.searchParams.get('review_status')
+      const reviewStatus = url.searchParams.get('review_status')
+      const items = reviewStatus ? CONTRACTS.filter((item) => item.review?.status === reviewStatus) : CONTRACTS
+      return route.fulfill({ json: success({ items, total: items.length, page: 1, page_size: 20 }) })
     }
     if (method === 'POST' && path === '/legal/orgs/5/contracts') {
       requests.createContract = request.postDataJSON()
@@ -94,6 +97,15 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
   await expect(ledgerRow).toContainText('无定位 2')
   await expect(page.locator('.el-table__row', { hasText: '采购协议联调' })).toContainText('未审查')
   expect(requests.listContracts).toBe('3')
+
+  // 台账筛选：按审查状态（服务端过滤）
+  const reviewFilter = page.locator('.contract-filters select[aria-label="按审查状态筛选"]')
+  await reviewFilter.selectOption('needs_lawyer_review')
+  await expect.poll(() => requests.reviewStatus).toBe('needs_lawyer_review')
+  await expect(page.locator('.el-table__row')).toHaveCount(1)
+  await expect(page.locator('.el-table__row')).toContainText('劳动合同模板联调')
+  await reviewFilter.selectOption('')
+  await expect(page.locator('.el-table__row')).toHaveCount(2)
   const signBtn = page.getByRole('button', { name: '签署', exact: true }).first()
   await expect(signBtn).toBeDisabled()
 

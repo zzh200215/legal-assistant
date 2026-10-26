@@ -120,6 +120,8 @@ def list_visible_contracts(
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    review_status: str | None = None,
+    risk: str | None = None,
 ) -> dict:
     query = (
         db.query(LegalContract)
@@ -146,14 +148,31 @@ def list_visible_contracts(
         or_(LegalCase.is_strict_mode.is_(None), LegalCase.is_strict_mode == 0),
         LegalCaseMember.id.isnot(None),
     ))
+    ordered = query.distinct().order_by(LegalContract.updated_at.desc(), LegalContract.id.desc())
+    if review_status or risk:
+        # 审查/风险是派生字段（JSON + 版本关联），SQL 无法直接过滤：
+        # 先取该组织可见合同（上限 1000，避免全表），再在内存里过滤 + 分页。
+        rows = ordered.limit(1000).all()
+        items = [serialize_contract(contract) for contract in rows]
+        _attach_latest_reviews(db, rows, items)
+        if review_status:
+            items = [item for item in items if (item["review"] or {}).get("status") == review_status]
+        if risk == "high":
+            items = [item for item in items if (item["review"] or {}).get("risks_high", 0) > 0]
+        elif risk == "unanchored":
+            items = [item for item in items if (item["review"] or {}).get("risks_unanchored", 0) > 0]
+        elif risk == "none":
+            items = [item for item in items if item["review"] is None]
+        total = len(items)
+        start = (page - 1) * page_size
+        return {
+            "items": items[start:start + page_size],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
     total = query.with_entities(LegalContract.id).distinct().count()
-    rows = (
-        query.distinct()
-        .order_by(LegalContract.updated_at.desc(), LegalContract.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+    rows = ordered.offset((page - 1) * page_size).limit(page_size).all()
     items = [serialize_contract(contract) for contract in rows]
     _attach_latest_reviews(db, rows, items)
     return {
@@ -170,6 +189,8 @@ def list_expiry_alerts(
     org_id: int,
     page: int = 1,
     page_size: int = 20,
+    review_status: str | None = None,
+    risk: str | None = None,
 ) -> dict:
     query = (
         db.query(LegalContractMilestone)

@@ -130,6 +130,8 @@ def list_contracts(
     case_id: Optional[int] = None,
     status: Optional[str] = None,
     q: Optional[str] = None,
+    review_status: Optional[str] = Query(None, pattern="^(draft|pending_review|needs_lawyer_review|needs_facts|lawyer_approved|returned_for_facts|offline_consultation|archived)$"),
+    risk: Optional[str] = Query(None, pattern="^(high|unanchored|none)$"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     db: Session = Depends(get_db),
@@ -147,6 +149,8 @@ def list_contracts(
         q=q,
         page=page,
         page_size=page_size,
+        review_status=review_status,
+        risk=risk,
     )
 
 

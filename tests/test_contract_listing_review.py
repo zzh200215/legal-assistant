@@ -87,3 +87,59 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         result = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id)
         item = next(row for row in result["items"] if row["id"] == contract.id)
         self.assertIsNone(item["review"])
+
+    def _attach_review(self, contract, *, status, risks):
+        review = ContractReview(
+            user_id=self.user.id, title=contract.title, content="正文", summary="",
+            risks_json=json.dumps(risks, ensure_ascii=False),
+            references_json="[]", status=status, version=1,
+        )
+        self.db.add(review)
+        self.db.commit()
+        self.db.refresh(review)
+        self.db.add(LegalContractVersion(
+            contract_id=contract.id, organization_id=self.org.id, version_no=1,
+            source_type="contract_review", text_snapshot="正文",
+            source_review_id=review.id, created_by=self.user.id,
+        ))
+        self.db.commit()
+        return review
+
+    def test_filters_by_review_status_and_risk(self):
+        high = self._contract("高风险合同")
+        self._attach_review(high, status="needs_lawyer_review", risks=[
+            {"clause_type": "breach", "risk_level": "high", "description": "高",
+             "source_location": {"paragraph": 1}},
+        ])
+        low = self._contract("已通过合同")
+        self._attach_review(low, status="lawyer_approved", risks=[
+            {"clause_type": "payment", "risk_level": "low", "description": "低",
+             "source_location": {"paragraph": 1}},
+        ])
+        none = self._contract("未审查合同")
+
+        by_status = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id, review_status="needs_lawyer_review",
+        )
+        self.assertEqual([item["id"] for item in by_status["items"]], [high.id])
+        self.assertEqual(by_status["total"], 1)
+
+        by_high = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id, risk="high")
+        self.assertEqual([item["id"] for item in by_high["items"]], [high.id])
+
+        by_none = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id, risk="none")
+        self.assertEqual([item["id"] for item in by_none["items"]], [none.id])
+
+        all_rows = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id)
+        self.assertEqual(all_rows["total"], 3)
+
+    def test_filtered_list_paginates_after_filtering(self):
+        for index in range(3):
+            contract = self._contract(f"待审合同{index}")
+            self._attach_review(contract, status="needs_lawyer_review", risks=[])
+        page = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            review_status="needs_lawyer_review", page=2, page_size=2,
+        )
+        self.assertEqual(page["total"], 3)
+        self.assertEqual(len(page["items"]), 1)

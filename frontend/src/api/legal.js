@@ -9,8 +9,14 @@ export default {
   getOperationsSummary(orgId) { return http.get(`/developer/orgs/${orgId}/operations/summary`) },
   // Contract lifecycle
   createLegalContract(orgId, payload) { return http.post(`/legal/orgs/${orgId}/contracts`, payload) },
-  listLegalContracts(orgId, caseId) {
-    return http.get(`/legal/orgs/${orgId}/contracts${caseId ? `?case_id=${caseId}` : ''}`)
+  listLegalContracts(orgId, caseId, params = {}) {
+    const query = new URLSearchParams()
+    if (caseId) query.set('case_id', caseId)
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') query.set(key, value)
+    })
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return http.get(`/legal/orgs/${orgId}/contracts${suffix}`)
   },
   listLegalContractVersions(contractId) { return http.get(`/legal/contracts/${contractId}/versions`) },
   createLegalContractVersion(contractId, payload) { return http.post(`/legal/contracts/${contractId}/versions`, payload) },
