@@ -80,6 +80,26 @@ class ScanReviewSlaTests(unittest.TestCase):
         # 幂等：再扫一次不重复
         self.assertEqual(scan_review_sla(self.db), {"created": 0, "due_soon": 0, "overdue": 0})
 
+    def test_email_channel_created_when_org_has_outbound_policy(self):
+        """组织配置外发邮件策略时，SLA 提醒同时落站内 + 邮件两个事件。"""
+        from app.models.email import OutboundEmailPolicy
+
+        self.db.add(OutboundEmailPolicy(organization_id=self.org.id, enabled=True))
+        self.db.commit()
+        row = self._row(hours=6, title="邮件提醒咨询")
+
+        result = scan_review_sla(self.db)
+        self.assertEqual(result["due_soon"], 1)
+        events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.reference_id == row.id,
+        ).all()
+        channels = sorted((event.channel, event.status) for event in events)
+        self.assertEqual(channels, [("email", "pending"), ("site", "delivered")])
+        self.assertTrue(all(event.template_key == "review_sla_due_soon" for event in events))
+
+        # 幂等：同模板键不重复建事件（含邮件渠道）
+        self.assertEqual(scan_review_sla(self.db)["created"], 0)
+
     def test_stage_change_from_due_soon_to_overdue_notifies_again(self):
         row = self._row(hours=6, title="先即将到期后逾期")
         scan_review_sla(self.db)

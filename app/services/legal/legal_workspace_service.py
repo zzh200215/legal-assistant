@@ -756,13 +756,14 @@ class LegalWorkspaceModule:
             .all()
         )
         for (recipient_id,) in recipients:
-            notification_service.create_notification(
+            notification_service.create_multi_channel_notification(
                 db=db,
                 organization_id=org_id,
                 user_id=recipient_id,
                 event_type="approval",
                 title=title,
                 body=body,
+                channels=["site", "email"],
                 case_id=getattr(row, "case_id", None),
                 reference_type="consultation",
                 reference_id=row.id,
@@ -1557,13 +1558,14 @@ class LegalWorkspaceReadModule:
             body = f"「{question[:40]}」法源依据偏弱（{covered}），审核前请留意依据是否充分。"
             template_key = "review_consultation_weak"
         for (recipient_id,) in recipients:
-            notification_service.create_notification(
+            notification_service.create_multi_channel_notification(
                 db=db,
                 organization_id=user.organization_id,
                 user_id=recipient_id,
                 event_type="approval",
                 title=title,
                 body=body,
+                channels=["site", "email"],
                 case_id=getattr(row, "case_id", None),
                 reference_type="consultation",
                 reference_id=row.id,
@@ -1591,13 +1593,14 @@ class LegalWorkspaceReadModule:
             detail = (note or "").strip()[:80] or "请查看审核意见后重新提交。"
             body = f"「{question[:40]}」被退回：{detail}"
             template_key = "consultation_returned"
-        notification_service.create_notification(
+        notification_service.create_multi_channel_notification(
             db=db,
             organization_id=user.organization_id,
             user_id=row.user_id,
             event_type="approval",
             title=title,
             body=body,
+            channels=["site", "email"],
             case_id=getattr(row, "case_id", None),
             reference_type="consultation",
             reference_id=row.id,

@@ -131,3 +131,27 @@ class NotificationTemplateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EmailRenderFallbackTests(unittest.TestCase):
+    """邮件模板缺失时回退到事件标题/正文，而不是死信。"""
+
+    def test_unknown_template_key_falls_back_to_event_copy(self):
+        from app.models.legal_notifications import LegalNotificationEvent
+        from app.services.notification.notification_service import notification_service
+
+        engine = _engine()
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+        try:
+            event = LegalNotificationEvent(
+                organization_id=1, user_id=1, event_type="approval",
+                title="审核即将到期：合同 A（剩 6 小时）", body="sla:due_soon · 合同 #1",
+                channel="email", template_key="review_sla_due_soon",
+            )
+            subject, body = notification_service._render_email_content(db, event)
+            self.assertEqual(subject, event.title)
+            self.assertEqual(body, event.body)
+        finally:
+            db.close()
+            engine.dispose()

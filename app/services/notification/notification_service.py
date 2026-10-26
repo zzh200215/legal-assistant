@@ -151,12 +151,17 @@ class NotificationService:
     @staticmethod
     def _idempotency_key(organization_id: int, user_id: int, channel: str, event_type: str,
                          reference_type: str | None, reference_id: int | None,
-                         business_version: int | None) -> str:
+                         business_version: int | None, template_key: str | None = None) -> str:
         version = business_version if business_version is not None else 1
-        return "notify:" + ":".join([
+        parts = [
             str(organization_id), str(user_id), str(channel), str(event_type),
             str(reference_type or ""), str(reference_id or ""), str(version),
-        ])
+        ]
+        # 同一业务对象可能有多个模板（如 SLA 即将到期/已逾期）：模板键参与去重，互不覆盖；
+        # 不传 template_key 时保持旧键，历史事件与幂等语义不变。
+        if template_key:
+            parts.append(str(template_key))
+        return "notify:" + ":".join(parts)
 
     def create_notification(self, *, db: Session, organization_id: int,
                            user_id: int, event_type: str, title: str,
@@ -180,7 +185,7 @@ class NotificationService:
 
         idem_key = self._idempotency_key(
             organization_id, user_id, channel, event_type,
-            reference_type, reference_id, business_version,
+            reference_type, reference_id, business_version, template_key,
         )
         existing = db.query(LegalNotificationEvent).filter(
             LegalNotificationEvent.idempotency_key == idem_key
@@ -247,7 +252,8 @@ class NotificationService:
                                           reference_type: str | None = None,
                                           reference_id: int | None = None,
                                           scheduled_at: datetime | None = None,
-                                          business_version: int | None = None) -> list[LegalNotificationEvent]:
+                                          business_version: int | None = None,
+                                          template_key: str | None = None) -> list[LegalNotificationEvent]:
         """创建多渠道通知事件（幂等：每个渠道一个事件，同键去重）。
 
         根据 user 通知偏好决定哪些渠道生效。站内通知始终创建。
@@ -272,6 +278,7 @@ class NotificationService:
                 reference_id=reference_id,
                 scheduled_at=scheduled_at,
                 business_version=business_version,
+                template_key=template_key,
             )
             events.append(event)
         return events
@@ -535,9 +542,9 @@ class NotificationService:
                         "reference_id": str(event.reference_id or "")},
             )
             return rendered.get("subject") or event.title, rendered.get("body") or ""
-        except Exception as exc:  # noqa: BLE001 - 渲染失败按模板错误处理
-            logger.error("通知模板渲染失败 event_id=%s: %s", event.id, exc)
-            return None, None
+        except Exception as exc:  # noqa: BLE001 - 模板缺失/失败时回退到事件标题与正文
+            logger.warning("通知模板渲染失败，回退到事件标题/正文 event_id=%s: %s", event.id, exc)
+            return event.title, event.body or ""
 
     def _dispatch_external_channel(self, db: Session, event: LegalNotificationEvent) -> str:
         """微信/飞书通知：保留既有占位投递（无真实出站凭据，标记为 sent）。"""

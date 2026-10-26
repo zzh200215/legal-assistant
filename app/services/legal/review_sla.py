@@ -15,6 +15,7 @@ from app.core.time import utc_now
 from app.models.legal import ContractReview, LegalCase, LegalConsultation, LegalDraft
 from app.models.legal_notifications import LegalNotificationEvent
 from app.models.user import User
+from app.services.notification.notification_service import notification_service
 
 DUE_SOON_HOURS = 24
 ACTIVE_STATUSES = ("pending_review", "needs_lawyer_review", "needs_facts")
@@ -75,12 +76,13 @@ def scan_review_sla(db: Session, *, now: datetime | None = None) -> dict:
             if not org_id:
                 continue
             marker = f"sla:{stage}"
+            template_key = f"review_sla_{stage}"
             exists = (
                 db.query(LegalNotificationEvent)
                 .filter(
                     LegalNotificationEvent.reference_type == kind,
                     LegalNotificationEvent.reference_id == row.id,
-                    LegalNotificationEvent.body.like(f"%{marker}%"),
+                    LegalNotificationEvent.template_key == template_key,
                 )
                 .first()
             )
@@ -89,20 +91,21 @@ def scan_review_sla(db: Session, *, now: datetime | None = None) -> dict:
             name = getattr(row, "title", None) or getattr(row, "question", None) or f"{label} #{row.id}"
             name = str(name).strip().splitlines()[0][:40]
             when = f"超时 {_humanize(hours)}" if stage == "overdue" else f"剩 {_humanize(hours)}"
-            db.add(LegalNotificationEvent(
+            # 站内 + 邮件：邮件仅在组织配置了外发策略时才会真正建事件，
+            # 实际投递由 Outbox worker 负责；站内照旧即时可见。
+            notification_service.create_multi_channel_notification(
+                db=db,
                 organization_id=org_id,
                 user_id=reviewer_id,
-                case_id=getattr(row, "case_id", None),
                 event_type="approval",
                 title=f"{prefix}：{name}（{when}）",
                 body=f"{marker} · {label} #{row.id} 的审核截止时间 {row.review_due_at:%Y-%m-%d %H:%M}",
-                channel="site",
-                status="delivered",
-                sent_at=now,
+                channels=["site", "email"],
+                case_id=getattr(row, "case_id", None),
                 reference_type=kind,
                 reference_id=row.id,
-                template_key=f"review_sla_{stage}",
-            ))
+                template_key=template_key,
+            )
             created += 1
             if stage == "overdue":
                 overdue += 1
