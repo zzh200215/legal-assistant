@@ -888,3 +888,38 @@ def slo_status(
     result["api_request_duration"]["latency_p95_ms"] = max(p95_values) if p95_values else None
     result["api_request_duration"]["target_p95_ms"] = settings.SLO_API_P95_MS
     return {"days": days, "org_id": org_id, "metrics": result}
+
+
+# ── Outbox 投递看板（通知 + 邮件 Outbox，读明细；死信可人工重排）──────────────
+
+@router.get("/outbox/overview")
+def outbox_delivery_overview(
+    days: int = Query(7, ge=1, le=90, description="统计窗口天数"),
+    org_id: int | None = Query(None, description="按组织过滤（仅影响邮件 Outbox）"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """投递看板：窗口内投递率/渠道分布 + 当前积压与死信 + 运营提示。"""
+    from app.services.notification.delivery_ops import outbox_overview
+
+    return outbox_overview(db, days=days, organization_id=org_id)
+
+
+@router.post("/outbox/dead-letters/{kind}/{item_id}/retry")
+def retry_outbox_dead_letter(
+    kind: str,
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """死信重排：notification → 待投递，email → 待审批（不改业务内容）。"""
+    from app.services.notification.delivery_ops import retry_dead_letter
+
+    try:
+        return retry_dead_letter(db, kind=kind, item_id=item_id, user=current_user)
+    except LookupError as exc:
+        raise api_error(404, "投递记录不存在", code="OUTBOX_ITEM_NOT_FOUND", detail=str(exc))
+    except PermissionError as exc:
+        raise api_error(403, "无权操作该组织的投递记录", code="OUTBOX_RETRY_FORBIDDEN", detail=str(exc))
+    except ValueError as exc:
+        raise api_error(409, "该投递当前状态不可重排", code="OUTBOX_RETRY_INVALID_STATE", detail=str(exc))

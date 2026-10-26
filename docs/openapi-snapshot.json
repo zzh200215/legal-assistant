@@ -17636,6 +17636,140 @@
         }
       }
     },
+    "/api/analytics/outbox/overview": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Outbox Delivery Overview",
+        "description": "投递看板：窗口内投递率/渠道分布 + 当前积压与死信 + 运营提示。",
+        "operationId": "outbox_delivery_overview_api_analytics_outbox_overview_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "description": "统计窗口天数",
+              "default": 7,
+              "title": "Days"
+            },
+            "description": "统计窗口天数"
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按组织过滤（仅影响邮件 Outbox）",
+              "title": "Org Id"
+            },
+            "description": "按组织过滤（仅影响邮件 Outbox）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/analytics/outbox/dead-letters/{kind}/{item_id}/retry": {
+      "post": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Retry Outbox Dead Letter",
+        "description": "死信重排：notification → 待投递，email → 待审批（不改业务内容）。",
+        "operationId": "retry_outbox_dead_letter_api_analytics_outbox_dead_letters__kind___item_id__retry_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/developer/api-keys": {
       "get": {
         "tags": [

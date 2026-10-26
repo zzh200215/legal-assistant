@@ -82,4 +82,10 @@ export default {
   resolveFeedback(qaRecordId, data) {
     return http.post(`/analytics/feedback/${qaRecordId}/resolve`, data)
   },
+  outboxOverview(params) {
+    return http.get('/analytics/outbox/overview', { params })
+  },
+  retryOutboxDeadLetter(kind, itemId) {
+    return http.post(`/analytics/outbox/dead-letters/${kind}/${itemId}/retry`)
+  },
 }
