@@ -153,7 +153,10 @@ class NotificationTemplate(Base):
     version = Column(Integer, nullable=False, default=1)
     locale = Column(String(16), nullable=False, default="default", comment="zh-CN / zh / default")
     subject_template = Column(String(512), nullable=True, comment="邮件主题模板（{{param}} 占位）")
-    body_template = Column(Text, nullable=False, comment="正文/载荷模板")
+    body_template = Column(Text, nullable=False,
+                           comment="正文/载荷模板；body_format=layout 时存 JSON 覆写（lead/action_label/footnote）")
+    body_format = Column(String(16), nullable=False, default="text", server_default="text",
+                         comment="text=纯文本 / html=整段 HTML / layout=内置版式字段覆写")
     params_schema_json = Column(Text, nullable=True, comment="参数 JSON Schema")
     status = Column(String(16), nullable=False, default="draft", index=True,
                     comment="draft / active / retired")

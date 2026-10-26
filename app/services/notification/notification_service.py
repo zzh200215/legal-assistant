@@ -549,9 +549,17 @@ class NotificationService:
                               event: LegalNotificationEvent) -> tuple[str | None, str | None, str | None]:
         """渲染邮件通知内容，返回 ``(subject, text, html)``。
 
-        优先级：数据库模板（运营可覆写文案，纯文本）→ 内置 HTML 版式 → 事件标题/正文。
-        HTML 缺失时 html 为 None，邮件按纯文本发送（不伪造 HTML 版）。
+        优先级：数据库模板 → 内置 HTML 版式 → 事件标题/正文。
+        数据库模板按 ``body_format`` 分三种：
+        - ``text``：纯文本，不要 HTML（历史行为）；
+        - ``html``：整段自定义 HTML，纯文本回退由服务端剥标签生成；
+        - ``layout``：只覆写内置版式的文案字段（lead/action_label/footnote/subject），版式不变。
         """
+        from app.services.notification.email_templates import (
+            LayoutOverrideError, action_url, html_to_text, parse_layout_overrides,
+            render_builtin_email,
+        )
+
         params = {
             "title": event.title,
             "body": event.body or "",
@@ -562,19 +570,35 @@ class NotificationService:
         try:
             from app.services.notification.notification_template_service import notification_template_service
 
-            if notification_template_service.resolve(
+            template = notification_template_service.resolve(
                 db=db, channel=CHANNEL_EMAIL, template_key=event.template_key,
                 locale=event.locale or "zh-CN",
-            ) is not None:
-                rendered = notification_template_service.render(
-                    db=db, channel=CHANNEL_EMAIL, template_key=event.template_key,
-                    locale=event.locale or "zh-CN", params=params,
-                )
-                return rendered.get("subject") or event.title, rendered.get("body") or "", None
+            )
+            if template is not None:
+                body_format = (template.body_format or "text").lower()
+                if body_format == "html":
+                    rendered = notification_template_service.render_instance(template, params=params)
+                    html_body = rendered.get("body") or ""
+                    return (rendered.get("subject") or event.title,
+                            html_to_text(html_body) or event.body or "", html_body)
+                if body_format == "layout":
+                    overrides = parse_layout_overrides(template.body_template)
+                    # layout.subject 优先；老数据只用 subject_template 列时也能兼容
+                    if not overrides.get("subject") and template.subject_template:
+                        overrides["subject"] = template.subject_template
+                    builtin = render_builtin_email(event.template_key, params={
+                        **params, "action_url": action_url(event.reference_type),
+                    }, layout_overrides=overrides)
+                    if builtin is not None:
+                        return builtin["subject"] or event.title, builtin["text"], builtin["html"]
+                else:
+                    rendered = notification_template_service.render_instance(template, params=params)
+                    return rendered.get("subject") or event.title, rendered.get("body") or "", None
+        except LayoutOverrideError as exc:
+            # 覆写内容坏了不能拖垮投递：记 warning，退回内置版式
+            logger.warning("通知模板布局覆写非法，回退内置版式 event_id=%s: %s", event.id, exc)
         except Exception as exc:  # noqa: BLE001 - 数据库模板异常不应阻断邮件
             logger.warning("数据库模板渲染失败 event_id=%s: %s", event.id, exc)
-
-        from app.services.notification.email_templates import action_url, render_builtin_email
 
         builtin = render_builtin_email(event.template_key, params={
             **params, "action_url": action_url(event.reference_type),

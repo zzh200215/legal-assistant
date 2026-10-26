@@ -26,6 +26,9 @@ _LOCALE_FALLBACK = ("zh-CN", "zh", "default")
 
 _VALID_TYPES = ("string", "number", "integer", "boolean")
 
+# 正文格式：text=纯文本；html=整段 HTML；layout=内置版式字段覆写（body_template 存 JSON）。
+_VALID_BODY_FORMATS = ("text", "html", "layout")
+
 
 class TemplateValidationError(ValueError):
     """模板或参数不合法（渲染前校验失败）。"""
@@ -50,15 +53,19 @@ class NotificationTemplateService:
         body_template: str,
         locale: str = "default",
         subject_template: str | None = None,
+        body_format: str = "text",
         params_schema: dict | None = None,
         status: str = "active",
         created_by: int | None = None,
         reviewed_by: int | None = None,
     ) -> NotificationTemplate:
-        """创建模板；同 channel+key+locale 内容未变则复用最新版，内容变化则新建版本。"""
+        """创建模板；同 channel+key+locale 且格式/内容未变则复用最新版，变化则新建版本。"""
+        body_format = self.validate_body_format(body_format)
         digest = _content_hash(channel, template_key, locale, subject_template, body_template)
         latest = self._latest(db, channel, template_key, locale)
-        if latest is not None and latest.content_hash == digest:
+        # 哈希公式不含格式（兼容历史行）；格式变化也要新版本，否则覆写语义会被静默切换。
+        if (latest is not None and latest.content_hash == digest
+                and (latest.body_format or "text") == body_format):
             return latest
 
         version = (latest.version if latest is not None else 0) + 1
@@ -69,6 +76,7 @@ class NotificationTemplateService:
             version=version,
             subject_template=subject_template,
             body_template=body_template,
+            body_format=body_format,
             params_schema_json=json.dumps(params_schema, ensure_ascii=False) if params_schema else None,
             status=status,
             created_by=created_by,
@@ -82,7 +90,7 @@ class NotificationTemplateService:
 
     def activate(self, *, db: Session, channel: str, template_key: str,
                  locale: str, version: int, reviewed_by: int | None = None) -> NotificationTemplate:
-        """把指定版本置为 active（并记录 review）。"""
+        """把指定版本置为 active（并记录 review）；同 key+locale 旧 active 版本转 retired。"""
         template = (
             db.query(NotificationTemplate)
             .filter(
@@ -95,6 +103,18 @@ class NotificationTemplateService:
         )
         if not template:
             raise TemplateValidationError("模板版本不存在")
+        for other in (
+            db.query(NotificationTemplate)
+            .filter(
+                NotificationTemplate.channel == channel,
+                NotificationTemplate.template_key == template_key,
+                NotificationTemplate.locale == locale,
+                NotificationTemplate.status == "active",
+                NotificationTemplate.id != template.id,
+            )
+            .all()
+        ):
+            other.status = "retired"
         template.status = "active"
         template.reviewed_by = reviewed_by or template.reviewed_by
         db.commit()
@@ -150,6 +170,11 @@ class NotificationTemplateService:
             raise TemplateValidationError(
                 f"模板不存在: channel={channel} key={template_key} locale={locale}"
             )
+        return self.render_instance(template, params=params, escape_html=escape_html)
+
+    def render_instance(self, template: NotificationTemplate, *,
+                        params: dict | None = None, escape_html: bool = True) -> dict:
+        """渲染给定模板行（预览与正式渲染共用；不查库、不改状态）。"""
         params = dict(params or {})
         self.validate_params(params, template.params_schema_json)
 
@@ -183,11 +208,19 @@ class NotificationTemplateService:
         return {
             "subject": subject,
             "body": body,
+            "body_format": template.body_format or "text",
             "template_key": template.template_key,
             "template_version": template.version,
             "locale": template.locale,
             "content_hash": template.content_hash,
         }
+
+    @staticmethod
+    def validate_body_format(body_format: str | None) -> str:
+        value = (body_format or "text").strip().lower()
+        if value not in _VALID_BODY_FORMATS:
+            raise TemplateValidationError(f"不支持的模板格式: {body_format}")
+        return value
 
     @staticmethod
     def validate_params(params: dict, params_schema_json: str | None) -> None:

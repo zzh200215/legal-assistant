@@ -88,4 +88,16 @@ export default {
   retryOutboxDeadLetter(kind, itemId) {
     return http.post(`/analytics/outbox/dead-letters/${kind}/${itemId}/retry`)
   },
+  notificationTemplates(params) {
+    return http.get('/admin/notification-templates/', { params })
+  },
+  previewNotificationTemplate(data) {
+    return http.post('/admin/notification-templates/preview', data)
+  },
+  createNotificationTemplate(data) {
+    return http.post('/admin/notification-templates/', data)
+  },
+  activateNotificationTemplate(id) {
+    return http.post(`/admin/notification-templates/${id}/activate`)
+  },
 }

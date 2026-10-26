@@ -906,6 +906,22 @@
  * @property {number | null}= progress
  * @property {string | null}= status
  * @property {string | null}= title
+ * @typedef {Object} TemplateDraftIn
+ * @property {string}= body_format
+ * @property {string | null}= body_template
+ * @property {Object | null}= layout
+ * @property {string}= locale
+ * @property {Object | null}= params_schema
+ * @property {string | null}= subject_template
+ * @property {string} template_key
+ * @typedef {Object} TemplatePreviewIn
+ * @property {string}= body_format
+ * @property {string | null}= body_template
+ * @property {Object | null}= layout
+ * @property {string}= locale
+ * @property {Object | null}= params
+ * @property {string | null}= subject_template
+ * @property {string} template_key
  * @typedef {Object} TimeEntryCreate
  * @property {number | null}= billing_rule_id
  * @property {number} case_id

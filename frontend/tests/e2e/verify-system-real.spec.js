@@ -28,13 +28,14 @@ const TABS = [
   'sensitivity',
   'tasks',
   'delivery',
+  'templates',
 ]
 
 test.describe('真实后端：系统页管理员视图', () => {
   test.skip(!RUN, '需要 E2E_RUN_INTEGRATION=true')
   test.skip(!USERNAME || !PASSWORD, '需要 E2E_ADMIN_USERNAME / E2E_ADMIN_PASSWORD')
 
-  test('管理员登录后 16 个 tab 全部渲染且无运行时报错', async ({ page }) => {
+  test('管理员登录后 17 个 tab 全部渲染且无运行时报错', async ({ page }) => {
     test.setTimeout(180_000)
     const pageErrors = []
     const failed = []

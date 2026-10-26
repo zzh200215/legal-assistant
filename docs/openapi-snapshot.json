@@ -14444,6 +14444,229 @@
         }
       }
     },
+    "/api/admin/notification-templates/": {
+      "get": {
+        "tags": [
+          "Notification Templates"
+        ],
+        "summary": "List Notification Templates",
+        "description": "内置模板清单 + 数据库覆写版本（默认按模板键/版本倒序）。",
+        "operationId": "list_notification_templates_api_admin_notification_templates__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "template_key",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按模板键过滤",
+              "title": "Template Key"
+            },
+            "description": "按模板键过滤"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Notification Templates"
+        ],
+        "summary": "Create Notification Template",
+        "description": "新建模板草稿（同内容复用已有版本；不自动启用）。",
+        "operationId": "create_notification_template_api_admin_notification_templates__post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateDraftIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
+      }
+    },
+    "/api/admin/notification-templates/preview": {
+      "post": {
+        "tags": [
+          "Notification Templates"
+        ],
+        "summary": "Preview Notification Template",
+        "description": "渲染预览（不落库）：layout 走内置版式，html/text 用传入正文。",
+        "operationId": "preview_notification_template_api_admin_notification_templates_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplatePreviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
+      }
+    },
+    "/api/admin/notification-templates/{template_id}/activate": {
+      "post": {
+        "tags": [
+          "Notification Templates"
+        ],
+        "summary": "Activate Notification Template",
+        "description": "启用指定版本；同 key+locale 的其它 active 版本转为 retired。",
+        "operationId": "activate_notification_template_api_admin_notification_templates__template_id__activate_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "template_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Template Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/prompts/": {
       "get": {
         "tags": [
@@ -31185,6 +31408,149 @@
         },
         "type": "object",
         "title": "TaskUpdate"
+      },
+      "TemplateDraftIn": {
+        "properties": {
+          "template_key": {
+            "type": "string",
+            "title": "Template Key"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "default": "zh-CN"
+          },
+          "body_format": {
+            "type": "string",
+            "title": "Body Format",
+            "default": "layout"
+          },
+          "subject_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Template"
+          },
+          "body_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Template"
+          },
+          "layout": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout"
+          },
+          "params_schema": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params Schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template_key"
+        ],
+        "title": "TemplateDraftIn"
+      },
+      "TemplatePreviewIn": {
+        "properties": {
+          "template_key": {
+            "type": "string",
+            "title": "Template Key"
+          },
+          "locale": {
+            "type": "string",
+            "title": "Locale",
+            "default": "zh-CN"
+          },
+          "body_format": {
+            "type": "string",
+            "title": "Body Format",
+            "default": "layout"
+          },
+          "subject_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Template"
+          },
+          "body_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Template"
+          },
+          "layout": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layout"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template_key"
+        ],
+        "title": "TemplatePreviewIn"
       },
       "TimeEntryCreate": {
         "properties": {

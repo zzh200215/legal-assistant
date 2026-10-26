@@ -63,6 +63,9 @@
       <el-tab-pane label="投递看板" name="delivery" lazy>
         <SystemDeliveryTab />
       </el-tab-pane>
+      <el-tab-pane label="通知模板" name="templates" lazy>
+        <SystemNotificationTemplatesTab />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -96,11 +99,12 @@ const asyncTab = (loader) => defineAsyncComponent({ loader, delay: 0 })
 const SystemTokensTab = asyncTab(() => import('../components/system/SystemTokensTab.vue'))
 // 投递看板同样拆成异步 chunk：新增 tab 不再推高 System 路由 chunk。
 const SystemDeliveryTab = asyncTab(() => import('../components/system/SystemDeliveryTab.vue'))
+const SystemNotificationTemplatesTab = asyncTab(() => import('../components/system/SystemNotificationTemplatesTab.vue'))
 
 const route = useRoute()
 const router = useRouter()
 
-const TAB_NAMES = ['health', 'tokens', 'oplogs', 'alerts', 'experiments', 'feedback', 'funnel', 'event_funnel', 'retention', 'tool_health', 'approvals', 'knowledge', 'orgs', 'sensitivity', 'tasks', 'delivery']
+const TAB_NAMES = ['health', 'tokens', 'oplogs', 'alerts', 'experiments', 'feedback', 'funnel', 'event_funnel', 'retention', 'tool_health', 'approvals', 'knowledge', 'orgs', 'sensitivity', 'tasks', 'delivery', 'templates']
 
 const activeTab = ref(TAB_NAMES.includes(route.query.tab) ? route.query.tab : 'health')
 

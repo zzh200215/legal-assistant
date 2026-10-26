@@ -11,7 +11,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import app.tasks  # noqa: F401  (显式注册 Celery 任务：应用进程内 .delay() 需任务已注册)
-from app.api.admin import analytics_api, dashboard_api, model_release_api, pilot_feedback_api, prompt_api
+from app.api.admin import analytics_api, dashboard_api, model_release_api, notification_template_api, pilot_feedback_api, prompt_api
 from app.api.agent import agent_api, mcp_api
 from app.api.auth import account_deletion_api, auth_api
 from app.api.billing import platform_payment_api, subscription_api
@@ -85,6 +85,8 @@ app.include_router(feishu_api.router, prefix="/api/feishu", tags=["Feishu"])
 app.include_router(miniapp_api.router, prefix="/api/miniapp", tags=["Mini App"])
 app.include_router(dashboard_api.router, prefix="/api/admin", tags=["Admin Dashboard"])
 app.include_router(model_release_api.router, prefix="/api/admin/model-releases", tags=["Model Releases"])
+app.include_router(notification_template_api.router, prefix="/api/admin/notification-templates",
+                   tags=["Notification Templates"])
 app.include_router(prompt_api.router, prefix="/api/prompts", tags=["Prompts"])
 app.include_router(analytics_api.router, prefix="/api/analytics", tags=["Analytics"])
 app.include_router(api_key_api.router, prefix="/api/developer", tags=["Open API Keys"])

@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
+import json
 import re
-from html import escape
+from html import escape, unescape
 
 from app.core.config import get_settings
 
@@ -82,6 +83,71 @@ _DEFAULT_ACTION_PATH = "/notifications"
 _BRAND = "律智检"
 _TAGLINE = "法律文书与合同审查智能体平台"
 _FOOTER = "此邮件由系统自动发送，请勿直接回复。"
+
+# 运营可覆写的版式字段（类型 layout 的模板只改这些文案，不动 HTML 结构）。
+LAYOUT_OVERRIDE_FIELDS = ("subject", "lead", "action_label", "footnote")
+LAYOUT_FIELD_LIMITS = {"subject": 120, "lead": 300, "action_label": 16, "footnote": 300}
+
+
+class LayoutOverrideError(ValueError):
+    """layout 覆写不合法（未知字段 / 超长 / 非 JSON）。"""
+
+
+def parse_layout_overrides(text: str | None) -> dict[str, str]:
+    """解析 layout 覆写 JSON：只认 4 个文案字段，空值和缺失都表示「用内置文案」。"""
+    if not text or not str(text).strip():
+        return {}
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise LayoutOverrideError("布局覆写必须是 JSON 对象") from exc
+    if not isinstance(payload, dict):
+        raise LayoutOverrideError("布局覆写必须是 JSON 对象")
+    overrides: dict[str, str] = {}
+    for key, value in payload.items():
+        if key not in LAYOUT_OVERRIDE_FIELDS:
+            raise LayoutOverrideError(f"不支持的覆写字段: {key}")
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise LayoutOverrideError(f"覆写字段 {key} 必须是字符串")
+        value = value.strip()
+        if not value:
+            continue
+        if len(value) > LAYOUT_FIELD_LIMITS[key]:
+            raise LayoutOverrideError(f"覆写字段 {key} 超过 {LAYOUT_FIELD_LIMITS[key]} 字")
+        overrides[key] = value
+    return overrides
+
+
+def describe_builtin_templates() -> list[dict]:
+    """内置模板清单（管理页展示用），不含渲染逻辑。"""
+    return [
+        {
+            "template_key": key,
+            "subject": spec["subject"],
+            "lead": spec["lead"],
+            "action_label": spec["action_label"],
+            "footnote": spec["footnote"],
+        }
+        for key, spec in BUILTIN_EMAIL_TEMPLATES.items()
+    ]
+
+
+def html_to_text(html: str) -> str:
+    """HTML → 纯文本回退（自定义 html 模板没有手写纯文本版时用）。
+
+    只做保守剥离：去掉 script/style，块级标签转换行，其余标签删除，实体还原。
+    """
+    if not html:
+        return ""
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "", html)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|tr|h[1-6]|li)>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = unescape(text)
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
 
 
 def action_url(reference_type: str | None) -> str | None:
@@ -168,24 +234,29 @@ def _layout(*, title: str, lead: str, body: str, action_label: str | None,
     )
 
 
-def render_builtin_email(template_key: str | None, *, params: dict | None = None) -> dict | None:
+def render_builtin_email(template_key: str | None, *, params: dict | None = None,
+                         layout_overrides: dict | None = None) -> dict | None:
     """渲染内置模板；key 未注册返回 None（由调用方回退到事件文案）。
 
+    ``layout_overrides`` 只替换文案字段（subject/lead/action_label/footnote），
+    HTML 结构与样式保持不变；空值表示沿用内置文案。
     返回 ``{"subject", "text", "html", "template_key"}``，subject/html 已转义。
     """
     spec = BUILTIN_EMAIL_TEMPLATES.get(str(template_key or ""))
     if spec is None:
         return None
+    overrides = layout_overrides or {}
 
     raw = {key: str(value or "") for key, value in (params or {}).items()}
     title = raw.get("title", "")
     body = raw.get("body", "")
     href = raw.get("action_url") or None
-    action_label = spec["action_label"] if href else ""
+    subject_template = overrides.get("subject") or spec["subject"]
+    lead = overrides.get("lead") or spec["lead"]
+    footnote = overrides.get("footnote") or spec["footnote"]
+    action_label = (overrides.get("action_label") or spec["action_label"]) if href else ""
 
-    subject = _fill(spec["subject"], {**raw, "title": re.sub(r"\s+", " ", title).strip()})
-    lead = spec["lead"]
-    footnote = spec["footnote"]
+    subject = _fill(subject_template, {**raw, "title": re.sub(r"\s+", " ", title).strip()})
 
     text_lines = [lead, "", title.strip()]
     if body.strip():
