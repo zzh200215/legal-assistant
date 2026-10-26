@@ -172,10 +172,33 @@ class DeliveryOpsOverviewTests(unittest.TestCase):
     def test_alerts_surface_dead_letters_and_stale_claims(self):
         data = outbox_overview(self.db, days=7)
         codes = {alert["code"] for alert in data["alerts"]}
-        self.assertIn("DEAD_LETTERS_PRESENT", codes)
+        self.assertIn("DEAD_LETTER", codes)
         self.assertIn("STALE_CLAIMS", codes)
-        self.assertIn("RETRY_DUE", codes)
+        # 到期待重试只有 1 条，低于默认阈值 10 → 不告警
+        self.assertNotIn("RETRY_STUCK", codes)
         self.assertIn("EMAIL_POLICY_DISABLED", codes)
+        # 结构化健康检查与 alerts 同源：阈值超限项一一对应
+        breached = {check["code"] for check in data["health"]["breached"]}
+        self.assertEqual(breached, {"DEAD_LETTER", "STALE_CLAIMS"})
+
+    def test_health_thresholds_use_settings(self):
+        from unittest.mock import patch
+
+        from app.core.config import get_settings
+
+        with patch.object(get_settings(), "OUTBOX_BACKLOG_WARN_THRESHOLD", 1):
+            data = outbox_overview(self.db, days=7)
+        breached = {check["code"] for check in data["health"]["breached"]}
+        self.assertIn("NOTIFICATION_BACKLOG", breached)
+
+    def test_trend_included_in_overview(self):
+        data = outbox_overview(self.db, days=7)
+        trend = data["trend"]
+        self.assertEqual(trend["days"], 7)
+        self.assertEqual(len(trend["notification"]), 7)
+        self.assertEqual(len(trend["email"]), 7)
+        # 今天创建了 6 条通知
+        self.assertEqual(trend["notification"][-1]["created"], 6)
 
     def test_window_is_clamped(self):
         self.assertEqual(outbox_overview(self.db, days=0)["window"]["days"], 1)

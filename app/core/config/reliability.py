@@ -69,6 +69,14 @@ class ReliabilitySettings(BaseSettings):
     # 通知邮件里的「去处理」按钮深链前缀（如 https://legal.example.com）。
     # 留空则不渲染按钮，邮件只保留文字提醒（不伪造不可点的链接）。
     NOTIFICATION_EMAIL_ACTION_BASE_URL: str = ""
+    # ── Outbox 投递健康阈值（投递看板 + 定时告警共用口径）──────────────
+    # 达到或超过阈值即视为异常；死信默认 1 条就告警（任何死信都需要人看）。
+    OUTBOX_BACKLOG_WARN_THRESHOLD: int = Field(default=50, ge=1, le=100000)
+    OUTBOX_DEAD_LETTER_WARN_THRESHOLD: int = Field(default=1, ge=1, le=10000)
+    OUTBOX_STALE_CLAIM_WARN_THRESHOLD: int = Field(default=1, ge=1, le=1000)
+    OUTBOX_RETRY_STUCK_WARN_THRESHOLD: int = Field(default=10, ge=1, le=100000)
+    # 同一组织同一条告警的冷却时间（= 幂等窗口），避免 beat 每 15 分钟刷屏。
+    OUTBOX_ALERT_COOLDOWN_MINUTES: int = Field(default=180, ge=15, le=1440)
     # 死信台账保留天数：由 run_database_archive 执行
     # （archive_service._cleanup_email_dead_letters，受 DATABASE_ARCHIVE_ENABLED/DRY_RUN 约束）。
     # 仍被通知事件引用的死信会跳过，等事件本身过期后再删。

@@ -63,6 +63,23 @@ def deliver_email_send_requests_task():
         db.close()
 
 
+@celery_app.task(name="check_outbox_health")
+@_beat_lock(task_name="check_outbox_health", ttl_seconds=600)
+def check_outbox_health_task():
+    """每15分钟：按组织检查投递积压/死信/卡死租约，超阈值给组织管理员发站内+邮件告警。
+
+    冷却窗口内幂等（同组织同告警不重复发）；平台管理员（无组织）不接收组织级事件。
+    """
+    _record_beat_heartbeat()
+    from app.services.notification.outbox_alerts import run_outbox_health_check
+
+    db = SessionLocal()
+    try:
+        return run_outbox_health_check(db)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="recover_stale_outbox_claims")
 @_beat_lock(task_name="recover_stale_outbox_claims", ttl_seconds=600)
 def recover_stale_outbox_claims_task():

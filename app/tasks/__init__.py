@@ -17,6 +17,7 @@ from app.tasks.document_tasks import (
     summarize_document_task,
 )
 from app.tasks.notification_tasks import (
+    check_outbox_health_task,
     deliver_email_send_requests_task,
     dispatch_notification_events_task,
     recover_stale_outbox_claims_task,

@@ -56,13 +56,41 @@ const OVERVIEW = {
     failure_codes: [{ code: 'SMTP_AUTH', count: 1 }],
   },
   alerts: [{
-    code: 'DEAD_LETTERS_PRESENT',
+    code: 'DEAD_LETTER',
     level: 'warning',
-    message: '2 条投递进入死信（通知 1 / 邮件 1），需人工重试或修复模板',
+    message: '2 条投递进入死信（阈值 1），需人工重试或修复模板',
   }],
 }
 
+const TREND_DAYS = [
+  { date: '2026-10-20', created: 6, delivered: 5, failed: 0, dead_letter: 0, open: 1, other: 0, rate: 1 },
+  { date: '2026-10-21', created: 9, delivered: 8, failed: 1, dead_letter: 0, open: 0, other: 0, rate: 0.8889 },
+  { date: '2026-10-22', created: 4, delivered: 3, failed: 0, dead_letter: 1, open: 0, other: 0, rate: 0.75 },
+  { date: '2026-10-23', created: 0, delivered: 0, failed: 0, dead_letter: 0, open: 0, other: 0, rate: null },
+  { date: '2026-10-24', created: 5, delivered: 5, failed: 0, dead_letter: 0, open: 0, other: 0, rate: 1 },
+  { date: '2026-10-25', created: 3, delivered: 2, failed: 0, dead_letter: 0, open: 1, other: 0, rate: 1 },
+  { date: '2026-10-26', created: 2, delivered: 2, failed: 0, dead_letter: 0, open: 0, other: 0, rate: 1 },
+]
+
+const HEALTH = {
+  organization_id: 1,
+  checks: [
+    { code: 'NOTIFICATION_BACKLOG', label: '通知待投递积压', value: 1, threshold: 50, level: 'warning', hint: 'pending + approved + sending' },
+    { code: 'EMAIL_BACKLOG', label: '邮件待投递积压', value: 1, threshold: 50, level: 'warning', hint: '待审批 + 待投递 + 投递中' },
+    { code: 'DEAD_LETTER', label: '死信', value: 2, threshold: 1, level: 'warning', hint: '通知 1 / 邮件 1' },
+    { code: 'STALE_CLAIMS', label: '卡死租约', value: 0, threshold: 1, level: 'warning', hint: 'worker 崩溃或卡死' },
+    { code: 'RETRY_STUCK', label: '到期待重试', value: 1, threshold: 10, level: 'info', hint: '已过重试时间仍在等待 worker' },
+  ],
+  breached: [{ code: 'DEAD_LETTER', label: '死信', value: 2, threshold: 1, level: 'warning' }],
+  healthy: false,
+  cooldown_minutes: 180,
+}
+
 const SHOT_DIR = process.env.E2E_SHOT_DIR || ''
+
+// 趋势/健康在 OVERVIEW 常量之后声明（TDZ），这里补挂，避免把大段数据挪到前面。
+OVERVIEW.trend = { days: 7, notification: TREND_DAYS, email: TREND_DAYS, metric: 'created_at 分桶 + 当前状态' }
+OVERVIEW.health = HEALTH
 
 test('System 投递看板与死信重排', async ({ page }) => {
   const requests = {}
@@ -104,9 +132,16 @@ test('System 投递看板与死信重排', async ({ page }) => {
   // 指标卡与提示条
   await expect(page.getByText('Outbox 投递看板')).toBeVisible()
   await expect(page.getByText('通知投递率')).toBeVisible()
-  await expect(page.getByText('2 条投递进入死信（通知 1 / 邮件 1），需人工重试或修复模板')).toBeVisible()
+  await expect(page.getByText('2 条投递进入死信（阈值 1），需人工重试或修复模板')).toBeVisible()
   await expect.poll(() => requests.overviewQuery, { timeout: 5000 }).toBeTruthy()
   expect(requests.overviewQuery.days).toBe('7')
+
+  // 趋势与健康检查
+  await expect(page.getByText('投递趋势')).toBeVisible()
+  await expect(page.getByText('按创建日分桶', { exact: false })).toBeVisible()
+  await expect(page.getByText('投递健康')).toBeVisible()
+  await expect(page.getByText('超阈值').first()).toBeVisible()
+  await expect(page.getByText('冷却 180 分钟', { exact: false })).toBeVisible()
 
   // 渠道表：站内 / 邮件两行
   await expect(page.getByText('站内').first()).toBeVisible()

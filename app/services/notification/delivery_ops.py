@@ -26,6 +26,7 @@ from app.models.user import User
 
 WINDOW_DEFAULT_DAYS = 7
 WINDOW_MAX_DAYS = 90
+TREND_MAX_BUCKETS = 30
 DEAD_LETTER_PAGE_SIZE = 20
 FAILURE_CODE_LIMIT = 10
 
@@ -78,21 +79,29 @@ def _mask_recipient(value: str | None) -> str | None:
     return f"{head}***@{domain}"
 
 
-def _notification_backlog(db: Session, now: datetime) -> dict:
+def _org_filter(model, organization_id: int | None) -> list:
+    return [] if organization_id is None else [model.organization_id == organization_id]
+
+
+def _notification_backlog(db: Session, now: datetime, organization_id: int | None = None) -> dict:
+    scope = _org_filter(LegalNotificationEvent, organization_id)
     counts = _group_counts(db, LegalNotificationEvent, LegalNotificationEvent.status,
-                           LegalNotificationEvent.status.in_(NOTIFICATION_BACKLOG))
+                           LegalNotificationEvent.status.in_(NOTIFICATION_BACKLOG), *scope)
     retry_pending = db.query(func.count(LegalNotificationEvent.id)).filter(
         LegalNotificationEvent.status == "failed",
         LegalNotificationEvent.next_retry_at.isnot(None),
         LegalNotificationEvent.next_retry_at <= now,
+        *scope,
     ).scalar() or 0
     stale_claims = db.query(func.count(LegalNotificationEvent.id)).filter(
         LegalNotificationEvent.status == "sending",
         LegalNotificationEvent.claim_expires_at.isnot(None),
         LegalNotificationEvent.claim_expires_at < now,
+        *scope,
     ).scalar() or 0
     oldest = db.query(func.min(LegalNotificationEvent.created_at)).filter(
         LegalNotificationEvent.status.in_(("pending", "approved")),
+        *scope,
     ).scalar()
     return {
         "pending": counts.get("pending", 0),
@@ -179,21 +188,25 @@ def _notification_section(db: Session, *, since: datetime, now: datetime) -> dic
     }
 
 
-def _email_backlog(db: Session, now: datetime) -> dict:
+def _email_backlog(db: Session, now: datetime, organization_id: int | None = None) -> dict:
+    scope = _org_filter(EmailSendRequest, organization_id)
     counts = _group_counts(db, EmailSendRequest, EmailSendRequest.status,
-                           EmailSendRequest.status.in_(EMAIL_BACKLOG))
+                           EmailSendRequest.status.in_(EMAIL_BACKLOG), *scope)
     retry_pending = db.query(func.count(EmailSendRequest.id)).filter(
         EmailSendRequest.status == "failed",
         EmailSendRequest.next_retry_at.isnot(None),
         EmailSendRequest.next_retry_at <= now,
+        *scope,
     ).scalar() or 0
     stale_claims = db.query(func.count(EmailSendRequest.id)).filter(
         EmailSendRequest.status == "sending",
         EmailSendRequest.claim_expires_at.isnot(None),
         EmailSendRequest.claim_expires_at < now,
+        *scope,
     ).scalar() or 0
     oldest = db.query(func.min(EmailSendRequest.created_at)).filter(
         EmailSendRequest.status.in_(("pending", "approved")),
+        *scope,
     ).scalar()
     return {
         "pending": counts.get("pending", 0),
@@ -254,7 +267,7 @@ def _email_section(db: Session, *, since: datetime, now: datetime,
         "dlp_blocked": by_status.get("blocked", 0),
         "sent_24h": int(sent_24h),
         "policy_enabled": policy_enabled,
-        "backlog": _email_backlog(db, now),
+        "backlog": _email_backlog(db, now, organization_id),
         "dead_letters": {
             "total": dead,
             "items": [{
@@ -275,28 +288,160 @@ def _email_section(db: Session, *, since: datetime, now: datetime,
     }
 
 
-def _alerts(notification: dict, email: dict) -> list[dict]:
-    alerts: list[dict] = []
-    dead_total = notification["dead_letter"] + email["dead_letter"]
-    if dead_total:
-        alerts.append({
-            "code": "DEAD_LETTERS_PRESENT",
-            "level": "warning",
-            "message": f"{dead_total} 条投递进入死信（通知 {notification['dead_letter']} / 邮件 {email['dead_letter']}），需人工重试或修复模板",
+def _dead_letter_count(db: Session, model, organization_id: int | None) -> int:
+    return db.query(func.count(model.id)).filter(
+        model.status == "dead_letter", *_org_filter(model, organization_id)
+    ).scalar() or 0
+
+
+def evaluate_health(db: Session, *, organization_id: int | None = None,
+                    now: datetime | None = None) -> dict:
+    """投递健康阈值检查（看板与定时告警共用同一份口径）。
+
+    阈值语义：``value >= threshold`` 视为异常。默认值见
+    ``app/core/config/reliability.py`` 的 ``OUTBOX_*_WARN_THRESHOLD``。
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    now = now or utc_now()
+    notification_backlog = _notification_backlog(db, now, organization_id)
+    email_backlog = _email_backlog(db, now, organization_id)
+    notification_dead = _dead_letter_count(db, LegalNotificationEvent, organization_id)
+    email_dead = _dead_letter_count(db, EmailSendRequest, organization_id)
+    stale = notification_backlog["stale_claims"] + email_backlog["stale_claims"]
+    retry = notification_backlog["retry_pending"] + email_backlog["retry_pending"]
+
+    checks = [
+        {
+            "code": "NOTIFICATION_BACKLOG", "label": "通知待投递积压",
+            "value": notification_backlog["open_total"],
+            "threshold": settings.OUTBOX_BACKLOG_WARN_THRESHOLD, "level": "warning",
+            "hint": "pending + approved + sending",
+        },
+        {
+            "code": "EMAIL_BACKLOG", "label": "邮件待投递积压",
+            "value": email_backlog["open_total"],
+            "threshold": settings.OUTBOX_BACKLOG_WARN_THRESHOLD, "level": "warning",
+            "hint": "待审批 + 待投递 + 投递中",
+        },
+        {
+            "code": "DEAD_LETTER", "label": "死信",
+            "value": notification_dead + email_dead,
+            "threshold": settings.OUTBOX_DEAD_LETTER_WARN_THRESHOLD, "level": "warning",
+            "hint": f"通知 {notification_dead} / 邮件 {email_dead}",
+        },
+        {
+            "code": "STALE_CLAIMS", "label": "卡死租约",
+            "value": stale,
+            "threshold": settings.OUTBOX_STALE_CLAIM_WARN_THRESHOLD, "level": "warning",
+            "hint": "worker 崩溃或卡死，等待回收任务重领",
+        },
+        {
+            "code": "RETRY_STUCK", "label": "到期待重试",
+            "value": retry,
+            "threshold": settings.OUTBOX_RETRY_STUCK_WARN_THRESHOLD, "level": "info",
+            "hint": "已过重试时间仍在等待 worker",
+        },
+    ]
+    breached = [dict(check, breached=True) for check in checks
+                if check["value"] >= check["threshold"]]
+    return {
+        "organization_id": organization_id,
+        "checks": checks,
+        "breached": breached,
+        "healthy": not breached,
+        "cooldown_minutes": settings.OUTBOX_ALERT_COOLDOWN_MINUTES,
+    }
+
+
+def _daily_status_counts(db: Session, model, since: datetime,
+                         organization_id: int | None) -> dict[str, dict]:
+    """按创建日聚合当前状态（不是当日投递量：没有快照，只能看队列批次结果）。"""
+    rows = (
+        db.query(func.date(model.created_at), model.status, func.count())
+        .filter(model.created_at >= since, *_org_filter(model, organization_id))
+        .group_by(func.date(model.created_at), model.status)
+        .all()
+    )
+    success = NOTIFICATION_SUCCESS if model is LegalNotificationEvent else EMAIL_SUCCESS
+    backlog = NOTIFICATION_BACKLOG if model is LegalNotificationEvent else EMAIL_BACKLOG
+    buckets: dict[str, dict] = {}
+    for day, status, count in rows:
+        bucket = buckets.setdefault(str(day), {
+            "created": 0, "delivered": 0, "failed": 0,
+            "dead_letter": 0, "open": 0, "other": 0,
         })
-    stale = notification["backlog"]["stale_claims"] + email["backlog"]["stale_claims"]
-    if stale:
+        count = int(count)
+        bucket["created"] += count
+        if status in success:
+            bucket["delivered"] += count
+        elif status == "failed":
+            bucket["failed"] += count
+        elif status == "dead_letter":
+            bucket["dead_letter"] += count
+        elif status in backlog:
+            bucket["open"] += count
+        else:
+            bucket["other"] += count
+    return buckets
+
+
+def daily_trend(db: Session, *, days: int = WINDOW_DEFAULT_DAYS,
+                organization_id: int | None = None,
+                now: datetime | None = None) -> dict:
+    """按天趋势：每天创建的事件数 + 当前状态分布（补齐空白天，最多 30 桶）。"""
+    days = int(days) if days is not None else WINDOW_DEFAULT_DAYS
+    days = max(1, min(days, TREND_MAX_BUCKETS))
+    now = now or utc_now()
+    since = now - timedelta(days=days - 1)
+
+    def _series(model) -> list[dict]:
+        buckets = _daily_status_counts(db, model, since, organization_id)
+        series = []
+        cursor = since.date()
+        while cursor <= now.date():
+            key = cursor.isoformat()
+            bucket = buckets.get(key) or {
+                "created": 0, "delivered": 0, "failed": 0,
+                "dead_letter": 0, "open": 0, "other": 0,
+            }
+            series.append({
+                "date": key,
+                **bucket,
+                "rate": _rate(bucket["delivered"], bucket["failed"], bucket["dead_letter"]),
+            })
+            cursor += timedelta(days=1)
+        return series
+
+    return {
+        "days": days,
+        "notification": _series(LegalNotificationEvent),
+        "email": _series(EmailSendRequest),
+        "metric": "created_at 分桶 + 当前状态（不是当日投递量）",
+    }
+
+
+_ALERT_MESSAGES = {
+    "NOTIFICATION_BACKLOG": "通知待投递积压 {value} 条（阈值 {threshold}），dispatch worker 可能停摆",
+    "EMAIL_BACKLOG": "邮件待投递积压 {value} 条（阈值 {threshold}），邮件 worker 可能停摆或待审批堆积",
+    "DEAD_LETTER": "{value} 条投递进入死信（阈值 {threshold}），需人工重试或修复模板",
+    "STALE_CLAIMS": "{value} 条投递租约过期（阈值 {threshold}），worker 崩溃或卡死",
+    "RETRY_STUCK": "{value} 条失败投递到期待重试（阈值 {threshold}），等待 worker 领取",
+}
+
+
+def _alerts(health: dict, email: dict) -> list[dict]:
+    """人类可读提示：阈值超限 + 配置类提示。健康检查是结构化版本，这里不重复计算。"""
+    alerts = []
+    for check in health["breached"]:
+        template = _ALERT_MESSAGES.get(check["code"])
+        if not template:
+            continue
         alerts.append({
-            "code": "STALE_CLAIMS",
-            "level": "warning",
-            "message": f"{stale} 条投递租约过期（worker 崩溃或卡死），等待回收任务重领",
-        })
-    retry = notification["backlog"]["retry_pending"] + email["backlog"]["retry_pending"]
-    if retry:
-        alerts.append({
-            "code": "RETRY_DUE",
-            "level": "info",
-            "message": f"{retry} 条失败投递已到重试时间，等待 worker 领取",
+            "code": check["code"],
+            "level": check["level"],
+            "message": template.format(value=check["value"], threshold=check["threshold"]),
         })
     if email["total"] and not email["policy_enabled"]:
         alerts.append({
@@ -310,7 +455,7 @@ def _alerts(notification: dict, email: dict) -> list[dict]:
 def outbox_overview(db: Session, *, days: int = WINDOW_DEFAULT_DAYS,
                     organization_id: int | None = None,
                     now: datetime | None = None) -> dict:
-    """投递看板数据：窗口内摘要在前，当前积压/死信在后。"""
+    """投递看板数据：窗口内摘要在前，当前积压/死信/健康/趋势在后。"""
     days = int(days) if days is not None else WINDOW_DEFAULT_DAYS
     days = max(1, min(days, WINDOW_MAX_DAYS))
     now = now or utc_now()
@@ -318,12 +463,15 @@ def outbox_overview(db: Session, *, days: int = WINDOW_DEFAULT_DAYS,
 
     notification = _notification_section(db, since=since, now=now)
     email = _email_section(db, since=since, now=now, organization_id=organization_id)
+    health = evaluate_health(db, organization_id=organization_id, now=now)
     return {
         "window": {"days": days, "start": _iso(since), "end": _iso(now)},
         "generated_at": _iso(now),
         "notification": notification,
         "email": email,
-        "alerts": _alerts(notification, email),
+        "trend": daily_trend(db, days=days, organization_id=organization_id, now=now),
+        "health": health,
+        "alerts": _alerts(health, email),
     }
 
 

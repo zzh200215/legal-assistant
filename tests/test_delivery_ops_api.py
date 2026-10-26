@@ -97,7 +97,10 @@ class OutboxOverviewApiTests(unittest.TestCase):
         self.assertEqual(data["window"]["days"], 7)
         self.assertEqual(data["notification"]["dead_letter"], 1)
         self.assertEqual(data["email"]["dead_letter"], 1)
-        self.assertTrue(any(alert["code"] == "DEAD_LETTERS_PRESENT" for alert in data["alerts"]))
+        self.assertTrue(any(alert["code"] == "DEAD_LETTER" for alert in data["alerts"]))
+        self.assertFalse(data["health"]["healthy"])
+        self.assertEqual(data["trend"]["days"], 7)
+        self.assertEqual(len(data["trend"]["notification"]), 7)
         self.assertEqual(data["notification"]["dead_letters"]["items"][0]["error_code"], "TEMPLATE_ERROR")
 
     def test_retry_notification_and_email_dead_letter(self):

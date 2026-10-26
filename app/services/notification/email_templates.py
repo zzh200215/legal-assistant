@@ -70,6 +70,12 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "去复核",
         "footnote": "对比结果已写入咨询详情，可查看补充前后的引用变化。",
     },
+    "outbox_health_alert": {
+        "subject": "【律智检】{{title}}",
+        "lead": "投递队列出现积压或异常，可能影响审核提醒与咨询通知的送达。",
+        "action_label": "看投递看板",
+        "footnote": "同类告警在冷却窗口内不重复发送；处理后可在此页重排死信。",
+    },
 }
 
 # 深链：按 reference_type 落到审核台；其他类型回到通知中心。
@@ -77,6 +83,7 @@ _ACTION_PATHS = {
     "consultation": "/legal-workspace?view=review",
     "contract_review": "/legal-workspace?view=review",
     "draft": "/legal-workspace?view=review",
+    "outbox_health": "/system?tab=delivery",
 }
 _DEFAULT_ACTION_PATH = "/notifications"
 

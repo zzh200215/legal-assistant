@@ -40,7 +40,7 @@ def _routes() -> dict:
         "dispatch_operational_alerts", "run_database_archive", "create_pilot_backup",
         "prune_graph_checkpoints")
     add("notification", "dispatch_notification_events", "check_legal_deadline_reminders",
-        "check_legal_review_sla",
+        "check_legal_review_sla", "check_outbox_health",
         "scan_expired_portal_links", "scan_contract_expiry_alerts",
         "check_legal_approval_timeouts", "confirm_account_deletions",
         "deliver_email_send_requests", "recover_stale_outbox_claims")
@@ -84,6 +84,10 @@ celery_app.conf.update(
         "check-legal-review-sla": {
             "task": "check_legal_review_sla",
             "schedule": 900.0,  # 每15分钟
+        },
+        "check-outbox-health": {
+            "task": "check_outbox_health",
+            "schedule": 900.0,  # 每15分钟（同告警冷却 180 分钟）
         },
         "dispatch-notification-events": {
             "task": "dispatch_notification_events",

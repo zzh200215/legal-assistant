@@ -49,6 +49,50 @@
 
   <section class="app-card system-panel-card">
     <div class="app-card-head">
+      <h2>投递趋势</h2>
+      <span class="app-card-head-meta">按创建日分桶 · 最多 30 天 · 悬停看每日明细</span>
+    </div>
+    <div class="app-card-body">
+      <div class="trend-block">
+        <div class="trend-head"><strong>通知</strong><span class="app-num">{{ trendSummary(trendNotification) }}</span></div>
+        <div class="trend-strip" :class="{ 'is-empty': !trendNotification.length }">
+          <div v-for="(day, index) in trendNotification" :key="`n-${day.date}`" class="trend-col" :title="trendTitle(day)">
+            <div class="trend-stack">
+              <span v-if="day.delivered" class="trend-seg is-delivered" :style="{ flexGrow: day.delivered }"></span>
+              <span v-if="day.failed" class="trend-seg is-failed" :style="{ flexGrow: day.failed }"></span>
+              <span v-if="day.dead_letter" class="trend-seg is-dead" :style="{ flexGrow: day.dead_letter }"></span>
+              <span v-if="day.open" class="trend-seg is-open" :style="{ flexGrow: day.open }"></span>
+            </div>
+            <span class="trend-label">{{ index % trendLabelStep(trendNotification.length) === 0 ? shortDate(day.date) : '' }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="trend-block">
+        <div class="trend-head"><strong>邮件</strong><span class="app-num">{{ trendSummary(trendEmail) }}</span></div>
+        <div class="trend-strip" :class="{ 'is-empty': !trendEmail.length }">
+          <div v-for="(day, index) in trendEmail" :key="`e-${day.date}`" class="trend-col" :title="trendTitle(day)">
+            <div class="trend-stack">
+              <span v-if="day.delivered" class="trend-seg is-delivered" :style="{ flexGrow: day.delivered }"></span>
+              <span v-if="day.failed" class="trend-seg is-failed" :style="{ flexGrow: day.failed }"></span>
+              <span v-if="day.dead_letter" class="trend-seg is-dead" :style="{ flexGrow: day.dead_letter }"></span>
+              <span v-if="day.open" class="trend-seg is-open" :style="{ flexGrow: day.open }"></span>
+            </div>
+            <span class="trend-label">{{ index % trendLabelStep(trendEmail.length) === 0 ? shortDate(day.date) : '' }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="trend-legend">
+        <span><i class="trend-dot is-delivered"></i>已投递</span>
+        <span><i class="trend-dot is-failed"></i>失败</span>
+        <span><i class="trend-dot is-dead"></i>死信</span>
+        <span><i class="trend-dot is-open"></i>未完成</span>
+        <span class="trend-note">柱高按当日创建量归一，同一天内按状态占比分段</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="app-card system-panel-card">
+    <div class="app-card-head">
       <h2>通知渠道</h2>
       <span class="app-card-head-meta">窗口内 {{ overview.window.days }} 天</span>
     </div>
@@ -117,6 +161,30 @@
       </div>
     </section>
   </div>
+
+  <section class="app-card system-panel-card">
+    <div class="app-card-head">
+      <h2>投递健康</h2>
+      <span class="app-card-head-meta">
+        阈值每 15 分钟扫描；同组织同告警冷却 {{ overview.health.cooldown_minutes }} 分钟
+      </span>
+    </div>
+    <div class="app-card-body">
+      <ul class="health-list">
+        <li v-for="check in overview.health.checks" :key="check.code" class="health-item">
+          <span class="health-name">{{ check.label }}</span>
+          <span class="health-hint">{{ check.hint }}</span>
+          <span class="app-num health-value">{{ check.value }} / 阈值 {{ check.threshold }}</span>
+          <span class="app-tag" :class="check.value >= check.threshold ? 'is-danger' : 'is-ok'">
+            {{ check.value >= check.threshold ? '超阈值' : '正常' }}
+          </span>
+        </li>
+      </ul>
+      <p class="health-note">
+        超阈值时由 <code>check_outbox_health</code> 给组织管理员发站内+邮件告警（冷却窗口内不重复）；平台管理员（无组织）只在此页看全局，不接收组织级告警。
+      </p>
+    </div>
+  </section>
 
   <section class="app-card system-panel-card">
     <div class="app-card-head">
@@ -191,6 +259,14 @@ const emptyOverview = () => ({
     failure_codes: [],
   },
   alerts: [],
+  trend: { days: 7, notification: [], email: [], metric: '' },
+  health: {
+    organization_id: null,
+    checks: [],
+    breached: [],
+    healthy: true,
+    cooldown_minutes: 180,
+  },
 })
 
 const days = ref(7)
@@ -204,6 +280,25 @@ const backlogTotal = computed(() =>
   (overview.value.notification.backlog.open_total || 0) + (overview.value.email.backlog.open_total || 0))
 const deadLetterTotal = computed(() =>
   (overview.value.notification.dead_letter || 0) + (overview.value.email.dead_letter || 0))
+
+const trendNotification = computed(() => overview.value.trend?.notification || [])
+const trendEmail = computed(() => overview.value.trend?.email || [])
+const shortDate = (value) => String(value || '').slice(5)
+const trendLabelStep = (count) => Math.max(1, Math.ceil((count || 1) / 7))
+const trendTitle = (day) => `${day.date} · 创建 ${day.created} · 已投递 ${day.delivered} · 失败 ${day.failed} · 死信 ${day.dead_letter} · 未完成 ${day.open}`
+const trendSummary = (series) => {
+  const totals = series.reduce((acc, day) => {
+    acc.created += Number(day.created) || 0
+    acc.delivered += Number(day.delivered) || 0
+    acc.dead += Number(day.dead_letter) || 0
+    return acc
+  }, { created: 0, delivered: 0, dead: 0 })
+  if (!totals.created) return '窗口内没有事件'
+  const rate = totals.delivered + totals.dead
+    ? Math.round((totals.delivered / (totals.delivered + totals.dead)) * 100)
+    : null
+  return `创建 ${totals.created} · 已投递 ${totals.delivered} · 死信 ${totals.dead}${rate === null ? '' : ` · 完成率 ${rate}%`}`
+}
 
 const failureCodes = computed(() => {
   const merged = new Map()
@@ -386,5 +481,137 @@ onMounted(fetchOverview)
 }
 .app-stat-value.is-warn {
   color: #d97706;
+}
+
+/* ── 投递趋势（纯 CSS 堆叠柱，不引图表库）── */
+.trend-block {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.trend-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: 13px;
+}
+.trend-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 76px;
+  padding-top: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+}
+.trend-strip.is-empty {
+  opacity: 0.4;
+}
+.trend-col {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.trend-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 2px 2px 0 0;
+  background: var(--color-bg-alt);
+}
+.trend-seg {
+  display: block;
+  width: 100%;
+}
+.trend-seg.is-delivered,
+.trend-dot.is-delivered {
+  background: #10b981;
+}
+.trend-seg.is-failed,
+.trend-dot.is-failed {
+  background: #f59e0b;
+}
+.trend-seg.is-dead,
+.trend-dot.is-dead {
+  background: #ef4444;
+}
+.trend-seg.is-open,
+.trend-dot.is-open {
+  background: #94a3b8;
+}
+.trend-label {
+  height: 12px;
+  margin-top: 2px;
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+.trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.trend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 2px;
+}
+.trend-note {
+  color: var(--color-text-muted);
+}
+
+/* ── 健康检查清单 ── */
+.health-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.health-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px dashed var(--color-border);
+  font-size: 13px;
+}
+.health-name {
+  width: 110px;
+  flex: none;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.health-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.health-value {
+  white-space: nowrap;
+}
+.health-note {
+  margin: var(--space-3) 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-text-muted);
+}
+.health-note code {
+  font-size: 11px;
 }
 </style>
