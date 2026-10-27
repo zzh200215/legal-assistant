@@ -129,7 +129,7 @@ def list_contracts(
     org_id: int,
     case_id: Optional[int] = None,
     status: Optional[str] = None,
-    q: Optional[str] = None,
+    q: Optional[str] = Query(None, max_length=100, description="搜索合同名称/相对方/编号"),
     review_status: Optional[str] = Query(None, pattern="^(draft|pending_review|needs_lawyer_review|needs_facts|lawyer_approved|returned_for_facts|offline_consultation|archived)$"),
     risk: Optional[str] = Query(None, pattern="^(critical|high|medium|low|unanchored|none)$"),
     sort: str = Query("updated_at", pattern="^(updated_at|created_at|reviewed_at|review_updated_at)$",

@@ -223,6 +223,52 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         )
         self.assertEqual([row["id"] for row in page["items"]][:3], [newer.id, same_time.id, older.id])
 
+    def test_search_matches_title_counterparty_and_contract_no(self):
+        labor = self._contract("劳动合同模板")
+        labor.counterparty = "某科技公司"
+        labor.contract_no = "HT-2026-001"
+        purchase = self._contract("采购协议")
+        purchase.counterparty = "某物流公司"
+        purchase.contract_no = "HT-2026-002"
+        self.db.commit()
+
+        def ids(**kwargs):
+            return [row["id"] for row in list_visible_contracts(
+                self.db, org_id=self.org.id, user_id=self.user.id, **kwargs,
+            )["items"]]
+
+        self.assertEqual(ids(q="劳动"), [labor.id])
+        self.assertEqual(ids(q=" 劳动 "), [labor.id])  # 前后空白被归一
+        self.assertEqual(ids(q="科技"), [labor.id])  # 相对方
+        self.assertEqual(ids(q="HT-2026-002"), [purchase.id])  # 合同编号
+        self.assertEqual(ids(q="劳"), [labor.id])  # 单字：SQLite/非 MySQL 回退 LIKE
+        self.assertEqual(ids(q="%"), [])  # LIKE 通配符按字面量处理
+        self.assertEqual(ids(q="不存在的关键词"), [])
+
+    def test_search_pagination_reuses_query_and_rejects_other_query(self):
+        for index in range(3):
+            self._contract(f"劳动事务{index}")
+        first = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            q="劳动", page_size=2,
+        )
+        self.assertEqual(first["total"], 3)
+        self.assertEqual(len(first["items"]), 2)
+        self.assertTrue(first["has_more"])
+
+        second = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            q="劳动", page_size=2, cursor=first["next_cursor"],
+        )
+        self.assertEqual(len(second["items"]), 1)
+        self.assertFalse(second["has_more"])
+
+        with self.assertRaisesRegex(ValueError, "筛选"):
+            list_visible_contracts(
+                self.db, org_id=self.org.id, user_id=self.user.id,
+                q="采购", page_size=2, cursor=first["next_cursor"],
+            )
+
     def test_sort_whitelist_falls_back_to_updated_at(self):
         contract = self._contract("回退排序合同")
         result = list_visible_contracts(

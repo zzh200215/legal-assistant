@@ -20855,14 +20855,17 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 100
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "搜索合同名称/相对方/编号",
               "title": "Q"
-            }
+            },
+            "description": "搜索合同名称/相对方/编号"
           },
           {
             "name": "review_status",

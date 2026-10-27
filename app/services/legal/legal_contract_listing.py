@@ -23,7 +23,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.models.legal import LegalCase
@@ -259,6 +259,33 @@ def _summary_query(db: Session):
     )
 
 
+def _search_phrase(keyword: str) -> str:
+    """把用户输入变成 MySQL 布尔模式的短语，避免 ``+ - * ( )`` 被当成操作符。"""
+    escaped = keyword.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _search_filter(query, q: str):
+    """MySQL 走 ngram 全文索引；其它方言（含 SQLite 开发库）回退三列 LIKE。
+
+    ngram 的分词粒度默认 2，单字查询无法命中索引；这种情况同样回退 LIKE。
+    """
+    keyword = " ".join(str(q).split())
+    if not keyword:
+        return None
+    dialect = query.session.get_bind().dialect.name
+    if dialect == "mysql" and len(keyword) >= 2 and any(ch.isalnum() for ch in keyword):
+        return text(
+            "MATCH (legal_contracts.title, legal_contracts.counterparty, "
+            "legal_contracts.contract_no) AGAINST (:contract_search IN BOOLEAN MODE)"
+        ).bindparams(contract_search=_search_phrase(keyword))
+    return or_(
+        LegalContract.title.contains(keyword, autoescape=True),
+        LegalContract.counterparty.contains(keyword, autoescape=True),
+        LegalContract.contract_no.contains(keyword, autoescape=True),
+    )
+
+
 def _apply_filters(
     query,
     *,
@@ -280,7 +307,9 @@ def _apply_filters(
     if status:
         query = query.filter(LegalContract.status == status)
     if q:
-        query = query.filter(LegalContract.title.contains(q))
+        condition = _search_filter(query, q)
+        if condition is not None:
+            query = query.filter(condition)
     # 可见性：无案件 / 案件非严格 / 严格案件成员
     query = query.filter(or_(
         LegalContract.case_id.is_(None),

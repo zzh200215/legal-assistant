@@ -12,6 +12,14 @@
       </div>
       <div class="app-card-body">
         <div class="contract-filters" aria-label="合同台账筛选">
+          <input
+            v-model="filters.q"
+            type="search"
+            class="contract-search"
+            aria-label="搜索合同"
+            placeholder="搜索名称/相对方/编号"
+            maxlength="100"
+          />
           <select v-model="filters.review_status" aria-label="按审查状态筛选">
             <option value="">全部审查状态</option>
             <option value="draft">草稿</option>
@@ -137,7 +145,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
@@ -162,7 +170,7 @@ import api from '../api'
 const props = defineProps({ orgId: { type: Number, required: true }, caseId: { type: Number, required: false, default: null } })
 const contracts = ref([])
 const total = ref(0)
-const filters = ref({ review_status: '', risk: '', sort: 'updated_at_desc' }); const REVIEW_STATUS_LABELS = {
+const filters = ref({ q: '', review_status: '', risk: '', sort: 'updated_at_desc' }); const REVIEW_STATUS_LABELS = {
   draft: '草稿', pending_review: '待审核', needs_lawyer_review: '需律师审核', needs_facts: '待补充事实',
   lawyer_approved: '律师通过', returned_for_facts: '退回补充', offline_consultation: '转线下', archived: '已归档',
 }
@@ -198,6 +206,7 @@ const loadContracts = async () => {
   try {
     const [sort, order] = splitSort(filters.value.sort)
     const { data } = await api.listLegalContracts(props.orgId, props.caseId, {
+      q: filters.value.q.trim(),
       review_status: filters.value.review_status,
       risk: filters.value.risk,
       sort,
@@ -222,6 +231,7 @@ const loadMore = async () => {
   try {
     const [sort, order] = splitSort(filters.value.sort)
     const { data } = await api.listLegalContracts(props.orgId, props.caseId, {
+      q: filters.value.q.trim(),
       review_status: filters.value.review_status,
       risk: filters.value.risk,
       sort,
@@ -251,7 +261,13 @@ const openSigning = async (contract) => { try { await loadVersions(contract); co
 const createAndSendSignRequest = async () => { if (!signForm.value.contract_version_id || !signForm.value.party_name.trim() || !signForm.value.phone_masked.trim()) return ElMessage.warning('请填写版本、签署方和已核验手机号'); saving.value = true; try { const { data } = await api.createSignRequest(selected.value.id, { contract_version_id: signForm.value.contract_version_id, parties: [{ name: signForm.value.party_name.trim(), phone_masked: signForm.value.phone_masked.trim(), sign_order: 1 }] }); await api.sendSignRequest(data.id); const result = await api.listSignRequests(selected.value.id); signRequests.value = result.data || []; ElMessage.success('签署请求已提交给服务商') } catch (e) { ElMessage.error(e.response?.data?.detail || '签署请求创建失败') } finally { saving.value = false } }
 const loadFeatures = async () => { try { const { data } = await api.getFeatureFlags(); signingEnabled.value = !!data.signing_enabled } catch { /* 特性开关不可用时保持默认关闭 */ } }
 watch(() => [props.orgId, props.caseId], loadContracts, { immediate: true })
-watch(filters, loadContracts, { deep: true })
+watch(() => [filters.value.review_status, filters.value.risk, filters.value.sort], loadContracts)
+let searchTimer = null
+watch(() => filters.value.q, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(loadContracts, 300)
+})
+onBeforeUnmount(() => clearTimeout(searchTimer))
 onMounted(loadFeatures)
 </script>
 
@@ -275,7 +291,9 @@ onMounted(loadFeatures)
 .risk-medium { color: var(--color-warning); }
 .risk-low { color: var(--color-text-muted); }
 
-.contract-filters { display: flex; align-items: center; gap: var(--space-2); padding-bottom: var(--space-3); }
-.contract-filters select { height: 30px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }
+.contract-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding-bottom: var(--space-3); }
+.contract-filters select,
+.contract-search { height: 30px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }
+.contract-search { width: 200px; }
 .contract-load-more { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding-top: var(--space-3); }
 </style>

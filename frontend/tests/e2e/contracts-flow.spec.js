@@ -61,9 +61,16 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
       requests.sort = url.searchParams.get('sort')
       requests.order = url.searchParams.get('order')
       requests.cursor = url.searchParams.get('cursor')
+      requests.q = url.searchParams.get('q')
       const reviewStatus = url.searchParams.get('review_status')
-      if (reviewStatus) {
-        const items = CONTRACTS.filter((item) => item.review?.status === reviewStatus)
+      const q = requests.q
+      if (reviewStatus || q) {
+        let items = CONTRACTS
+        if (reviewStatus) items = items.filter((item) => item.review?.status === reviewStatus)
+        if (q) {
+          items = items.filter((item) =>
+            [item.title, item.counterparty, item.contract_no].some((value) => value.includes(q)))
+        }
         return route.fulfill({ json: success({
           items, total: items.length, page_size: 2, has_more: false, next_cursor: null,
         }) })
@@ -165,6 +172,16 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
   await expect(page.locator('.el-table__row')).toHaveCount(3)
   await expect(page.getByText('补充协议联调')).toBeVisible()
   await expect(page.getByRole('button', { name: '加载更多', exact: true })).toHaveCount(0)
+
+  // 搜索：q 下推（名称/相对方/编号），清空后回到第一页
+  const search = page.locator('.contract-search')
+  await search.fill('采购')
+  await expect.poll(() => requests.q).toBe('采购')
+  await expect(page.locator('.el-table__row')).toHaveCount(1)
+  await expect(page.locator('.el-table__row')).toContainText('采购协议联调')
+  await search.fill('')
+  await expect.poll(() => requests.q).toBeNull()
+  await expect(page.locator('.el-table__row')).toHaveCount(2)
 
   // 台账筛选：按审查状态（服务端过滤）
   const reviewFilter = page.locator('.contract-filters select[aria-label="按审查状态筛选"]')
