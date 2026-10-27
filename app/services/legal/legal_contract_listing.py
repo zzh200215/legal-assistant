@@ -1,23 +1,26 @@
-"""合同列表查询服务（P1 API 统一化）：可见性过滤与分页全部下沉 SQL。
+"""合同列表查询服务（P1 API 统一化）：可见性过滤、审查筛选与分页全部下沉 SQL。
 
 - 可见性语义与 legal_contract_api.list_contracts 原实现一致：
   无案件合同 → 组织成员可见；普通案件合同 → 组织成员可见；
   严格案件（is_strict_mode=1）合同 → 仅未撤销案件成员可见。
-- 分页走 DB offset/limit + count（distinct 防多案件成员行重复）；
+- 审查/风险筛选走物化摘要表 ``legal_contract_review_summaries``（step44）：
+  JOIN + WHERE + offset/limit + count，不再有 1000 条上限；
 - items 为显式序列化 dict，不返回合同正文（description 为加密列，禁止外泄）。
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.models.legal import ContractReview, LegalCase
-from app.models.legal_contract import LegalContract, LegalContractMilestone, LegalContractVersion
-from app.models.legal_portal import LegalCaseMember
+from app.models.legal import LegalCase
+from app.models.legal_contract import (
+    LegalContract,
+    LegalContractMilestone,
+    LegalContractReviewSummary,
+)
 
 
 def serialize_contract(contract: LegalContract) -> dict[str, Any]:
@@ -41,53 +44,20 @@ def serialize_contract(contract: LegalContract) -> dict[str, Any]:
     }
 
 
-def _review_summary(review: ContractReview) -> dict[str, Any]:
-    """台账用的审查摘要：状态 + 风险数量 + 无定位数量（读 risks_json，不落库）。"""
-    try:
-        risks = json.loads(review.risks_json or "[]")
-    except (TypeError, ValueError):
-        risks = []
-    risks = [risk for risk in risks if isinstance(risk, dict)]
-    high = sum(1 for risk in risks if risk.get("risk_level") in ("high", "critical"))
-    unanchored = sum(1 for risk in risks if not (risk.get("source_location") or {}).get("paragraph"))
+def serialize_review_summary(summary: LegalContractReviewSummary | None) -> dict[str, Any] | None:
+    """台账行里的「最近一次审查」：字段与 step36 读时派生保持一致。"""
+    if summary is None:
+        return None
     return {
-        "id": review.id,
-        "status": review.status,
-        "version": review.version,
-        "risks_total": len(risks),
-        "risks_high": high,
-        "risks_unanchored": unanchored,
-        "reviewed_at": review.reviewed_at,
-        "updated_at": review.updated_at,
+        "id": summary.review_id,
+        "status": summary.review_status,
+        "version": summary.review_version,
+        "risks_total": summary.risks_total or 0,
+        "risks_high": summary.risks_high or 0,
+        "risks_unanchored": summary.risks_unanchored or 0,
+        "reviewed_at": summary.reviewed_at,
+        "updated_at": summary.review_updated_at,
     }
-
-
-def _attach_latest_reviews(db: Session, contracts: list[LegalContract], items: list[dict]) -> None:
-    """给台账行补「最近一次审查」：版本 -> source_review_id -> 审查摘要（批量查询，避免 N+1）。"""
-    contract_ids = [contract.id for contract in contracts]
-    if not contract_ids:
-        return
-    versions = (
-        db.query(LegalContractVersion)
-        .filter(
-            LegalContractVersion.contract_id.in_(contract_ids),
-            LegalContractVersion.source_review_id.isnot(None),
-        )
-        .order_by(LegalContractVersion.version_no.desc(), LegalContractVersion.id.desc())
-        .all()
-    )
-    latest_by_contract: dict[int, LegalContractVersion] = {}
-    for version in versions:
-        latest_by_contract.setdefault(version.contract_id, version)
-    review_ids = {version.source_review_id for version in latest_by_contract.values()}
-    reviews = {
-        review.id: review
-        for review in db.query(ContractReview).filter(ContractReview.id.in_(review_ids)).all()
-    } if review_ids else {}
-    for contract, item in zip(contracts, items):
-        version = latest_by_contract.get(contract.id)
-        review = reviews.get(version.source_review_id) if version else None
-        item["review"] = _review_summary(review) if review is not None else None
 
 
 def serialize_milestone(milestone: LegalContractMilestone) -> dict[str, Any]:
@@ -123,8 +93,14 @@ def list_visible_contracts(
     review_status: str | None = None,
     risk: str | None = None,
 ) -> dict:
+    from app.models.legal_portal import LegalCaseMember
+
     query = (
-        db.query(LegalContract)
+        db.query(LegalContract, LegalContractReviewSummary)
+        .outerjoin(
+            LegalContractReviewSummary,
+            LegalContractReviewSummary.contract_id == LegalContract.id,
+        )
         .filter(LegalContract.organization_id == org_id)
         .outerjoin(LegalCase, LegalContract.case_id == LegalCase.id)
         .outerjoin(
@@ -148,33 +124,30 @@ def list_visible_contracts(
         or_(LegalCase.is_strict_mode.is_(None), LegalCase.is_strict_mode == 0),
         LegalCaseMember.id.isnot(None),
     ))
-    ordered = query.distinct().order_by(LegalContract.updated_at.desc(), LegalContract.id.desc())
-    if review_status or risk:
-        # 审查/风险是派生字段（JSON + 版本关联），SQL 无法直接过滤：
-        # 先取该组织可见合同（上限 1000，避免全表），再在内存里过滤 + 分页。
-        rows = ordered.limit(1000).all()
-        items = [serialize_contract(contract) for contract in rows]
-        _attach_latest_reviews(db, rows, items)
-        if review_status:
-            items = [item for item in items if (item["review"] or {}).get("status") == review_status]
-        if risk == "high":
-            items = [item for item in items if (item["review"] or {}).get("risks_high", 0) > 0]
-        elif risk == "unanchored":
-            items = [item for item in items if (item["review"] or {}).get("risks_unanchored", 0) > 0]
-        elif risk == "none":
-            items = [item for item in items if item["review"] is None]
-        total = len(items)
-        start = (page - 1) * page_size
-        return {
-            "items": items[start:start + page_size],
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-        }
+    # 审查/风险筛选下沉 SQL：摘要表 1:1 JOIN，可直接 WHERE + 分页
+    if review_status:
+        query = query.filter(LegalContractReviewSummary.review_status == review_status)
+    if risk == "high":
+        query = query.filter(LegalContractReviewSummary.risks_high > 0)
+    elif risk == "unanchored":
+        query = query.filter(LegalContractReviewSummary.risks_unanchored > 0)
+    elif risk == "none":
+        query = query.filter(LegalContractReviewSummary.contract_id.is_(None))
+
     total = query.with_entities(LegalContract.id).distinct().count()
-    rows = ordered.offset((page - 1) * page_size).limit(page_size).all()
-    items = [serialize_contract(contract) for contract in rows]
-    _attach_latest_reviews(db, rows, items)
+    rows = (
+        query.with_entities(LegalContract, LegalContractReviewSummary)
+        .distinct()
+        .order_by(LegalContract.updated_at.desc(), LegalContract.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    items = []
+    for contract, summary in rows:
+        item = serialize_contract(contract)
+        item["review"] = serialize_review_summary(summary)
+        items.append(item)
     return {
         "items": items,
         "total": total,

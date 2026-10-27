@@ -1083,6 +1083,10 @@ def anchor_contract_risk(
     risks[risk_index]["source_location"] = {"paragraph": req.paragraph, "snippet": req.snippet.strip()}
     row.risks_json = json.dumps(risks, ensure_ascii=False)
     db.add(row)
+    # 台账摘要物化（step44）：补定位会改变「无定位风险」计数
+    from app.services.legal.contract_review_summary import refresh_summaries_for_review
+
+    refresh_summaries_for_review(db, item_id)
     db.commit()
     db.refresh(row)
 

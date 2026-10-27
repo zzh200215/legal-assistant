@@ -257,6 +257,12 @@ def create_contract_version(
     db.add(version)
     db.commit()
     db.refresh(version)
+    if version.source_review_id:
+        # 台账摘要物化：新版本可能成为「最近一次审查」，刷新后筛选才能下推 SQL
+        from app.services.legal.contract_review_summary import refresh_contract_review_summary
+
+        refresh_contract_review_summary(db, contract_id)
+        db.commit()
     return version
 
 
@@ -494,6 +500,10 @@ def apply_review_suggestions(
     db.add(candidate)
     db.commit()
     db.refresh(candidate)
+    from app.services.legal.contract_review_summary import refresh_contract_review_summary
+
+    refresh_contract_review_summary(db, contract_id)
+    db.commit()
     return {"version_id": candidate.id, "version_no": candidate.version_no,
             "parse_status": candidate.parse_status,
             "message": "候选修改稿已创建，请人工确认后再设为当前版本"}

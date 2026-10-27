@@ -271,6 +271,10 @@ def persist_review_artifacts(
             ))
     for ref in refs or []:
         _add_reference(db, ref, org_id=org_id, user_id=review.user_id, case_id=review.case_id)
+    # 台账摘要物化（step44）：风险清单变化会影响台账的「高风险/无定位」筛选
+    from app.services.legal.contract_review_summary import refresh_summaries_for_review
+
+    refresh_summaries_for_review(db, review.id)
     db.commit()
 
 
@@ -547,6 +551,10 @@ def update_risk_item_status(
         claim.review_status = None
         claim.reviewer_id = user.id
         claim.reviewed_at = utc_now()
+    # 台账摘要物化（step44）：风险状态/定位变化会影响「高风险/无定位」筛选
+    from app.services.legal.contract_review_summary import refresh_summaries_for_review
+
+    refresh_summaries_for_review(db, review.id)
     db.commit()
     db.refresh(review)
     item = serialize_risk_item(review, risk, risk_index)
@@ -586,6 +594,9 @@ def bulk_update_risk_item_status(
         results.append((index, risk))
     review.risks_json = json.dumps(risks, ensure_ascii=False)
     db.add(review)
+    from app.services.legal.contract_review_summary import refresh_summaries_for_review
+
+    refresh_summaries_for_review(db, review.id)
     db.commit()
     db.refresh(review)
     history = _risk_action_history(db, review.id)

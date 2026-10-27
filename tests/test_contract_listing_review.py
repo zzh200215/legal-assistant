@@ -1,4 +1,4 @@
-"""合同台账：每份合同补「最近一次审查」摘要（跨案件视图）。"""
+"""合同台账：审查摘要物化（筛选下沉 SQL）、写入路径刷新、超过 1000 条仍可分页筛选。"""
 
 import json
 import unittest
@@ -11,9 +11,12 @@ import app.models  # noqa: F401
 from app.core.auth import hash_password
 from app.core.database import Base
 from app.models.legal import ContractReview
-from app.models.legal_contract import LegalContract, LegalContractVersion
+from app.models.legal_contract import LegalContract, LegalContractReviewSummary, LegalContractVersion
 from app.models.org import Organization
 from app.models.user import User
+from app.services.legal.contract_review_summary import (
+    refresh_contract_review_summary, refresh_summaries_for_review,
+)
 from app.services.legal.legal_contract_listing import list_visible_contracts
 
 
@@ -72,6 +75,8 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
             source_review_id=review.id, created_by=self.user.id,
         ))
         self.db.commit()
+        refresh_contract_review_summary(self.db, contract.id)
+        self.db.commit()
 
         result = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id)
         item = next(row for row in result["items"] if row["id"] == contract.id)
@@ -102,6 +107,8 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
             source_type="contract_review", text_snapshot="正文",
             source_review_id=review.id, created_by=self.user.id,
         ))
+        self.db.commit()
+        refresh_contract_review_summary(self.db, contract.id)
         self.db.commit()
         return review
 
@@ -143,3 +150,97 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         )
         self.assertEqual(page["total"], 3)
         self.assertEqual(len(page["items"]), 1)
+
+    def test_filter_pushes_down_beyond_previous_1000_cap(self):
+        """审查筛选不再被 1000 条上限截断：匹配的合同排在第 1000 条之后也能被筛出来。"""
+        oldest = self._contract("最早创建、带审查")
+        self._attach_review(oldest, status="needs_lawyer_review", risks=[])
+        others = [
+            LegalContract(
+                organization_id=self.org.id, contract_no=f"BULK-{index}", title=f"批量合同{index}",
+                contract_type="service", status="active", created_by=self.user.id, version=1,
+            )
+            for index in range(1000)
+        ]
+        self.db.add_all(others)
+        self.db.commit()
+
+        result = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            review_status="needs_lawyer_review", page=1, page_size=20,
+        )
+        self.assertEqual(result["total"], 1)
+        self.assertEqual([item["id"] for item in result["items"]], [oldest.id])
+        # 未审查筛选同样走 SQL：1000 条未审查都能被统计（旧实现只取前 1000 条内存过滤）
+        none_result = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            risk="none", page=1, page_size=20,
+        )
+        self.assertEqual(none_result["total"], 1000)
+        self.assertEqual(len(none_result["items"]), 20)
+
+    def test_summary_refreshes_on_review_action(self):
+        contract = self._contract("审核流转合同")
+        review = self._attach_review(contract, status="needs_lawyer_review", risks=[])
+        reviewer = User(
+            username="ledger-reviewer", email="reviewer@example.com",
+            hashed_password=hash_password("pw"), role="admin",
+            organization_id=self.org.id,
+        )
+        self.db.add(reviewer)
+        self.db.commit()
+
+        from app.services.legal.legal_workspace_service import legal_workspace_read_module
+
+        legal_workspace_read_module.apply_review_action(
+            self.db, reviewer, target_type="contract_review", target_id=review.id,
+            action="approve", note="通过",
+        )
+        approved = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id, review_status="lawyer_approved",
+        )
+        self.assertEqual([item["id"] for item in approved["items"]], [contract.id])
+
+    def test_summary_refreshes_when_risks_rewritten(self):
+        from app.services.legal.legal_domain_service import persist_review_artifacts
+
+        contract = self._contract("风险重写合同")
+        review = self._attach_review(contract, status="needs_lawyer_review", risks=[])
+        summary = self.db.query(LegalContractReviewSummary).filter(
+            LegalContractReviewSummary.contract_id == contract.id).first()
+        self.assertEqual(summary.risks_total, 0)
+
+        persist_review_artifacts(self.db, review, risks=[
+            {"risk_level": "high", "description": "高", "source_location": {"paragraph": 1}},
+            {"risk_level": "medium", "description": "中", "source_location": {}},
+        ], refs=[])
+        self.db.refresh(summary)
+        self.assertEqual(summary.risks_total, 2)
+        self.assertEqual(summary.risks_high, 1)
+        self.assertEqual(summary.risks_unanchored, 1)
+
+        high = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id, risk="high",
+        )
+        self.assertEqual([item["id"] for item in high["items"]], [contract.id])
+
+    def test_summary_removed_when_review_unlinked(self):
+        contract = self._contract("解除关联合同")
+        self._attach_review(contract, status="needs_lawyer_review", risks=[])
+        self.db.query(LegalContractVersion).filter(
+            LegalContractVersion.contract_id == contract.id).delete()
+        self.db.commit()
+        refresh_contract_review_summary(self.db, contract.id)
+        self.db.commit()
+        self.assertIsNone(self.db.query(LegalContractReviewSummary).filter(
+            LegalContractReviewSummary.contract_id == contract.id).first())
+        none_rows = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id, risk="none",
+        )
+        self.assertEqual([item["id"] for item in none_rows["items"]], [contract.id])
+
+    def test_refresh_helper_returns_affected_contracts(self):
+        contract = self._contract("刷新计数合同")
+        review = self._attach_review(contract, status="needs_lawyer_review", risks=[])
+        self.assertEqual(refresh_summaries_for_review(self.db, review.id), 1)
+        self.assertEqual(refresh_summaries_for_review(self.db, review.id + 999), 0)

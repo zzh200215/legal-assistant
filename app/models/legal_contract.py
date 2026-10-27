@@ -70,6 +70,34 @@ class LegalContractClause(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class LegalContractReviewSummary(Base):
+    """合同台账的审查摘要（物化），让台账筛选/分页能下推数据库。
+
+    为什么单独一张表而不加在 ``legal_contracts`` 上：合同表有乐观锁
+    (``version_id_col``)，写摘要会顶高版本号，导致并发编辑合同的人拿到 409。
+    摘要只由版本↔审查的写入路径刷新，台账读写都不触碰合同行本身。
+
+    语义与 step36 的读时派生一致：取该合同**最新**带有 ``source_review_id`` 的版本，
+    再取对应审查的状态与 ``risks_json`` 计数；没有审查时**删除本行**（台账显示未审查）。
+    """
+
+    __tablename__ = "legal_contract_review_summaries"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    contract_id = Column(Integer, ForeignKey("legal_contracts.id", ondelete="CASCADE"),
+                         nullable=False, unique=True, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    review_id = Column(Integer, ForeignKey("legal_contract_reviews.id"), nullable=True)
+    review_status = Column(String(32), nullable=False, index=True)
+    review_version = Column(Integer, nullable=True)
+    risks_total = Column(Integer, nullable=False, default=0)
+    risks_high = Column(Integer, nullable=False, default=0)
+    risks_unanchored = Column(Integer, nullable=False, default=0)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_updated_at = Column(DateTime(timezone=True), nullable=True)
+    refreshed_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class LegalContractMilestone(Base):
     __tablename__ = "legal_contract_milestones"
 

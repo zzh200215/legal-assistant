@@ -1499,6 +1499,11 @@ class LegalWorkspaceReadModule:
             note=note, from_status=previous, to_status=status,
             target_version=getattr(row, "version", None),
         ))
+        if target_type == "contract_review":
+            # 台账摘要物化（step44）：审查状态变化会影响列表筛选，同一事务内刷新
+            from app.services.legal.contract_review_summary import refresh_summaries_for_review
+
+            refresh_summaries_for_review(db, target_id)
         db.commit()
         db.refresh(row)
         matter_service.record_activity(
