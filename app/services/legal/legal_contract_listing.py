@@ -219,6 +219,20 @@ def serialize_review_summary(summary: LegalContractReviewSummary | None) -> dict
 
 
 SEARCH_FIELD_NAMES = ("title", "counterparty", "contract_no")
+SNIPPET_RADIUS = 20
+
+
+def _snippet(value, keyword: str) -> str | None:
+    """截取命中词前后各 20 个字符；两端有截断时补省略号。"""
+    text = str(value or "")
+    index = text.casefold().find(keyword.casefold())
+    if index < 0:
+        return None
+    start = max(0, index - SNIPPET_RADIUS)
+    end = min(len(text), index + len(keyword) + SNIPPET_RADIUS)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return f"{prefix}{text[start:end]}{suffix}"
 
 
 def search_hit(contract: LegalContract, q: str | None) -> dict[str, Any] | None:
@@ -232,11 +246,15 @@ def search_hit(contract: LegalContract, q: str | None) -> dict[str, Any] | None:
         return None
     needle = keyword.casefold()
     matched = []
+    snippets: dict[str, str] = {}
     for field in SEARCH_FIELD_NAMES:
         value = getattr(contract, field, None)
         if value and needle in str(value).casefold():
             matched.append(field)
-    return {"query": keyword, "matched_fields": matched}
+            snippet = _snippet(value, keyword)
+            if snippet:
+                snippets[field] = snippet
+    return {"query": keyword, "matched_fields": matched, "snippets": snippets}
 
 
 def serialize_milestone(milestone: LegalContractMilestone) -> dict[str, Any]:

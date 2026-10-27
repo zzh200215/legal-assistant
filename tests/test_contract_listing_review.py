@@ -249,7 +249,9 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         by_title = list_visible_contracts(
             self.db, org_id=self.org.id, user_id=self.user.id, q="劳动",
         )["items"][0]
-        self.assertEqual(by_title["search"], {"query": "劳动", "matched_fields": ["title"]})
+        self.assertEqual(by_title["search"]["query"], "劳动")
+        self.assertEqual(by_title["search"]["matched_fields"], ["title"])
+        self.assertEqual(by_title["search"]["snippets"]["title"], "劳动合同模板")
         by_party = list_visible_contracts(
             self.db, org_id=self.org.id, user_id=self.user.id, q="科技",
         )["items"][0]
@@ -286,6 +288,38 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
                 self.db, org_id=self.org.id, user_id=self.user.id,
                 q="采购", page_size=2, cursor=first["next_cursor"],
             )
+
+    def test_search_snippets_keep_20_chars_around_match(self):
+        long = self._contract("甲" * 30 + "劳动合同" + "乙" * 30)
+        long.counterparty = "丙" * 25 + "科技" + "丁" * 25
+        long.contract_no = "HT-" + "0" * 20 + "劳动" + "9" * 20
+        short = self._contract("劳动合同")
+        self.db.commit()
+
+        def row_for(query, contract_id):
+            result = list_visible_contracts(
+                self.db, org_id=self.org.id, user_id=self.user.id, q=query,
+            )
+            return next(row for row in result["items"] if row["id"] == contract_id)
+
+        by_title = row_for("劳动", long.id)
+        self.assertEqual(
+            by_title["search"]["snippets"]["title"],
+            "…" + "甲" * 20 + "劳动合同" + "乙" * 18 + "…",
+        )
+        self.assertEqual(
+            by_title["search"]["snippets"]["contract_no"],
+            "…" + "0" * 20 + "劳动" + "9" * 20,
+        )
+        by_party = row_for("科技", long.id)
+        self.assertEqual(
+            by_party["search"]["snippets"]["counterparty"],
+            "…" + "丙" * 20 + "科技" + "丁" * 20 + "…",
+        )
+        # 短字段不补省略号
+        self.assertEqual(
+            row_for("劳动", short.id)["search"]["snippets"]["title"], "劳动合同",
+        )
 
     def test_relevance_sort_orders_by_matched_field_and_paginates(self):
         title_hit = self._contract("劳动合同")

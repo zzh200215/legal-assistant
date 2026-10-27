@@ -45,19 +45,23 @@
           </select>
         </div>
         <el-table v-loading="loading" :data="contracts" stripe size="small">
-          <el-table-column label="合同编号" width="150">
-            <template #default="{ row }"><HighlightText :text="row.contract_no" /></template>
+          <el-table-column label="合同编号" width="140">
+            <template #default="{ row }"><HighlightText :text="cellText(row, 'contract_no')" :title="cellText(row, 'contract_no')" /></template>
           </el-table-column>
-          <el-table-column label="合同名称" min-width="180">
+          <el-table-column label="合同名称" min-width="160">
             <template #default="{ row }">
-              <div class="contract-title">
-                <HighlightText :text="row.title" :title="row.title" />
+              <div class="contract-title" :class="{ 'is-snippet': hasSnippet(row, 'title') }">
+                <HighlightText :text="cellText(row, 'title')" :title="cellText(row, 'title')" />
                 <span v-if="searchTerm" class="search-hit-fields">命中 {{ searchHitText(row) }}</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="相对方" min-width="140">
-            <template #default="{ row }"><HighlightText :text="row.counterparty" /></template>
+          <el-table-column label="相对方" min-width="120">
+            <template #default="{ row }">
+              <div class="contract-cell" :class="{ 'is-snippet': hasSnippet(row, 'counterparty') }">
+                <HighlightText :text="cellText(row, 'counterparty')" :title="cellText(row, 'counterparty')" />
+              </div>
+            </template>
           </el-table-column>
           <el-table-column prop="status" label="状态" width="100" />
           <el-table-column label="关联案件" width="100">
@@ -197,7 +201,7 @@ const splitSort = (value) => {
 // 搜索命中提示：后端 search.matched_fields 是展示口径（字面子串），
 // 高亮在前端按同一个搜索词切分，避免用 v-html 引入注入风险。
 const SEARCH_FIELD_LABELS = { title: '名称', counterparty: '相对方', contract_no: '编号' }
-const searchTerm = computed(() => filters.value.q.trim())
+const searchTerm = computed(() => filters.value.q.trim().replace(/\s+/g, ' '))
 
 const highlightParts = (value) => {
   const text = value == null ? '' : String(value)
@@ -242,6 +246,12 @@ const searchHitText = (row) => {
   if (fields.length) return fields.map((field) => SEARCH_FIELD_LABELS[field] || field).join(' / ')
   return '分词匹配'
 }
+// 搜索命中时优先显示后端截好的片段（命中词前后各 20 字），没有片段则回退全文。
+const cellText = (row, field) => {
+  if (!searchTerm.value) return row[field]
+  return row.search?.snippets?.[field] ?? row[field]
+}
+const hasSnippet = (row, field) => Boolean(row.search?.snippets?.[field])
 const reviewTagClass = (review) => {
   if (!review) return ''
   if (review.status === 'lawyer_approved') return 'is-ok'
@@ -353,7 +363,22 @@ onMounted(loadFeatures)
 .risk-high { color: var(--color-danger); }
 .risk-gap { color: var(--color-warning); }
 .contract-title { display: grid; gap: 2px; min-width: 0; }
-.contract-title .search-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contract-cell { min-width: 0; }
+/* 片段最长 = 命中词前 20 + 命中词 + 后 20；只有片段模式最多铺三行，普通文本仍单行省略 */
+.contract-title .search-text,
+.contract-cell .search-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.contract-title.is-snippet .search-text,
+.contract-cell.is-snippet .search-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  word-break: break-word;
+}
 .search-hit { padding: 0 1px; border-radius: 2px; background: var(--color-warning-light); color: var(--color-warning); font-weight: 600; }
 .search-hit-fields { color: var(--color-text-muted); font-size: var(--text-xs); line-height: 1.4; }
 .risk-breakdown { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; line-height: 1.6; }

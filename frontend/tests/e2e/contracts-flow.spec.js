@@ -8,19 +8,34 @@ import { test, expect } from '@playwright/test'
 const success = (data) => ({ success: true, data })
 const SHOT_DIR = process.env.E2E_SHOT_DIR || ''
 const SEARCH_FIELDS = ['title', 'counterparty', 'contract_no']
-const withSearch = (items, query) => items.map((item) => ({
-  ...item,
-  search: query ? {
-    query,
-    matched_fields: SEARCH_FIELDS.filter((field) => item[field]?.includes(query)),
-  } : null,
-}))
+const snippet = (value, query, radius = 20) => {
+  if (!value || !query) return value
+  const text = String(value)
+  const index = text.toLowerCase().indexOf(query.toLowerCase())
+  if (index < 0) return text
+  const start = Math.max(0, index - radius)
+  const end = Math.min(text.length, index + query.length + radius)
+  return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`
+}
+const withSearch = (items, query) => items.map((item) => {
+  const matched = query
+    ? SEARCH_FIELDS.filter((field) => item[field]?.includes(query))
+    : []
+  return {
+    ...item,
+    search: query ? {
+      query,
+      matched_fields: matched,
+      snippets: Object.fromEntries(matched.map((field) => [field, snippet(item[field], query)])),
+    } : null,
+  }
+})
 
 // 台账列较多（含审查时间与严重度分布），截图文案需要更宽的视口才能同时看到筛选与右侧列。
 test.use({ viewport: { width: 1600, height: 900 } })
 
 const CONTRACTS = [
-  { id: 1, contract_no: 'HT-2026-001', title: '劳动合同模板联调', counterparty: '某科技有限公司', status: 'active', organization_id: 5, case_id: 3, updated_at: '2026-08-07T10:00:00',
+  { id: 1, contract_no: 'HT-2026-001', title: '劳动合同模板联调', counterparty: `${'前缀'.repeat(12)}科技${'后缀'.repeat(12)}`, status: 'active', organization_id: 5, case_id: 3, updated_at: '2026-08-07T10:00:00',
     review: { id: 71, status: 'needs_lawyer_review', version: 2, risks_total: 5, risks_high: 2, risks_critical: 1, risks_medium: 2, risks_low: 1, risks_unanchored: 2, reviewed_at: '2026-08-07T09:30:00' } },
   { id: 2, contract_no: 'HT-2026-002', title: '采购协议联调', counterparty: '某供应链公司', status: 'draft', organization_id: 5, case_id: 3, updated_at: '2026-08-06T10:00:00', review: null },
   { id: 3, contract_no: 'HT-2026-003', title: '补充协议联调', counterparty: '某物流公司', status: 'draft', organization_id: 5, case_id: 3, updated_at: '2026-08-05T10:00:00',
@@ -197,8 +212,12 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
     const row = page.locator('.el-table__row')
     await expect(row).toContainText(hint)
     await expect(row.locator('mark.search-hit')).toHaveText(query)
+    if (query === '科技') {
+      await expect(row).toContainText('…')  // 长相对方显示命中词前后各 20 字
+    }
     if (SHOT_DIR && query === '科技') {
       await page.screenshot({ path: path.join(SHOT_DIR, 'step48-contract-search-highlight.png'), fullPage: true })
+      await page.screenshot({ path: path.join(SHOT_DIR, 'step50-search-snippet.png'), fullPage: true })
     }
   }
 
