@@ -77,6 +77,11 @@ class ReliabilitySettings(BaseSettings):
     OUTBOX_RETRY_STUCK_WARN_THRESHOLD: int = Field(default=10, ge=1, le=100000)
     # 同一组织同一条告警的冷却时间（= 幂等窗口），避免 beat 每 15 分钟刷屏。
     OUTBOX_ALERT_COOLDOWN_MINUTES: int = Field(default=180, ge=15, le=1440)
+    # 告警升级：持续越阈值超过 N 分钟 → 发升级提醒（升级自身有冷却，且不受静默时段限制）。
+    OUTBOX_ALERT_ESCALATE_AFTER_MINUTES: int = Field(default=60, ge=15, le=1440)
+    OUTBOX_ESCALATION_COOLDOWN_MINUTES: int = Field(default=180, ge=15, le=1440)
+    # 静默时段：命中用户「免打扰」窗口时，普通告警只发站内；升级提醒不受限（见上）。
+    OUTBOX_ALERT_RESPECT_QUIET_HOURS: bool = True
     # 积压快照：每 5 分钟采样一行（平台级 + 每个有管理员的组织），默认保留 30 天。
     OUTBOX_SNAPSHOT_RETENTION_DAYS: int = Field(default=30, ge=1, le=365)
     # 单次采样最多覆盖多少个组织（组织数膨胀时只保留平台级，避免任务被拖长）。

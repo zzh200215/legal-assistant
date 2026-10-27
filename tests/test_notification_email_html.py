@@ -62,7 +62,7 @@ class BuiltinEmailTemplateTests(unittest.TestCase):
         "review_sla_due_soon", "review_sla_overdue",
         "review_consultation_uncited", "review_consultation_weak",
         "consultation_returned_supplement", "consultation_returned",
-        "consultation_supplemented", "outbox_health_alert",
+        "consultation_supplemented", "outbox_health_alert", "outbox_health_escalation",
     }
 
     def test_all_business_template_keys_registered(self):

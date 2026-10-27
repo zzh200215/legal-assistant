@@ -201,7 +201,7 @@
     <div class="app-card-head">
       <h2>投递健康</h2>
       <span class="app-card-head-meta">
-        阈值每 15 分钟扫描；同组织同告警冷却 {{ overview.health.cooldown_minutes }} 分钟
+        阈值每 15 分钟扫描 · 告警冷却 {{ overview.health.cooldown_minutes }} 分钟 · 持续超阈值会自动升级
       </span>
     </div>
     <div class="app-card-body">
@@ -215,8 +215,19 @@
           </span>
         </li>
       </ul>
+      <div v-if="escalations.length" class="escalation-list">
+        <div v-for="item in escalations" :key="item.organization_id" class="escalation-item">
+          <span class="escalation-org">组织 #{{ item.organization_id }}</span>
+          <span class="app-num">连续 {{ item.breach_streak }} 次</span>
+          <span class="app-num">首次 {{ formatTime(item.first_breached_at) }}</span>
+          <span class="app-tag" :class="item.escalated_at ? 'is-danger' : 'is-pending'">
+            {{ item.escalated_at ? `已升级 ${formatTime(item.escalated_at)}` : '待升级' }}
+          </span>
+        </div>
+      </div>
       <p class="health-note">
-        超阈值时由 <code>check_outbox_health</code> 给组织管理员发站内+邮件告警（冷却窗口内不重复）；平台管理员（无组织）只在此页看全局，不接收组织级告警。
+        超阈值时由 <code>check_outbox_health</code> 给组织管理员发站内+邮件告警（冷却窗口内不重复）；
+        命中用户免打扰时段时普通告警只发站内，持续超过 60 分钟的异常会单独发升级提醒（不受静默限制，投递恢复后自动停止）。平台管理员（无组织）只在此页看全局，不接收组织级告警。
       </p>
     </div>
   </section>
@@ -302,6 +313,7 @@ const emptyOverview = () => ({
     healthy: true,
     cooldown_minutes: 180,
   },
+  escalations: [],
 })
 
 const emptyHistory = () => ({
@@ -322,6 +334,7 @@ const error = ref(null)
 const retrying = ref('')
 
 const alerts = computed(() => overview.value.alerts || [])
+const escalations = computed(() => overview.value.escalations || [])
 const backlogTotal = computed(() =>
   (overview.value.notification.backlog.open_total || 0) + (overview.value.email.backlog.open_total || 0))
 const deadLetterTotal = computed(() =>
@@ -699,6 +712,25 @@ onMounted(fetchOverview)
 }
 .health-note code {
   font-size: 11px;
+}
+.escalation-list {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+}
+.escalation-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 13px;
+}
+.escalation-org {
+  width: 92px;
+  flex: none;
+  font-weight: 600;
+  color: var(--color-text);
 }
 
 /* ── 积压曲线（SVG 折线，无图表库）── */

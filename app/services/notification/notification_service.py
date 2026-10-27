@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_ as sa_or
 from sqlalchemy import text as sa_text
@@ -30,6 +30,20 @@ from app.models.user import User
 from app.services.observability.oplog_service import oplog_service
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_hhmm(value: str | None) -> int | None:
+    """把 "HH:MM" 解析为当天分钟数；非法值返回 None（不阻塞投递）。"""
+    if not value:
+        return None
+    try:
+        hour_text, _, minute_text = str(value).strip().partition(":")
+        hour, minute = int(hour_text), int(minute_text or 0)
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return hour * 60 + minute
 
 
 def _record_delivery_metric(event: LegalNotificationEvent, status: str) -> None:
@@ -354,6 +368,39 @@ class NotificationService:
             return channel in channels
         except (json.JSONDecodeError, TypeError):
             return False
+
+    def preference_for(self, *, db: Session, user_id: int, organization_id: int,
+                       event_type: str) -> LegalNotificationPreference | None:
+        """读取生效偏好（具体事件类型优先，回退 all）；供静默时段等外部判定复用。"""
+        return self._get_preference(
+            db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
+        )
+
+    @staticmethod
+    def is_quiet_now(pref: LegalNotificationPreference | None, *, now: datetime | None = None) -> bool:
+        """是否处于用户免打扰窗口（按偏好时区解释 mute_start/mute_end，支持跨夜）。
+
+        与渠道偏好解耦：命中窗口只影响投递渠道选择，不改偏好本身。
+        """
+        if pref is None or not pref.mute_start or not pref.mute_end:
+            return False
+        start = _parse_hhmm(pref.mute_start)
+        end = _parse_hhmm(pref.mute_end)
+        if start is None or end is None or start == end:
+            return False
+        try:
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(pref.timezone or "Asia/Shanghai")
+        except Exception:  # noqa: BLE001 - 时区非法按 UTC 解释，不阻塞投递
+            from datetime import timezone as _tz
+
+            tz = _tz.utc
+        moment = (now or utc_now()).replace(tzinfo=timezone.utc).astimezone(tz)
+        minutes = moment.hour * 60 + moment.minute
+        if start < end:
+            return start <= minutes < end
+        return minutes >= start or minutes < end
 
     def _is_email_available(self, db: Session, organization_id: int) -> bool:
         """检查组织是否配置了外发邮件。"""

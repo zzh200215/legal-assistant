@@ -60,6 +60,15 @@ const OVERVIEW = {
     level: 'warning',
     message: '2 条投递进入死信（阈值 1），需人工重试或修复模板',
   }],
+  escalations: [{
+    organization_id: 1,
+    breach_streak: 5,
+    first_breached_at: '2026-10-26T08:00:00',
+    last_breached_at: '2026-10-26T09:00:00',
+    last_alert_at: '2026-10-26T09:00:00',
+    escalated_at: '2026-10-26T09:00:00',
+    resolved_at: null,
+  }],
 }
 
 const TREND_DAYS = [
@@ -166,6 +175,10 @@ test('System 投递看板与死信重排', async ({ page }) => {
   await expect(page.getByText('投递健康')).toBeVisible()
   await expect(page.getByText('超阈值').first()).toBeVisible()
   await expect(page.getByText('冷却 180 分钟', { exact: false })).toBeVisible()
+  // 持续越阈值的组织会出现在升级清单里
+  await expect(page.getByText('组织 #1')).toBeVisible()
+  await expect(page.getByText('连续 5 次')).toBeVisible()
+  await expect(page.getByText('已升级 10-26 09:00')).toBeVisible()
 
   // 积压曲线（快照）
   await expect(page.getByText('积压曲线')).toBeVisible()
@@ -184,7 +197,7 @@ test('System 投递看板与死信重排', async ({ page }) => {
   await expect(page.getByText('咨询被退回').first()).toBeVisible()
 
   if (SHOT_DIR) {
-    await page.screenshot({ path: path.join(SHOT_DIR, 'step42-delivery-dashboard.png'), fullPage: true })
+    await page.screenshot({ path: path.join(SHOT_DIR, 'step43-delivery-escalation.png'), fullPage: true })
   }
 
   // 重排第一条（通知）→ 待投递

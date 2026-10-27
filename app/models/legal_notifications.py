@@ -201,6 +201,29 @@ class OutboxSnapshot(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class OutboxAlertState(Base):
+    """投递告警的持续状态（每组织一行），用于升级与恢复判定。
+
+    - 首次越阈值记 ``first_breached_at``；每次仍越阈值 ``breach_streak`` +1；
+    - 恢复（不再越阈值）清零并把 ``resolved_at`` 置为恢复时间；
+    - 持续超过 ``OUTBOX_ALERT_ESCALATE_AFTER_MINUTES`` 后升级提醒一次，升级自身有冷却；
+    - 这张表只记录告警状态，不存投递数据。
+    """
+
+    __tablename__ = "outbox_alert_states"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False,
+                             unique=True, index=True)
+    first_breached_at = Column(DateTime(timezone=True), nullable=True, comment="本轮首次越阈值时间")
+    last_breached_at = Column(DateTime(timezone=True), nullable=True, comment="最近一次仍越阈值")
+    breach_streak = Column(Integer, nullable=False, default=0, comment="连续越阈值次数")
+    last_alert_at = Column(DateTime(timezone=True), nullable=True, comment="最近一次普通告警时间")
+    escalated_at = Column(DateTime(timezone=True), nullable=True, comment="最近一次升级提醒时间")
+    resolved_at = Column(DateTime(timezone=True), nullable=True, comment="最近一次恢复时间")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class OrganizationOnboardingProgress(Base):
     __tablename__ = "organization_onboarding_progress"
 

@@ -76,6 +76,12 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "看投递看板",
         "footnote": "同类告警在冷却窗口内不重复发送；处理后可在此页重排死信。",
     },
+    "outbox_health_escalation": {
+        "subject": "【律智检】{{title}}",
+        "lead": "投递异常持续未恢复，已升级提醒。",
+        "action_label": "立即处理",
+        "footnote": "升级提醒不受静默时段限制；投递恢复后自动停止升级。",
+    },
 }
 
 # 深链：按 reference_type 落到审核台；其他类型回到通知中心。

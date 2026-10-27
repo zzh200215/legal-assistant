@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.time import utc_now
 from app.models.email import EmailSendRequest, OutboundEmailPolicy
-from app.models.legal_notifications import LegalNotificationEvent
+from app.models.legal_notifications import LegalNotificationEvent, OutboxAlertState
 from app.models.user import User
 
 WINDOW_DEFAULT_DAYS = 7
@@ -465,6 +465,24 @@ def _alerts(health: dict, email: dict) -> list[dict]:
     return alerts
 
 
+def open_alert_states(db: Session, *, organization_id: int | None = None,
+                      limit: int = 20) -> list[dict]:
+    """仍在越阈值的告警状态（看板展示升级进度用）；已恢复的不返回。"""
+    query = db.query(OutboxAlertState).filter(OutboxAlertState.first_breached_at.isnot(None))
+    if organization_id is not None:
+        query = query.filter(OutboxAlertState.organization_id == organization_id)
+    rows = query.order_by(OutboxAlertState.first_breached_at.asc()).limit(limit).all()
+    return [{
+        "organization_id": row.organization_id,
+        "breach_streak": row.breach_streak or 0,
+        "first_breached_at": _iso(row.first_breached_at),
+        "last_breached_at": _iso(row.last_breached_at),
+        "last_alert_at": _iso(row.last_alert_at),
+        "escalated_at": _iso(row.escalated_at),
+        "resolved_at": _iso(row.resolved_at),
+    } for row in rows]
+
+
 def outbox_overview(db: Session, *, days: int = WINDOW_DEFAULT_DAYS,
                     organization_id: int | None = None,
                     now: datetime | None = None) -> dict:
@@ -484,6 +502,7 @@ def outbox_overview(db: Session, *, days: int = WINDOW_DEFAULT_DAYS,
         "email": email,
         "trend": daily_trend(db, days=days, organization_id=organization_id, now=now),
         "health": health,
+        "escalations": open_alert_states(db, organization_id=organization_id),
         "alerts": _alerts(health, email),
     }
 

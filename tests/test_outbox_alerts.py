@@ -1,6 +1,6 @@
-"""Outbox 健康检查与告警：阈值口径、按组织告警、冷却窗口幂等、每日趋势分桶。"""
+"""Outbox 健康检查与告警：阈值口径、按组织告警、冷却/升级、静默时段、每日趋势分桶。"""
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -13,11 +13,16 @@ from app.core.config import get_settings
 from app.core.database import Base
 from app.core.time import utc_now
 from app.models.email import EmailSendRequest
-from app.models.legal_notifications import LegalNotificationEvent
+from app.models.legal_notifications import (
+    LegalNotificationEvent, LegalNotificationPreference, OutboxAlertState,
+)
 from app.models.org import Organization
 from app.models.user import User, UserStatus
 from app.services.notification.delivery_ops import daily_trend, evaluate_health, outbox_overview
-from app.services.notification.outbox_alerts import run_outbox_health_check, TEMPLATE_KEY
+from app.services.notification.notification_service import notification_service
+from app.services.notification.outbox_alerts import (
+    ESCALATION_TEMPLATE_KEY, TEMPLATE_KEY, run_outbox_health_check,
+)
 
 
 def _engine():
@@ -179,10 +184,105 @@ class OutboxAlertTaskTests(unittest.TestCase):
         return self.db.query(LegalNotificationEvent).filter(
             LegalNotificationEvent.template_key == TEMPLATE_KEY).all()
 
+    def _escalations(self):
+        return self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.template_key == ESCALATION_TEMPLATE_KEY).all()
+
+    def _enable_email(self):
+        from app.models.email import OutboundEmailPolicy
+
+        self.db.add(OutboundEmailPolicy(organization_id=self.org_id, enabled=True,
+                                        allowed_recipient_domains_json='["example.com"]'))
+        self.db.commit()
+
+    def _quiet_pref(self, user, *, start="00:00", end="23:59"):
+        from app.models.legal_notifications import LegalNotificationPreference
+
+        self.db.add(LegalNotificationPreference(
+            user_id=user.id, organization_id=self.org_id, event_type="approval",
+            channels_json='["site", "email"]', mute_start=start, mute_end=end,
+            timezone="Asia/Shanghai",
+        ))
+        self.db.commit()
+
     def test_no_alert_when_healthy(self):
         result = run_outbox_health_check(self.db)
         self.assertEqual(result["breached_orgs"], 0)
         self.assertEqual(self._alerts(), [])
+
+    def test_state_tracks_streak_and_resolution(self):
+        now = self._breach()
+        run_outbox_health_check(self.db, now=now)
+        state = self.db.query(OutboxAlertState).first()
+        self.assertIsNotNone(state)
+        self.assertEqual(state.breach_streak, 1)
+        self.assertIsNotNone(state.first_breached_at)
+
+        run_outbox_health_check(self.db, now=now + timedelta(minutes=15))
+        self.db.refresh(state)
+        self.assertEqual(state.breach_streak, 2)
+
+        # 投递恢复：状态清零并记 resolved_at
+        self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.status == "dead_letter").delete()
+        self.db.commit()
+        result = run_outbox_health_check(self.db, now=now + timedelta(minutes=30))
+        self.db.refresh(state)
+        self.assertEqual(result["resolved_orgs"], 1)
+        self.assertEqual(state.breach_streak, 0)
+        self.assertIsNone(state.first_breached_at)
+        self.assertIsNotNone(state.resolved_at)
+
+    def test_escalation_after_sustained_breach(self):
+        now = self._breach()
+        run_outbox_health_check(self.db, now=now)
+        self.assertEqual(self._escalations(), [])
+
+        # 持续 61 分钟（默认阈值 60）→ 每个管理员各一条升级（无邮件策略时只有站内）
+        run_outbox_health_check(self.db, now=now + timedelta(minutes=61))
+        escalations = self._escalations()
+        self.assertEqual({event.user_id for event in escalations}, self.admin_ids)
+        self.assertEqual(len(escalations), len(self.admin_ids))
+        self.assertIn("升级", escalations[0].title)
+        self.assertIn("已持续 61 分钟", escalations[0].title)
+
+        # 升级冷却内重复扫描：不新增
+        run_outbox_health_check(self.db, now=now + timedelta(minutes=75))
+        self.assertEqual(len(self._escalations()), len(self.admin_ids))
+
+    def test_quiet_hours_send_site_only(self):
+        self._enable_email()
+        self._quiet_pref(self.admin)
+        now = self._breach()
+        result = run_outbox_health_check(self.db, now=now)
+        self.assertEqual(result["quiet_users"], 1)
+
+        admin_events = [event for event in self._alerts() if event.user_id == self.admin.id]
+        self.assertEqual([event.channel for event in admin_events], ["site"])
+        self.assertIn("静默", admin_events[0].body)
+        # 另一个没设偏好的管理员仍然双渠道
+        other_events = [event for event in self._alerts() if event.user_id == self.other_admin.id]
+        self.assertEqual({event.channel for event in other_events}, {"site", "email"})
+
+    def test_escalation_bypasses_quiet_hours(self):
+        self._enable_email()
+        self._quiet_pref(self.admin)
+        now = self._breach()
+        run_outbox_health_check(self.db, now=now)
+        run_outbox_health_check(self.db, now=now + timedelta(minutes=61))
+
+        admin_escalations = [event for event in self._escalations() if event.user_id == self.admin.id]
+        self.assertEqual({event.channel for event in admin_escalations}, {"site", "email"})
+        self.assertNotIn("静默", admin_escalations[0].body)
+
+    def test_quiet_hours_can_be_disabled(self):
+        self._enable_email()
+        self._quiet_pref(self.admin)
+        now = self._breach()
+        with patch.object(get_settings(), "OUTBOX_ALERT_RESPECT_QUIET_HOURS", False):
+            run_outbox_health_check(self.db, now=now)
+        admin_events = [event for event in self._alerts() if event.user_id == self.admin.id]
+        self.assertEqual({event.channel for event in admin_events}, {"site", "email"})
 
     def test_alerts_org_admins_only(self):
         self._breach()
@@ -241,6 +341,41 @@ class OutboxAlertTaskTests(unittest.TestCase):
         self.assertEqual(result["skipped"], "no_org_admin")
         self.assertEqual(result["checked_orgs"], 0)
         self.assertEqual(self._alerts(), [])
+
+
+class QuietHoursTests(unittest.TestCase):
+    """免打扰窗口解析：跨夜、同时段、无偏好、非法时区。"""
+
+    @staticmethod
+    def _pref(start, end, timezone_name="Asia/Shanghai"):
+        return LegalNotificationPreference(
+            user_id=1, organization_id=1, event_type="approval", channels_json="[]",
+            mute_start=start, mute_end=end, timezone=timezone_name,
+        )
+
+    # 2026-10-27 17:30 UTC == 2026-10-28 01:30 Asia/Shanghai
+    NOW = datetime(2026, 10, 27, 17, 30)
+
+    def test_overnight_window_is_quiet(self):
+        self.assertTrue(notification_service.is_quiet_now(
+            self._pref("22:00", "08:00"), now=self.NOW))
+
+    def test_daytime_window_is_not_quiet_at_night(self):
+        self.assertFalse(notification_service.is_quiet_now(
+            self._pref("09:00", "18:00"), now=self.NOW))
+
+    def test_same_start_end_disables_quiet(self):
+        self.assertFalse(notification_service.is_quiet_now(
+            self._pref("08:00", "08:00"), now=self.NOW))
+
+    def test_missing_pref_or_fields_is_not_quiet(self):
+        self.assertFalse(notification_service.is_quiet_now(None, now=self.NOW))
+        self.assertFalse(notification_service.is_quiet_now(self._pref(None, None), now=self.NOW))
+
+    def test_invalid_timezone_falls_back_to_utc(self):
+        # 17:30 UTC 落在 16:00-18:00 窗口内（按 UTC 解释），不抛异常
+        self.assertTrue(notification_service.is_quiet_now(
+            self._pref("16:00", "18:00", timezone_name="Not/AZone"), now=self.NOW))
 
 
 if __name__ == "__main__":
