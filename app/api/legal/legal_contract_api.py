@@ -131,7 +131,10 @@ def list_contracts(
     status: Optional[str] = None,
     q: Optional[str] = None,
     review_status: Optional[str] = Query(None, pattern="^(draft|pending_review|needs_lawyer_review|needs_facts|lawyer_approved|returned_for_facts|offline_consultation|archived)$"),
-    risk: Optional[str] = Query(None, pattern="^(high|unanchored|none)$"),
+    risk: Optional[str] = Query(None, pattern="^(critical|high|medium|low|unanchored|none)$"),
+    sort: str = Query("updated_at", pattern="^(updated_at|created_at|reviewed_at|review_updated_at)$",
+                      description="排序字段：合同更新时间/创建时间或最近审查时间"),
+    order: str = Query("desc", pattern="^(asc|desc)$", description="排序方向；未审查记录始终排最后"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     db: Session = Depends(get_db),
@@ -151,6 +154,8 @@ def list_contracts(
         page_size=page_size,
         review_status=review_status,
         risk=risk,
+        sort=sort,
+        order=order,
     )
 
 

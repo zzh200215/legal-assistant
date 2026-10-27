@@ -20889,7 +20889,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^(high|unanchored|none)$"
+                  "pattern": "^(critical|high|medium|low|unanchored|none)$"
                 },
                 {
                   "type": "null"
@@ -20897,6 +20897,32 @@
               ],
               "title": "Risk"
             }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(updated_at|created_at|reviewed_at|review_updated_at)$",
+              "description": "排序字段：合同更新时间/创建时间或最近审查时间",
+              "default": "updated_at",
+              "title": "Sort"
+            },
+            "description": "排序字段：合同更新时间/创建时间或最近审查时间"
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(asc|desc)$",
+              "description": "排序方向；未审查记录始终排最后",
+              "default": "desc",
+              "title": "Order"
+            },
+            "description": "排序方向；未审查记录始终排最后"
           },
           {
             "name": "page",

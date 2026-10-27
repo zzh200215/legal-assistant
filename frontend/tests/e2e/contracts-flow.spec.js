@@ -1,14 +1,19 @@
+import path from 'node:path'
 import { test, expect } from '@playwright/test'
 
 // 合同台账 tab（LegalContracts）联调回归：
-//   列表加载（org+case 过滤）→ 新建合同 POST → 版本列表/保存新版本 POST →
+//   列表加载（org+case 过滤）→ 审查/风险筛选与排序参数 → 新建合同 POST → 版本列表/保存新版本 POST →
 //   版本 Diff GET（base/target 参数）→ 关键节点 → 签署在 signing_enabled=false 时禁用。
 // 全 mock，锁定 API 契约与懒加载 tab 挂载接线。
 const success = (data) => ({ success: true, data })
+const SHOT_DIR = process.env.E2E_SHOT_DIR || ''
+
+// 台账列较多（含审查时间与严重度分布），截图文案需要更宽的视口才能同时看到筛选与右侧列。
+test.use({ viewport: { width: 1600, height: 900 } })
 
 const CONTRACTS = [
   { id: 1, contract_no: 'HT-2026-001', title: '劳动合同模板联调', counterparty: '某科技有限公司', status: 'active', organization_id: 5, case_id: 3, updated_at: '2026-08-07T10:00:00',
-    review: { id: 71, status: 'needs_lawyer_review', version: 2, risks_total: 3, risks_high: 1, risks_unanchored: 2, reviewed_at: null } },
+    review: { id: 71, status: 'needs_lawyer_review', version: 2, risks_total: 5, risks_high: 2, risks_critical: 1, risks_medium: 2, risks_low: 1, risks_unanchored: 2, reviewed_at: '2026-08-07T09:30:00' } },
   { id: 2, contract_no: 'HT-2026-002', title: '采购协议联调', counterparty: '某供应链公司', status: 'draft', organization_id: 5, case_id: 3, updated_at: '2026-08-06T10:00:00', review: null },
 ]
 let VERSIONS = [
@@ -50,6 +55,9 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
     if (method === 'GET' && path === '/legal/orgs/5/contracts') {
       requests.listContracts = url.searchParams.get('case_id')
       requests.reviewStatus = url.searchParams.get('review_status')
+      requests.risk = url.searchParams.get('risk')
+      requests.sort = url.searchParams.get('sort')
+      requests.order = url.searchParams.get('order')
       const reviewStatus = url.searchParams.get('review_status')
       const items = reviewStatus ? CONTRACTS.filter((item) => item.review?.status === reviewStatus) : CONTRACTS
       return route.fulfill({ json: success({ items, total: items.length, page: 1, page_size: 20 }) })
@@ -89,14 +97,45 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
   // 列表（带 case 过滤）+ 签署禁用（特性开关 false）
   await expect(page.getByText('劳动合同模板联调')).toBeVisible()
   await expect(page.getByText('采购协议联调')).toBeVisible()
-  // 台账跨案件视图：最近审查状态 + 风险摘要
+  // 台账跨案件视图：最近审查状态 + 严重度细分 + 审查时间
   const ledgerRow = page.locator('.el-table__row', { hasText: '劳动合同模板联调' })
   await expect(ledgerRow).toContainText('需律师审核')
-  await expect(ledgerRow).toContainText('3 条')
-  await expect(ledgerRow).toContainText('高 1')
+  await expect(ledgerRow).toContainText('共 5 条')
+  await expect(ledgerRow).toContainText('高 2（含严重 1）')
+  await expect(ledgerRow).toContainText('中 2')
+  await expect(ledgerRow).toContainText('低 1')
   await expect(ledgerRow).toContainText('无定位 2')
+  await expect(ledgerRow).toContainText('2026-08-07 09:30')
   await expect(page.locator('.el-table__row', { hasText: '采购协议联调' })).toContainText('未审查')
   expect(requests.listContracts).toBe('3')
+  expect(requests.sort).toBe('updated_at')
+  expect(requests.order).toBe('desc')
+
+  // 排序：审查时间（新→旧 / 旧→新）下推 sort/order 参数
+  const sortSelect = page.locator('.contract-filters select[aria-label="合同排序"]')
+  await sortSelect.selectOption('reviewed_at_desc')
+  await expect.poll(() => requests.sort).toBe('reviewed_at')
+  expect(requests.order).toBe('desc')
+  await sortSelect.selectOption('reviewed_at_asc')
+  await expect.poll(() => requests.order).toBe('asc')
+
+  // 风险筛选：严重度细分值可下推
+  const riskFilter = page.locator('.contract-filters select[aria-label="按风险筛选"]')
+  await riskFilter.selectOption('critical')
+  await expect.poll(() => requests.risk).toBe('critical')
+  await riskFilter.selectOption('')
+  await sortSelect.selectOption('updated_at_desc')
+  await expect.poll(() => requests.sort).toBe('updated_at')
+
+  if (SHOT_DIR) {
+    // 窄栏台账横向滚动到右侧，截图同时保留顶部筛选与「最近审查 / 审查时间 / 严重度分布」列。
+    await page.evaluate(() => {
+      const wrap = document.querySelector('.el-table__body-wrapper .el-scrollbar__wrap')
+      if (wrap) wrap.scrollLeft = 620
+    })
+    await page.waitForTimeout(200)
+    await page.screenshot({ path: path.join(SHOT_DIR, 'step45-contract-ledger-severity.png'), fullPage: true })
+  }
 
   // 台账筛选：按审查状态（服务端过滤）
   const reviewFilter = page.locator('.contract-filters select[aria-label="按审查状态筛选"]')

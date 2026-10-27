@@ -1,10 +1,14 @@
-"""合同列表查询服务（P1 API 统一化）：可见性过滤、审查筛选与分页全部下沉 SQL。
+"""合同列表查询服务（P1 API 统一化）：可见性过滤、审查筛选、排序与分页全部下沉 SQL。
 
 - 可见性语义与 legal_contract_api.list_contracts 原实现一致：
   无案件合同 → 组织成员可见；普通案件合同 → 组织成员可见；
   严格案件（is_strict_mode=1）合同 → 仅未撤销案件成员可见。
+  案件成员判断用 EXISTS 子查询（不用 JOIN），避免一个用户在同一案件有多条成员记录时
+  把合同行放大、也避免 DISTINCT 与「按审查时间排序」在 MySQL 上冲突。
 - 审查/风险筛选走物化摘要表 ``legal_contract_review_summaries``（step44）：
   JOIN + WHERE + offset/limit + count，不再有 1000 条上限；
+- 排序支持合同更新时间（默认）与最近审查时间；未审查（NULL）始终排在最后，
+  同一时间按合同 id 倒序保证分页稳定；
 - items 为显式序列化 dict，不返回合同正文（description 为加密列，禁止外泄）。
 """
 
@@ -12,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import and_, or_
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.legal import LegalCase
@@ -21,6 +25,24 @@ from app.models.legal_contract import (
     LegalContractMilestone,
     LegalContractReviewSummary,
 )
+
+# 台账排序白名单：只允许按白名单列排，避免把任意列名拼进 SQL。
+SORT_COLUMNS = {
+    "updated_at": LegalContract.updated_at,
+    "created_at": LegalContract.created_at,
+    "reviewed_at": LegalContractReviewSummary.reviewed_at,
+    "review_updated_at": LegalContractReviewSummary.review_updated_at,
+}
+DEFAULT_SORT = "updated_at"
+
+# 风险筛选白名单：列 > 0 即命中；``none`` 单独表示「没有审查摘要」。
+RISK_COLUMNS = {
+    "critical": LegalContractReviewSummary.risks_critical,
+    "high": LegalContractReviewSummary.risks_high,
+    "medium": LegalContractReviewSummary.risks_medium,
+    "low": LegalContractReviewSummary.risks_low,
+    "unanchored": LegalContractReviewSummary.risks_unanchored,
+}
 
 
 def serialize_contract(contract: LegalContract) -> dict[str, Any]:
@@ -54,6 +76,9 @@ def serialize_review_summary(summary: LegalContractReviewSummary | None) -> dict
         "version": summary.review_version,
         "risks_total": summary.risks_total or 0,
         "risks_high": summary.risks_high or 0,
+        "risks_critical": summary.risks_critical or 0,
+        "risks_medium": summary.risks_medium or 0,
+        "risks_low": summary.risks_low or 0,
         "risks_unanchored": summary.risks_unanchored or 0,
         "reviewed_at": summary.reviewed_at,
         "updated_at": summary.review_updated_at,
@@ -92,8 +117,16 @@ def list_visible_contracts(
     page_size: int = 20,
     review_status: str | None = None,
     risk: str | None = None,
+    sort: str = DEFAULT_SORT,
+    order: str = "desc",
 ) -> dict:
     from app.models.legal_portal import LegalCaseMember
+
+    member_exists = select(LegalCaseMember.id).where(
+        LegalCaseMember.case_id == LegalContract.case_id,
+        LegalCaseMember.user_id == user_id,
+        LegalCaseMember.revoked_at.is_(None),
+    ).correlate(LegalContract).exists()
 
     query = (
         db.query(LegalContract, LegalContractReviewSummary)
@@ -103,14 +136,6 @@ def list_visible_contracts(
         )
         .filter(LegalContract.organization_id == org_id)
         .outerjoin(LegalCase, LegalContract.case_id == LegalCase.id)
-        .outerjoin(
-            LegalCaseMember,
-            and_(
-                LegalCaseMember.case_id == LegalContract.case_id,
-                LegalCaseMember.user_id == user_id,
-                LegalCaseMember.revoked_at.is_(None),
-            ),
-        )
     )
     if case_id:
         query = query.filter(LegalContract.case_id == case_id)
@@ -122,23 +147,26 @@ def list_visible_contracts(
     query = query.filter(or_(
         LegalContract.case_id.is_(None),
         or_(LegalCase.is_strict_mode.is_(None), LegalCase.is_strict_mode == 0),
-        LegalCaseMember.id.isnot(None),
+        member_exists,
     ))
     # 审查/风险筛选下沉 SQL：摘要表 1:1 JOIN，可直接 WHERE + 分页
     if review_status:
         query = query.filter(LegalContractReviewSummary.review_status == review_status)
-    if risk == "high":
-        query = query.filter(LegalContractReviewSummary.risks_high > 0)
-    elif risk == "unanchored":
-        query = query.filter(LegalContractReviewSummary.risks_unanchored > 0)
-    elif risk == "none":
+    if risk == "none":
         query = query.filter(LegalContractReviewSummary.contract_id.is_(None))
+    elif risk in RISK_COLUMNS:
+        query = query.filter(RISK_COLUMNS[risk] > 0)
 
-    total = query.with_entities(LegalContract.id).distinct().count()
+    sort_column = SORT_COLUMNS.get(sort, SORT_COLUMNS[DEFAULT_SORT])
+    descending = str(order or "desc").lower() != "asc"
+    # 未审查的 reviewed_at 为 NULL：无论升降序都排最后，避免空值混在有效时间中间。
+    nulls_last = case((sort_column.is_(None), 1), else_=0)
+    direction = sort_column.desc() if descending else sort_column.asc()
+
+    total = query.count()
     rows = (
-        query.with_entities(LegalContract, LegalContractReviewSummary)
-        .distinct()
-        .order_by(LegalContract.updated_at.desc(), LegalContract.id.desc())
+        query
+        .order_by(nulls_last, direction, LegalContract.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -153,6 +181,8 @@ def list_visible_contracts(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "sort": sort if sort in SORT_COLUMNS else DEFAULT_SORT,
+        "order": "desc" if descending else "asc",
     }
 
 

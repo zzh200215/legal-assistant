@@ -22,9 +22,17 @@
           </select>
           <select v-model="filters.risk" aria-label="按风险筛选">
             <option value="">全部风险</option>
+            <option value="critical">有严重风险</option>
             <option value="high">有高风险</option>
+            <option value="medium">有中风险</option>
+            <option value="low">有低风险</option>
             <option value="unanchored">有无定位风险</option>
             <option value="none">未审查</option>
+          </select>
+          <select v-model="filters.sort" aria-label="合同排序">
+            <option value="updated_at_desc">合同更新（新→旧）</option>
+            <option value="reviewed_at_desc">审查时间（新→旧）</option>
+            <option value="reviewed_at_asc">审查时间（旧→新）</option>
           </select>
         </div>
         <el-table v-loading="loading" :data="contracts" stripe size="small">
@@ -41,12 +49,20 @@
               <span v-else class="muted">未审查</span>
             </template>
           </el-table-column>
-          <el-table-column label="风险" width="150">
+          <el-table-column label="审查时间" width="160">
             <template #default="{ row }">
-              <span v-if="row.review">
-                {{ row.review.risks_total }} 条
-                <span v-if="row.review.risks_high" class="risk-high"> · 高 {{ row.review.risks_high }}</span>
-                <span v-if="row.review.risks_unanchored" class="risk-gap"> · 无定位 {{ row.review.risks_unanchored }}</span>
+              <span v-if="row.review?.reviewed_at">{{ formatTime(row.review.reviewed_at) }}</span>
+              <span v-else class="muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="风险" width="250">
+            <template #default="{ row }">
+              <span v-if="row.review" class="risk-breakdown">
+                <span class="risk-total">共 {{ row.review.risks_total }} 条</span>
+                <span v-if="row.review.risks_high" class="risk-high">高 {{ row.review.risks_high }}<template v-if="row.review.risks_critical">（含严重 {{ row.review.risks_critical }}）</template></span>
+                <span v-if="row.review.risks_medium" class="risk-medium">中 {{ row.review.risks_medium }}</span>
+                <span v-if="row.review.risks_low" class="risk-low">低 {{ row.review.risks_low }}</span>
+                <span v-if="row.review.risks_unanchored" class="risk-gap">无定位 {{ row.review.risks_unanchored }}</span>
               </span>
               <span v-else class="muted">—</span>
             </template>
@@ -142,11 +158,17 @@ import api from '../api'
 const props = defineProps({ orgId: { type: Number, required: true }, caseId: { type: Number, required: false, default: null } })
 const contracts = ref([])
 const total = ref(0)
-const filters = ref({ review_status: '', risk: '' }); const REVIEW_STATUS_LABELS = {
+const filters = ref({ review_status: '', risk: '', sort: 'updated_at_desc' }); const REVIEW_STATUS_LABELS = {
   draft: '草稿', pending_review: '待审核', needs_lawyer_review: '需律师审核', needs_facts: '待补充事实',
   lawyer_approved: '律师通过', returned_for_facts: '退回补充', offline_consultation: '转线下', archived: '已归档',
 }
 const reviewStatusText = (review) => (review ? REVIEW_STATUS_LABELS[review.status] || review.status : '未审查')
+const formatTime = (value) => (value ? String(value).replace('T', ' ').slice(0, 16) : '—')
+// 排序控件是「字段_方向」单值，按最后一个下划线拆开（reviewed_at_desc → reviewed_at / desc）。
+const splitSort = (value) => {
+  const index = String(value).lastIndexOf('_')
+  return index > 0 ? [value.slice(0, index), value.slice(index + 1)] : ['updated_at', 'desc']
+}
 const reviewTagClass = (review) => {
   if (!review) return ''
   if (review.status === 'lawyer_approved') return 'is-ok'
@@ -164,9 +186,12 @@ const loadContracts = async () => {
   if (!props.orgId) return
   loading.value = true
   try {
+    const [sort, order] = splitSort(filters.value.sort)
     const { data } = await api.listLegalContracts(props.orgId, props.caseId, {
       review_status: filters.value.review_status,
       risk: filters.value.risk,
+      sort,
+      order,
     })
     contracts.value = data.items || []
     total.value = data.total ?? contracts.value.length
@@ -206,6 +231,10 @@ onMounted(loadFeatures)
 
 .risk-high { color: var(--color-danger); }
 .risk-gap { color: var(--color-warning); }
+.risk-breakdown { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; line-height: 1.6; }
+.risk-total { color: var(--color-text-secondary); }
+.risk-medium { color: var(--color-warning); }
+.risk-low { color: var(--color-text-muted); }
 
 .contract-filters { display: flex; align-items: center; gap: var(--space-2); padding-bottom: var(--space-3); }
 .contract-filters select { height: 30px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }

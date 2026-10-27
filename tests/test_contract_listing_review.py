@@ -1,7 +1,8 @@
-"""合同台账：审查摘要物化（筛选下沉 SQL）、写入路径刷新、超过 1000 条仍可分页筛选。"""
+"""合同台账：审查摘要物化（筛选下沉 SQL）、严重度细分、按审查时间排序、写入路径刷新。"""
 
 import json
 import unittest
+from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -10,8 +11,10 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.auth import hash_password
 from app.core.database import Base
-from app.models.legal import ContractReview
+from app.core.time import utc_now
+from app.models.legal import ContractReview, LegalCase
 from app.models.legal_contract import LegalContract, LegalContractReviewSummary, LegalContractVersion
+from app.models.legal_portal import LegalCaseMember
 from app.models.org import Organization
 from app.models.user import User
 from app.services.legal.contract_review_summary import (
@@ -44,10 +47,11 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def _contract(self, title):
+    def _contract(self, title, *, case_id=None):
         contract = LegalContract(
             organization_id=self.org.id, contract_no=f"NO-{title}", title=title, counterparty="对方",
-            contract_type="service", status="active", created_by=self.user.id, version=1,
+            contract_type="service", status="active", case_id=case_id,
+            created_by=self.user.id, version=1,
         )
         self.db.add(contract)
         self.db.commit()
@@ -85,6 +89,9 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         self.assertEqual(item["review"]["status"], "needs_lawyer_review")
         self.assertEqual(item["review"]["risks_total"], 2)
         self.assertEqual(item["review"]["risks_high"], 1)
+        self.assertEqual(item["review"]["risks_critical"], 0)
+        self.assertEqual(item["review"]["risks_medium"], 1)
+        self.assertEqual(item["review"]["risks_low"], 0)
         self.assertEqual(item["review"]["risks_unanchored"], 1)
 
     def test_contract_without_review_has_null_summary(self):
@@ -93,11 +100,11 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         item = next(row for row in result["items"] if row["id"] == contract.id)
         self.assertIsNone(item["review"])
 
-    def _attach_review(self, contract, *, status, risks):
+    def _attach_review(self, contract, *, status, risks, reviewed_at=None):
         review = ContractReview(
             user_id=self.user.id, title=contract.title, content="正文", summary="",
             risks_json=json.dumps(risks, ensure_ascii=False),
-            references_json="[]", status=status, version=1,
+            references_json="[]", status=status, version=1, reviewed_at=reviewed_at,
         )
         self.db.add(review)
         self.db.commit()
@@ -139,6 +146,122 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
 
         all_rows = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id)
         self.assertEqual(all_rows["total"], 3)
+
+    def test_severity_breakdown_and_filters(self):
+        """严重度细分：critical 是 high 的子集，未知级别按 medium 计，四档相加等于总数。"""
+        contract = self._contract("严重度合同")
+        self._attach_review(contract, status="needs_lawyer_review", risks=[
+            {"risk_level": "critical", "description": "严重", "source_location": {"paragraph": 1}},
+            {"risk_level": "high", "description": "高", "source_location": {"paragraph": 2}},
+            {"risk_level": "medium", "description": "中", "source_location": {"paragraph": 3}},
+            {"risk_level": "low", "description": "低", "source_location": {"paragraph": 4}},
+            {"description": "未标级别", "source_location": {"paragraph": 5}},
+        ])
+        low_only = self._contract("只有低风险")
+        self._attach_review(low_only, status="lawyer_approved", risks=[
+            {"risk_level": "low", "description": "低", "source_location": {"paragraph": 1}},
+        ])
+
+        all_rows = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id)
+        item = next(row for row in all_rows["items"] if row["id"] == contract.id)
+        review = item["review"]
+        self.assertEqual(review["risks_total"], 5)
+        self.assertEqual(review["risks_high"], 2)  # high + critical
+        self.assertEqual(review["risks_critical"], 1)
+        self.assertEqual(review["risks_medium"], 2)  # medium + 未知级别
+        self.assertEqual(review["risks_low"], 1)
+        self.assertEqual(
+            review["risks_high"] + review["risks_medium"] + review["risks_low"],
+            review["risks_total"],
+        )
+
+        expectations = {
+            "critical": [contract.id],
+            "high": [contract.id],
+            "medium": [contract.id],
+            "low": [low_only.id, contract.id],
+        }
+        for risk, expected_ids in expectations.items():
+            result = list_visible_contracts(
+                self.db, org_id=self.org.id, user_id=self.user.id, risk=risk,
+            )
+            self.assertEqual(sorted(row["id"] for row in result["items"]), sorted(expected_ids),
+                             msg=f"risk={risk}")
+            self.assertEqual(result["total"], len(expected_ids), msg=f"risk={risk}")
+
+    def test_sort_by_reviewed_at_puts_unreviewed_last(self):
+        base = datetime(2026, 9, 1, 9, 0, 0)
+        older = self._contract("较早审查")
+        self._attach_review(older, status="lawyer_approved", risks=[], reviewed_at=base)
+        newer = self._contract("较新审查")
+        self._attach_review(
+            newer, status="lawyer_approved", risks=[], reviewed_at=base + timedelta(days=2),
+        )
+        unreviewed = self._contract("未审查合同")
+
+        desc = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="reviewed_at", order="desc",
+        )
+        self.assertEqual([row["id"] for row in desc["items"]], [newer.id, older.id, unreviewed.id])
+        self.assertEqual(desc["sort"], "reviewed_at")
+        self.assertEqual(desc["order"], "desc")
+
+        asc = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="reviewed_at", order="asc",
+        )
+        self.assertEqual([row["id"] for row in asc["items"]], [older.id, newer.id, unreviewed.id])
+        self.assertEqual(asc["order"], "asc")
+
+        # 分页稳定：同一审查时间按合同 id 倒序
+        same_time = self._contract("同一时间审查")
+        self._attach_review(same_time, status="lawyer_approved", risks=[], reviewed_at=base)
+        page = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="reviewed_at", order="desc", page=1, page_size=20,
+        )
+        self.assertEqual([row["id"] for row in page["items"]][:3], [newer.id, same_time.id, older.id])
+
+    def test_sort_whitelist_falls_back_to_updated_at(self):
+        contract = self._contract("回退排序合同")
+        result = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="risks_high; drop table", order="sideways",
+        )
+        self.assertEqual(result["sort"], "updated_at")
+        self.assertEqual(result["order"], "desc")
+        self.assertEqual([row["id"] for row in result["items"]], [contract.id])
+
+    def test_strict_case_contracts_visible_only_to_active_members(self):
+        case = LegalCase(
+            organization_id=self.org.id, user_id=self.user.id, title="严格案件",
+            case_type="contract_dispute", status="in_progress", is_strict_mode=1,
+        )
+        self.db.add(case)
+        self.db.commit()
+        self.db.refresh(case)
+        contract = self._contract("严格案件合同", case_id=case.id)
+
+        hidden = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id)
+        self.assertEqual(hidden["total"], 0)  # 非成员：严格案件合同不可见
+
+        self.db.add_all([
+            LegalCaseMember(case_id=case.id, organization_id=self.org.id, user_id=self.user.id,
+                            case_role="owner", granted_by=self.user.id),
+            LegalCaseMember(case_id=case.id, organization_id=self.org.id, user_id=self.user.id,
+                            case_role="collaborator", granted_by=self.user.id),
+        ])
+        self.db.commit()
+        visible = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id)
+        self.assertEqual([row["id"] for row in visible["items"]], [contract.id])
+        self.assertEqual(visible["total"], 1)  # 重复成员记录不会放大行数
+
+        self.db.query(LegalCaseMember).filter(
+            LegalCaseMember.case_id == case.id).update({"revoked_at": utc_now()})
+        self.db.commit()
+        revoked = list_visible_contracts(self.db, org_id=self.org.id, user_id=self.user.id)
+        self.assertEqual(revoked["total"], 0)  # 撤销后不再可见
 
     def test_filtered_list_paginates_after_filtering(self):
         for index in range(3):

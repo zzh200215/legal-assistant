@@ -1,4 +1,4 @@
-"""迁移 0108 的存量回填：按最新带审查来源的版本生成摘要行。"""
+"""迁移 0108/0109 的存量回填：最新审查摘要 + 严重度细分列。"""
 import importlib.util
 import json
 import unittest
@@ -12,16 +12,21 @@ import app.models  # noqa: F401
 from app.core.auth import hash_password
 from app.core.database import Base
 from app.models.legal import ContractReview
-from app.models.legal_contract import LegalContract, LegalContractVersion
+from app.models.legal_contract import (
+    LegalContract,
+    LegalContractReviewSummary,
+    LegalContractVersion,
+)
 from app.models.org import Organization
 from app.models.user import User
 
-MIGRATION = Path(__file__).resolve().parents[1] / "alembic" / "versions" / \
-    "20261027_0108_contract_review_summary.py"
+VERSIONS_DIR = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+MIGRATION = VERSIONS_DIR / "20261027_0108_contract_review_summary.py"
+MIGRATION_0109 = VERSIONS_DIR / "20261027_0109_contract_summary_severity.py"
 
 
-def _load_migration():
-    spec = importlib.util.spec_from_file_location("mig_0108", MIGRATION)
+def _load_migration(path=MIGRATION, name="mig_0108"):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -124,6 +129,63 @@ class ContractSummaryBackfillTests(unittest.TestCase):
         self.assertEqual(rows[0].review_id, new_review.id)
         self.assertEqual(rows[0].risks_high, 0)
         self.assertEqual(rows[0].risks_unanchored, 0)
+
+    def _summary_row(self, contract, review):
+        summary = LegalContractReviewSummary(
+            contract_id=contract.id, organization_id=self.org_id, review_id=review.id,
+            review_status=review.status, review_version=review.version,
+            risks_total=5, risks_high=2, risks_unanchored=0,
+        )
+        self.db.add(summary)
+        self.db.commit()
+        self.db.refresh(summary)
+        return summary
+
+    def _run_0109_backfill(self):
+        module = _load_migration(MIGRATION_0109, "mig_0109")
+        with self.engine.connect() as connection:
+            module._backfill(connection)
+            connection.commit()
+            rows = connection.execute(select(module._summaries())).all()
+        return rows
+
+    def test_0109_backfills_severity_columns_without_touching_old_ones(self):
+        contract = self._contract("严重度回填合同")
+        review = self._review(contract, [
+            {"risk_level": "critical", "source_location": {"paragraph": 1}},
+            {"risk_level": "high", "source_location": {}},
+            {"risk_level": "medium", "source_location": {"paragraph": 2}},
+            {"risk_level": "low", "source_location": {"paragraph": 3}},
+            {"source_location": {"paragraph": 4}},  # 未知级别 → medium
+        ])
+        summary = self._summary_row(contract, review)
+
+        self.assertEqual(len(self._run_0109_backfill()), 1)
+        self.db.expire_all()
+        refreshed = self.db.get(LegalContractReviewSummary, summary.id)
+        self.assertEqual(refreshed.risks_critical, 1)
+        self.assertEqual(refreshed.risks_medium, 2)
+        self.assertEqual(refreshed.risks_low, 1)
+        # 旧列保持原值（只回填三个新列）
+        self.assertEqual((refreshed.risks_total, refreshed.risks_high), (5, 2))
+
+    def test_0109_skips_summaries_without_review(self):
+        contract = self._contract("无审查来源摘要")
+        summary = LegalContractReviewSummary(
+            contract_id=contract.id, organization_id=self.org_id, review_id=None,
+            review_status="pending_review", review_version=1,
+            risks_total=3, risks_high=1, risks_unanchored=0,
+        )
+        self.db.add(summary)
+        self.db.commit()
+
+        self.assertEqual(len(self._run_0109_backfill()), 1)
+        self.db.expire_all()
+        refreshed = self.db.get(LegalContractReviewSummary, summary.id)
+        self.assertEqual(
+            (refreshed.risks_critical, refreshed.risks_medium, refreshed.risks_low), (0, 0, 0),
+        )
+        self.assertEqual(refreshed.risks_total, 3)
 
 
 if __name__ == "__main__":

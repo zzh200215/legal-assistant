@@ -91,7 +91,12 @@ class LegalContractReviewSummary(Base):
     review_status = Column(String(32), nullable=False, index=True)
     review_version = Column(Integer, nullable=True)
     risks_total = Column(Integer, nullable=False, default=0)
-    risks_high = Column(Integer, nullable=False, default=0)
+    # ``risks_high`` 含 critical（与 step36 口径一致）；``risks_critical`` 是其子集，
+    # ``risks_high + risks_medium + risks_low == risks_total``（未知严重度按 medium 计）。
+    risks_high = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    risks_critical = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    risks_medium = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    risks_low = Column(Integer, nullable=False, default=0, server_default=text("0"))
     risks_unanchored = Column(Integer, nullable=False, default=0)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     review_updated_at = Column(DateTime(timezone=True), nullable=True)

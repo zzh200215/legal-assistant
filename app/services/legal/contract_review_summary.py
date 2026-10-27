@@ -5,7 +5,11 @@
 
 口径（与 step36 读时派生一致）：
 - 「最近一次审查」= 该合同**版本号最大**且带 ``source_review_id`` 的版本所指向的审查；
-- ``risks_high``：``risk_level`` 为 high/critical；
+- ``risks_high``：``risk_level`` 为 high/critical（含 critical）；
+- ``risks_critical``：其中 critical 的子集；
+- ``risks_medium`` / ``risks_low``：对应严重度，未知或缺失按 medium 计
+  （与 ``contract_risk_stats`` 一致），因此
+  ``risks_high + risks_medium + risks_low == risks_total``；
 - ``risks_unanchored``：``source_location.paragraph`` 为空的项（step25 的定位口径）；
 - 没有审查 → 删除摘要行，台账显示「未审查」。
 
@@ -30,17 +34,31 @@ from app.models.legal_contract import (
 
 
 def review_counts(risks_json: str | None) -> dict[str, int]:
-    """从 ``risks_json`` 统计总数 / 高风险 / 无定位（无定位口径同 step25）。"""
+    """从 ``risks_json`` 统计总数 / 严重度分布 / 无定位（无定位口径同 step25）。
+
+    未知或缺失的 ``risk_level`` 计入 medium（与 ``contract_risk_stats`` 的归一一致），
+    保证 ``high + medium + low == total``；``critical`` 是 ``high`` 的子集，不重复计入。
+    """
     try:
         risks = json.loads(risks_json or "[]")
     except (TypeError, ValueError):
         risks = []
     risks = [risk for risk in risks if isinstance(risk, dict)]
-    high = sum(1 for risk in risks if risk.get("risk_level") in ("high", "critical"))
-    unanchored = sum(
+    counts = {"total": len(risks), "high": 0, "critical": 0, "medium": 0, "low": 0}
+    for risk in risks:
+        level = str(risk.get("risk_level") or "").strip().lower()
+        if level in ("high", "critical"):
+            counts["high"] += 1
+            if level == "critical":
+                counts["critical"] += 1
+        elif level == "low":
+            counts["low"] += 1
+        else:
+            counts["medium"] += 1
+    counts["unanchored"] = sum(
         1 for risk in risks if not (risk.get("source_location") or {}).get("paragraph")
     )
-    return {"total": len(risks), "high": high, "unanchored": unanchored}
+    return counts
 
 
 def latest_review_for_contract(db: Session, contract_id: int) -> ContractReview | None:
@@ -90,6 +108,9 @@ def refresh_contract_review_summary(
     summary.review_version = review.version
     summary.risks_total = counts["total"]
     summary.risks_high = counts["high"]
+    summary.risks_critical = counts["critical"]
+    summary.risks_medium = counts["medium"]
+    summary.risks_low = counts["low"]
     summary.risks_unanchored = counts["unanchored"]
     summary.reviewed_at = review.reviewed_at
     summary.review_updated_at = review.updated_at
