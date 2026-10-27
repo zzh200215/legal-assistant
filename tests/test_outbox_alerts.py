@@ -298,6 +298,10 @@ class OutboxAlertTaskTests(unittest.TestCase):
 
     def test_alert_is_idempotent_within_cooldown(self):
         now = self._breach()
+        # 冷却窗口是 180 分钟的绝对时间桶；若当前时刻距桶边界不足 15 分钟，
+        # +15 分钟的第二次扫描会跨桶，导致「同一冷却窗口」的前提不成立。
+        # 固定到 :30，保证 +15 分钟仍落在同一桶内（与真实墙钟无关）。
+        now = now.replace(minute=30, second=0, microsecond=0)
         run_outbox_health_check(self.db, now=now)
         first = len(self._alerts())
         # 同一冷却窗口（+15 分钟）再扫一次：命中幂等键，不新增
