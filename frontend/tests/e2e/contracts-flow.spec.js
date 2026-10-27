@@ -15,6 +15,8 @@ const CONTRACTS = [
   { id: 1, contract_no: 'HT-2026-001', title: '劳动合同模板联调', counterparty: '某科技有限公司', status: 'active', organization_id: 5, case_id: 3, updated_at: '2026-08-07T10:00:00',
     review: { id: 71, status: 'needs_lawyer_review', version: 2, risks_total: 5, risks_high: 2, risks_critical: 1, risks_medium: 2, risks_low: 1, risks_unanchored: 2, reviewed_at: '2026-08-07T09:30:00' } },
   { id: 2, contract_no: 'HT-2026-002', title: '采购协议联调', counterparty: '某供应链公司', status: 'draft', organization_id: 5, case_id: 3, updated_at: '2026-08-06T10:00:00', review: null },
+  { id: 3, contract_no: 'HT-2026-003', title: '补充协议联调', counterparty: '某物流公司', status: 'draft', organization_id: 5, case_id: 3, updated_at: '2026-08-05T10:00:00',
+    review: { id: 72, status: 'pending_review', version: 1, risks_total: 2, risks_high: 0, risks_critical: 0, risks_medium: 1, risks_low: 1, risks_unanchored: 1, reviewed_at: '2026-08-05T15:00:00' } },
 ]
 let VERSIONS = [
   { id: 11, contract_id: 1, organization_id: 5, version_no: 1, source_type: 'text_snapshot', parse_status: 'ready', version_note: '首版', created_at: '2026-08-05T09:00:00' },
@@ -58,9 +60,23 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
       requests.risk = url.searchParams.get('risk')
       requests.sort = url.searchParams.get('sort')
       requests.order = url.searchParams.get('order')
+      requests.cursor = url.searchParams.get('cursor')
       const reviewStatus = url.searchParams.get('review_status')
-      const items = reviewStatus ? CONTRACTS.filter((item) => item.review?.status === reviewStatus) : CONTRACTS
-      return route.fulfill({ json: success({ items, total: items.length, page: 1, page_size: 20 }) })
+      if (reviewStatus) {
+        const items = CONTRACTS.filter((item) => item.review?.status === reviewStatus)
+        return route.fulfill({ json: success({
+          items, total: items.length, page_size: 2, has_more: false, next_cursor: null,
+        }) })
+      }
+      if (requests.cursor === 'page-2') {
+        return route.fulfill({ json: success({
+          items: [CONTRACTS[2]], total: 3, page_size: 2, has_more: false, next_cursor: null,
+        }) })
+      }
+      return route.fulfill({ json: success({
+        items: CONTRACTS.slice(0, 2), total: 3, page_size: 2,
+        has_more: true, next_cursor: 'page-2',
+      }) })
     }
     if (method === 'POST' && path === '/legal/orgs/5/contracts') {
       requests.createContract = request.postDataJSON()
@@ -136,6 +152,19 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
     await page.waitForTimeout(200)
     await page.screenshot({ path: path.join(SHOT_DIR, 'step45-contract-ledger-severity.png'), fullPage: true })
   }
+
+  // keyset 加载更多：带上一页 next_cursor，追加而不是重置；游标用完按钮消失
+  await page.evaluate(() => {
+    const wrap = document.querySelector('.el-table__body-wrapper .el-scrollbar__wrap')
+    if (wrap) wrap.scrollLeft = 0
+  })
+  expect(requests.cursor).toBeNull()
+  await expect(page.getByRole('button', { name: '加载更多', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '加载更多', exact: true }).click()
+  await expect.poll(() => requests.cursor).toBe('page-2')
+  await expect(page.locator('.el-table__row')).toHaveCount(3)
+  await expect(page.getByText('补充协议联调')).toBeVisible()
+  await expect(page.getByRole('button', { name: '加载更多', exact: true })).toHaveCount(0)
 
   // 台账筛选：按审查状态（服务端过滤）
   const reviewFilter = page.locator('.contract-filters select[aria-label="按审查状态筛选"]')

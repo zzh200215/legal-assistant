@@ -79,6 +79,10 @@
             </template>
           </el-table-column>
         </el-table>
+        <div v-if="contracts.length && (hasMore || contracts.length < total)" class="contract-load-more">
+          <el-button v-if="hasMore" size="small" :loading="loadingMore" @click="loadMore">加载更多</el-button>
+          <span class="muted">已显示 {{ contracts.length }} / {{ total }} 份</span>
+        </div>
       </div>
     </section>
 
@@ -176,6 +180,11 @@ const reviewTagClass = (review) => {
   return 'is-warning'
 }
 const loading = ref(false); const saving = ref(false)
+const loadingMore = ref(false)
+const nextCursor = ref('')
+const hasMore = ref(false)
+const PAGE_SIZE = 20
+let requestSeq = 0 // 筛选在翻页途中变化时，丢弃旧请求的回包
 const signingEnabled = ref(false)
 const createVisible = ref(false); const versionsVisible = ref(false); const diffVisible = ref(false); const milestonesVisible = ref(false); const signingVisible = ref(false)
 const selected = ref(null); const versions = ref([]); const milestones = ref([]); const versionText = ref(''); const diffBase = ref(null); const diffTarget = ref(null); const diffResult = ref(null)
@@ -184,6 +193,7 @@ const signRequests = ref([]); const signForm = ref({ contract_version_id: null, 
 
 const loadContracts = async () => {
   if (!props.orgId) return
+  const seq = ++requestSeq
   loading.value = true
   try {
     const [sort, order] = splitSort(filters.value.sort)
@@ -192,13 +202,42 @@ const loadContracts = async () => {
       risk: filters.value.risk,
       sort,
       order,
+      page_size: PAGE_SIZE,
     })
+    if (seq !== requestSeq) return
     contracts.value = data.items || []
     total.value = data.total ?? contracts.value.length
+    nextCursor.value = data.next_cursor || ''
+    hasMore.value = !!data.has_more
   } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '合同加载失败')
+    if (seq === requestSeq) ElMessage.error(e.response?.data?.detail || '合同加载失败')
   } finally {
-    loading.value = false
+    if (seq === requestSeq) loading.value = false
+  }
+}
+const loadMore = async () => {
+  if (!nextCursor.value || loadingMore.value) return
+  const seq = requestSeq
+  loadingMore.value = true
+  try {
+    const [sort, order] = splitSort(filters.value.sort)
+    const { data } = await api.listLegalContracts(props.orgId, props.caseId, {
+      review_status: filters.value.review_status,
+      risk: filters.value.risk,
+      sort,
+      order,
+      page_size: PAGE_SIZE,
+      cursor: nextCursor.value,
+    })
+    if (seq !== requestSeq) return
+    contracts.value = [...contracts.value, ...(data.items || [])]
+    total.value = data.total ?? total.value
+    nextCursor.value = data.next_cursor || ''
+    hasMore.value = !!data.has_more
+  } catch (e) {
+    if (seq === requestSeq) ElMessage.error(e.response?.data?.detail || '加载更多失败')
+  } finally {
+    loadingMore.value = false
   }
 }
 const createContract = async () => { if (!createForm.value.title.trim()) return ElMessage.warning('请输入合同名称'); saving.value = true; try { await api.createLegalContract(props.orgId, { ...createForm.value, case_id: props.caseId || null, contract_no: createForm.value.contract_no || null }); createVisible.value = false; createForm.value = { title: '', counterparty: '', contract_type: '', contract_no: '' }; await loadContracts() } catch (e) { ElMessage.error(e.response?.data?.detail || '合同创建失败') } finally { saving.value = false } }
@@ -238,4 +277,5 @@ onMounted(loadFeatures)
 
 .contract-filters { display: flex; align-items: center; gap: var(--space-2); padding-bottom: var(--space-3); }
 .contract-filters select { height: 30px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }
+.contract-load-more { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding-top: var(--space-3); }
 </style>

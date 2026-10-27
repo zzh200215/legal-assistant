@@ -1,22 +1,29 @@
-"""合同列表查询服务（P1 API 统一化）：可见性过滤、审查筛选、排序与分页全部下沉 SQL。
+"""合同列表查询服务（P1 API 统一化）：可见性过滤、审查筛选、排序与游标分页全部下沉 SQL。
 
 - 可见性语义与 legal_contract_api.list_contracts 原实现一致：
   无案件合同 → 组织成员可见；普通案件合同 → 组织成员可见；
   严格案件（is_strict_mode=1）合同 → 仅未撤销案件成员可见。
   案件成员判断用 EXISTS 子查询（不用 JOIN），避免一个用户在同一案件有多条成员记录时
-  把合同行放大、也避免 DISTINCT 与「按审查时间排序」在 MySQL 上冲突。
+  把合同行放大。
 - 审查/风险筛选走物化摘要表 ``legal_contract_review_summaries``（step44）：
-  JOIN + WHERE + offset/limit + count，不再有 1000 条上限；
-- 排序支持合同更新时间（默认）与最近审查时间；未审查（NULL）始终排在最后，
-  同一时间按合同 id 倒序保证分页稳定；
+  JOIN + WHERE + count，不再有 1000 条上限。
+- 分页改为 **keyset（游标）**（step46）：排序键 + 合同 id 作为游标，不再用 OFFSET，
+  翻页期间新增/删除不会造成重复或跳条；总数沿用第一页的快照，不每页重算。
+- 排序支持合同更新时间/创建时间、最近审查时间/审查更新时间；空值统一排最后，
+  同一时间按 id 同方向兜底。
 - items 为显式序列化 dict，不返回合同正文（description 为加密列，禁止外泄）。
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import json
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import case, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.legal import LegalCase
@@ -33,6 +40,8 @@ SORT_COLUMNS = {
     "reviewed_at": LegalContractReviewSummary.reviewed_at,
     "review_updated_at": LegalContractReviewSummary.review_updated_at,
 }
+CONTRACT_SORTS = frozenset({"updated_at", "created_at"})
+REVIEW_SORTS = frozenset({"reviewed_at", "review_updated_at"})
 DEFAULT_SORT = "updated_at"
 
 # 风险筛选白名单：列 > 0 即命中；``none`` 单独表示「没有审查摘要」。
@@ -43,6 +52,119 @@ RISK_COLUMNS = {
     "low": LegalContractReviewSummary.risks_low,
     "unanchored": LegalContractReviewSummary.risks_unanchored,
 }
+
+CURSOR_VERSION = 1
+SEGMENT_VALUE = "value"  # 排序键非空的一段
+SEGMENT_TAIL = "tail"  # 排序键为空的一段（统一排最后）
+
+
+def _filters_fingerprint(
+    *,
+    org_id: int,
+    user_id: int,
+    case_id: int | None,
+    status: str | None,
+    q: str | None,
+    review_status: str | None,
+    risk: str | None,
+) -> str:
+    """把「会影响结果集合」的条件固化成短哈希，防止游标跨筛选复用。"""
+    material = json.dumps(
+        {
+            "org": org_id,
+            "user": user_id,
+            "case": case_id,
+            "status": status or "",
+            "q": q or "",
+            "review": review_status or "",
+            "risk": risk or "",
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
+def encode_contract_cursor(
+    *,
+    sort: str,
+    order: str,
+    segment: str,
+    value: datetime | None,
+    contract_id: int,
+    seen: int,
+    total: int,
+    fingerprint: str,
+) -> str:
+    """生成不透明游标：排序键、合同 id、已返回数量与第一页总数都带上。"""
+    payload = {
+        "v": CURSOR_VERSION,
+        "s": sort,
+        "o": order,
+        "g": segment,
+        "k": value.isoformat() if isinstance(value, datetime) else None,
+        "i": contract_id,
+        "n": seen,
+        "t": total,
+        "f": fingerprint,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_contract_cursor(
+    raw: str,
+    *,
+    sort: str,
+    order: str,
+    fingerprint: str,
+) -> dict[str, Any]:
+    """解析并校验游标；任何不匹配都抛 ``ValueError``（API 转 400，提示重新加载）。"""
+    try:
+        padded = raw + "=" * (-len(raw) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (binascii.Error, UnicodeError, ValueError) as exc:
+        raise ValueError("分页游标无效，请刷新列表") from exc
+
+    if not isinstance(payload, dict) or payload.get("v") != CURSOR_VERSION:
+        raise ValueError("分页游标版本不支持，请刷新列表")
+    if payload.get("s") != sort or payload.get("o") != order:
+        raise ValueError("分页游标与当前排序不匹配，请刷新列表")
+    if payload.get("f") != fingerprint:
+        raise ValueError("分页游标与当前筛选不匹配，请刷新列表")
+
+    segment = payload.get("g")
+    if segment not in (SEGMENT_VALUE, SEGMENT_TAIL):
+        raise ValueError("分页游标无效，请刷新列表")
+    try:
+        contract_id = int(payload["i"])
+        seen = int(payload["n"])
+        total = int(payload["t"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("分页游标无效，请刷新列表") from exc
+    if contract_id <= 0 or seen < 0 or total < 0:
+        raise ValueError("分页游标无效，请刷新列表")
+
+    value = payload.get("k")
+    if segment == SEGMENT_TAIL:
+        value = None
+    else:
+        if not isinstance(value, str) or not value:
+            raise ValueError("分页游标无效，请刷新列表")
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("分页游标无效，请刷新列表") from exc
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return {
+        "segment": segment,
+        "value": value,
+        "contract_id": contract_id,
+        "seen": seen,
+        "total": total,
+    }
 
 
 def serialize_contract(contract: LegalContract) -> dict[str, Any]:
@@ -105,38 +227,54 @@ def serialize_milestone(milestone: LegalContractMilestone) -> dict[str, Any]:
     }
 
 
-def list_visible_contracts(
-    db: Session,
-    *,
-    org_id: int,
-    user_id: int,
-    case_id: int | None = None,
-    status: str | None = None,
-    q: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
-    review_status: str | None = None,
-    risk: str | None = None,
-    sort: str = DEFAULT_SORT,
-    order: str = "desc",
-) -> dict:
+def _member_exists(user_id: int):
     from app.models.legal_portal import LegalCaseMember
 
-    member_exists = select(LegalCaseMember.id).where(
+    return select(LegalCaseMember.id).where(
         LegalCaseMember.case_id == LegalContract.case_id,
         LegalCaseMember.user_id == user_id,
         LegalCaseMember.revoked_at.is_(None),
     ).correlate(LegalContract).exists()
 
-    query = (
+
+def _contract_query(db: Session):
+    """合同驱动：默认排序、空值尾段、以及输出行都用它。"""
+    return (
         db.query(LegalContract, LegalContractReviewSummary)
         .outerjoin(
             LegalContractReviewSummary,
             LegalContractReviewSummary.contract_id == LegalContract.id,
         )
-        .filter(LegalContract.organization_id == org_id)
         .outerjoin(LegalCase, LegalContract.case_id == LegalCase.id)
     )
+
+
+def _summary_query(db: Session):
+    """摘要驱动：按审查时间排序时让 ``(organization_id, reviewed_at, contract_id)`` 索引生效。"""
+    return (
+        db.query(LegalContract, LegalContractReviewSummary)
+        .select_from(LegalContractReviewSummary)
+        .join(LegalContract, LegalContract.id == LegalContractReviewSummary.contract_id)
+        .outerjoin(LegalCase, LegalContract.case_id == LegalCase.id)
+    )
+
+
+def _apply_filters(
+    query,
+    *,
+    summary_driven: bool,
+    org_id: int,
+    user_id: int,
+    case_id: int | None,
+    status: str | None,
+    q: str | None,
+    review_status: str | None,
+    risk: str | None,
+):
+    query = query.filter(LegalContract.organization_id == org_id)
+    if summary_driven:
+        # 与 JOIN 条件一起钉住索引前缀；摘要与合同的 org 正常一致。
+        query = query.filter(LegalContractReviewSummary.organization_id == org_id)
     if case_id:
         query = query.filter(LegalContract.case_id == case_id)
     if status:
@@ -147,42 +285,190 @@ def list_visible_contracts(
     query = query.filter(or_(
         LegalContract.case_id.is_(None),
         or_(LegalCase.is_strict_mode.is_(None), LegalCase.is_strict_mode == 0),
-        member_exists,
+        _member_exists(user_id),
     ))
-    # 审查/风险筛选下沉 SQL：摘要表 1:1 JOIN，可直接 WHERE + 分页
     if review_status:
         query = query.filter(LegalContractReviewSummary.review_status == review_status)
     if risk == "none":
         query = query.filter(LegalContractReviewSummary.contract_id.is_(None))
     elif risk in RISK_COLUMNS:
         query = query.filter(RISK_COLUMNS[risk] > 0)
+    return query
 
-    sort_column = SORT_COLUMNS.get(sort, SORT_COLUMNS[DEFAULT_SORT])
-    descending = str(order or "desc").lower() != "asc"
-    # 未审查的 reviewed_at 为 NULL：无论升降序都排最后，避免空值混在有效时间中间。
-    nulls_last = case((sort_column.is_(None), 1), else_=0)
-    direction = sort_column.desc() if descending else sort_column.asc()
 
-    total = query.count()
-    rows = (
-        query
-        .order_by(nulls_last, direction, LegalContract.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+def _order_by(column, id_column, descending: bool):
+    if descending:
+        return [column.desc(), id_column.desc()]
+    return [column.asc(), id_column.asc()]
+
+
+def _id_order(id_column, descending: bool):
+    return [id_column.desc()] if descending else [id_column.asc()]
+
+
+def _time_expression(db: Session, column):
+    """SQLite 把时间存成两种文本（``CURRENT_TIMESTAMP`` 无小数、ORM 写 ``.000000``），
+    直接比较字符串会把相等当成「小于」。开发/测试用的 SQLite 统一转 julianday 后再比；
+    MySQL（生产）仍用原生 DATETIME，复合索引不受影响。
+    """
+    if db.get_bind().dialect.name == "sqlite":
+        return func.julianday(column)
+    return column
+
+
+def _time_value(db: Session, value: datetime):
+    if db.get_bind().dialect.name == "sqlite":
+        return func.julianday(value)
+    return value
+
+
+def _keyset_predicate(column, id_column, *, value: Any, contract_id: int, descending: bool):
+    """``(column, id) < (value, contract_id)`` 的展开写法，便于 MySQL 走复合索引范围。"""
+    if descending:
+        return or_(column < value, and_(column == value, id_column < contract_id))
+    return or_(column > value, and_(column == value, id_column > contract_id))
+
+
+def _id_predicate(id_column, contract_id: int, descending: bool):
+    return id_column < contract_id if descending else id_column > contract_id
+
+
+def _serialize_rows(rows) -> list[dict[str, Any]]:
     items = []
     for contract, summary in rows:
         item = serialize_contract(contract)
         item["review"] = serialize_review_summary(summary)
         items.append(item)
+    return items
+
+
+def list_visible_contracts(
+    db: Session,
+    *,
+    org_id: int,
+    user_id: int,
+    case_id: int | None = None,
+    status: str | None = None,
+    q: str | None = None,
+    page_size: int = 20,
+    review_status: str | None = None,
+    risk: str | None = None,
+    sort: str = DEFAULT_SORT,
+    order: str = "desc",
+    cursor: str | None = None,
+) -> dict:
+    page_size = max(1, min(int(page_size), 100))
+    sort = sort if sort in SORT_COLUMNS else DEFAULT_SORT
+    descending = str(order or "desc").lower() != "asc"
+    order = "desc" if descending else "asc"
+    fingerprint = _filters_fingerprint(
+        org_id=org_id, user_id=user_id, case_id=case_id, status=status,
+        q=q, review_status=review_status, risk=risk,
+    )
+    state = decode_contract_cursor(
+        cursor, sort=sort, order=order, fingerprint=fingerprint,
+    ) if cursor else None
+
+    filters = {
+        "org_id": org_id,
+        "user_id": user_id,
+        "case_id": case_id,
+        "status": status,
+        "q": q,
+        "review_status": review_status,
+        "risk": risk,
+    }
+    total = state["total"] if state else _apply_filters(
+        _contract_query(db), summary_driven=False, **filters,
+    ).count()
+    seen = state["seen"] if state else 0
+    column = SORT_COLUMNS[sort]
+    sort_expr = _time_expression(db, column)
+    is_review_sort = sort in REVIEW_SORTS
+    value_id = LegalContractReviewSummary.contract_id if is_review_sort else LegalContract.id
+
+    if seen >= total:
+        return {
+            "items": [], "total": total, "page_size": page_size,
+            "sort": sort, "order": order, "has_more": False, "next_cursor": None,
+        }
+
+    rows = []
+    last_segment = SEGMENT_VALUE
+
+    if state is None or state["segment"] == SEGMENT_VALUE:
+        value_query = _apply_filters(
+            _summary_query(db) if is_review_sort else _contract_query(db),
+            summary_driven=is_review_sort,
+            **filters,
+        ).filter(column.isnot(None))
+        if state:
+            value_query = value_query.filter(_keyset_predicate(
+                sort_expr, value_id,
+                value=_time_value(db, state["value"]), contract_id=state["contract_id"],
+                descending=descending,
+            ))
+        rows = (
+            value_query.order_by(*_order_by(sort_expr, value_id, descending))
+            .limit(page_size)
+            .all()
+        )
+        if len(rows) < page_size:
+            remaining = page_size - len(rows)
+            tail_query = _apply_filters(
+                _contract_query(db), summary_driven=False, **filters,
+            ).filter(column.is_(None))
+            tail_rows = (
+                tail_query.order_by(*_id_order(LegalContract.id, descending))
+                .limit(remaining)
+                .all()
+            )
+            if tail_rows:
+                rows.extend(tail_rows)
+                last_segment = SEGMENT_TAIL
+    else:
+        tail_query = _apply_filters(
+            _contract_query(db), summary_driven=False, **filters,
+        ).filter(column.is_(None))
+        tail_query = tail_query.filter(_id_predicate(
+            LegalContract.id, state["contract_id"], descending,
+        ))
+        rows = (
+            tail_query.order_by(*_id_order(LegalContract.id, descending))
+            .limit(page_size)
+            .all()
+        )
+        last_segment = SEGMENT_TAIL
+
+    items = _serialize_rows(rows)
+    loaded = seen + len(items)
+    has_more = loaded < total and bool(items)
+
+    next_cursor = None
+    if has_more:
+        contract, summary = rows[-1]
+        if last_segment == SEGMENT_TAIL:
+            segment = SEGMENT_TAIL
+            value = None
+            contract_id = contract.id
+        else:
+            segment = SEGMENT_VALUE
+            value = getattr(summary, sort) if is_review_sort else getattr(contract, sort)
+            contract_id = summary.contract_id if is_review_sort else contract.id
+        next_cursor = encode_contract_cursor(
+            sort=sort, order=order, segment=segment, value=value,
+            contract_id=contract_id, seen=loaded, total=total,
+            fingerprint=fingerprint,
+        )
+
     return {
         "items": items,
         "total": total,
-        "page": page,
         "page_size": page_size,
-        "sort": sort if sort in SORT_COLUMNS else DEFAULT_SORT,
-        "order": "desc" if descending else "asc",
+        "sort": sort,
+        "order": order,
+        "has_more": has_more,
+        "next_cursor": next_cursor,
     }
 
 

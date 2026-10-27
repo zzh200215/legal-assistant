@@ -134,8 +134,9 @@ def list_contracts(
     risk: Optional[str] = Query(None, pattern="^(critical|high|medium|low|unanchored|none)$"),
     sort: str = Query("updated_at", pattern="^(updated_at|created_at|reviewed_at|review_updated_at)$",
                       description="排序字段：合同更新时间/创建时间或最近审查时间"),
-    order: str = Query("desc", pattern="^(asc|desc)$", description="排序方向；未审查记录始终排最后"),
-    page: int = Query(1, ge=1, description="页码"),
+    order: str = Query("desc", pattern="^(asc|desc)$", description="排序方向；空值记录始终排最后"),
+    cursor: Optional[str] = Query(None, max_length=2048,
+                                  description="上一页返回的 next_cursor；不传取第一页"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -143,20 +144,23 @@ def list_contracts(
     verify_org_member_access(org_id, current_user.id, db)
     from app.services.legal.legal_contract_listing import list_visible_contracts
 
-    return list_visible_contracts(
-        db,
-        org_id=org_id,
-        user_id=current_user.id,
-        case_id=case_id,
-        status=status,
-        q=q,
-        page=page,
-        page_size=page_size,
-        review_status=review_status,
-        risk=risk,
-        sort=sort,
-        order=order,
-    )
+    try:
+        return list_visible_contracts(
+            db,
+            org_id=org_id,
+            user_id=current_user.id,
+            case_id=case_id,
+            status=status,
+            q=q,
+            page_size=page_size,
+            review_status=review_status,
+            risk=risk,
+            sort=sort,
+            order=order,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/contracts/expiry-alerts")

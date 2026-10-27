@@ -20918,24 +20918,30 @@
             "schema": {
               "type": "string",
               "pattern": "^(asc|desc)$",
-              "description": "排序方向；未审查记录始终排最后",
+              "description": "排序方向；空值记录始终排最后",
               "default": "desc",
               "title": "Order"
             },
-            "description": "排序方向；未审查记录始终排最后"
+            "description": "排序方向；空值记录始终排最后"
           },
           {
-            "name": "page",
+            "name": "cursor",
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "页码",
-              "default": 1,
-              "title": "Page"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页返回的 next_cursor；不传取第一页",
+              "title": "Cursor"
             },
-            "description": "页码"
+            "description": "上一页返回的 next_cursor；不传取第一页"
           },
           {
             "name": "page_size",

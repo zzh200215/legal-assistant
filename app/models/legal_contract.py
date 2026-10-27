@@ -1,6 +1,6 @@
 """Phase 12 — 合同台账 / 版本 / 条款 / 里程碑 / 电子签名 / 审查策略"""
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text, func, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func, text
 
 from app.core.database import Base
 from app.core.encryption import EncryptedText
@@ -30,6 +30,12 @@ class LegalContract(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __mapper_args__ = {"version_id_col": version}
+    # 台账 keyset 排序/尾段查询用（step46）；id 已在主键里，显式写进复合索引让排序完全走索引。
+    __table_args__ = (
+        Index("ix_legal_contracts_org_updated_at", "organization_id", "updated_at", "id"),
+        Index("ix_legal_contracts_org_created_at", "organization_id", "created_at", "id"),
+        Index("ix_legal_contracts_org_pk", "organization_id", "id"),
+    )
 
 
 class LegalContractVersion(Base):
@@ -101,6 +107,14 @@ class LegalContractReviewSummary(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     review_updated_at = Column(DateTime(timezone=True), nullable=True)
     refreshed_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # 按审查时间排序时让摘要表驱动查询，避免对 JOIN 结果 filesort（step46）。
+    __table_args__ = (
+        Index("ix_legal_contract_review_summaries_org_reviewed",
+              "organization_id", "reviewed_at", "contract_id"),
+        Index("ix_legal_contract_review_summaries_org_review_updated",
+              "organization_id", "review_updated_at", "contract_id"),
+    )
 
 
 class LegalContractMilestone(Base):

@@ -219,7 +219,7 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         self._attach_review(same_time, status="lawyer_approved", risks=[], reviewed_at=base)
         page = list_visible_contracts(
             self.db, org_id=self.org.id, user_id=self.user.id,
-            sort="reviewed_at", order="desc", page=1, page_size=20,
+            sort="reviewed_at", order="desc", page_size=20,
         )
         self.assertEqual([row["id"] for row in page["items"]][:3], [newer.id, same_time.id, older.id])
 
@@ -267,12 +267,125 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         for index in range(3):
             contract = self._contract(f"待审合同{index}")
             self._attach_review(contract, status="needs_lawyer_review", risks=[])
-        page = list_visible_contracts(
+        first = list_visible_contracts(
             self.db, org_id=self.org.id, user_id=self.user.id,
-            review_status="needs_lawyer_review", page=2, page_size=2,
+            review_status="needs_lawyer_review", page_size=2,
         )
-        self.assertEqual(page["total"], 3)
-        self.assertEqual(len(page["items"]), 1)
+        self.assertEqual(first["total"], 3)
+        self.assertEqual(len(first["items"]), 2)
+        self.assertTrue(first["has_more"])
+        self.assertTrue(first["next_cursor"])
+
+        second = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            review_status="needs_lawyer_review", page_size=2, cursor=first["next_cursor"],
+        )
+        self.assertEqual(second["total"], 3)  # 总数沿用游标快照，不重新 count
+        self.assertEqual(len(second["items"]), 1)
+        self.assertFalse(second["has_more"])
+        self.assertIsNone(second["next_cursor"])
+        # 两页没有重复
+        first_ids = {row["id"] for row in first["items"]}
+        self.assertTrue(first_ids.isdisjoint({row["id"] for row in second["items"]}))
+
+    def test_keyset_pagination_does_not_drift_when_rows_change(self):
+        base = datetime(2026, 9, 1, 9, 0, 0)
+        contracts = []
+        for index in range(5):
+            contract = self._contract(f"翻页合同{index}")
+            contract.updated_at = base + timedelta(minutes=index)
+            contracts.append(contract)
+        self.db.commit()
+
+        first = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="updated_at", order="desc", page_size=2,
+        )
+        self.assertEqual(
+            [row["id"] for row in first["items"]],
+            [contracts[4].id, contracts[3].id],
+        )
+        cursor = first["next_cursor"]
+        self.assertTrue(cursor)
+
+        # 翻页期间把第一页最后一条改到最前：游标仍按旧键往后走，
+        # 第二页不重复第一页，也不因为整体位移而跳过 contracts[2] / contracts[1]。
+        contracts[3].updated_at = base + timedelta(days=1)
+        self.db.commit()
+
+        second = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="updated_at", order="desc", page_size=2, cursor=cursor,
+        )
+        self.assertEqual(
+            [row["id"] for row in second["items"]],
+            [contracts[2].id, contracts[1].id],
+        )
+
+        third = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="updated_at", order="desc", page_size=2, cursor=second["next_cursor"],
+        )
+        self.assertEqual([row["id"] for row in third["items"]], [contracts[0].id])
+        self.assertFalse(third["has_more"])
+
+    def test_keyset_review_sort_splits_value_and_unreviewed_tail(self):
+        base = datetime(2026, 9, 1, 9, 0, 0)
+        reviewed = []
+        for index in range(3):
+            contract = self._contract(f"已审查{index}")
+            self._attach_review(
+                contract, status="lawyer_approved", risks=[],
+                reviewed_at=base + timedelta(hours=index),
+            )
+            reviewed.append(contract)
+        unreviewed = [self._contract(f"未审查{index}") for index in range(3)]
+
+        first = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="reviewed_at", order="desc", page_size=4,
+        )
+        self.assertEqual(
+            [row["id"] for row in first["items"]],
+            [reviewed[2].id, reviewed[1].id, reviewed[0].id, unreviewed[2].id],
+        )
+        self.assertTrue(first["has_more"])
+
+        second = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            sort="reviewed_at", order="desc", page_size=4, cursor=first["next_cursor"],
+        )
+        self.assertEqual(
+            [row["id"] for row in second["items"]],
+            [unreviewed[1].id, unreviewed[0].id],
+        )
+        self.assertFalse(second["has_more"])
+        self.assertIsNone(second["next_cursor"])
+
+    def test_cursor_rejects_changed_filters_sort_and_tampering(self):
+        for index in range(2):
+            self._contract(f"游标合同{index}")
+        first = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id, page_size=1,
+        )
+        cursor = first["next_cursor"]
+        self.assertTrue(cursor)
+
+        with self.assertRaisesRegex(ValueError, "筛选"):
+            list_visible_contracts(
+                self.db, org_id=self.org.id, user_id=self.user.id,
+                risk="high", page_size=1, cursor=cursor,
+            )
+        with self.assertRaisesRegex(ValueError, "排序"):
+            list_visible_contracts(
+                self.db, org_id=self.org.id, user_id=self.user.id,
+                sort="reviewed_at", page_size=1, cursor=cursor,
+            )
+        with self.assertRaisesRegex(ValueError, "游标"):
+            list_visible_contracts(
+                self.db, org_id=self.org.id, user_id=self.user.id,
+                page_size=1, cursor="not-a-cursor",
+            )
 
     def test_filter_pushes_down_beyond_previous_1000_cap(self):
         """审查筛选不再被 1000 条上限截断：匹配的合同排在第 1000 条之后也能被筛出来。"""
@@ -290,14 +403,14 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
 
         result = list_visible_contracts(
             self.db, org_id=self.org.id, user_id=self.user.id,
-            review_status="needs_lawyer_review", page=1, page_size=20,
+            review_status="needs_lawyer_review", page_size=20,
         )
         self.assertEqual(result["total"], 1)
         self.assertEqual([item["id"] for item in result["items"]], [oldest.id])
         # 未审查筛选同样走 SQL：1000 条未审查都能被统计（旧实现只取前 1000 条内存过滤）
         none_result = list_visible_contracts(
             self.db, org_id=self.org.id, user_id=self.user.id,
-            risk="none", page=1, page_size=20,
+            risk="none", page_size=20,
         )
         self.assertEqual(none_result["total"], 1000)
         self.assertEqual(len(none_result["items"]), 20)
