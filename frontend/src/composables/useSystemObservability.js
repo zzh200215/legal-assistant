@@ -22,6 +22,8 @@ const emptyEvidence = () => ({
   unmatched_references: { references: 0, consultations: 0 },
 })
 
+const emptyEvidenceIssues = () => ({ window_days: 30, total: 0, returned: 0, items: [] })
+
 const emptyIndexStats = () => ({
   enabled: true,
   ttl_seconds: 300,
@@ -49,6 +51,9 @@ export function useSystemObservability({ client, message, isAdmin }) {
   const evidenceLoading = ref(false)
   const evidenceStats = ref(emptyEvidence())
   const evidenceError = ref(null)
+  const evidenceIssuesLoading = ref(false)
+  const evidenceIssues = ref(emptyEvidenceIssues())
+  const evidenceIssuesError = ref(null)
   const toolHealthLoading = ref(false)
   const toolHealthRows = ref([])
   const toolHealthError = ref(null)
@@ -78,6 +83,21 @@ export function useSystemObservability({ client, message, isAdmin }) {
     catch (error) { evidenceStats.value = emptyEvidence(); evidenceError.value = normalizeError(error); message.error(error.response?.data?.detail || '获取证据可核验性失败') }
     finally { evidenceLoading.value = false }
   }
+  const fetchEvidenceIssues = async (params = {}) => {
+    evidenceIssuesError.value = null
+    if (!isAdmin.value) { evidenceIssues.value = emptyEvidenceIssues(); return }
+    evidenceIssuesLoading.value = true
+    try {
+      const { data } = await client.consultationEvidenceIssues(experimentDays.value, params)
+      evidenceIssues.value = data || emptyEvidenceIssues()
+    } catch (error) {
+      evidenceIssues.value = emptyEvidenceIssues()
+      evidenceIssuesError.value = normalizeError(error)
+      message.error(error.response?.data?.detail || '获取引用质量问题失败')
+    } finally {
+      evidenceIssuesLoading.value = false
+    }
+  }
   const fetchToolHealth = async () => {
     toolHealthLoading.value = true
     toolHealthError.value = null
@@ -93,5 +113,5 @@ export function useSystemObservability({ client, message, isAdmin }) {
     catch (error) { indexStats.value = emptyIndexStats(); indexError.value = normalizeError(error); message.error(error.response?.data?.detail || '获取检索索引状态失败') }
     finally { indexLoading.value = false }
   }
-  return { healthLoading, healthData, experimentDays, experimentLoading, experimentOverview, experimentError, evidenceLoading, evidenceStats, evidenceError, toolHealthLoading, toolHealthRows, toolHealthError, indexLoading, indexStats, indexError, fetchHealthData, fetchExperimentOverview, fetchEvidenceStats, fetchToolHealth, fetchIndexStats }
+  return { healthLoading, healthData, experimentDays, experimentLoading, experimentOverview, experimentError, evidenceLoading, evidenceStats, evidenceError, evidenceIssuesLoading, evidenceIssues, evidenceIssuesError, toolHealthLoading, toolHealthRows, toolHealthError, indexLoading, indexStats, indexError, fetchHealthData, fetchExperimentOverview, fetchEvidenceStats, fetchEvidenceIssues, fetchToolHealth, fetchIndexStats }
 }

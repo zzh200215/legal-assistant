@@ -72,6 +72,9 @@
         </span>
       </div>
       <div class="app-card-body">
+        <div class="evidence-actions">
+          <el-button size="small" @click="openEvidenceIssues({})">查看引用问题</el-button>
+        </div>
         <div class="app-metric-grid-4 evidence-metric-grid">
           <div class="app-stat">
             <span class="app-stat-label">逐条核对通过率</span>
@@ -129,7 +132,14 @@
         <p v-if="!evidenceSourceRows.length" class="evidence-empty">窗口内的答复没有挂到法源库的引用。</p>
         <div v-else class="app-table-wrap">
           <el-table :data="evidenceSourceRows" border size="small" max-height="320">
-            <el-table-column prop="title" label="法源" min-width="220" show-overflow-tooltip />
+            <el-table-column label="法源" min-width="220">
+              <template #default="{ row }">
+                <div class="evidence-source-title">
+                  <span :title="row.title">{{ row.title }}</span>
+                  <el-button text size="small" @click="openEvidenceIssues({ source: row })">查看</el-button>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="references" label="被引用" width="90" class-name="app-num" />
             <el-table-column prop="consultations" label="涉及答复" width="100" class-name="app-num" />
             <el-table-column prop="articles" label="条文数" width="90" class-name="app-num" />
@@ -143,6 +153,60 @@
           </el-table>
         </div>
         <p v-if="evidenceGapNote" class="evidence-note">{{ evidenceGapNote }}</p>
+
+        <div v-if="issuesVisible" class="evidence-issues">
+          <div class="evidence-issues-head">
+            <h3 class="evidence-subhead">{{ evidenceIssuesTitle }}</h3>
+            <el-radio-group v-model="issuesFilter" size="small" @change="loadEvidenceIssues">
+              <el-radio-button value="all">全部问题</el-radio-button>
+              <el-radio-button value="missing">条号未找到</el-radio-button>
+              <el-radio-button value="no_corpus">法源缺条文</el-radio-button>
+              <el-radio-button value="unmatched">未挂法源</el-radio-button>
+              <el-radio-button value="weak">待核答复</el-radio-button>
+            </el-radio-group>
+            <el-button text size="small" @click="issuesVisible = false">收起</el-button>
+          </div>
+          <p class="evidence-note">
+            窗口内匹配 {{ evidenceIssues.total }} 条，最多显示 50 条；展开行看引用明细。
+          </p>
+          <QueryStateView
+            :status="issuesStatus"
+            :error="evidenceIssuesError"
+            empty-text="没有匹配的引用问题"
+            min-height="160px"
+            @retry="loadEvidenceIssues"
+          >
+            <div class="app-table-wrap">
+              <el-table v-loading="evidenceIssuesLoading" :data="evidenceIssueRows" border size="small" max-height="380">
+                <el-table-column type="expand">
+                  <template #default="{ row }">
+                    <div class="issue-ref-list">
+                      <div v-for="(refItem, index) in row.references" :key="index" class="issue-ref">
+                        <div class="issue-ref-head">
+                          <strong>{{ refItem.title }}</strong>
+                          <span class="app-tag" :class="refItem.scope === 'verified' ? 'is-ok' : 'is-warning'">
+                            {{ refItem.scope_label }}
+                          </span>
+                          <span v-if="refItem.citation" class="issue-citation">{{ refItem.citation }}</span>
+                        </div>
+                        <p v-if="refItem.note" class="muted">{{ refItem.note }}</p>
+                      </div>
+                      <p v-if="!row.references.length" class="muted">这条答复没有引用明细。</p>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="time_text" label="时间" width="140" />
+                <el-table-column prop="question" label="咨询问题" min-width="240" show-overflow-tooltip />
+                <el-table-column label="可核验性" width="120">
+                  <template #default="{ row }">
+                    <span class="app-tag" :class="row.level_class">{{ row.level_label }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="issue_text" label="问题" width="180" />
+              </el-table>
+            </div>
+          </QueryStateView>
+        </div>
       </div>
     </section>
 
@@ -219,7 +283,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
 import { ElButton } from 'element-plus/es/components/button/index'
@@ -247,8 +311,12 @@ const {
   evidenceLoading,
   evidenceStats,
   evidenceError,
+  evidenceIssuesLoading,
+  evidenceIssues,
+  evidenceIssuesError,
   fetchExperimentOverview,
   fetchEvidenceStats,
+  fetchEvidenceIssues,
 } = useSystemObservability({ client: api, message: ElMessage, isAdmin })
 
 // 证据可核验性：口径四档（后端给 label 与占比），空窗口时给一行说明而不是空表
@@ -296,6 +364,39 @@ const evidenceGapNote = computed(() => {
   }
   return parts.join('；')
 })
+
+// 引用质量问题下钻：从聚合卡片展开到具体答复，再按法源/问题类型收窄
+const issuesVisible = ref(false)
+const issuesFilter = ref('all')
+const issuesSource = ref(null)
+const formatTime = (value) => (value ? String(value).replace('T', ' ').slice(0, 16) : '-')
+const evidenceIssueRows = computed(() => (evidenceIssues.value.items || []).map((row) => ({
+  ...row,
+  time_text: formatTime(row.created_at),
+  issue_text: (row.issue_labels || []).join(' / ') || '引用已核对',
+  level_class: row.level === 'strong' ? 'is-ok' : (row.level === 'weak' || row.level === 'none' ? 'is-danger' : 'is-warning'),
+})))
+const evidenceIssuesTitle = computed(() => (
+  issuesSource.value ? `引用质量：${issuesSource.value.title}` : '引用质量问题清单'
+))
+const issuesStatus = computed(() => {
+  if (evidenceIssuesLoading.value && !evidenceIssueRows.value.length) return 'loading'
+  if (evidenceIssuesError.value) return 'error'
+  if (!evidenceIssueRows.value.length) return 'empty'
+  return 'success'
+})
+const loadEvidenceIssues = () => {
+  const params = { limit: 50 }
+  if (issuesFilter.value !== 'all') params.issue = issuesFilter.value
+  if (issuesSource.value?.source_id) params.source_id = issuesSource.value.source_id
+  fetchEvidenceIssues(params)
+}
+const openEvidenceIssues = ({ source = null, issue = 'all' } = {}) => {
+  issuesSource.value = source
+  issuesFilter.value = issue
+  issuesVisible.value = true
+  loadEvidenceIssues()
+}
 
 const experimentArtifacts = computed(() => experimentOverview.value.artifact_status || {})
 const experimentSummary = computed(() => experimentOverview.value.summary || {})
@@ -371,6 +472,7 @@ const formatRate = (value) => {
 const refreshExperimentWindow = () => {
   fetchExperimentOverview()
   fetchEvidenceStats()
+  if (issuesVisible.value) loadEvidenceIssues()
 }
 
 onMounted(async () => {
@@ -404,6 +506,62 @@ onMounted(async () => {
 /* 证据可核验性：四个读数各带一行口径说明（与 AgentHeader 的 .app-stat-note 同款） */
 .evidence-metric-grid {
   margin-top: 0;
+}
+.evidence-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-3);
+}
+/* 引用问题下钻：嵌在证据卡里的二级面板，不另起卡片 */
+.evidence-issues {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+}
+.evidence-source-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.evidence-source-title > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.evidence-issues-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.evidence-issues-head .evidence-subhead {
+  margin: 0;
+}
+.evidence-issues-head .el-button {
+  margin-left: auto;
+}
+.issue-ref-list {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+.issue-ref-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.issue-ref p {
+  margin: 2px 0 0;
+  font-size: var(--text-xs);
+}
+.issue-citation {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
 }
 .app-stat-note {
   color: var(--color-text-muted);

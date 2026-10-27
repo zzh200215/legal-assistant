@@ -102,6 +102,27 @@ def consultation_evidence_stats(
     )
 
 
+@router.get("/consultations/evidence-issues")
+def consultation_evidence_issues(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    issue: str | None = Query(None, pattern="^(missing|no_corpus|unmatched|weak)$",
+                              description="问题类型：条号未找到/法源缺条文/未挂法源/答复待核"),
+    source_id: int | None = Query(None, ge=1, description="只看引用过该法源的答复"),
+    limit: int = Query(50, ge=1, le=100, description="最多返回条数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """引用质量问题清单：从聚合数字下钻到具体答复与引用明细（见 step51）。"""
+    return analytics_service.list_consultation_evidence_issues(
+        db,
+        days=days,
+        organization_id=current_user.organization_id,
+        issue=issue,
+        source_id=source_id,
+        limit=limit,
+    )
+
+
 @router.get("/retrieval-index/stats")
 def retrieval_index_stats(
     current_user: User = Depends(require_admin_user),

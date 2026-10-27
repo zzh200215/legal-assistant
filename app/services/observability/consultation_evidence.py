@@ -51,6 +51,22 @@ SOURCE_LIMIT = 10
 # 「按当前法源库重算」与「生成当时算的」是两件事，聚合里分开计数、界面上分开说。
 RECOMPUTED_BASIS = "recomputed"
 
+# 引用问题清单的枚举与展示文案（API 过滤器与前端标签共用一套口径）
+ISSUE_LABELS = {
+    "missing": "条号未找到",
+    "no_corpus": "法源缺条文",
+    "unmatched": "未挂法源",
+    "weak": "答复待核",
+}
+ISSUE_ORDER = ("missing", "no_corpus", "unmatched", "weak")
+SCOPE_LABELS = {
+    "verified": "已核对",
+    "missing": "条号未找到",
+    "no_corpus": "法源缺条文",
+    "no_numbers": "未标条号",
+    "no_source": "未挂法源",
+}
+
 
 def _parse(payload: str | None) -> dict | None:
     if not payload:
@@ -113,6 +129,17 @@ def _source_rows(db: Session, source_refs: dict[int, dict]) -> list[dict]:
         )
     rows.sort(key=lambda row: (-row["references"], row["source_id"]))
     return rows
+
+
+def _source_titles(db: Session, ids: set[int]) -> dict[int, dict]:
+    if not ids:
+        return {}
+    return {
+        row.id: {"title": row.title, "citation": row.citation}
+        for row in db.query(LegalSource.id, LegalSource.title, LegalSource.citation)
+        .filter(LegalSource.id.in_(ids))
+        .all()
+    }
 
 
 class ConsultationEvidenceMixin:
@@ -258,4 +285,168 @@ class ConsultationEvidenceMixin:
                 "references": unmatched_references,
                 "consultations": unmatched_consultations,
             },
+        }
+
+    def list_consultation_evidence_issues(
+        self,
+        db: Session,
+        *,
+        days: int = 30,
+        organization_id: int | None = None,
+        issue: str | None = None,
+        source_id: int | None = None,
+        limit: int = 50,
+    ) -> dict:
+        """引用质量问题清单（从聚合数字下钻到具体答复）。
+
+        - 只列有 `evidence_json` 的答复，口径与 `get_consultation_evidence_stats` 一致；
+        - `issue` 支持 missing / no_corpus / unmatched / weak；
+        - `source_id` 用于「某部法源/语料缺口」的定向下钻，只保留引用过该法源的答复；
+        - 返回每条答复的问题类型与最多 8 条引用明细，供管理员判断是补语料还是改引用。
+        """
+        if issue and issue not in ISSUE_LABELS:
+            raise ValueError(f"未知的引用问题类型: {issue}")
+        window = max(1, min(int(days or 30), 365))
+        since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=window)
+        query = (
+            db.query(
+                LegalConsultation.id,
+                LegalConsultation.user_id,
+                User.username,
+                LegalConsultation.question,
+                LegalConsultation.category,
+                LegalConsultation.status,
+                LegalConsultation.created_at,
+                LegalConsultation.evidence_json,
+                LegalConsultation.references_json,
+            )
+            .join(User, User.id == LegalConsultation.user_id)
+            .filter(LegalConsultation.created_at >= since)
+        )
+        if organization_id is not None:
+            query = query.filter(User.organization_id == organization_id)
+        rows = query.order_by(
+            LegalConsultation.created_at.desc(), LegalConsultation.id.desc()
+        ).all()
+
+        records = []
+        source_ids: set[int] = set()
+        for (
+            consultation_id,
+            user_id,
+            username,
+            question,
+            category,
+            status,
+            created_at,
+            evidence_json,
+            references_json,
+        ) in rows:
+            summary = _parse(evidence_json)
+            if summary is None:
+                continue
+            level = summary.get("level")
+            if level not in LEVEL_LABELS:
+                continue
+            refs = _parse_list(references_json)
+            issues: set[str] = set()
+            if level in ("weak", "none"):
+                issues.add("weak")
+            for ref in refs:
+                ref_source_id = ref.get("source_id")
+                if not isinstance(ref_source_id, int):
+                    issues.add("unmatched")
+                else:
+                    source_ids.add(ref_source_id)
+                verification = ref.get("verification") if isinstance(ref.get("verification"), dict) else {}
+                scope = verification.get("article_scope")
+                if scope == "no_corpus":
+                    issues.add("no_corpus")
+                elif scope == "missing":
+                    issues.add("missing")
+            records.append(
+                {
+                    "id": consultation_id,
+                    "user_id": user_id,
+                    "user_name": username,
+                    "question": question,
+                    "category": category,
+                    "status": status,
+                    "created_at": created_at,
+                    "level": level,
+                    "summary": summary,
+                    "refs": refs,
+                    "issues": issues,
+                }
+            )
+
+        titles = _source_titles(db, source_ids)
+        items = []
+        for record in records:
+            refs = record["refs"]
+            matched_source = source_id is None or any(
+                isinstance(ref.get("source_id"), int) and ref.get("source_id") == source_id
+                for ref in refs
+            )
+            if not matched_source:
+                continue
+            if issue:
+                matched_issue = issue in record["issues"]
+                if not matched_issue:
+                    continue
+            elif source_id is None and not record["issues"]:
+                # 默认只列有问题的答复；点某部法源时允许看到该法源的全部引用（含已核对）
+                continue
+
+            details = []
+            for ref in refs:
+                ref_source_id = ref.get("source_id") if isinstance(ref.get("source_id"), int) else None
+                if source_id is not None and ref_source_id != source_id:
+                    continue
+                verification = ref.get("verification") if isinstance(ref.get("verification"), dict) else {}
+                scope = verification.get("article_scope") or (
+                    "no_source" if ref_source_id is None else None
+                )
+                source_meta = titles.get(ref_source_id) or {}
+                details.append(
+                    {
+                        "source_id": ref_source_id,
+                        "title": ref.get("title") or source_meta.get("title") or "未挂法源",
+                        "citation": ref.get("citation") or "",
+                        "scope": scope,
+                        "scope_label": SCOPE_LABELS.get(scope, "未核对"),
+                        "verified": verification.get("verified"),
+                        "note": verification.get("verification_note") or "",
+                    }
+                )
+                if len(details) >= 8:
+                    break
+
+            issues = [key for key in ISSUE_ORDER if key in record["issues"]]
+            items.append(
+                {
+                    "id": record["id"],
+                    "user_id": record["user_id"],
+                    "user_name": record["user_name"],
+                    "question": record["question"],
+                    "category": record["category"],
+                    "status": record["status"],
+                    "created_at": record["created_at"],
+                    "level": record["level"],
+                    "level_label": LEVEL_LABELS[record["level"]],
+                    "basis": record["summary"].get("basis"),
+                    "issues": issues,
+                    "issue_labels": [ISSUE_LABELS[key] for key in issues],
+                    "reference_count": len(refs),
+                    "references": details,
+                }
+            )
+
+        total = len(items)
+        capped = max(1, min(int(limit or 50), 100))
+        return {
+            "window_days": window,
+            "total": total,
+            "returned": len(items[:capped]),
+            "items": items[:capped],
         }

@@ -15466,6 +15466,109 @@
         }
       }
     },
+    "/api/analytics/consultations/evidence-issues": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Consultation Evidence Issues",
+        "description": "引用质量问题清单：从聚合数字下钻到具体答复与引用明细（见 step51）。",
+        "operationId": "consultation_evidence_issues_api_analytics_consultations_evidence_issues_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "统计天数",
+              "default": 30,
+              "title": "Days"
+            },
+            "description": "统计天数"
+          },
+          {
+            "name": "issue",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(missing|no_corpus|unmatched|weak)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "问题类型：条号未找到/法源缺条文/未挂法源/答复待核",
+              "title": "Issue"
+            },
+            "description": "问题类型：条号未找到/法源缺条文/未挂法源/答复待核"
+          },
+          {
+            "name": "source_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看引用过该法源的答复",
+              "title": "Source Id"
+            },
+            "description": "只看引用过该法源的答复"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "最多返回条数",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "最多返回条数"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analytics/retrieval-index/stats": {
       "get": {
         "tags": [
