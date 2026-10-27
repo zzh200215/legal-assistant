@@ -245,6 +245,24 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
         self.assertEqual(ids(q="%"), [])  # LIKE 通配符按字面量处理
         self.assertEqual(ids(q="不存在的关键词"), [])
 
+        # 命中字段提示：给前端高亮用，展示口径按字面子串
+        by_title = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id, q="劳动",
+        )["items"][0]
+        self.assertEqual(by_title["search"], {"query": "劳动", "matched_fields": ["title"]})
+        by_party = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id, q="科技",
+        )["items"][0]
+        self.assertEqual(by_party["search"]["matched_fields"], ["counterparty"])
+        by_no = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id, q="HT-2026-002",
+        )["items"][0]
+        self.assertEqual(by_no["search"]["matched_fields"], ["contract_no"])
+        no_query = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+        )["items"][0]
+        self.assertIsNone(no_query["search"])
+
     def test_search_pagination_reuses_query_and_rejects_other_query(self):
         for index in range(3):
             self._contract(f"劳动事务{index}")

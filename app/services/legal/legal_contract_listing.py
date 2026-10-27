@@ -207,6 +207,27 @@ def serialize_review_summary(summary: LegalContractReviewSummary | None) -> dict
     }
 
 
+SEARCH_FIELD_NAMES = ("title", "counterparty", "contract_no")
+
+
+def search_hit(contract: LegalContract, q: str | None) -> dict[str, Any] | None:
+    """给前端做「命中字段提示」：按字面子串标注命中了名称/相对方/编号。
+
+    这是展示口径，不参与搜索判定（MySQL 的 ngram 短语匹配可能命中分词边界，
+    此时列表仍返回该行，但这里可能标不出字段，前端会显示「分词匹配」）。
+    """
+    keyword = " ".join(str(q or "").split())
+    if not keyword:
+        return None
+    needle = keyword.casefold()
+    matched = []
+    for field in SEARCH_FIELD_NAMES:
+        value = getattr(contract, field, None)
+        if value and needle in str(value).casefold():
+            matched.append(field)
+    return {"query": keyword, "matched_fields": matched}
+
+
 def serialize_milestone(milestone: LegalContractMilestone) -> dict[str, Any]:
     return {
         "id": milestone.id,
@@ -362,11 +383,12 @@ def _id_predicate(id_column, contract_id: int, descending: bool):
     return id_column < contract_id if descending else id_column > contract_id
 
 
-def _serialize_rows(rows) -> list[dict[str, Any]]:
+def _serialize_rows(rows, q: str | None = None) -> list[dict[str, Any]]:
     items = []
     for contract, summary in rows:
         item = serialize_contract(contract)
         item["review"] = serialize_review_summary(summary)
+        item["search"] = search_hit(contract, q)
         items.append(item)
     return items
 
@@ -469,7 +491,7 @@ def list_visible_contracts(
         )
         last_segment = SEGMENT_TAIL
 
-    items = _serialize_rows(rows)
+    items = _serialize_rows(rows, q)
     loaded = seen + len(items)
     has_more = loaded < total and bool(items)
 

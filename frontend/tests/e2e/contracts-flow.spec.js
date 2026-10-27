@@ -7,6 +7,14 @@ import { test, expect } from '@playwright/test'
 // 全 mock，锁定 API 契约与懒加载 tab 挂载接线。
 const success = (data) => ({ success: true, data })
 const SHOT_DIR = process.env.E2E_SHOT_DIR || ''
+const SEARCH_FIELDS = ['title', 'counterparty', 'contract_no']
+const withSearch = (items, query) => items.map((item) => ({
+  ...item,
+  search: query ? {
+    query,
+    matched_fields: SEARCH_FIELDS.filter((field) => item[field]?.includes(query)),
+  } : null,
+}))
 
 // 台账列较多（含审查时间与严重度分布），截图文案需要更宽的视口才能同时看到筛选与右侧列。
 test.use({ viewport: { width: 1600, height: 900 } })
@@ -72,16 +80,18 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
             [item.title, item.counterparty, item.contract_no].some((value) => value.includes(q)))
         }
         return route.fulfill({ json: success({
-          items, total: items.length, page_size: 2, has_more: false, next_cursor: null,
+          items: withSearch(items, q), total: items.length, page_size: 2,
+          has_more: false, next_cursor: null,
         }) })
       }
       if (requests.cursor === 'page-2') {
         return route.fulfill({ json: success({
-          items: [CONTRACTS[2]], total: 3, page_size: 2, has_more: false, next_cursor: null,
+          items: withSearch([CONTRACTS[2]], null), total: 3, page_size: 2,
+          has_more: false, next_cursor: null,
         }) })
       }
       return route.fulfill({ json: success({
-        items: CONTRACTS.slice(0, 2), total: 3, page_size: 2,
+        items: withSearch(CONTRACTS.slice(0, 2), null), total: 3, page_size: 2,
         has_more: true, next_cursor: 'page-2',
       }) })
     }
@@ -173,12 +183,23 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
   await expect(page.getByText('补充协议联调')).toBeVisible()
   await expect(page.getByRole('button', { name: '加载更多', exact: true })).toHaveCount(0)
 
-  // 搜索：q 下推（名称/相对方/编号），清空后回到第一页
+  // 搜索：q 下推 + 命中字段提示 + 单元格高亮（名称/相对方/编号各验一次）
   const search = page.locator('.contract-search')
-  await search.fill('采购')
-  await expect.poll(() => requests.q).toBe('采购')
-  await expect(page.locator('.el-table__row')).toHaveCount(1)
-  await expect(page.locator('.el-table__row')).toContainText('采购协议联调')
+  for (const [query, hint] of [
+    ['科技', '命中 相对方'],
+    ['采购', '命中 名称'],
+    ['HT-2026-003', '命中 编号'],
+  ]) {
+    await search.fill(query)
+    await expect.poll(() => requests.q).toBe(query)
+    await expect(page.locator('.el-table__row')).toHaveCount(1)
+    const row = page.locator('.el-table__row')
+    await expect(row).toContainText(hint)
+    await expect(row.locator('mark.search-hit')).toHaveText(query)
+    if (SHOT_DIR && query === '科技') {
+      await page.screenshot({ path: path.join(SHOT_DIR, 'step48-contract-search-highlight.png'), fullPage: true })
+    }
+  }
   await search.fill('')
   await expect.poll(() => requests.q).toBeNull()
   await expect(page.locator('.el-table__row')).toHaveCount(2)

@@ -44,9 +44,20 @@
           </select>
         </div>
         <el-table v-loading="loading" :data="contracts" stripe size="small">
-          <el-table-column prop="contract_no" label="合同编号" width="150" />
-          <el-table-column prop="title" label="合同名称" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="counterparty" label="相对方" min-width="140" show-overflow-tooltip />
+          <el-table-column label="合同编号" width="150">
+            <template #default="{ row }"><HighlightText :text="row.contract_no" /></template>
+          </el-table-column>
+          <el-table-column label="合同名称" min-width="180">
+            <template #default="{ row }">
+              <div class="contract-title">
+                <HighlightText :text="row.title" :title="row.title" />
+                <span v-if="searchTerm" class="search-hit-fields">命中 {{ searchHitText(row) }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="相对方" min-width="140">
+            <template #default="{ row }"><HighlightText :text="row.counterparty" /></template>
+          </el-table-column>
           <el-table-column prop="status" label="状态" width="100" />
           <el-table-column label="关联案件" width="100">
             <template #default="{ row }">{{ row.case_id ? `#${row.case_id}` : '未关联' }}</template>
@@ -145,7 +156,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, h, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
@@ -180,6 +191,55 @@ const formatTime = (value) => (value ? String(value).replace('T', ' ').slice(0, 
 const splitSort = (value) => {
   const index = String(value).lastIndexOf('_')
   return index > 0 ? [value.slice(0, index), value.slice(index + 1)] : ['updated_at', 'desc']
+}
+
+// 搜索命中提示：后端 search.matched_fields 是展示口径（字面子串），
+// 高亮在前端按同一个搜索词切分，避免用 v-html 引入注入风险。
+const SEARCH_FIELD_LABELS = { title: '名称', counterparty: '相对方', contract_no: '编号' }
+const searchTerm = computed(() => filters.value.q.trim())
+
+const highlightParts = (value) => {
+  const text = value == null ? '' : String(value)
+  const needle = searchTerm.value.toLowerCase()
+  if (!needle) return [{ text, hit: false }]
+  const lower = text.toLowerCase()
+  const parts = []
+  let start = 0
+  let index = lower.indexOf(needle)
+  while (index !== -1) {
+    if (index > start) parts.push({ text: text.slice(start, index), hit: false })
+    parts.push({ text: text.slice(index, index + needle.length), hit: true })
+    start = index + needle.length
+    index = lower.indexOf(needle, start)
+  }
+  if (start < text.length) parts.push({ text: text.slice(start), hit: false })
+  return parts.length ? parts : [{ text, hit: false }]
+}
+
+const HighlightText = (props, { attrs }) => h(
+  'span',
+  { class: 'search-text', ...attrs },
+  highlightParts(props.text).map((part, index) => (
+    part.hit ? h('mark', { class: 'search-hit', key: index }, part.text) : part.text
+  )),
+)
+HighlightText.props = { text: { type: [String, Number], default: '' } }
+
+const matchedFields = (row) => {
+  if (row.search && Array.isArray(row.search.matched_fields)) return row.search.matched_fields
+  const needle = searchTerm.value.toLowerCase()
+  if (!needle) return []
+  return [
+    ['title', row.title],
+    ['counterparty', row.counterparty],
+    ['contract_no', row.contract_no],
+  ].filter(([, value]) => value && String(value).toLowerCase().includes(needle))
+    .map(([field]) => field)
+}
+const searchHitText = (row) => {
+  const fields = matchedFields(row)
+  if (fields.length) return fields.map((field) => SEARCH_FIELD_LABELS[field] || field).join(' / ')
+  return '分词匹配'
 }
 const reviewTagClass = (review) => {
   if (!review) return ''
@@ -286,6 +346,10 @@ onMounted(loadFeatures)
 
 .risk-high { color: var(--color-danger); }
 .risk-gap { color: var(--color-warning); }
+.contract-title { display: grid; gap: 2px; min-width: 0; }
+.contract-title .search-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-hit { padding: 0 1px; border-radius: 2px; background: var(--color-warning-light); color: var(--color-warning); font-weight: 600; }
+.search-hit-fields { color: var(--color-text-muted); font-size: var(--text-xs); line-height: 1.4; }
 .risk-breakdown { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; line-height: 1.6; }
 .risk-total { color: var(--color-text-secondary); }
 .risk-medium { color: var(--color-warning); }
