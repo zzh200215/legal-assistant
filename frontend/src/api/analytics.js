@@ -85,6 +85,9 @@ export default {
   outboxOverview(params) {
     return http.get('/analytics/outbox/overview', { params })
   },
+  outboxHistory(params) {
+    return http.get('/analytics/outbox/history', { params })
+  },
   retryOutboxDeadLetter(kind, itemId) {
     return http.post(`/analytics/outbox/dead-letters/${kind}/${itemId}/retry`)
   },

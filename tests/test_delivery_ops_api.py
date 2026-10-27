@@ -103,6 +103,35 @@ class OutboxOverviewApiTests(unittest.TestCase):
         self.assertEqual(len(data["trend"]["notification"]), 7)
         self.assertEqual(data["notification"]["dead_letters"]["items"][0]["error_code"], "TEMPLATE_ERROR")
 
+    def test_history_requires_admin(self):
+        response = self.client.get("/api/analytics/outbox/history",
+                                   headers=self._headers(self.member_token))
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "ADMIN_REQUIRED")
+
+    def test_history_shape_after_snapshot(self):
+        from app.services.notification.outbox_snapshots import capture_snapshots
+
+        session = self.Session()
+        try:
+            capture_snapshots(session)
+        finally:
+            session.close()
+        response = self.client.get("/api/analytics/outbox/history?hours=6",
+                                   headers=self._headers(self.admin_token))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(data["hours"], 6)
+        self.assertGreaterEqual(data["snapshot_count"], 1)
+        self.assertEqual(len(data["throughput"]), 6)
+        self.assertEqual(data["backlog"][0]["notification"], 0, "通知只有死信，没有积压")
+        self.assertEqual(data["backlog"][0]["email_dead_letter"], 1)
+
+    def test_history_rejects_out_of_range_hours(self):
+        response = self.client.get("/api/analytics/outbox/history?hours=0",
+                                   headers=self._headers(self.admin_token))
+        self.assertEqual(response.status_code, 422)
+
     def test_retry_notification_and_email_dead_letter(self):
         response = self.client.post(
             f"/api/analytics/outbox/dead-letters/notification/{self.event_id}/retry",

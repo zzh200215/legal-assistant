@@ -17,7 +17,7 @@ def _registered_task_names() -> set[str]:
         "recover_queued_open_contract_reviews",
         "parse_contract_versions", "check_legal_approval_timeouts", "confirm_account_deletions",
         "create_pilot_backup", "dispatch_feishu_reminders", "connector_sync_task",
-        "recover_stale_connector_syncs", "check_outbox_health",
+        "recover_stale_connector_syncs", "check_outbox_health", "check_outbox_snapshot",
     }}
 
 

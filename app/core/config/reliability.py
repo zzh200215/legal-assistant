@@ -77,6 +77,10 @@ class ReliabilitySettings(BaseSettings):
     OUTBOX_RETRY_STUCK_WARN_THRESHOLD: int = Field(default=10, ge=1, le=100000)
     # 同一组织同一条告警的冷却时间（= 幂等窗口），避免 beat 每 15 分钟刷屏。
     OUTBOX_ALERT_COOLDOWN_MINUTES: int = Field(default=180, ge=15, le=1440)
+    # 积压快照：每 5 分钟采样一行（平台级 + 每个有管理员的组织），默认保留 30 天。
+    OUTBOX_SNAPSHOT_RETENTION_DAYS: int = Field(default=30, ge=1, le=365)
+    # 单次采样最多覆盖多少个组织（组织数膨胀时只保留平台级，避免任务被拖长）。
+    OUTBOX_SNAPSHOT_MAX_ORGS: int = Field(default=50, ge=1, le=1000)
     # 死信台账保留天数：由 run_database_archive 执行
     # （archive_service._cleanup_email_dead_letters，受 DATABASE_ARCHIVE_ENABLED/DRY_RUN 约束）。
     # 仍被通知事件引用的死信会跳过，等事件本身过期后再删。

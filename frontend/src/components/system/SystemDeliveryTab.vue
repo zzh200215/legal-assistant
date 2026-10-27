@@ -125,6 +125,41 @@
     </div>
   </section>
 
+  <section class="app-card system-panel-card">
+    <div class="app-card-head">
+      <h2>积压曲线</h2>
+      <span class="app-card-head-meta">
+        最近 {{ history.hours }} 小时 · 每 5 分钟采样 · 当前 {{ history.snapshot_count }} 个点
+      </span>
+    </div>
+    <div class="app-card-body">
+      <div v-if="history.empty" class="delivery-empty">
+        还没有积压快照。确认 beat 里的 <code>check_outbox_snapshot</code> 在运行后，这里会显示通知/邮件的积压曲线。
+      </div>
+      <template v-else>
+        <svg class="backlog-chart" viewBox="0 0 600 140" preserveAspectRatio="none" role="img" aria-label="投递积压曲线">
+          <line x1="0" y1="132" x2="600" y2="132" class="chart-axis" />
+          <polyline :points="chartLine('notification')" class="chart-line is-notification" />
+          <polyline :points="chartLine('email')" class="chart-line is-email" />
+        </svg>
+        <div class="chart-meta">
+          <span class="app-num">{{ historyStartLabel }}</span>
+          <span class="chart-legend">
+            <i class="trend-dot is-notification"></i>通知积压
+            <i class="trend-dot is-email"></i>邮件积压
+            · 峰值 {{ backlogMax }}
+          </span>
+          <span class="app-num">{{ historyEndLabel }}</span>
+        </div>
+        <div class="throughput-row">
+          <span>近 {{ history.hours }} 小时吞吐：</span>
+          <span class="app-num">通知创建 {{ throughputTotals.notificationCreated }} / 投递 {{ throughputTotals.notificationDelivered }}</span>
+          <span class="app-num">邮件创建 {{ throughputTotals.emailCreated }} / 投递 {{ throughputTotals.emailDelivered }}</span>
+        </div>
+      </template>
+    </div>
+  </section>
+
   <div class="app-panel-grid-2 delivery-breakdown-grid">
     <section class="app-card">
       <div class="app-card-head">
@@ -269,9 +304,20 @@ const emptyOverview = () => ({
   },
 })
 
+const emptyHistory = () => ({
+  hours: 24,
+  organization_id: null,
+  snapshot_count: 0,
+  empty: true,
+  interval_note: '',
+  backlog: [],
+  throughput: [],
+})
+
 const days = ref(7)
 const loading = ref(false)
 const overview = ref(emptyOverview())
+const history = ref(emptyHistory())
 const error = ref(null)
 const retrying = ref('')
 
@@ -284,6 +330,34 @@ const deadLetterTotal = computed(() =>
 const trendNotification = computed(() => overview.value.trend?.notification || [])
 const trendEmail = computed(() => overview.value.trend?.email || [])
 const shortDate = (value) => String(value || '').slice(5)
+
+// 积压曲线：SVG 折线，采样到 ≤ 240 点避免 5 分钟粒度在 24h 上画 288 段太密
+const backlogMax = computed(() => {
+  const values = history.value.backlog.flatMap((point) => [Number(point.notification) || 0, Number(point.email) || 0])
+  return Math.max(1, ...values)
+})
+const chartLine = (key) => {
+  const points = history.value.backlog
+  if (!points.length) return ''
+  const step = Math.max(1, Math.ceil(points.length / 240))
+  const sampled = points.filter((_, index) => index % step === 0 || index === points.length - 1)
+  return sampled.map((point, index) => {
+    const x = sampled.length === 1 ? 300 : (index / (sampled.length - 1)) * 600
+    const value = Number(point[key]) || 0
+    const y = 132 - (value / backlogMax.value) * 120
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+}
+const timeLabel = (value) => (value ? String(value).slice(11, 16) : '-')
+const historyStartLabel = computed(() => timeLabel(history.value.backlog[0]?.at))
+const historyEndLabel = computed(() => timeLabel(history.value.backlog[history.value.backlog.length - 1]?.at))
+const throughputTotals = computed(() => history.value.throughput.reduce((acc, hour) => {
+  acc.notificationCreated += Number(hour.notification_created) || 0
+  acc.notificationDelivered += Number(hour.notification_delivered) || 0
+  acc.emailCreated += Number(hour.email_created) || 0
+  acc.emailDelivered += Number(hour.email_delivered) || 0
+  return acc
+}, { notificationCreated: 0, notificationDelivered: 0, emailCreated: 0, emailDelivered: 0 }))
 const trendLabelStep = (count) => Math.max(1, Math.ceil((count || 1) / 7))
 const trendTitle = (day) => `${day.date} · 创建 ${day.created} · 已投递 ${day.delivered} · 失败 ${day.failed} · 死信 ${day.dead_letter} · 未完成 ${day.open}`
 const trendSummary = (series) => {
@@ -363,15 +437,27 @@ const formatTime = (value) => {
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(text) ? text.slice(5, 16) : text
 }
 
+const fetchHistory = async () => {
+  try {
+    const { data } = await api.outboxHistory({ hours: 24 })
+    history.value = { ...emptyHistory(), ...(data || {}) }
+  } catch {
+    // 历史是辅助视图：失败不阻塞看板主数据，也不弹错
+    history.value = emptyHistory()
+  }
+}
+
 const fetchOverview = async () => {
   loading.value = true
   error.value = null
   try {
     const { data } = await api.outboxOverview({ days: days.value })
     overview.value = { ...emptyOverview(), ...(data || {}) }
+    await fetchHistory()
   } catch (err) {
     error.value = err
     overview.value = emptyOverview()
+    history.value = emptyHistory()
     ElMessage.error(err.response?.data?.message || '获取投递看板失败')
   } finally {
     loading.value = false
@@ -613,5 +699,72 @@ onMounted(fetchOverview)
 }
 .health-note code {
   font-size: 11px;
+}
+
+/* ── 积压曲线（SVG 折线，无图表库）── */
+.backlog-chart {
+  width: 100%;
+  height: 140px;
+  display: block;
+}
+.chart-axis {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.chart-line {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chart-line.is-notification {
+  stroke: #4f46e5;
+}
+.chart-line.is-email {
+  stroke: #10b981;
+}
+.chart-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.chart-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.trend-dot.is-notification {
+  background: #4f46e5;
+}
+.trend-dot.is-email {
+  background: #10b981;
+}
+.throughput-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.delivery-empty {
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-alt);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-text-secondary);
+}
+.delivery-empty code {
+  font-size: 12px;
 }
 </style>

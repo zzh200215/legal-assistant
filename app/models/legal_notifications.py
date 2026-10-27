@@ -1,6 +1,8 @@
 """Phase 14 — 安全审计 / 通知偏好 / 引导进度 / 通知模板与投递可靠性"""
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func,
+)
 
 from app.core.database import Base
 
@@ -165,6 +167,38 @@ class NotificationTemplate(Base):
     content_hash = Column(String(64), nullable=False, comment="模板内容 SHA-256")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OutboxSnapshot(Base):
+    """投递积压快照（定时采样），用于画真实的积压曲线。
+
+    为什么单独一张表：积压是「状态」不是「增量」，清点类指标无法从事件明细反推
+    历史值；按 5 分钟采样一行，成本可控（每天 288 行/组织），保留期由
+    ``OUTBOX_SNAPSHOT_RETENTION_DAYS`` 控制。
+
+    ``organization_id`` 为 NULL 表示平台级（全部组织之和）；每个有管理员的组织
+    另存一行，供组织维度看板使用。
+    """
+
+    __tablename__ = "outbox_snapshots"
+    __table_args__ = (
+        Index("ix_outbox_snapshots_org_captured", "organization_id", "captured_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    captured_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True,
+                             comment="NULL=平台级")
+    notification_backlog = Column(Integer, nullable=False, default=0,
+                                  comment="pending + approved + sending")
+    notification_dead_letter = Column(Integer, nullable=False, default=0)
+    notification_retry_pending = Column(Integer, nullable=False, default=0)
+    notification_stale_claims = Column(Integer, nullable=False, default=0)
+    email_backlog = Column(Integer, nullable=False, default=0)
+    email_dead_letter = Column(Integer, nullable=False, default=0)
+    email_retry_pending = Column(Integer, nullable=False, default=0)
+    email_stale_claims = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class OrganizationOnboardingProgress(Base):

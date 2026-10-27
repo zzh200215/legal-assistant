@@ -294,6 +294,19 @@ def _dead_letter_count(db: Session, model, organization_id: int | None) -> int:
     ).scalar() or 0
 
 
+def backlog_metrics(db: Session, *, organization_id: int | None = None,
+                    now: datetime | None = None) -> dict:
+    """积压/死信/重试/卡死的一次性读数；健康检查与快照采样共用。"""
+    now = now or utc_now()
+    return {
+        "notification": _notification_backlog(db, now, organization_id),
+        "email": _email_backlog(db, now, organization_id),
+        "notification_dead_letter": _dead_letter_count(
+            db, LegalNotificationEvent, organization_id),
+        "email_dead_letter": _dead_letter_count(db, EmailSendRequest, organization_id),
+    }
+
+
 def evaluate_health(db: Session, *, organization_id: int | None = None,
                     now: datetime | None = None) -> dict:
     """投递健康阈值检查（看板与定时告警共用同一份口径）。
@@ -304,11 +317,11 @@ def evaluate_health(db: Session, *, organization_id: int | None = None,
     from app.core.config import get_settings
 
     settings = get_settings()
-    now = now or utc_now()
-    notification_backlog = _notification_backlog(db, now, organization_id)
-    email_backlog = _email_backlog(db, now, organization_id)
-    notification_dead = _dead_letter_count(db, LegalNotificationEvent, organization_id)
-    email_dead = _dead_letter_count(db, EmailSendRequest, organization_id)
+    metrics = backlog_metrics(db, organization_id=organization_id, now=now)
+    notification_backlog = metrics["notification"]
+    email_backlog = metrics["email"]
+    notification_dead = metrics["notification_dead_letter"]
+    email_dead = metrics["email_dead_letter"]
     stale = notification_backlog["stale_claims"] + email_backlog["stale_claims"]
     retry = notification_backlog["retry_pending"] + email_backlog["retry_pending"]
 

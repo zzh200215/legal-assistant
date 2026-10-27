@@ -905,6 +905,19 @@ def outbox_delivery_overview(
     return outbox_overview(db, days=days, organization_id=org_id)
 
 
+@router.get("/outbox/history")
+def outbox_delivery_history(
+    hours: int = Query(24, ge=1, le=168, description="回看小时数"),
+    org_id: int | None = Query(None, description="按组织过滤（None=平台级快照）"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """积压曲线（快照）+ 每小时吞吐；快照由 check_outbox_snapshot 每 5 分钟写入。"""
+    from app.services.notification.outbox_snapshots import history
+
+    return history(db, hours=hours, organization_id=org_id)
+
+
 @router.post("/outbox/dead-letters/{kind}/{item_id}/retry")
 def retry_outbox_dead_letter(
     kind: str,

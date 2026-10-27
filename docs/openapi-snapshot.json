@@ -17928,6 +17928,75 @@
         }
       }
     },
+    "/api/analytics/outbox/history": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Outbox Delivery History",
+        "description": "积压曲线（快照）+ 每小时吞吐；快照由 check_outbox_snapshot 每 5 分钟写入。",
+        "operationId": "outbox_delivery_history_api_analytics_outbox_history_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 168,
+              "minimum": 1,
+              "description": "回看小时数",
+              "default": 24,
+              "title": "Hours"
+            },
+            "description": "回看小时数"
+          },
+          {
+            "name": "org_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按组织过滤（None=平台级快照）",
+              "title": "Org Id"
+            },
+            "description": "按组织过滤（None=平台级快照）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analytics/outbox/dead-letters/{kind}/{item_id}/retry": {
       "post": {
         "tags": [

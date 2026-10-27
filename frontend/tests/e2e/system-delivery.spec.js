@@ -88,6 +88,26 @@ const HEALTH = {
 
 const SHOT_DIR = process.env.E2E_SHOT_DIR || ''
 
+const HISTORY = {
+  hours: 24,
+  organization_id: null,
+  snapshot_count: 4,
+  empty: false,
+  interval_note: '快照由 check_outbox_snapshot 每 5 分钟写入',
+  backlog: [
+    { at: '2026-10-26T06:00:00', notification: 2, email: 0, notification_dead_letter: 0, email_dead_letter: 0, notification_retry_pending: 0, email_retry_pending: 0 },
+    { at: '2026-10-26T07:00:00', notification: 6, email: 1, notification_dead_letter: 0, email_dead_letter: 0, notification_retry_pending: 1, email_retry_pending: 0 },
+    { at: '2026-10-26T08:00:00', notification: 3, email: 2, notification_dead_letter: 1, email_dead_letter: 0, notification_retry_pending: 1, email_retry_pending: 0 },
+    { at: '2026-10-26T09:00:00', notification: 1, email: 1, notification_dead_letter: 1, email_dead_letter: 1, notification_retry_pending: 1, email_retry_pending: 0 },
+  ],
+  throughput: [
+    { hour: '2026-10-26 06', notification_created: 4, notification_delivered: 2, email_created: 1, email_delivered: 0 },
+    { hour: '2026-10-26 07', notification_created: 8, notification_delivered: 5, email_created: 2, email_delivered: 1 },
+    { hour: '2026-10-26 08', notification_created: 3, notification_delivered: 6, email_created: 1, email_delivered: 1 },
+    { hour: '2026-10-26 09', notification_created: 2, notification_delivered: 3, email_created: 0, email_delivered: 1 },
+  ],
+}
+
 // 趋势/健康在 OVERVIEW 常量之后声明（TDZ），这里补挂，避免把大段数据挪到前面。
 OVERVIEW.trend = { days: 7, notification: TREND_DAYS, email: TREND_DAYS, metric: 'created_at 分桶 + 当前状态' }
 OVERVIEW.health = HEALTH
@@ -118,6 +138,10 @@ test('System 投递看板与死信重排', async ({ page }) => {
       requests.overviewQuery = Object.fromEntries(url.searchParams.entries())
       return route.fulfill({ json: success(OVERVIEW) })
     }
+    if (method === 'GET' && path === '/analytics/outbox/history') {
+      requests.historyQuery = Object.fromEntries(url.searchParams.entries())
+      return route.fulfill({ json: success(HISTORY) })
+    }
     if (method === 'POST' && path === '/analytics/outbox/dead-letters/notification/77/retry') {
       requests.retry = { kind: 'notification', id: 77 }
       return route.fulfill({ json: success({ kind: 'notification', id: 77, status: 'pending' }) })
@@ -143,6 +167,14 @@ test('System 投递看板与死信重排', async ({ page }) => {
   await expect(page.getByText('超阈值').first()).toBeVisible()
   await expect(page.getByText('冷却 180 分钟', { exact: false })).toBeVisible()
 
+  // 积压曲线（快照）
+  await expect(page.getByText('积压曲线')).toBeVisible()
+  await expect.poll(() => requests.historyQuery, { timeout: 5000 }).toBeTruthy()
+  expect(requests.historyQuery.hours).toBe('24')
+  await expect(page.locator('.backlog-chart polyline')).toHaveCount(2)
+  await expect(page.getByText('近 24 小时吞吐', { exact: false })).toBeVisible()
+  await expect(page.getByText('通知创建 17 / 投递 16', { exact: false })).toBeVisible()
+
   // 渠道表：站内 / 邮件两行
   await expect(page.getByText('站内').first()).toBeVisible()
   await expect(page.getByText('邮件').first()).toBeVisible()
@@ -152,7 +184,7 @@ test('System 投递看板与死信重排', async ({ page }) => {
   await expect(page.getByText('咨询被退回').first()).toBeVisible()
 
   if (SHOT_DIR) {
-    await page.screenshot({ path: path.join(SHOT_DIR, 'step39-delivery-dashboard.png'), fullPage: true })
+    await page.screenshot({ path: path.join(SHOT_DIR, 'step42-delivery-dashboard.png'), fullPage: true })
   }
 
   // 重排第一条（通知）→ 待投递

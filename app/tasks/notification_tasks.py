@@ -63,6 +63,20 @@ def deliver_email_send_requests_task():
         db.close()
 
 
+@celery_app.task(name="check_outbox_snapshot")
+@_beat_lock(task_name="check_outbox_snapshot", ttl_seconds=240)
+def check_outbox_snapshot_task():
+    """每5分钟：采样一次积压快照（平台级 + 有管理员的组织），并清理过期快照。"""
+    _record_beat_heartbeat()
+    from app.services.notification.outbox_snapshots import capture_snapshots
+
+    db = SessionLocal()
+    try:
+        return capture_snapshots(db)
+    finally:
+        db.close()
+
+
 @celery_app.task(name="check_outbox_health")
 @_beat_lock(task_name="check_outbox_health", ttl_seconds=600)
 def check_outbox_health_task():
