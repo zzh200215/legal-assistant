@@ -17,7 +17,8 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.auth import hash_password
 from app.core.database import Base
-from app.models.legal import LegalConsultation, LegalSource
+from app.models.legal import LegalArticle, LegalConsultation, LegalSource
+from app.models.legal_notifications import LegalNotificationEvent
 from app.models.org import Organization
 from app.models.user import User
 from app.services.observability.analytics_service import analytics_service
@@ -80,7 +81,12 @@ class ConsultationEvidenceIssuesTests(unittest.TestCase):
             username="other_user", email="other@example.com",
             hashed_password=hash_password("pw"), organization_id=self.other_org.id,
         )
-        self.db.add_all([self.user, self.other_user])
+        self.admin = User(
+            username="evidence_admin", email="evidence_admin@example.com",
+            hashed_password=hash_password("pw"), role="admin",
+            organization_id=self.org.id,
+        )
+        self.db.add_all([self.user, self.other_user, self.admin])
         self.db.flush()
         self.db.add(LegalSource(
             id=10, user_id=self.user.id, title="劳动合同法", source_type="statute",
@@ -217,6 +223,103 @@ class ConsultationEvidenceIssuesTests(unittest.TestCase):
         self.assertEqual(self._issues()["total"], 0)
         with self.assertRaisesRegex(ValueError, "未知的引用问题类型"):
             self._issues(issue="bad")
+
+    def test_resolve_reopen_and_status_filter(self):
+        row = self._consultation(
+            evidence=_evidence("weak", references=1, no_corpus=1),
+            refs=[_ref(10, "no_corpus")],
+        )
+        result = analytics_service.resolve_evidence_issue(
+            self.db, consultation_id=row.id, actor_id=self.admin.id,
+            organization_id=self.org.id, note="已补语料",
+        )
+        self.assertTrue(result["resolved"])
+        self.assertEqual(result["note"], "已补语料")
+
+        self.assertEqual(self._issues()["total"], 0)  # 默认只看未处理
+        resolved = self._issues(status="resolved")
+        self.assertEqual(resolved["total"], 1)
+        self.assertEqual(resolved["items"][0]["resolved_by_name"], "evidence_admin")
+        self.assertEqual(resolved["items"][0]["note"], "已补语料")
+        self.assertEqual(self._issues(status="all")["total"], 1)
+
+        reopened = analytics_service.reopen_evidence_issue(
+            self.db, consultation_id=row.id, organization_id=self.org.id,
+        )
+        self.assertFalse(reopened["resolved"])
+        self.assertEqual(self._issues()["total"], 1)
+        self.assertEqual(self._issues(status="resolved")["total"], 0)
+
+        with self.assertRaisesRegex(ValueError, "无权"):
+            analytics_service.resolve_evidence_issue(
+                self.db, consultation_id=row.id, actor_id=self.admin.id,
+                organization_id=self.other_org.id,
+            )
+        with self.assertRaisesRegex(ValueError, "不存在"):
+            analytics_service.resolve_evidence_issue(
+                self.db, consultation_id=999999, actor_id=self.admin.id,
+            )
+
+    def test_export_corpus_gaps_csv_includes_all_zero_article_sources(self):
+        self.db.add(LegalSource(
+            id=11, user_id=self.user.id, title="劳动争议调解仲裁法", source_type="statute",
+            citation="调解仲裁法", content="摘要", version="1",
+        ))
+        self.db.add(LegalSource(
+            id=12, user_id=self.user.id, title="有完整条文的法", source_type="statute",
+            citation="有条文法", content="摘要", version="1",
+        ))
+        self.db.add(LegalArticle(
+            source_id=12, article_number="第1条", content="正文", sequence=1,
+        ))
+        self.db.commit()
+        self._consultation(
+            evidence=_evidence("weak", references=2, no_corpus=2),
+            refs=[_ref(10, "no_corpus"), _ref(11, "no_corpus")],
+        )
+        self._consultation(
+            evidence=_evidence("strong", references=1, article_checked=1, article_verified=1),
+            refs=[_ref(12, "verified")],
+        )
+
+        content, filename = analytics_service.export_corpus_gaps(
+            self.db, days=30, organization_id=self.org.id,
+        )
+        self.assertTrue(content.startswith("\ufeff"))
+        self.assertTrue(filename.endswith(".csv"))
+        self.assertIn("法源ID", content)
+        self.assertIn("劳动合同法", content)
+        self.assertIn("劳动争议调解仲裁法", content)
+        self.assertNotIn("有完整条文的法", content)
+
+    def test_notify_unresolved_issues_is_daily_idempotent(self):
+        self._consultation(
+            evidence=_evidence("weak", references=1, no_corpus=1),
+            refs=[_ref(10, "no_corpus")],
+        )
+        first = analytics_service.notify_evidence_issues(
+            self.db, days=30, organization_id=self.org.id, actor_id=self.admin.id,
+        )
+        self.assertEqual(first["unresolved_total"], 1)
+        self.assertEqual(first["users"], 1)
+        self.assertGreaterEqual(first["events"], 1)
+        events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.template_key == "citation_quality_issue").all()
+        self.assertGreaterEqual(len(events), 1)
+        self.assertEqual({event.user_id for event in events}, {self.admin.id})
+        self.assertIn("引用质量问题待处理", events[0].title)
+
+        # 同一天重复触发：幂等键命中，不新增事件
+        count_before = len(events)
+        second = analytics_service.notify_evidence_issues(
+            self.db, days=30, organization_id=self.org.id, actor_id=self.admin.id,
+        )
+        self.assertEqual(second["users"], 1)
+        self.assertEqual(
+            self.db.query(LegalNotificationEvent).filter(
+                LegalNotificationEvent.template_key == "citation_quality_issue").count(),
+            count_before,
+        )
 
 
 if __name__ == "__main__":

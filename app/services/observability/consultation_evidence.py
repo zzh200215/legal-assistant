@@ -15,14 +15,24 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, aliased
 
-from app.models.legal import LegalArticle, LegalConsultation, LegalSource
+from app.core.time import utc_now
+from app.models.legal import (
+    ConsultationEvidenceIssueMark,
+    LegalArticle,
+    LegalConsultation,
+    LegalSource,
+)
 from app.models.user import User
+from app.services.notification.notification_service import notification_service
 
 # 与 `app/services/legal/legal_reference_service.py::_EVIDENCE_LEVELS` 同源；
 # tests/test_consultation_evidence_stats.py 里有一条断言守着两处不漂移。
@@ -46,6 +56,8 @@ _REFERENCE_KEYS = (
 
 # 法源引用榜只展示前 N 个（前端是表格，不翻页）
 SOURCE_LIMIT = 10
+
+logger = logging.getLogger(__name__)
 
 # 事后回填的摘要带这个 basis 标记（`scripts/backfill_consultation_evidence.py`）：
 # 「按当前法源库重算」与「生成当时算的」是两件事，聚合里分开计数、界面上分开说。
@@ -103,7 +115,7 @@ def _source_rows(db: Session, source_refs: dict[int, dict]) -> list[dict]:
         return []
     ids = list(source_refs)
     titles = {
-        row.id: (row.title or row.citation or f"法源 #{row.id}")
+        row.id: {"title": row.title, "citation": row.citation}
         for row in db.query(LegalSource.id, LegalSource.title, LegalSource.citation)
         .filter(LegalSource.id.in_(ids))
         .all()
@@ -116,10 +128,12 @@ def _source_rows(db: Session, source_refs: dict[int, dict]) -> list[dict]:
     )
     rows = []
     for source_id, entry in source_refs.items():
+        meta = titles.get(source_id, {})
         rows.append(
             {
                 "source_id": source_id,
-                "title": titles.get(source_id, f"法源 #{source_id}（已删除）"),
+                "title": meta.get("title") or f"法源 #{source_id}（已删除）",
+                "citation": meta.get("citation") or "",
                 "references": entry["references"],
                 "consultations": entry["consultations"],
                 "verified": entry["verified"],
@@ -140,6 +154,37 @@ def _source_titles(db: Session, ids: set[int]) -> dict[int, dict]:
         .filter(LegalSource.id.in_(ids))
         .all()
     }
+
+
+def _count_source_refs(reference_rows) -> tuple[dict[int, dict], int, int]:
+    """按法源统计引用次数/涉及答复/核验通过/缺条文；返回 (排行, 未挂引用数, 未挂答复数)。"""
+    source_refs: dict[int, dict] = {}
+    unmatched_references = 0
+    unmatched_consultations = 0
+    for (references_json,) in reference_rows:
+        unmatched_in_row = False
+        sources_in_row: set[int] = set()
+        for ref in _parse_list(references_json):
+            source_id = ref.get("source_id")
+            if not isinstance(source_id, int):
+                unmatched_references += 1
+                unmatched_in_row = True
+                continue
+            entry = source_refs.setdefault(
+                source_id, {"references": 0, "consultations": 0, "verified": 0, "no_corpus": 0}
+            )
+            entry["references"] += 1
+            sources_in_row.add(source_id)
+            verification = ref.get("verification") if isinstance(ref.get("verification"), dict) else {}
+            if verification.get("verified") is True:
+                entry["verified"] += 1
+            if verification.get("article_scope") == "no_corpus":
+                entry["no_corpus"] += 1
+        for source_id in sources_in_row:
+            source_refs[source_id]["consultations"] += 1
+        if unmatched_in_row:
+            unmatched_consultations += 1
+    return source_refs, unmatched_references, unmatched_consultations
 
 
 class ConsultationEvidenceMixin:
@@ -183,9 +228,6 @@ class ConsultationEvidenceMixin:
         with_evidence = 0
         with_evidence_recomputed = 0
         trend: dict[str, dict] = {}
-        source_refs: dict[int, dict] = {}
-        unmatched_references = 0
-        unmatched_consultations = 0
 
         for evidence_json, references_json, created_at in rows:
             summary = _parse(evidence_json)
@@ -228,34 +270,15 @@ class ConsultationEvidenceMixin:
                         if isinstance(value, int) and value > 0:
                             bucket[key] += value
 
-            # 法源引用排行：只认挂了 source_id 的引用；没挂的单独计数
-            unmatched_in_row = False
-            sources_in_row: set[int] = set()
-            for ref in _parse_list(references_json):
-                source_id = ref.get("source_id")
-                if not isinstance(source_id, int):
-                    unmatched_references += 1
-                    unmatched_in_row = True
-                    continue
-                entry = source_refs.setdefault(
-                    source_id, {"references": 0, "consultations": 0, "verified": 0, "no_corpus": 0}
-                )
-                entry["references"] += 1
-                sources_in_row.add(source_id)
-                verification = ref.get("verification") if isinstance(ref.get("verification"), dict) else {}
-                if verification.get("verified") is True:
-                    entry["verified"] += 1
-                if verification.get("article_scope") == "no_corpus":
-                    entry["no_corpus"] += 1
-            for source_id in sources_in_row:
-                source_refs[source_id]["consultations"] += 1
-            if unmatched_in_row:
-                unmatched_consultations += 1
+            # 法源引用排行与未挂引用在循环外统一统计（与导出共用一套口径）
 
-        sources = _source_rows(db, source_refs)
+        source_refs, unmatched_references, unmatched_consultations = _count_source_refs(
+            (row[1],) for row in rows
+        )
         # 缺口清单从**全量**排行里挑（不是 top N 的子集），否则冷门但零条文的法源会被漏掉
-        gaps = [row for row in sources if not row["articles"]][:SOURCE_LIMIT]
-        sources = sources[:SOURCE_LIMIT]
+        all_sources = _source_rows(db, source_refs)
+        gaps = [row for row in all_sources if not row["articles"]][:SOURCE_LIMIT]
+        sources = all_sources[:SOURCE_LIMIT]
 
         total = len(rows)
         return {
@@ -295,6 +318,7 @@ class ConsultationEvidenceMixin:
         organization_id: int | None = None,
         issue: str | None = None,
         source_id: int | None = None,
+        status: str = "open",
         limit: int = 50,
     ) -> dict:
         """引用质量问题清单（从聚合数字下钻到具体答复）。
@@ -302,29 +326,45 @@ class ConsultationEvidenceMixin:
         - 只列有 `evidence_json` 的答复，口径与 `get_consultation_evidence_stats` 一致；
         - `issue` 支持 missing / no_corpus / unmatched / weak；
         - `source_id` 用于「某部法源/语料缺口」的定向下钻，只保留引用过该法源的答复；
+        - `status` 默认 open（未处理）；resolved 只看已处理；all 不筛；
         - 返回每条答复的问题类型与最多 8 条引用明细，供管理员判断是补语料还是改引用。
         """
         if issue and issue not in ISSUE_LABELS:
             raise ValueError(f"未知的引用问题类型: {issue}")
+        if status not in ("open", "resolved", "all"):
+            raise ValueError(f"未知的处置状态: {status}")
         window = max(1, min(int(days or 30), 365))
         since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=window)
+        mark = ConsultationEvidenceIssueMark
+        resolver = aliased(User)
         query = (
             db.query(
                 LegalConsultation.id,
                 LegalConsultation.user_id,
                 User.username,
+                User.organization_id,
                 LegalConsultation.question,
                 LegalConsultation.category,
                 LegalConsultation.status,
                 LegalConsultation.created_at,
                 LegalConsultation.evidence_json,
                 LegalConsultation.references_json,
+                mark.status,
+                mark.resolved_at,
+                mark.note,
+                resolver.username,
             )
             .join(User, User.id == LegalConsultation.user_id)
+            .outerjoin(mark, mark.consultation_id == LegalConsultation.id)
+            .outerjoin(resolver, resolver.id == mark.resolved_by)
             .filter(LegalConsultation.created_at >= since)
         )
         if organization_id is not None:
             query = query.filter(User.organization_id == organization_id)
+        if status == "open":
+            query = query.filter(or_(mark.id.is_(None), mark.status != "resolved"))
+        elif status == "resolved":
+            query = query.filter(mark.status == "resolved")
         rows = query.order_by(
             LegalConsultation.created_at.desc(), LegalConsultation.id.desc()
         ).all()
@@ -335,12 +375,17 @@ class ConsultationEvidenceMixin:
             consultation_id,
             user_id,
             username,
+            owner_org_id,
             question,
             category,
-            status,
+            consultation_status,
             created_at,
             evidence_json,
             references_json,
+            mark_status,
+            resolved_at,
+            note,
+            resolved_by_name,
         ) in rows:
             summary = _parse(evidence_json)
             if summary is None:
@@ -369,14 +414,19 @@ class ConsultationEvidenceMixin:
                     "id": consultation_id,
                     "user_id": user_id,
                     "user_name": username,
+                    "organization_id": owner_org_id,
                     "question": question,
                     "category": category,
-                    "status": status,
+                    "status": consultation_status,
                     "created_at": created_at,
                     "level": level,
                     "summary": summary,
                     "refs": refs,
                     "issues": issues,
+                    "resolved": mark_status == "resolved",
+                    "resolved_at": resolved_at,
+                    "resolved_by_name": resolved_by_name,
+                    "note": note,
                 }
             )
 
@@ -428,6 +478,7 @@ class ConsultationEvidenceMixin:
                     "id": record["id"],
                     "user_id": record["user_id"],
                     "user_name": record["user_name"],
+                    "organization_id": record["organization_id"],
                     "question": record["question"],
                     "category": record["category"],
                     "status": record["status"],
@@ -439,6 +490,10 @@ class ConsultationEvidenceMixin:
                     "issue_labels": [ISSUE_LABELS[key] for key in issues],
                     "reference_count": len(refs),
                     "references": details,
+                    "resolved": record["resolved"],
+                    "resolved_at": record["resolved_at"],
+                    "resolved_by_name": record["resolved_by_name"],
+                    "note": record["note"],
                 }
             )
 
@@ -449,4 +504,183 @@ class ConsultationEvidenceMixin:
             "total": total,
             "returned": len(items[:capped]),
             "items": items[:capped],
+        }
+
+    def _owner_org(self, db: Session, consultation_id: int, organization_id: int | None):
+        row = (
+            db.query(LegalConsultation.id, User.organization_id)
+            .join(User, User.id == LegalConsultation.user_id)
+            .filter(LegalConsultation.id == consultation_id)
+            .first()
+        )
+        if row is None:
+            raise ValueError("咨询不存在")
+        if organization_id is not None and row.organization_id != organization_id:
+            raise ValueError("无权处理该咨询")
+        return row.organization_id
+
+    def resolve_evidence_issue(
+        self,
+        db: Session,
+        *,
+        consultation_id: int,
+        actor_id: int,
+        organization_id: int | None = None,
+        note: str | None = None,
+    ) -> dict:
+        """把一条咨询的引用问题标记为已处理；重复标记更新备注与处理人。"""
+        owner_org = self._owner_org(db, consultation_id, organization_id)
+        mark = (
+            db.query(ConsultationEvidenceIssueMark)
+            .filter(ConsultationEvidenceIssueMark.consultation_id == consultation_id)
+            .first()
+        )
+        if mark is None:
+            mark = ConsultationEvidenceIssueMark(
+                consultation_id=consultation_id, organization_id=owner_org,
+            )
+            db.add(mark)
+        mark.organization_id = owner_org
+        mark.status = "resolved"
+        mark.resolved_by = actor_id
+        mark.resolved_at = utc_now()
+        mark.note = (note or "").strip()[:500] or None
+        db.commit()
+        db.refresh(mark)
+        return {
+            "consultation_id": consultation_id,
+            "resolved": True,
+            "resolved_at": mark.resolved_at,
+            "resolved_by": mark.resolved_by,
+            "note": mark.note,
+        }
+
+    def reopen_evidence_issue(
+        self,
+        db: Session,
+        *,
+        consultation_id: int,
+        organization_id: int | None = None,
+    ) -> dict:
+        """重新打开：删除处置标记，问题重新进入默认清单。"""
+        self._owner_org(db, consultation_id, organization_id)
+        mark = (
+            db.query(ConsultationEvidenceIssueMark)
+            .filter(ConsultationEvidenceIssueMark.consultation_id == consultation_id)
+            .first()
+        )
+        if mark is not None:
+            db.delete(mark)
+            db.commit()
+        return {"consultation_id": consultation_id, "resolved": False}
+
+    def export_corpus_gaps(
+        self,
+        db: Session,
+        *,
+        days: int = 30,
+        organization_id: int | None = None,
+    ) -> tuple[str, str]:
+        """导出语料缺口 CSV（全量零条文被引用法源，不截 top N）。"""
+        window = max(1, min(int(days or 30), 365))
+        since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=window)
+        query = db.query(LegalConsultation.references_json).filter(
+            LegalConsultation.created_at >= since
+        )
+        if organization_id is not None:
+            query = query.join(User, User.id == LegalConsultation.user_id).filter(
+                User.organization_id == organization_id
+            )
+        source_refs, _unmatched_refs, _unmatched_cons = _count_source_refs(query.all())
+        gaps = [row for row in _source_rows(db, source_refs) if not row["articles"]]
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "法源ID", "法源标题", "引用标识", "引用次数", "涉及答复",
+            "核验通过", "缺条文引用", "已收录条文数",
+        ])
+        for row in gaps:
+            writer.writerow([
+                row["source_id"], row["title"], row["citation"], row["references"],
+                row["consultations"], row["verified"], row["no_corpus"], row["articles"],
+            ])
+        filename = f"citation-corpus-gaps-{datetime.now(timezone.utc):%Y%m%d}.csv"
+        return "\ufeff" + output.getvalue(), filename
+
+    def notify_evidence_issues(
+        self,
+        db: Session,
+        *,
+        days: int = 30,
+        organization_id: int | None = None,
+        issue: str | None = None,
+        source_id: int | None = None,
+        actor_id: int | None = None,
+    ) -> dict:
+        """把未处理的引用问题按组织汇总，通知组织管理员（站内+可用邮件）。"""
+        data = self.list_consultation_evidence_issues(
+            db, days=days, organization_id=organization_id,
+            issue=issue, source_id=source_id, status="open", limit=100,
+        )
+        items = data["items"]
+        by_org: dict[int, list[dict]] = {}
+        for item in items:
+            by_org.setdefault(item["organization_id"], []).append(item)
+
+        users = 0
+        events = 0
+        failed = 0
+        notified_orgs = 0
+        for org_id, org_items in by_org.items():
+            admins = [
+                user_id for (user_id,) in db.query(User.id).filter(
+                    User.role == "admin", User.organization_id == org_id,
+                ).all()
+            ]
+            if not admins:
+                continue
+            notified_orgs += 1
+            labels = []
+            for item in org_items:
+                for label in item["issue_labels"]:
+                    if label not in labels:
+                        labels.append(label)
+            title = f"引用质量问题待处理：{len(org_items)} 条"
+            body = (
+                f"近 {data['window_days']} 天有 {len(org_items)} 条咨询答复存在引用问题"
+                f"（{'、'.join(labels) or '待核'}）。请到「系统 → 实验观测 → 证据可核验性」"
+                "查看并标记处理。"
+            )
+            for user_id in admins:
+                try:
+                    created = notification_service.create_multi_channel_notification(
+                        db=db,
+                        organization_id=org_id,
+                        user_id=user_id,
+                        event_type="approval",
+                        title=title,
+                        body=body,
+                        channels=["site", "email"],
+                        reference_type="consultation_evidence_issue",
+                        business_version=int(utc_now().strftime("%Y%m%d")),
+                        template_key="citation_quality_issue",
+                    )
+                    events += len(created)
+                    users += 1
+                except Exception:
+                    failed += 1
+                    logger.exception(
+                        "引用质量问题通知失败 org=%s user=%s", org_id, user_id,
+                    )
+        db.commit()
+        return {
+            "window_days": data["window_days"],
+            "unresolved_total": data["total"],
+            "notified_items": len(items),
+            "orgs": notified_orgs,
+            "users": users,
+            "events": events,
+            "failed": failed,
+            "actor_id": actor_id,
         }

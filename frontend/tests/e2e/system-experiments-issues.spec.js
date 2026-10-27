@@ -52,6 +52,9 @@ const ISSUES = {
       issues: ['missing', 'weak'],
       issue_labels: ['条号未找到', '答复待核'],
       reference_count: 1,
+      resolved: false,
+      resolved_at: null,
+      resolved_by_name: null,
       references: [{
         source_id: 10, title: '中华人民共和国劳动合同法', citation: '劳动合同法第99条',
         scope: 'missing', scope_label: '条号未找到', note: '未在已收录的 98 条条文中找到第99条',
@@ -69,6 +72,9 @@ const ISSUES = {
       issues: ['unmatched'],
       issue_labels: ['未挂法源'],
       reference_count: 2,
+      resolved: false,
+      resolved_at: null,
+      resolved_by_name: null,
       references: [{
         source_id: null, title: '未挂法源的引用', citation: '某地方性规定',
         scope: 'no_source', scope_label: '未挂法源', note: '引用没有 source_id',
@@ -79,6 +85,7 @@ const ISSUES = {
 
 test('System 实验观测：引用质量问题下钻', async ({ page }) => {
   const requests = {}
+  let issueItems = ISSUES.items.map((row) => ({ ...row }))
   const unexpected = []
   const failed = []
   page.on('response', (r) => {
@@ -108,10 +115,40 @@ test('System 实验观测：引用质量问题下钻', async ({ page }) => {
       requests.issueQuery = Object.fromEntries(url.searchParams.entries())
       const issue = url.searchParams.get('issue')
       const sourceId = url.searchParams.get('source_id')
-      let items = ISSUES.items
+      const status = url.searchParams.get('status') || 'open'
+      let items = issueItems
+      if (status === 'open') items = items.filter((row) => !row.resolved)
+      if (status === 'resolved') items = items.filter((row) => row.resolved)
       if (issue) items = items.filter((row) => row.issues.includes(issue))
       if (sourceId) items = items.filter((row) => row.references.some((ref) => String(ref.source_id) === sourceId))
       return route.fulfill({ json: success({ window_days: 30, total: items.length, returned: items.length, items }) })
+    }
+    if (method === 'GET' && path === '/analytics/consultations/evidence-issues/export') {
+      requests.exportDays = url.searchParams.get('days')
+      return route.fulfill({
+        status: 200,
+        headers: { 'Content-Disposition': 'attachment; filename="citation-corpus-gaps-20261027.csv"' },
+        contentType: 'text/csv; charset=utf-8',
+        body: '\ufeff法源ID,法源标题\n10,劳动合同法\n',
+      })
+    }
+    if (method === 'POST' && path === '/analytics/consultations/evidence-issues/notify') {
+      requests.notifyQuery = Object.fromEntries(url.searchParams.entries())
+      return route.fulfill({ json: success({ users: 1, notified_items: 1, events: 2, unresolved_total: 1, orgs: 1 }) })
+    }
+    if (method === 'POST' && path === '/analytics/consultations/evidence-issues/65/resolve') {
+      requests.resolve = 65
+      issueItems = issueItems.map((row) => (row.id === 65
+        ? { ...row, resolved: true, resolved_at: '2026-10-27T12:00:00', resolved_by_name: 'admin' }
+        : row))
+      return route.fulfill({ json: success({ consultation_id: 65, resolved: true }) })
+    }
+    if (method === 'POST' && path === '/analytics/consultations/evidence-issues/65/reopen') {
+      requests.reopen = 65
+      issueItems = issueItems.map((row) => (row.id === 65
+        ? { ...row, resolved: false, resolved_at: null, resolved_by_name: null }
+        : row))
+      return route.fulfill({ json: success({ consultation_id: 65, resolved: false }) })
     }
 
     unexpected.push(`${method} ${path}`)
@@ -124,14 +161,41 @@ test('System 实验观测：引用质量问题下钻', async ({ page }) => {
   await expect(page.getByText('查看引用问题')).toBeVisible()
   expect(requests.statsDays).toBe('30')
 
-  // 打开引用质量问题清单（默认全部问题）
+  // 导出语料缺口清单（CSV 下载）与批量通知
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: '导出缺口清单' }).click({ force: true }),
+  ])
+  expect(download.suggestedFilename()).toContain('.csv')
+  expect(requests.exportDays).toBe('30')
+  await page.getByRole('button', { name: '通知负责人' }).click({ force: true })
+  await expect.poll(() => requests.notifyQuery).toBeTruthy()
+  expect(requests.notifyQuery.days).toBe('30')
+  await expect(page.getByText(/已通知 1 位管理员/)).toBeVisible()
+
+  // 打开引用质量问题清单（默认未处理）
   await page.getByRole('button', { name: '查看引用问题' }).click()
   await expect.poll(() => requests.issueQuery, { timeout: 5000 }).toBeTruthy()
-  expect(requests.issueQuery).toEqual({ days: '30', limit: '50' })
+  expect(requests.issueQuery).toEqual({ days: '30', limit: '50', status: 'open' })
   await expect(page.getByText('引用质量问题清单')).toBeVisible()
   await expect(page.locator('.evidence-issues .el-table__row')).toHaveCount(2)
   await expect(page.locator('.evidence-issues')).toContainText('试用期最长可以约定多久？')
   await expect(page.locator('.evidence-issues')).toContainText('条号未找到 / 答复待核')
+
+  // 标记已处理 → 已处理视图 → 重新打开
+  await page.locator('.evidence-issues .el-table__row').first()
+    .getByRole('button', { name: '标记已处理' }).evaluate((element) => element.click())
+  await expect.poll(() => requests.resolve).toBe(65)
+  await expect(page.locator('.evidence-issues .el-table__row')).toHaveCount(1)
+  await page.getByRole('radio', { name: '已处理' }).click({ force: true })
+  await expect.poll(() => requests.issueQuery.status).toBe('resolved')
+  await expect(page.locator('.evidence-issues .el-table__row')).toHaveCount(1)
+  await expect(page.locator('.evidence-issues')).toContainText('已处理 · admin')
+  await page.getByRole('button', { name: '重新打开' }).evaluate((element) => element.click())
+  await expect.poll(() => requests.reopen).toBe(65)
+  await expect(page.locator('.evidence-issues .el-table__row')).toHaveCount(0)
+  await page.getByRole('radio', { name: '未处理' }).click({ force: true })
+  await expect(page.locator('.evidence-issues .el-table__row')).toHaveCount(2)
 
   // 按问题类型过滤（顶部导航是 sticky 的，force 避免被它拦住点击）
   await page.getByRole('radio', { name: '条号未找到' }).click({ force: true })
@@ -153,7 +217,7 @@ test('System 实验观测：引用质量问题下钻', async ({ page }) => {
 
   if (SHOT_DIR) {
     // 截图只看证据卡：隐藏 sticky 顶栏，并把被「查看」按钮带偏的表格横向滚动复位
-    await page.addStyleTag({ content: '.workspace-topbar { display: none !important; }' })
+    await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
     await page.evaluate(() => {
       document.querySelectorAll('.el-table__body-wrapper .el-scrollbar__wrap')
         .forEach((wrap) => { wrap.scrollLeft = 0 })

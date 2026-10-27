@@ -31,6 +31,20 @@ export default {
   consultationEvidenceIssues(days = 30, params = {}) {
     return http.get('/analytics/consultations/evidence-issues', { params: { days, ...params } })
   },
+  resolveConsultationEvidenceIssue(consultationId, note = null) {
+    return http.post(`/analytics/consultations/evidence-issues/${consultationId}/resolve`, { note })
+  },
+  reopenConsultationEvidenceIssue(consultationId) {
+    return http.post(`/analytics/consultations/evidence-issues/${consultationId}/reopen`)
+  },
+  exportConsultationCorpusGaps(days = 30) {
+    return http.get('/analytics/consultations/evidence-issues/export', {
+      params: { days }, responseType: 'blob',
+    })
+  },
+  notifyConsultationEvidenceIssues(days = 30, params = {}) {
+    return http.post('/analytics/consultations/evidence-issues/notify', null, { params: { days, ...params } })
+  },
   retrievalIndexStats() {
     return http.get('/analytics/retrieval-index/stats')
   },

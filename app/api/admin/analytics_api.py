@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -28,6 +28,10 @@ class ResolveFeedbackRequest(BaseModel):
 
 class FeedbackEvalBundleRequest(BaseModel):
     days: int = 30
+
+
+class EvidenceIssueResolveRequest(BaseModel):
+    note: str | None = None
 
 
 class MCPPolicyDraftRequest(BaseModel):
@@ -108,6 +112,8 @@ def consultation_evidence_issues(
     issue: str | None = Query(None, pattern="^(missing|no_corpus|unmatched|weak)$",
                               description="问题类型：条号未找到/法源缺条文/未挂法源/答复待核"),
     source_id: int | None = Query(None, ge=1, description="只看引用过该法源的答复"),
+    status: str = Query("open", pattern="^(open|resolved|all)$",
+                        description="处置状态：未处理/已处理/全部"),
     limit: int = Query(50, ge=1, le=100, description="最多返回条数"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin_user),
@@ -119,7 +125,83 @@ def consultation_evidence_issues(
         organization_id=current_user.organization_id,
         issue=issue,
         source_id=source_id,
+        status=status,
         limit=limit,
+    )
+
+
+@router.get("/consultations/evidence-issues/export")
+def export_consultation_corpus_gaps(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """导出当前窗口的语料缺口清单（CSV，含零条文被引用法源的全部行）。"""
+    content, filename = analytics_service.export_corpus_gaps(
+        db, days=days, organization_id=current_user.organization_id,
+    )
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/consultations/evidence-issues/{consultation_id}/resolve")
+def resolve_consultation_evidence_issue(
+    consultation_id: int,
+    req: EvidenceIssueResolveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """把一条咨询的引用问题标记为已处理。"""
+    try:
+        return analytics_service.resolve_evidence_issue(
+            db,
+            consultation_id=consultation_id,
+            actor_id=current_user.id,
+            organization_id=current_user.organization_id,
+            note=req.note,
+        )
+    except ValueError as exc:
+        status_code = 404 if "不存在" in str(exc) else 400
+        raise api_error(status_code, str(exc), code="EVIDENCE_ISSUE_RESOLVE_INVALID") from exc
+
+
+@router.post("/consultations/evidence-issues/{consultation_id}/reopen")
+def reopen_consultation_evidence_issue(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """重新打开已处理的引用问题。"""
+    try:
+        return analytics_service.reopen_evidence_issue(
+            db,
+            consultation_id=consultation_id,
+            organization_id=current_user.organization_id,
+        )
+    except ValueError as exc:
+        status_code = 404 if "不存在" in str(exc) else 400
+        raise api_error(status_code, str(exc), code="EVIDENCE_ISSUE_REOPEN_INVALID") from exc
+
+
+@router.post("/consultations/evidence-issues/notify")
+def notify_consultation_evidence_issues(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    issue: str | None = Query(None, pattern="^(missing|no_corpus|unmatched|weak)$"),
+    source_id: int | None = Query(None, ge=1),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_user),
+):
+    """把未处理的引用问题按组织汇总，通知组织管理员（每日幂等）。"""
+    return analytics_service.notify_evidence_issues(
+        db,
+        days=days,
+        organization_id=current_user.organization_id,
+        issue=issue,
+        source_id=source_id,
+        actor_id=current_user.id,
     )
 
 

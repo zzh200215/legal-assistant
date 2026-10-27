@@ -73,6 +73,8 @@
       </div>
       <div class="app-card-body">
         <div class="evidence-actions">
+          <el-button size="small" :loading="exporting" @click="exportCorpusGaps">导出缺口清单</el-button>
+          <el-button size="small" :loading="notifying" @click="notifyEvidenceIssues">通知负责人</el-button>
           <el-button size="small" @click="openEvidenceIssues({})">查看引用问题</el-button>
         </div>
         <div class="app-metric-grid-4 evidence-metric-grid">
@@ -157,6 +159,11 @@
         <div v-if="issuesVisible" class="evidence-issues">
           <div class="evidence-issues-head">
             <h3 class="evidence-subhead">{{ evidenceIssuesTitle }}</h3>
+            <el-radio-group v-model="issuesStatusFilter" size="small" @change="loadEvidenceIssues">
+              <el-radio-button value="open">未处理</el-radio-button>
+              <el-radio-button value="resolved">已处理</el-radio-button>
+              <el-radio-button value="all">全部</el-radio-button>
+            </el-radio-group>
             <el-radio-group v-model="issuesFilter" size="small" @change="loadEvidenceIssues">
               <el-radio-button value="all">全部问题</el-radio-button>
               <el-radio-button value="missing">条号未找到</el-radio-button>
@@ -195,14 +202,39 @@
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="time_text" label="时间" width="140" />
-                <el-table-column prop="question" label="咨询问题" min-width="240" show-overflow-tooltip />
-                <el-table-column label="可核验性" width="120">
+                <el-table-column prop="time_text" label="时间" width="130" />
+                <el-table-column label="咨询问题" min-width="250">
                   <template #default="{ row }">
-                    <span class="app-tag" :class="row.level_class">{{ row.level_label }}</span>
+                    <div class="issue-question">
+                      <span>{{ row.question }}</span>
+                      <div class="issue-question-meta">
+                        <span class="app-tag" :class="row.level_class">{{ row.level_label }}</span>
+                        <span class="issue-text">{{ row.issue_text }}</span>
+                      </div>
+                    </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="issue_text" label="问题" width="180" />
+                <el-table-column label="处置" width="190">
+                  <template #default="{ row }">
+                    <div class="issue-actions">
+                      <span v-if="row.resolved" class="app-tag is-ok">{{ row.resolved_text }}</span>
+                      <el-button
+                        v-if="row.resolved"
+                        text
+                        size="small"
+                        :loading="resolvingId === row.id"
+                        @click="reopenIssue(row)"
+                      >重新打开</el-button>
+                      <el-button
+                        v-else
+                        text
+                        size="small"
+                        :loading="resolvingId === row.id"
+                        @click="resolveIssue(row)"
+                      >标记已处理</el-button>
+                    </div>
+                  </template>
+                </el-table-column>
               </el-table>
             </div>
           </QueryStateView>
@@ -368,12 +400,17 @@ const evidenceGapNote = computed(() => {
 // 引用质量问题下钻：从聚合卡片展开到具体答复，再按法源/问题类型收窄
 const issuesVisible = ref(false)
 const issuesFilter = ref('all')
+const issuesStatusFilter = ref('open')
 const issuesSource = ref(null)
+const resolvingId = ref(null)
+const exporting = ref(false)
+const notifying = ref(false)
 const formatTime = (value) => (value ? String(value).replace('T', ' ').slice(0, 16) : '-')
 const evidenceIssueRows = computed(() => (evidenceIssues.value.items || []).map((row) => ({
   ...row,
   time_text: formatTime(row.created_at),
   issue_text: (row.issue_labels || []).join(' / ') || '引用已核对',
+  resolved_text: row.resolved ? `已处理 · ${row.resolved_by_name || '管理员'}` : '',
   level_class: row.level === 'strong' ? 'is-ok' : (row.level === 'weak' || row.level === 'none' ? 'is-danger' : 'is-warning'),
 })))
 const evidenceIssuesTitle = computed(() => (
@@ -386,7 +423,7 @@ const issuesStatus = computed(() => {
   return 'success'
 })
 const loadEvidenceIssues = () => {
-  const params = { limit: 50 }
+  const params = { limit: 50, status: issuesStatusFilter.value }
   if (issuesFilter.value !== 'all') params.issue = issuesFilter.value
   if (issuesSource.value?.source_id) params.source_id = issuesSource.value.source_id
   fetchEvidenceIssues(params)
@@ -394,8 +431,68 @@ const loadEvidenceIssues = () => {
 const openEvidenceIssues = ({ source = null, issue = 'all' } = {}) => {
   issuesSource.value = source
   issuesFilter.value = issue
+  issuesStatusFilter.value = 'open'
   issuesVisible.value = true
   loadEvidenceIssues()
+}
+const resolveIssue = async (row) => {
+  resolvingId.value = row.id
+  try {
+    await api.resolveConsultationEvidenceIssue(row.id)
+    ElMessage.success('已标记处理')
+    await loadEvidenceIssues()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '标记处理失败')
+  } finally {
+    resolvingId.value = null
+  }
+}
+const reopenIssue = async (row) => {
+  resolvingId.value = row.id
+  try {
+    await api.reopenConsultationEvidenceIssue(row.id)
+    ElMessage.success('已重新打开')
+    await loadEvidenceIssues()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '重新打开失败')
+  } finally {
+    resolvingId.value = null
+  }
+}
+const exportCorpusGaps = async () => {
+  exporting.value = true
+  try {
+    const { data } = await api.exportConsultationCorpusGaps(experimentDays.value)
+    const url = URL.createObjectURL(data)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `引用语料缺口-${experimentDays.value}天.csv`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('语料缺口清单已导出')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
+const notifyEvidenceIssues = async () => {
+  notifying.value = true
+  try {
+    const params = {}
+    if (issuesVisible.value && issuesFilter.value !== 'all') params.issue = issuesFilter.value
+    if (issuesVisible.value && issuesSource.value?.source_id) params.source_id = issuesSource.value.source_id
+    const { data } = await api.notifyConsultationEvidenceIssues(experimentDays.value, params)
+    if (data.users) {
+      ElMessage.success(`已通知 ${data.users} 位管理员（${data.notified_items} 条未处理问题）`)
+    } else {
+      ElMessage.warning('没有可通知的未处理问题，或组织没有管理员账号')
+    }
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '批量通知失败')
+  } finally {
+    notifying.value = false
+  }
 }
 
 const experimentArtifacts = computed(() => experimentOverview.value.artifact_status || {})
@@ -509,7 +606,9 @@ onMounted(async () => {
 }
 .evidence-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: var(--space-2);
   margin-bottom: var(--space-3);
 }
 /* 引用问题下钻：嵌在证据卡里的二级面板，不另起卡片 */
@@ -560,6 +659,26 @@ onMounted(async () => {
   font-size: var(--text-xs);
 }
 .issue-citation {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+.issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.issue-question {
+  display: grid;
+  gap: 2px;
+}
+.issue-question-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.issue-text {
   color: var(--color-text-muted);
   font-size: var(--text-xs);
 }

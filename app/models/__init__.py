@@ -27,6 +27,7 @@ from app.models.feedback import ExitSurvey, NpsResponse
 from app.models.feishu_binding import FeishuBinding
 from app.models.idempotency import IdempotencyKey
 from app.models.legal import (
+    ConsultationEvidenceIssueMark,
     ContractReview,
     LegalApprovalChain,
     LegalApprovalStep,
@@ -183,6 +184,7 @@ __all__ = [
     "LegalCaseSource",
     "LegalArticle",
     "LegalConsultation",
+    "ConsultationEvidenceIssueMark",
     "ContractReview",
     "LegalDraft",
     "LegalReviewAction",

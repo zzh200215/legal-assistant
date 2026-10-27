@@ -175,6 +175,26 @@ class LegalConsultation(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ConsultationEvidenceIssueMark(Base):
+    """引用质量问题处置标记：管理员把一条咨询的引用问题标记为已处理/重新打开。"""
+
+    __tablename__ = "consultation_evidence_issue_marks"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    consultation_id = Column(
+        Integer, ForeignKey("legal_consultations.id", ondelete="CASCADE"),
+        nullable=False, unique=True, index=True,
+    )
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="resolved", index=True,
+                    comment="resolved / open")
+    resolved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    note = Column(Text, nullable=True, comment="处置备注（最多 500 字）")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class ContractReview(Base):
     __tablename__ = "legal_contract_reviews"
 

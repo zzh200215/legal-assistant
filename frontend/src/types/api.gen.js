@@ -467,6 +467,8 @@
  * @property {number} candidate_score
  * @property {number}= max_regression
  * @property {string} report_ref
+ * @typedef {Object} EvidenceIssueResolveRequest
+ * @property {string | null}= note
  * @typedef {Object} ExitSurveyRequest
  * @property {string | null}= feature_requests
  * @property {number | null}= nps_score
