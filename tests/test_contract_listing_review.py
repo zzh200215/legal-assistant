@@ -287,6 +287,43 @@ class ContractListingReviewSummaryTests(unittest.TestCase):
                 q="采购", page_size=2, cursor=first["next_cursor"],
             )
 
+    def test_relevance_sort_orders_by_matched_field_and_paginates(self):
+        title_hit = self._contract("劳动合同")
+        title_hit.counterparty = "甲公司"
+        title_hit.contract_no = "HT-001"
+        party_hit = self._contract("服务合同")
+        party_hit.counterparty = "劳动公司"
+        party_hit.contract_no = "HT-002"
+        no_hit = self._contract("采购合同")
+        no_hit.counterparty = "乙公司"
+        no_hit.contract_no = "LD-劳动-003"
+        self.db.commit()
+
+        first = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            q="劳动", sort="relevance", order="desc", page_size=2,
+        )
+        self.assertEqual(
+            [row["id"] for row in first["items"]], [title_hit.id, party_hit.id],
+        )
+        self.assertEqual(first["sort"], "relevance")
+        self.assertEqual(first["order"], "desc")
+        self.assertTrue(first["has_more"])
+
+        second = list_visible_contracts(
+            self.db, org_id=self.org.id, user_id=self.user.id,
+            q="劳动", sort="relevance", order="desc", page_size=2,
+            cursor=first["next_cursor"],
+        )
+        self.assertEqual([row["id"] for row in second["items"]], [no_hit.id])
+        self.assertFalse(second["has_more"])
+
+    def test_relevance_sort_requires_query(self):
+        with self.assertRaisesRegex(ValueError, "相关度"):
+            list_visible_contracts(
+                self.db, org_id=self.org.id, user_id=self.user.id, sort="relevance",
+            )
+
     def test_sort_whitelist_falls_back_to_updated_at(self):
         contract = self._contract("回退排序合同")
         result = list_visible_contracts(

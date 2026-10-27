@@ -185,6 +185,7 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
 
   // 搜索：q 下推 + 命中字段提示 + 单元格高亮（名称/相对方/编号各验一次）
   const search = page.locator('.contract-search')
+  await expect(sortSelect.locator('option[value="relevance_desc"]')).toBeDisabled()
   for (const [query, hint] of [
     ['科技', '命中 相对方'],
     ['采购', '命中 名称'],
@@ -200,8 +201,20 @@ test('合同台账：列表→新建→版本→Diff→关键节点→签署禁�
       await page.screenshot({ path: path.join(SHOT_DIR, 'step48-contract-search-highlight.png'), fullPage: true })
     }
   }
+
+  // 按相关度排序：有搜索词时可选，清空搜索词后自动回到默认排序
+  await expect(sortSelect.locator('option[value="relevance_desc"]')).toBeEnabled()
+  await sortSelect.selectOption('relevance_desc')
+  await expect.poll(() => requests.sort).toBe('relevance')
+  expect(requests.order).toBe('desc')
+  await expect(page.locator('.el-table__row')).toHaveCount(1)
+  if (SHOT_DIR) {
+    await page.screenshot({ path: path.join(SHOT_DIR, 'step49-relevance-sort.png'), fullPage: true })
+  }
   await search.fill('')
   await expect.poll(() => requests.q).toBeNull()
+  await expect.poll(() => requests.sort).toBe('updated_at')
+  await expect(sortSelect).toHaveValue('updated_at_desc')
   await expect(page.locator('.el-table__row')).toHaveCount(2)
 
   // 台账筛选：按审查状态（服务端过滤）

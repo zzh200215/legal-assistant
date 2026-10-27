@@ -20907,12 +20907,12 @@
             "required": false,
             "schema": {
               "type": "string",
-              "pattern": "^(updated_at|created_at|reviewed_at|review_updated_at)$",
-              "description": "排序字段：合同更新时间/创建时间或最近审查时间",
+              "pattern": "^(updated_at|created_at|reviewed_at|review_updated_at|relevance)$",
+              "description": "排序字段：合同时间/审查时间/相关度（相关度需配合搜索词 q）",
               "default": "updated_at",
               "title": "Sort"
             },
-            "description": "排序字段：合同更新时间/创建时间或最近审查时间"
+            "description": "排序字段：合同时间/审查时间/相关度（相关度需配合搜索词 q）"
           },
           {
             "name": "order",

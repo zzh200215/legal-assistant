@@ -23,7 +23,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.dialects.mysql import match as mysql_match
 from sqlalchemy.orm import Session
 
 from app.models.legal import LegalCase
@@ -42,6 +43,7 @@ SORT_COLUMNS = {
 }
 CONTRACT_SORTS = frozenset({"updated_at", "created_at"})
 REVIEW_SORTS = frozenset({"reviewed_at", "review_updated_at"})
+RELEVANCE_SORT = "relevance"
 DEFAULT_SORT = "updated_at"
 
 # 风险筛选白名单：列 > 0 即命中；``none`` 单独表示「没有审查摘要」。
@@ -90,7 +92,7 @@ def encode_contract_cursor(
     sort: str,
     order: str,
     segment: str,
-    value: datetime | None,
+    value: datetime | float | None,
     contract_id: int,
     seen: int,
     total: int,
@@ -102,7 +104,7 @@ def encode_contract_cursor(
         "s": sort,
         "o": order,
         "g": segment,
-        "k": value.isoformat() if isinstance(value, datetime) else None,
+        "k": value.isoformat() if isinstance(value, datetime) else value,
         "i": contract_id,
         "n": seen,
         "t": total,
@@ -146,7 +148,16 @@ def decode_contract_cursor(
         raise ValueError("分页游标无效，请刷新列表")
 
     value = payload.get("k")
-    if segment == SEGMENT_TAIL:
+    if sort == RELEVANCE_SORT:
+        if segment != SEGMENT_VALUE:
+            raise ValueError("分页游标无效，请刷新列表")
+        try:
+            value = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("分页游标无效，请刷新列表") from exc
+        if value < 0:
+            raise ValueError("分页游标无效，请刷新列表")
+    elif segment == SEGMENT_TAIL:
         value = None
     else:
         if not isinstance(value, str) or not value:
@@ -286,6 +297,25 @@ def _search_phrase(keyword: str) -> str:
     return f'"{escaped}"'
 
 
+def _fulltext_match(keyword: str):
+    """MATCH(title, counterparty, contract_no) AGAINST (... IN BOOLEAN MODE)，仅 MySQL 构造。"""
+    return mysql_match(
+        LegalContract.title,
+        LegalContract.counterparty,
+        LegalContract.contract_no,
+        against=_search_phrase(keyword),
+        in_boolean_mode=True,
+    )
+
+
+def _is_fulltext_search(query, keyword: str) -> bool:
+    return (
+        query.session.get_bind().dialect.name == "mysql"
+        and len(keyword) >= 2
+        and any(ch.isalnum() for ch in keyword)
+    )
+
+
 def _search_filter(query, q: str):
     """MySQL 走 ngram 全文索引；其它方言（含 SQLite 开发库）回退三列 LIKE。
 
@@ -294,17 +324,25 @@ def _search_filter(query, q: str):
     keyword = " ".join(str(q).split())
     if not keyword:
         return None
-    dialect = query.session.get_bind().dialect.name
-    if dialect == "mysql" and len(keyword) >= 2 and any(ch.isalnum() for ch in keyword):
-        return text(
-            "MATCH (legal_contracts.title, legal_contracts.counterparty, "
-            "legal_contracts.contract_no) AGAINST (:contract_search IN BOOLEAN MODE)"
-        ).bindparams(contract_search=_search_phrase(keyword))
+    if _is_fulltext_search(query, keyword):
+        return _fulltext_match(keyword)
     return or_(
         LegalContract.title.contains(keyword, autoescape=True),
         LegalContract.counterparty.contains(keyword, autoescape=True),
         LegalContract.contract_no.contains(keyword, autoescape=True),
     )
+
+
+def _relevance_expression(db: Session, keyword: str):
+    """相关度表达式：MySQL 用 MATCH 的 TF-IDF 分数，其它方言用三列加权命中（3/2/1）。"""
+    if db.get_bind().dialect.name == "mysql" and len(keyword) >= 2 and any(
+        ch.isalnum() for ch in keyword
+    ):
+        return _fulltext_match(keyword)
+    title = case((LegalContract.title.contains(keyword, autoescape=True), 3), else_=0)
+    party = case((LegalContract.counterparty.contains(keyword, autoescape=True), 2), else_=0)
+    number = case((LegalContract.contract_no.contains(keyword, autoescape=True), 1), else_=0)
+    return title + party + number
 
 
 def _apply_filters(
@@ -385,7 +423,8 @@ def _id_predicate(id_column, contract_id: int, descending: bool):
 
 def _serialize_rows(rows, q: str | None = None) -> list[dict[str, Any]]:
     items = []
-    for contract, summary in rows:
+    for row in rows:
+        contract, summary = row[0], row[1]
         item = serialize_contract(contract)
         item["review"] = serialize_review_summary(summary)
         item["search"] = search_hit(contract, q)
@@ -409,7 +448,10 @@ def list_visible_contracts(
     cursor: str | None = None,
 ) -> dict:
     page_size = max(1, min(int(page_size), 100))
-    sort = sort if sort in SORT_COLUMNS else DEFAULT_SORT
+    sort = sort if sort in SORT_COLUMNS or sort == RELEVANCE_SORT else DEFAULT_SORT
+    keyword = " ".join(str(q or "").split())
+    if sort == RELEVANCE_SORT and not keyword:
+        raise ValueError("按相关度排序需要先输入搜索词")
     descending = str(order or "desc").lower() != "asc"
     order = "desc" if descending else "asc"
     fingerprint = _filters_fingerprint(
@@ -433,8 +475,9 @@ def list_visible_contracts(
         _contract_query(db), summary_driven=False, **filters,
     ).count()
     seen = state["seen"] if state else 0
-    column = SORT_COLUMNS[sort]
-    sort_expr = _time_expression(db, column)
+    is_relevance = sort == RELEVANCE_SORT
+    column = SORT_COLUMNS.get(sort)
+    sort_expr = _time_expression(db, column) if column is not None else None
     is_review_sort = sort in REVIEW_SORTS
     value_id = LegalContractReviewSummary.contract_id if is_review_sort else LegalContract.id
 
@@ -447,7 +490,23 @@ def list_visible_contracts(
     rows = []
     last_segment = SEGMENT_VALUE
 
-    if state is None or state["segment"] == SEGMENT_VALUE:
+    if is_relevance:
+        score_expr = _relevance_expression(db, keyword)
+        relevance_query = _apply_filters(
+            _contract_query(db), summary_driven=False, **filters,
+        ).add_columns(score_expr.label("relevance"))
+        if state:
+            relevance_query = relevance_query.filter(_keyset_predicate(
+                score_expr, LegalContract.id,
+                value=state["value"], contract_id=state["contract_id"],
+                descending=descending,
+            ))
+        rows = (
+            relevance_query.order_by(*_order_by(score_expr, LegalContract.id, descending))
+            .limit(page_size)
+            .all()
+        )
+    elif state is None or state["segment"] == SEGMENT_VALUE:
         value_query = _apply_filters(
             _summary_query(db) if is_review_sort else _contract_query(db),
             summary_driven=is_review_sort,
@@ -497,13 +556,18 @@ def list_visible_contracts(
 
     next_cursor = None
     if has_more:
-        contract, summary = rows[-1]
-        if last_segment == SEGMENT_TAIL:
+        contract = rows[-1][0]
+        if is_relevance:
+            segment = SEGMENT_VALUE
+            value = float(rows[-1][2])
+            contract_id = contract.id
+        elif last_segment == SEGMENT_TAIL:
             segment = SEGMENT_TAIL
             value = None
             contract_id = contract.id
         else:
             segment = SEGMENT_VALUE
+            summary = rows[-1][1]
             value = getattr(summary, sort) if is_review_sort else getattr(contract, sort)
             contract_id = summary.contract_id if is_review_sort else contract.id
         next_cursor = encode_contract_cursor(

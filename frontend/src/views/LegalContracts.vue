@@ -38,6 +38,7 @@
             <option value="none">未审查</option>
           </select>
           <select v-model="filters.sort" aria-label="合同排序">
+            <option value="relevance_desc" :disabled="!searchTerm">相关度（高→低）</option>
             <option value="updated_at_desc">合同更新（新→旧）</option>
             <option value="reviewed_at_desc">审查时间（新→旧）</option>
             <option value="reviewed_at_asc">审查时间（旧→新）</option>
@@ -323,8 +324,13 @@ const loadFeatures = async () => { try { const { data } = await api.getFeatureFl
 watch(() => [props.orgId, props.caseId], loadContracts, { immediate: true })
 watch(() => [filters.value.review_status, filters.value.risk, filters.value.sort], loadContracts)
 let searchTimer = null
-watch(() => filters.value.q, () => {
+watch(() => filters.value.q, (value) => {
   clearTimeout(searchTimer)
+  if (!value.trim() && filters.value.sort.startsWith('relevance')) {
+    // 清空搜索词后「相关度」不再可用，回到默认排序；sort watcher 会触发重载。
+    filters.value.sort = 'updated_at_desc'
+    return
+  }
   searchTimer = setTimeout(loadContracts, 300)
 })
 onBeforeUnmount(() => clearTimeout(searchTimer))
