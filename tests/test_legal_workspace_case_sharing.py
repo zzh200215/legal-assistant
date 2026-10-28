@@ -90,6 +90,30 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertIn("成员A的咨询", resp.text)
         self.assertIn("建议", resp.text)
 
+        listed = self.client.get(
+            f"/api/legal/consultations/{self.row.id}/exports",
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(listed.status_code, 200, listed.text)
+        records = listed.json()["data"]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["format"], "markdown")
+        self.assertNotIn("content", records[0])
+        export_id = records[0]["id"]
+
+        downloaded = self.client.get(
+            f"/api/legal/consultations/exports/{export_id}/download",
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        self.assertIn("成员A的咨询", downloaded.text)
+
+        denied = self.client.get(
+            f"/api/legal/consultations/exports/{export_id}/download",
+            headers=self._headers(self.outsider),
+        )
+        self.assertEqual(denied.status_code, 404)
+
     def test_export_markdown_denied_for_outsider(self):
         resp = self.client.get(
             f"/api/legal/consultations/{self.row.id}/export/markdown",

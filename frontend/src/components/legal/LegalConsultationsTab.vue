@@ -111,6 +111,24 @@
                 </el-input>
               </div>
               <AiOutputFeedback :target-type="'consultation'" :target-id="consultResult.id" :value="consultResult.feedback_score" @submit="submitConsultFeedback" />
+              <details class="export-history" @toggle="onExportsToggle">
+                <summary class="export-history-summary">
+                  <span>导出记录</span>
+                  <span class="app-card-head-meta">最近 20 条</span>
+                </summary>
+                <p v-if="exportsLoading" class="legal-muted">正在加载导出记录…</p>
+                <p v-else-if="exportsError" class="legal-muted">{{ exportsError }}</p>
+                <p v-else-if="!exportRows.length" class="legal-muted">还没有导出记录。</p>
+                <ul v-else class="export-history-list">
+                  <li v-for="row in exportRows" :key="row.id">
+                    <span class="export-history-file">
+                      {{ row.filename }}
+                      <small>{{ formatExportTime(row.created_at) }} · {{ row.user_name || '未知用户' }}</small>
+                    </span>
+                    <el-button text size="small" @click="downloadExport(row)">下载</el-button>
+                  </li>
+                </ul>
+              </details>
             </div>
           </section>
 
@@ -354,10 +372,54 @@ const exportResultMarkdown = async () => {
     anchor.click()
     URL.revokeObjectURL(url)
     ElMessage.success('Markdown 已导出')
+    if (exportsOpen.value) await loadExports()
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '导出失败')
   }
 }
+
+const exportsOpen = ref(false)
+const exportRows = ref([])
+const exportsLoading = ref(false)
+const exportsError = ref(null)
+const formatExportTime = (value) => (value ? String(value).replace('T', ' ').slice(0, 16) : '')
+const loadExports = async () => {
+  const id = consultResult.value?.id
+  if (!id) return
+  exportsLoading.value = true
+  exportsError.value = null
+  try {
+    const { data } = await legalWorkspace.listLegalConsultationExports(id, { params: { limit: 20 } })
+    exportRows.value = data || []
+  } catch (error) {
+    exportsError.value = error.response?.data?.detail || '加载导出记录失败'
+  } finally {
+    exportsLoading.value = false
+  }
+}
+const onExportsToggle = (event) => {
+  exportsOpen.value = event.target.open
+  if (exportsOpen.value) loadExports()
+}
+const downloadExport = async (row) => {
+  try {
+    const { data } = await legalWorkspace.downloadLegalConsultationExport(row.id)
+    const url = URL.createObjectURL(data)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = row.filename || `法律咨询-${consultResult.value?.id || ''}.md`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('已下载导出快照')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '下载失败')
+  }
+}
+watch(() => consultResult.value?.id, () => {
+  exportRows.value = []
+  exportsError.value = null
+  if (exportsOpen.value) loadExports()
+})
 
 // 历史咨询 → 结果卡：点击行内"查看结果"加载完整详情（含送审按钮），替代刷新后丢失的会话内状态
 const focusRowId = ref(null)
@@ -556,4 +618,12 @@ onMounted(() => {
 .comparison-refs { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-1); }
 .comparison-label { color: var(--color-text-secondary); font-size: var(--text-xs); }
 .comparison-meta { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); }
+
+.export-history { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
+.export-history-summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: var(--color-text-secondary); font-size: var(--text-sm); list-style: none; }
+.export-history-summary::-webkit-details-marker { display: none; }
+.export-history-list { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+.export-history-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.export-history-file { display: grid; gap: 2px; min-width: 0; color: var(--color-text-primary); font-size: var(--text-xs); }
+.export-history-file small { color: var(--color-text-muted); font-size: var(--text-xs); }
 </style>

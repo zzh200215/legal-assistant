@@ -5484,6 +5484,110 @@
         }
       }
     },
+    "/api/legal/consultations/{item_id}/exports": {
+      "get": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "List Consultation Exports",
+        "description": "列出某条咨询的导出记录（不含正文，只给元数据）。",
+        "operationId": "list_consultation_exports_api_legal_consultations__item_id__exports_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/legal/consultations/exports/{export_id}/download": {
+      "get": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "Download Consultation Export",
+        "description": "重新下载某次导出的快照；先按咨询做一次权限校验。",
+        "operationId": "download_consultation_export_api_legal_consultations_exports__export_id__download_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Export Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/contracts/analyze": {
       "post": {
         "tags": [

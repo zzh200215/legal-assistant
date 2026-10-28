@@ -195,6 +195,26 @@ class ConsultationEvidenceIssueMark(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class LegalConsultationExport(Base):
+    """咨询结果导出记录：保存导出时的 Markdown 快照，可回看/重新下载。"""
+
+    __tablename__ = "legal_consultation_exports"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    consultation_id = Column(
+        Integer, ForeignKey("legal_consultations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    format = Column(String(16), nullable=False, default="markdown")
+    filename = Column(String(255), nullable=False)
+    content_version = Column(String(32), nullable=True)
+    status_at_export = Column(String(32), nullable=True)
+    content = Column(Text, nullable=False, comment="导出时的 Markdown 快照")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class ContractReview(Base):
     __tablename__ = "legal_contract_reviews"
 

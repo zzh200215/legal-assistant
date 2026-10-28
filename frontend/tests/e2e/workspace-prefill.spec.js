@@ -65,6 +65,23 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
         body: '# 法律咨询结果\n\n**当前状态：** 律师通过\n',
       })
     }
+    if (method === 'GET' && path === '/legal/consultations/11/exports') {
+      return route.fulfill({
+        json: success([{
+          id: 301, filename: 'legal_consultation_11.md', format: 'markdown',
+          status_at_export: 'lawyer_approved', content_version: 'cv-new',
+          created_at: '2026-10-28T12:00:00', user_name: 'lawyer',
+        }]),
+      })
+    }
+    if (method === 'GET' && path === '/legal/consultations/exports/301/download') {
+      return route.fulfill({
+        status: 200,
+        headers: { 'Content-Disposition': 'attachment; filename="legal_consultation_11.md"' },
+        contentType: 'text/markdown; charset=utf-8',
+        body: '# 法律咨询结果\n\n导出快照\n',
+      })
+    }
     if (method === 'GET' && path === '/legal/consultations/11') {
       return route.fulfill({
         json: success({
@@ -128,10 +145,19 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     page.getByRole('button', { name: '导出 Markdown' }).click(),
   ])
   expect(download.suggestedFilename()).toContain('.md')
+  // 导出记录：展开后能看到快照并重新下载
+  await page.locator('.export-history summary').click({ force: true })
+  await expect(page.locator('.export-history')).toContainText('legal_consultation_11.md')
+  await expect(page.locator('.export-history')).toContainText('lawyer')
+  const [redownload] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: '下载', exact: true }).click(),
+  ])
+  expect(redownload.suggestedFilename()).toContain('.md')
   if (SHOT_DIR) {
     await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
     await page.waitForTimeout(200)
-    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step62-consult-markdown-export.png') })
+    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step63-consult-export-history.png') })
   }
 
   // 文书：prefill 应在异步组件挂载后生效

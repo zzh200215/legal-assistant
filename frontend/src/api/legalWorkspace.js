@@ -137,6 +137,12 @@ export default {
   exportLegalConsultationMarkdown(id) {
     return http.get(`/legal/consultations/${id}/export/markdown`, { responseType: 'blob' })
   },
+  listLegalConsultationExports(id, config = {}) {
+    return http.get(`/legal/consultations/${id}/exports`, config)
+  },
+  downloadLegalConsultationExport(exportId) {
+    return http.get(`/legal/consultations/exports/${exportId}/download`, { responseType: 'blob' })
+  },
   exportLegalDraftDocx(id) {
     return http.get(`/legal/drafts/${id}/export/docx`, { responseType: 'blob' })
   },

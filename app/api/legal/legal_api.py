@@ -23,6 +23,7 @@ from app.models.legal import (
     LegalArticle,
     LegalCaseSource,
     LegalConsultation,
+    LegalConsultationExport,
     LegalDraft,
     LegalSource,
     LegalSourceFavorite,
@@ -43,6 +44,7 @@ from app.services.legal.consultation_evidence import attach_consultation_compari
 from app.services.legal.consultation_export import build_consultation_markdown
 from app.services.legal.contract_risk_stats import summarize_contract_risk_stats
 from app.services.legal.legal_workspace_service import (
+    consultation_content_version,
     legal_workspace_module,
     legal_workspace_read_module,
     serialize_workspace_row,
@@ -997,15 +999,84 @@ def export_consultation_markdown(
     except LookupError:
         raise api_error(404, "法律咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
     content = build_consultation_markdown(row)
+    filename = f"legal_consultation_{row.id}.md"
+    record = LegalConsultationExport(
+        consultation_id=row.id,
+        organization_id=current_user.organization_id,
+        user_id=current_user.id,
+        format="markdown",
+        filename=filename,
+        content_version=consultation_content_version(row),
+        status_at_export=row.status,
+        content=content,
+    )
+    db.add(record)
+    db.commit()
     audit.log(
         db, current_user, "legal_consultation_export_markdown",
         target_type="consultation", target_id=row.id, detail=f"status={row.status}",
     )
-    filename = f"legal_consultation_{row.id}.md"
     return Response(
         content=content.encode("utf-8"),
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/consultations/{item_id}/exports")
+def list_consultation_exports(
+    item_id: int,
+    limit: int = Query(20, ge=1, le=50),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """列出某条咨询的导出记录（不含正文，只给元数据）。"""
+    try:
+        legal_workspace_read_module.get_row(db, current_user, "consultation", item_id)
+    except LookupError:
+        raise api_error(404, "法律咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
+    rows = (
+        db.query(LegalConsultationExport, User.username)
+        .outerjoin(User, User.id == LegalConsultationExport.user_id)
+        .filter(LegalConsultationExport.consultation_id == item_id)
+        .order_by(LegalConsultationExport.created_at.desc(), LegalConsultationExport.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": record.id,
+            "filename": record.filename,
+            "format": record.format,
+            "status_at_export": record.status_at_export,
+            "content_version": record.content_version,
+            "created_at": record.created_at,
+            "user_name": username,
+        }
+        for record, username in rows
+    ]
+
+
+@router.get("/consultations/exports/{export_id}/download")
+def download_consultation_export(
+    export_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """重新下载某次导出的快照；先按咨询做一次权限校验。"""
+    record = db.query(LegalConsultationExport).filter(LegalConsultationExport.id == export_id).first()
+    if not record:
+        raise api_error(404, "导出记录不存在", code="LEGAL_CONSULTATION_EXPORT_NOT_FOUND")
+    try:
+        legal_workspace_read_module.get_row(db, current_user, "consultation", record.consultation_id)
+    except LookupError:
+        raise api_error(404, "法律咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
+    audit.log(
+        db, current_user, "legal_consultation_export_download",
+        target_type="consultation", target_id=record.consultation_id,
+        detail=f"export_id={record.id}",
+    )
+    return Response(
+        content=record.content.encode("utf-8"),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{record.filename}"'},
     )
 
 
