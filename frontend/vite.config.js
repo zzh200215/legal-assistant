@@ -8,6 +8,9 @@ export default defineConfig({
   cacheDir: 'node_modules/.vite-project-cache',
   plugins: [vue(), tailwindcss()],
   build: {
+    // 目标浏览器按 ES2021 标准构建（Chrome/Edge 85+、Firefox 79+、Safari 15+）。
+    // 比 Vite 默认 modules 少一层旧浏览器 downlevel 辅助代码，给 System 分组 chunk 留出余量。
+    target: 'es2021',
     rollupOptions: {
       output: {
         manualChunks(id) {

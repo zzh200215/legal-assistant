@@ -78,28 +78,31 @@ import 'element-plus/es/components/tab-pane/style/css'
 import 'element-plus/es/components/tabs/style/css'
 import SystemOverviewBar from '../components/system/SystemOverviewBar.vue'
 import SystemHealthTab from '../components/system/SystemHealthTab.vue'
-import SystemTasksTab from '../components/system/SystemTasksTab.vue'
-import SystemOplogsTab from '../components/system/SystemOplogsTab.vue'
-import SystemAlertsTab from '../components/system/SystemAlertsTab.vue'
-import SystemExperimentsTab from '../components/system/SystemExperimentsTab.vue'
-import SystemFeedbackTab from '../components/system/SystemFeedbackTab.vue'
-import SystemToolHealthTab from '../components/system/SystemToolHealthTab.vue'
-import SystemApprovalsTab from '../components/system/SystemApprovalsTab.vue'
-import SystemKnowledgeTab from '../components/system/SystemKnowledgeTab.vue'
-import SystemOrgTab from '../components/system/SystemOrgTab.vue'
-import SystemSensitivityTab from '../components/system/SystemSensitivityTab.vue'
-import PilotAnalyticsTabs from '../components/system/PilotAnalyticsTabs.vue'
-import SystemEventFunnelTab from '../components/system/SystemEventFunnelTab.vue'
 
 // tab 组件按需加载：tab 本身已经是 lazy（首次激活才渲染），但静态 import 会把全部组件打进
-// System 路由 chunk（15 个 tab 一度把页面 chunk 顶到 130 KB 预算线）。只把体量最大的
-// Token 统计（22.5 KB）拆成异步 chunk——既压住页面 chunk，又不让整体资产因过多小 chunk 膨胀
-// （每拆一个 chunk 都要多付一份 chunk 头与独立 CSS，总资产预算只剩几 KB 余量）。
-const asyncTab = (loader) => defineAsyncComponent({ loader, delay: 0 })
-const SystemTokensTab = asyncTab(() => import('../components/system/SystemTokensTab.vue'))
-// 投递看板同样拆成异步 chunk：新增 tab 不再推高 System 路由 chunk。
-const SystemDeliveryTab = asyncTab(() => import('../components/system/SystemDeliveryTab.vue'))
-const SystemNotificationTemplatesTab = asyncTab(() => import('../components/system/SystemNotificationTemplatesTab.vue'))
+// System 路由 chunk。首屏只保留健康检查（默认 tab）与概览条；其余 tab 按「运营/表格」
+// 与「观测/图表」两组异步 chunk 加载，点开任一 tab 时整组取回，后续同组 tab 不再请求。
+const loadOpsTabs = () => import('../components/system/SystemOpsTabs.js')
+const loadAnalyticsTabs = () => import('../components/system/SystemAnalyticsTabs.js')
+const asyncGroupTab = (loader, name) => defineAsyncComponent({
+  loader: () => loader().then((module) => module[name]),
+  delay: 0,
+})
+const SystemTasksTab = asyncGroupTab(loadOpsTabs, 'SystemTasksTab')
+const SystemOplogsTab = asyncGroupTab(loadOpsTabs, 'SystemOplogsTab')
+const SystemAlertsTab = asyncGroupTab(loadOpsTabs, 'SystemAlertsTab')
+const SystemFeedbackTab = asyncGroupTab(loadOpsTabs, 'SystemFeedbackTab')
+const SystemToolHealthTab = asyncGroupTab(loadOpsTabs, 'SystemToolHealthTab')
+const SystemApprovalsTab = asyncGroupTab(loadOpsTabs, 'SystemApprovalsTab')
+const SystemKnowledgeTab = asyncGroupTab(loadOpsTabs, 'SystemKnowledgeTab')
+const SystemOrgTab = asyncGroupTab(loadOpsTabs, 'SystemOrgTab')
+const SystemSensitivityTab = asyncGroupTab(loadOpsTabs, 'SystemSensitivityTab')
+const SystemExperimentsTab = asyncGroupTab(loadAnalyticsTabs, 'SystemExperimentsTab')
+const PilotAnalyticsTabs = asyncGroupTab(loadAnalyticsTabs, 'PilotAnalyticsTabs')
+const SystemEventFunnelTab = asyncGroupTab(loadAnalyticsTabs, 'SystemEventFunnelTab')
+const SystemTokensTab = asyncGroupTab(loadAnalyticsTabs, 'SystemTokensTab')
+const SystemDeliveryTab = asyncGroupTab(loadAnalyticsTabs, 'SystemDeliveryTab')
+const SystemNotificationTemplatesTab = asyncGroupTab(loadAnalyticsTabs, 'SystemNotificationTemplatesTab')
 
 const route = useRoute()
 const router = useRouter()

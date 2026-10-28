@@ -4,7 +4,7 @@
 //   node scripts/check-bundle-budget.mjs          # 校验（超预算 exit 1）
 //   node scripts/check-bundle-budget.mjs --report # 打印当前尺寸
 // 预算可经环境变量覆盖（ENTRY_JS_RAW_KB / ENTRY_JS_GZIP_KB / PAGE_CHUNK_RAW_KB / TOTAL_RAW_KB）。
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
@@ -36,6 +36,11 @@ const ASSETS = resolve(DIST, 'assets')
 // 但代码只是搬进异步 chunk，总量基本不动（仅分块开销 +2.4kB 后又被死 CSS 抵消一部分）。
 // 所以本轮**重定预算**：入口按新实测收紧（100 / 35），总量按实测 +6% 放宽到 1700，页面 chunk 不动；
 // 另加 95% 预警档，让下一次增长先出 ⚠️ 而不是直接撞红。
+// 2026-10-28 包体治理（step53）：System 页只保留健康检查与概览条，运营/表格与观测/图表
+// 两组 tab 改为异步 chunk（SystemOpsTabs / SystemAnalyticsTabs）；构建目标从 Vite 默认
+// 下移到 es2021，去掉旧浏览器 downlevel 辅助代码。实测入口 80.2kB、System 18.0kB、
+// 最大页面 chunk 117.1kB（LegalWorkspace）、总资产 1672.7kB，四项全部回到预算内。
+// 注意：异步分组 chunk 也纳入页面 chunk 检查，避免把大块代码改个名字绕过预算。
 const BUDGETS = {
   entryJsRawKB: Number(process.env.ENTRY_JS_RAW_KB || 100),
   entryJsGzipKB: Number(process.env.ENTRY_JS_GZIP_KB || 35),
@@ -43,8 +48,8 @@ const BUDGETS = {
   totalRawKB: Number(process.env.TOTAL_RAW_KB || 1700),
 }
 
-// 路由级页面 chunk 命名（router.js 懒加载视图）
-const PAGE_CHUNK_PATTERN = /^(LegalWorkspace|System|Documents|Agent|Tasks|Chat|Login|LegalPortal|LegalDeveloper|LegalOnboarding|Pricing)-/
+// 路由级页面 chunk 命名（router.js 懒加载视图）；System 的异步分组 chunk 也在这里检查。
+const PAGE_CHUNK_PATTERN = /^(LegalWorkspace|System|SystemOpsTabs|SystemAnalyticsTabs|Documents|Agent|Tasks|Chat|Login|LegalPortal|LegalDeveloper|LegalOnboarding|Pricing)-/
 
 function kb(bytes) {
   return bytes / 1024
