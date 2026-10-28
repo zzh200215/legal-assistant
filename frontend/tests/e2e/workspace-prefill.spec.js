@@ -18,6 +18,7 @@ const CONSULT_RESULT = {
   risk_level: 'medium',
   status: 'pending_review',
   confidence: 82,
+  content_version: 'cv-old',
   references: [],
 }
 
@@ -50,7 +51,14 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     if (method === 'GET' && path === '/legal/matters/1/activity') return route.fulfill({ json: success({ items: [] }) })
     if (method === 'GET' && path === '/legal/consultations') return route.fulfill({ json: success(listRows) })
     if (method === 'GET' && path === '/legal/consultations/11') {
-      return route.fulfill({ json: success({ ...CONSULT_RESULT, status: 'lawyer_approved', updated_at: '2026-10-28T12:00:00' }) })
+      return route.fulfill({
+        json: success({
+          ...CONSULT_RESULT,
+          status: 'lawyer_approved',
+          updated_at: '2026-10-28T12:00:00',
+          content_version: 'cv-new',
+        }),
+      })
     }
     if (method === 'GET' && path === '/legal/contract-reviews') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/drafts') return route.fulfill({ json: success([]) })
@@ -67,8 +75,11 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     if (method === 'POST' && path === '/legal/consultations') {
       requests.consults += 1
       const id = 10 + requests.consults
-      // 模拟“提交后审核已通过”：列表 updated_at 比结果卡新，触发一次一致性重取
-      listRows = [{ id, case_id: 1, status: 'pending_review', updated_at: '2026-10-28T12:00:00', question: CONSULT_RESULT.question }]
+      // 模拟“提交后内容已更新”：列表 content_version 比结果卡新，触发一次一致性重取
+      listRows = [{
+        id, case_id: 1, status: 'pending_review', updated_at: '2026-10-28T12:00:00',
+        content_version: 'cv-new', question: CONSULT_RESULT.question,
+      }]
       return route.fulfill({ json: success({ ...CONSULT_RESULT, id }) })
     }
     if (method === 'POST' && path === '/legal/drafts') {
@@ -90,7 +101,7 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   await expect(page.getByText('可以主张经济补偿，建议先固定解除通知与工资流水。')).toBeVisible()
   expect(requests.consults).toBe(1)
   await expect(page).toHaveURL(/consultation_id=11/)
-  // 历史列表 updated_at 比结果卡新，结果卡应重取详情，隐藏旧的「提交律师审核」
+  // 历史列表 content_version 比结果卡新，结果卡应重取详情，隐藏旧的「提交律师审核」
   await expect(page.getByText('结果已同步')).toBeVisible()
   await expect(page.getByRole('button', { name: '提交律师审核' })).toHaveCount(0)
   if (SHOT_DIR) {

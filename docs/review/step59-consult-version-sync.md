@@ -78,6 +78,8 @@ if (!statusChanged && !newer) return
 - 后端全量：**2457 passed / 4 skipped**；OpenAPI **361**；前端单测 **96 passed**。
 - 包体：入口 **80.3 / 100 KB**、最大页面 chunk **85.3 / 130 KB**、总资产 **1679.7 / 1700 KB**。
 
+> 注：step60 发现咨询 serializer 当时并未下发 `updated_at`，线上只有 `status` 会触发同步；step60 已补 `updated_at` 并增加 `content_version` 指纹。e2e 当时 mock 了该字段，掩盖了缺口。
+
 ## 6. 边界
 
 1. **依赖后端下发 `updated_at`**：列表/详情都有该字段才有效；缺失时退回只比状态。

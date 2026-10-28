@@ -304,10 +304,17 @@ const syncResultStatus = async () => {
   const row = consultations.value.find((item) => Number(item.id) === Number(result.id))
   if (!row) return
   const statusChanged = Boolean(row.status && row.status !== result.status)
+  // 优先比内容指纹：正文/引用/核验/审核字段任一变化都会变；
+  // 老记录没有 content_version 时退回 updated_at（时间戳精度/时钟不可靠）。
+  const versionChanged = Boolean(
+    row.content_version && result.content_version && row.content_version !== result.content_version
+  )
+  const missingVersion = !row.content_version || !result.content_version
   const resultStamp = Date.parse(result.updated_at || '')
   const rowStamp = Date.parse(row.updated_at || '')
-  const newer = Number.isFinite(rowStamp) && (!Number.isFinite(resultStamp) || rowStamp > resultStamp)
-  if (!statusChanged && !newer) return
+  const newer = missingVersion && Number.isFinite(rowStamp)
+    && (!Number.isFinite(resultStamp) || rowStamp > resultStamp)
+  if (!statusChanged && !versionChanged && !newer) return
   statusSyncing.value = true
   try {
     await openConsultationDetail(result.id)

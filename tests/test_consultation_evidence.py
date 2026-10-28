@@ -93,6 +93,20 @@ class SummarizeConsultationEvidenceTests(unittest.TestCase):
         self.assertEqual(payload["evidence_summary"]["level"], "strong")
         self.assertEqual(payload["evidence_summary"]["references"], 1)
 
+    def test_serializer_exposes_content_version_and_updated_at(self):
+        row = _consultation()
+        payload = serialize_workspace_row(row)
+        self.assertIn("updated_at", payload)
+        self.assertIsNone(payload["updated_at"])
+        self.assertEqual(len(payload["content_version"]), 16)
+        # 同样内容稳定；正文或状态变化后指纹变化。
+        self.assertEqual(payload["content_version"], serialize_workspace_row(row)["content_version"])
+        row.advice = "更新后的建议"
+        changed_advice = serialize_workspace_row(row)["content_version"]
+        self.assertNotEqual(payload["content_version"], changed_advice)
+        row.status = "needs_lawyer_review"
+        self.assertNotEqual(changed_advice, serialize_workspace_row(row)["content_version"])
+
 
 class ListConsultationsEvidenceFilterTests(unittest.TestCase):
     """列表接口按证据链等级筛选：无引用咨询可单独列出。"""

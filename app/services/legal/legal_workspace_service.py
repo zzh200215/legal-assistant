@@ -5,6 +5,7 @@ the orchestration that is shared by the legal workspace endpoints: quota
 checks, source selection, LLM execution, persistence, and audit records.
 """
 
+import hashlib
 import json
 import difflib
 import logging
@@ -132,6 +133,38 @@ def compute_confidence(row: LegalConsultation | ContractReview | LegalDraft) -> 
     return max(30, min(95, score))
 
 
+def consultation_content_version(row: LegalConsultation) -> str:
+    """咨询结果的内容指纹（16 位 sha256）。
+
+    前端用它判断「结果卡是否还是旧版本」：状态相同、updated_at 精度不足、
+    或时钟不可靠时，只要正文/引用/核验/审核字段变了，指纹就会变。
+    不包含 updated_at 本身，避免仅时间戳变化触发一次无意义重取。
+    """
+    payload = {
+        "question": row.question,
+        "category": row.category,
+        "advice": row.advice,
+        "known_facts": _json_or(row.known_facts_json, "[]"),
+        "missing_facts": _json_or(row.missing_facts_json, "[]"),
+        "references": _json_or(row.references_json, "[]"),
+        "risk_level": row.risk_level,
+        "disclaimer_level": getattr(row, "disclaimer_level", None),
+        "status": row.status,
+        "reviewer_id": row.reviewer_id,
+        "review_note": row.review_note,
+        "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+        "reviewed_version": getattr(row, "reviewed_version", None),
+        "parent_id": getattr(row, "parent_id", None),
+        "feedback_score": getattr(row, "feedback_score", None),
+        "model_snapshot": _json_or(getattr(row, "model_snapshot_json", None), "{}"),
+        "attribution": _json_or(getattr(row, "attribution_json", None), "{}"),
+        "faithfulness": _json_or(getattr(row, "faithfulness_json", None), "{}"),
+        "evidence": _json_or(getattr(row, "evidence_json", None), "{}"),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft) -> dict:
     """Stable response representation shared by every workspace entry point."""
     if isinstance(row, LegalConsultation):
@@ -144,6 +177,9 @@ def serialize_workspace_row(row: LegalConsultation | ContractReview | LegalDraft
             "reviewer_id": row.reviewer_id, "review_note": row.review_note,
             "reviewed_at": row.reviewed_at, "review_due_at": getattr(row, "review_due_at", None),
             "created_at": row.created_at,
+            # 前端一致性校验用：内容指纹 + 更新时间（时间戳仅作兜底）。
+            "updated_at": row.updated_at,
+            "content_version": consultation_content_version(row),
             "confidence": compute_confidence(row),
             "feedback_score": row.feedback_score,
             "reviewed_version": getattr(row, "reviewed_version", None),
