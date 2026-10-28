@@ -24,6 +24,7 @@
               <el-tag v-if="quotaHint('consultation')" size="small" effect="plain" :type="quotaSummary?.consultation?.remaining <= 0 ? 'danger' : 'warning'">{{ quotaHint('consultation') }}</el-tag>
               <el-tag :type="riskTagType(consultResult.risk_level)" size="small">{{ riskLabel(consultResult.risk_level) }}</el-tag>
               <el-tag v-if="consultResult.confidence !== undefined" :type="confidenceTagType(consultResult.confidence)" size="small" effect="plain">置信度 {{ consultResult.confidence }}%</el-tag>
+              <el-tag v-if="statusSynced" type="success" size="small" effect="plain" title="已按历史列表重新拉取最新详情">状态已同步</el-tag>
               <!-- 证据可核验性（0100 迁移）：生成时的确定性统计，老记录没有该字段就不显示 -->
               <el-tag
                 v-if="consultVerifiability"
@@ -293,6 +294,25 @@ const consultVerifiability = computed(() => deriveVerifiability(consultResult.va
 
 // 历史咨询 → 结果卡：点击行内"查看结果"加载完整详情（含送审按钮），替代刷新后丢失的会话内状态
 const focusRowId = ref(null)
+// 结果卡状态与历史列表一致性：页面级 ref 可能停留在提交时的状态，
+// 若列表里的状态更新（如审核已通过），按 id 重新拉一次详情，避免旧按钮继续显示。
+const statusSyncing = ref(false)
+const statusSynced = ref(false)
+const syncResultStatus = async () => {
+  const result = consultResult.value
+  if (!result?.id || !consultations.value.length || statusSyncing.value) return
+  const row = consultations.value.find((item) => Number(item.id) === Number(result.id))
+  if (!row?.status || row.status === result.status) return
+  statusSyncing.value = true
+  try {
+    await openConsultationDetail(result.id)
+    statusSynced.value = true
+  } finally {
+    statusSyncing.value = false
+  }
+}
+watch([() => consultResult.value?.id, consultations], () => { void syncResultStatus() }, { flush: 'post' })
+watch(() => consultResult.value?.id, () => { statusSynced.value = false })
 const openHistoryResult = async (row) => {
   focusRowId.value = row.id
   await openConsultationDetail(row.id)

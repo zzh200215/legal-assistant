@@ -23,6 +23,7 @@ const CONSULT_RESULT = {
 
 test('工作台：咨询结果带入文书与合同审查', async ({ page }) => {
   const requests = { consults: 0, drafts: 0, contracts: 0 }
+  let listRows = []
   const unexpected = []
   const failed = []
   page.on('response', (response) => {
@@ -47,8 +48,10 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     if (method === 'GET' && path === '/legal/orgs/1/portal-branding') return route.fulfill({ json: success({ portal_logo_url: '', portal_welcome_message: '' }) })
     if (method === 'GET' && path === '/legal/orgs/1/cases/1/items') return route.fulfill({ json: success({ consultations: [], contract_reviews: [], drafts: [] }) })
     if (method === 'GET' && path === '/legal/matters/1/activity') return route.fulfill({ json: success({ items: [] }) })
-    if (method === 'GET' && path === '/legal/consultations') return route.fulfill({ json: success([]) })
-    if (method === 'GET' && path === '/legal/consultations/11') return route.fulfill({ json: success(CONSULT_RESULT) })
+    if (method === 'GET' && path === '/legal/consultations') return route.fulfill({ json: success(listRows) })
+    if (method === 'GET' && path === '/legal/consultations/11') {
+      return route.fulfill({ json: success({ ...CONSULT_RESULT, status: 'lawyer_approved' }) })
+    }
     if (method === 'GET' && path === '/legal/contract-reviews') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/drafts') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/review-queue') return route.fulfill({ json: success([]) })
@@ -63,7 +66,10 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     }
     if (method === 'POST' && path === '/legal/consultations') {
       requests.consults += 1
-      return route.fulfill({ json: success({ ...CONSULT_RESULT, id: 10 + requests.consults }) })
+      const id = 10 + requests.consults
+      // 模拟“提交后审核已通过”：列表状态比结果卡更新，触发一次一致性重取
+      listRows = [{ id, case_id: 1, status: 'lawyer_approved', question: CONSULT_RESULT.question }]
+      return route.fulfill({ json: success({ ...CONSULT_RESULT, id }) })
     }
     if (method === 'POST' && path === '/legal/drafts') {
       requests.drafts += 1
@@ -84,6 +90,14 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   await expect(page.getByText('可以主张经济补偿，建议先固定解除通知与工资流水。')).toBeVisible()
   expect(requests.consults).toBe(1)
   await expect(page).toHaveURL(/consultation_id=11/)
+  // 历史列表显示审核已通过，结果卡应重取详情，隐藏旧的「提交律师审核」
+  await expect(page.getByText('状态已同步')).toBeVisible()
+  await expect(page.getByRole('button', { name: '提交律师审核' })).toHaveCount(0)
+  if (SHOT_DIR) {
+    await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
+    await page.waitForTimeout(200)
+    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step58-consult-status-synced.png') })
+  }
 
   // 文书：prefill 应在异步组件挂载后生效
   await page.getByRole('button', { name: '生成文书' }).click()
