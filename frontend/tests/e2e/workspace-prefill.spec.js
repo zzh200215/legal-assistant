@@ -48,6 +48,7 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     if (method === 'GET' && path === '/legal/orgs/1/cases/1/items') return route.fulfill({ json: success({ consultations: [], contract_reviews: [], drafts: [] }) })
     if (method === 'GET' && path === '/legal/matters/1/activity') return route.fulfill({ json: success({ items: [] }) })
     if (method === 'GET' && path === '/legal/consultations') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/consultations/11') return route.fulfill({ json: success(CONSULT_RESULT) })
     if (method === 'GET' && path === '/legal/contract-reviews') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/drafts') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/legal/review-queue') return route.fulfill({ json: success([]) })
@@ -82,6 +83,7 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   await page.getByRole('button', { name: '提交咨询' }).click()
   await expect(page.getByText('可以主张经济补偿，建议先固定解除通知与工资流水。')).toBeVisible()
   expect(requests.consults).toBe(1)
+  await expect(page).toHaveURL(/consultation_id=11/)
 
   // 文书：prefill 应在异步组件挂载后生效
   await page.getByRole('button', { name: '生成文书' }).click()
@@ -99,9 +101,17 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   await page.locator('.legal-matter-tab', { hasText: '法律咨询' }).click()
   await expect(page.getByText('可以主张经济补偿，建议先固定解除通知与工资流水。')).toBeVisible()
   expect(requests.consults).toBe(1)
+  await expect(page).toHaveURL(/consultation_id=11/)
   if (SHOT_DIR) {
     await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
     await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step56-consult-result-retained.png') })
+  }
+  // 刷新后页面级 ref 丢失，但 URL 带 consultation_id，应走历史详情恢复同一结果卡
+  await page.reload()
+  await expect(page.getByText('可以主张经济补偿，建议先固定解除通知与工资流水。')).toBeVisible()
+  if (SHOT_DIR) {
+    await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
+    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step57-consult-url-restore.png') })
   }
   await page.getByRole('button', { name: '进入合同审查' }).click()
   await expect(page).toHaveURL(/tab=contract/)

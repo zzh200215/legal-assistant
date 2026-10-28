@@ -300,17 +300,19 @@ const openHistoryResult = async (row) => {
 }
 
 watch(() => props.initialConsultationId, (id) => {
-  if (id) openConsultationDetail(id)
+  // 结果已由页面级 ref 保留时不再重复请求（例如从文书/合同审查切回咨询）；
+  // 刷新/深链时页面级 ref 为空，才按 URL 的 consultation_id 恢复。
+  if (id && consultResult.value?.id !== id) openConsultationDetail(id)
 }, { immediate: true })
 
-// 结果卡内容与 URL 焦点不一致（提交新咨询/追问/打开历史行）时清掉直达参数，
-// 避免之后重新进入 tab 恢复过期的结果卡
+// 结果卡与 URL 焦点保持一致：提交/追问/打开历史后把 consultation_id 写进 URL，
+// 刷新或分享链接时才能恢复同一张结果卡。
 const route = useRoute()
 const router = useRouter()
 watch(() => consultResult.value?.id, (id) => {
-  if (id && route.query.consultation_id && Number(route.query.consultation_id) !== id) {
-    router.replace({ query: { ...route.query, consultation_id: undefined } })
-  }
+  if (!id) return
+  if (String(route.query.consultation_id || '') === String(id)) return
+  router.replace({ query: { ...route.query, consultation_id: String(id) } })
 })
 
 // 通知「去补充」直达：带 supplement=1 时把追问框预填好并聚焦

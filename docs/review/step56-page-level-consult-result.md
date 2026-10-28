@@ -113,5 +113,5 @@ export function useLegalConsultations({ ..., result = null }) {
 
 ## 7. 后续建议
 
-- 如果希望刷新后也能恢复结果卡，提交成功时把 `consultation_id` 写进 URL（与现有 `initialConsultationId` 衔接），这样刷新/分享链接都能回到同一结果；
+- 刷新/分享恢复：step57 已把结果 id 写进 URL，刷新或分享后按 `consultation_id` 走历史详情恢复；
 - 包体余量 21.0 KB，下一步继续做功能前先量产物。
