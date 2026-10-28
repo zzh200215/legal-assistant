@@ -5438,6 +5438,52 @@
         }
       }
     },
+    "/api/legal/consultations/{item_id}/export/markdown": {
+      "get": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "Export Consultation Markdown",
+        "description": "把咨询结果导出为 Markdown（确定性拼装，不调用模型）。",
+        "operationId": "export_consultation_markdown_api_legal_consultations__item_id__export_markdown_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/contracts/analyze": {
       "post": {
         "tags": [

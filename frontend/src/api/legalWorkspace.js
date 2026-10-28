@@ -134,6 +134,9 @@ export default {
   listLegalDrafts(config = {}) {
     return http.get('/legal/drafts', config)
   },
+  exportLegalConsultationMarkdown(id) {
+    return http.get(`/legal/consultations/${id}/export/markdown`, { responseType: 'blob' })
+  },
   exportLegalDraftDocx(id) {
     return http.get(`/legal/drafts/${id}/export/docx`, { responseType: 'blob' })
   },

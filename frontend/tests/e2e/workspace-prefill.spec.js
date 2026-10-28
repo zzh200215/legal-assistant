@@ -57,6 +57,14 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     if (method === 'GET' && path === '/legal/orgs/1/cases/1/items') return route.fulfill({ json: success({ consultations: [], contract_reviews: [], drafts: [] }) })
     if (method === 'GET' && path === '/legal/matters/1/activity') return route.fulfill({ json: success({ items: [] }) })
     if (method === 'GET' && path === '/legal/consultations') return route.fulfill({ json: success(listRows) })
+    if (method === 'GET' && path === '/legal/consultations/11/export/markdown') {
+      return route.fulfill({
+        status: 200,
+        headers: { 'Content-Disposition': 'attachment; filename="legal_consultation_11.md"' },
+        contentType: 'text/markdown; charset=utf-8',
+        body: '# 法律咨询结果\n\n**当前状态：** 律师通过\n',
+      })
+    }
     if (method === 'GET' && path === '/legal/consultations/11') {
       return route.fulfill({
         json: success({
@@ -115,10 +123,15 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   await page.getByRole('button', { name: '复制结果' }).click()
   await expect.poll(() => page.evaluate(() => window.__copiedConsult)).toContain('当前状态：律师通过')
   await expect.poll(() => page.evaluate(() => window.__copiedConsult)).toContain('2021年3月入职；2024年5月被辞退')
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: '导出 Markdown' }).click(),
+  ])
+  expect(download.suggestedFilename()).toContain('.md')
   if (SHOT_DIR) {
     await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
     await page.waitForTimeout(200)
-    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step61-consult-result-actions.png') })
+    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step62-consult-markdown-export.png') })
   }
 
   // 文书：prefill 应在异步组件挂载后生效

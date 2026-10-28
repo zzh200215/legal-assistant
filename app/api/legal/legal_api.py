@@ -9,7 +9,7 @@ from datetime import datetime, date
 
 import jieba
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -40,6 +40,7 @@ from app.services.observability.audit_log_service import AuditLogService
 from app.services.legal.legal_retrieval_service import legal_retrieval_service
 from app.services.legal.legal_knowledge_graph_service import legal_knowledge_graph_service
 from app.services.legal.consultation_evidence import attach_consultation_comparison
+from app.services.legal.consultation_export import build_consultation_markdown
 from app.services.legal.contract_risk_stats import summarize_contract_risk_stats
 from app.services.legal.legal_workspace_service import (
     legal_workspace_module,
@@ -984,6 +985,28 @@ def get_consultation(item_id: int, db: Session = Depends(get_db), current_user: 
         return attach_consultation_comparison(db, serialize(row), row)
     except LookupError:
         raise api_error(404, "法律咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
+
+
+@router.get("/consultations/{item_id}/export/markdown")
+def export_consultation_markdown(
+    item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """把咨询结果导出为 Markdown（确定性拼装，不调用模型）。"""
+    try:
+        row = legal_workspace_read_module.get_row(db, current_user, "consultation", item_id)
+    except LookupError:
+        raise api_error(404, "法律咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
+    content = build_consultation_markdown(row)
+    audit.log(
+        db, current_user, "legal_consultation_export_markdown",
+        target_type="consultation", target_id=row.id, detail=f"status={row.status}",
+    )
+    filename = f"legal_consultation_{row.id}.md"
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/contract-reviews")

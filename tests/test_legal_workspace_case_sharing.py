@@ -78,6 +78,25 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
     def test_owner_reads_own_case_record(self):
         self.assertEqual(self._detail(self.member_a, self.row).status_code, 200)
 
+    def test_export_markdown_for_accessible_consultation(self):
+        resp = self.client.get(
+            f"/api/legal/consultations/{self.row.id}/export/markdown",
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertTrue(resp.headers["content-type"].startswith("text/markdown"))
+        self.assertIn("legal_consultation_", resp.headers["content-disposition"])
+        self.assertIn("# 法律咨询结果", resp.text)
+        self.assertIn("成员A的咨询", resp.text)
+        self.assertIn("建议", resp.text)
+
+    def test_export_markdown_denied_for_outsider(self):
+        resp = self.client.get(
+            f"/api/legal/consultations/{self.row.id}/export/markdown",
+            headers=self._headers(self.outsider),
+        )
+        self.assertEqual(resp.status_code, 404)
+
     def test_case_member_reads_others_record(self):
         self.assertEqual(self._detail(self.member_b, self.row).status_code, 200)
 

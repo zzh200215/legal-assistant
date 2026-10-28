@@ -36,6 +36,7 @@
               >依据：{{ consultVerifiability.label }}</el-tag>
               <div class="result-actions">
                 <el-button size="small" plain @click="copyResult">复制结果</el-button>
+                <el-button size="small" plain @click="exportResultMarkdown">导出 Markdown</el-button>
                 <el-button size="small" type="success" plain @click="emit('go-to-review', consultResult)">进入合同审查</el-button>
                 <el-button size="small" type="primary" plain @click="emit('go-to-draft', consultResult)">生成文书</el-button>
                 <el-button v-if="consultResult.status === 'pending_review' || consultResult.status === 'needs_lawyer_review'" size="small" type="primary" @click="submitConsultForReview">提交律师审核</el-button>
@@ -340,6 +341,22 @@ const copyResult = async () => {
   if (!copied) copied = fallbackCopy(text)
   if (copied) ElMessage.success('咨询结果已复制')
   else ElMessage.error('复制失败，请手动选择结果文本')
+}
+const exportResultMarkdown = async () => {
+  const id = consultResult.value?.id
+  if (!id) return
+  try {
+    const { data } = await legalWorkspace.exportLegalConsultationMarkdown(id)
+    const url = URL.createObjectURL(data)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `法律咨询-${id}.md`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('Markdown 已导出')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '导出失败')
+  }
 }
 
 // 历史咨询 → 结果卡：点击行内"查看结果"加载完整详情（含送审按钮），替代刷新后丢失的会话内状态
