@@ -169,7 +169,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -191,6 +191,7 @@ import legalWorkspace from '../../api/legalWorkspace'
 import AiOutputFeedback from '../AiOutputFeedback.vue'
 import QueryStateView from '../QueryStateView.vue'
 import { useLegalConsultations } from '../../composables/useLegalConsultations'
+import { CONSULT_RESULT_KEY } from '../../composables/consultationResultKey'
 import { useQuota } from '../../composables/useQuota'
 import { useLegalSourceDetail } from '../../composables/useLegalSourceDetail'
 import { useStagedProgress } from '../../composables/useStagedProgress'
@@ -238,6 +239,8 @@ const emit = defineEmits(['go-to-draft', 'go-to-review'])
 const { quotaSummary, quotaHint, loadQuota } = useQuota()
 // 只取 openSourceDetail：核验状态现在由结果卡自己的 .app-verify-badge 表达（已核验 / 未核验）
 const { openSourceDetail } = useLegalSourceDetail()
+// 页面级共享的结果 ref（由 LegalWorkspace provide）；不在工作区时退回本地 state。
+const sharedConsultResult = inject(CONSULT_RESULT_KEY, null)
 
 const {
   consultForm,
@@ -259,6 +262,7 @@ const {
   confirm: ElMessageBox.confirm,
   caseId: computed(() => props.caseId),
   onReviewSubmitted: props.onReviewSubmitted,
+  result: sharedConsultResult,
 })
 
 // 历史咨询三态（ux-audit P1-3/M-13）：失败态可重试，不再与"暂无咨询"混同

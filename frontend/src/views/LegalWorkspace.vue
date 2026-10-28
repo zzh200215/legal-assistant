@@ -302,7 +302,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onUnmounted, provide, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
@@ -318,6 +318,7 @@ import WorkbenchHome from '../components/legal/WorkbenchHome.vue'
 import { categoryLabel, statusLabel } from '../composables/useLegalWorkspacePresentation'
 import { clearWorkspaceCrumbs, setWorkspaceCrumbs } from '../composables/workspaceBreadcrumb'
 import { useCopilotDock } from '../composables/useCopilotDock'
+import { CONSULT_RESULT_KEY } from '../composables/consultationResultKey'
 
 const AsyncLegalBilling = defineAsyncComponent(() => import('./LegalBilling.vue'))
 const AsyncLegalDeadlines = defineAsyncComponent(() => import('./LegalDeadlines.vue'))
@@ -341,6 +342,11 @@ const router = useRouter()
 const { openCopilot } = useCopilotDock()
 const caseDialog = ref(null)
 const currentCaseId = ref(route.query.case_id ? Number(route.query.case_id) : null)
+// 咨询结果提升到案件工作区：咨询 tab 切走会被卸载，但用户从咨询生成文书/审查后
+// 再切回来仍应看到同一张结果卡；换案件时清空，避免跨案残留。
+const consultResult = ref(null)
+provide(CONSULT_RESULT_KEY, consultResult)
+watch(currentCaseId, () => { consultResult.value = null })
 const caseSearch = ref('')
 const reviewTabRef = ref(null)
 const draftsTabRef = ref(null)

@@ -95,10 +95,14 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     await page.locator('.draft-workspace').screenshot({ path: path.join(SHOT_DIR, 'step55-workspace-prefill.png') })
   }
 
-  // 合同审查：重新提交一次咨询（切 tab 后结果卡是组件本地 state），再带入
+  // 合同审查：切回咨询后结果卡应仍在（页面级 ref，不要求重新提交），再带入
   await page.locator('.legal-matter-tab', { hasText: '法律咨询' }).click()
-  await page.getByPlaceholder(/我在公司工作了3年/).fill('公司未支付经济补偿金怎么办？')
-  await page.getByRole('button', { name: '提交咨询' }).click()
+  await expect(page.getByText('可以主张经济补偿，建议先固定解除通知与工资流水。')).toBeVisible()
+  expect(requests.consults).toBe(1)
+  if (SHOT_DIR) {
+    await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
+    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step56-consult-result-retained.png') })
+  }
   await page.getByRole('button', { name: '进入合同审查' }).click()
   await expect(page).toHaveURL(/tab=contract/)
   await expect(page.locator('#contract-title')).toHaveValue('劳动争议关联审查')

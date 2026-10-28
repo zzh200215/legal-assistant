@@ -108,4 +108,4 @@ defineExpose({ prefill })
 
 - 如果还有其他「跳 tab 后立即调用子组件方法」的入口，可以复用这套 `pending + ref watcher`，不要再直接 `ref.value?.method()`；
 - 包体余量 20.7 KB，下一步若继续做功能，先量产物；
-- 咨询结果卡本身在切 tab 后会丢（组件本地 state），如果要做「咨询→文书→返回咨询结果」连续操作，应把 `consultResult` 提升到页面级或按 `consultation_id` 恢复——这是比 prefill 更大的体验缺口。
+- 咨询结果卡本身在切 tab 后会丢（组件本地 state）；step56 已把 `consultResult` 提升到页面级，切 tab 返回仍保留；刷新恢复仍需 URL `consultation_id`。

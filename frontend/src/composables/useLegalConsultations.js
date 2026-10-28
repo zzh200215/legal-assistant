@@ -6,10 +6,12 @@ import { qk, qkPrefix } from '../query/keys'
 // 法律咨询 tab 领域模块（查询层 + 幂等写）：
 // 列表走统一查询层（同 key 去重/缓存/取消），提交/追问经 useMutation（Idempotency-Key 防连点重复）。
 
-export function useLegalConsultations({ client, message, confirm, onReviewSubmitted, caseId, context, withHistory = true }) {
+export function useLegalConsultations({ client, message, confirm, onReviewSubmitted, caseId, context, withHistory = true, result = null }) {
   const consultForm = ref({ question: '' })
   const consultLoading = ref(false)
-  const consultResult = ref(null)
+  // 页面级注入时用父组件的 ref，切 tab 卸载本组件后结果卡仍在；
+  // 未注入时退回组件本地 state，保持独立使用（如测试/其他入口）不变。
+  const consultResult = result || ref(null)
   const consultations = ref([])
   const followupQuestion = ref('')
   const followupLoading = ref(false)
