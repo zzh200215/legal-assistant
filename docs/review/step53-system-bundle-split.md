@@ -124,5 +124,5 @@ build: {
 ## 8. 后续建议
 
 - 下一轮如果还要加 System 功能，优先加进现有两组之一，不要再新增第三组（每多一组约 1–2 KB 包装开销）；
-- LegalWorkspace 仍是最大页面 chunk（117.1 KB），后续可单独做一轮工作台面板拆分；
+- LegalWorkspace 仍是最大页面 chunk（117.1 KB），step54 已把合同审查/文书/审核三个主 tab 拆成异步（页面 chunk 降到 36.9 KB）；后续若要继续治理，看 SystemAnalyticsTabs（85.3 KB）；
 - 若要支持 Safari 14，需要把 target 退回默认，总资产会回到 1701.7 KB，届时要同步删掉约 2 KB 代码或调整总预算，不能只改 target。

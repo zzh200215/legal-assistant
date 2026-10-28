@@ -47,7 +47,7 @@
 
     <template v-else-if="view === 'review'">
       <!-- 页头由 LegalReviewTab 自带（含 SLA 指标），这里不再重复一层标题 -->
-      <LegalReviewTab ref="reviewTabRef" />
+      <AsyncLegalReviewTab ref="reviewTabRef" />
     </template>
 
     <template v-else-if="currentCase">
@@ -207,19 +207,19 @@
       </section>
 
       <section v-else-if="activeCaseTab === 'contract'" class="matter-panel">
-        <LegalContractTab :key="`contract-${currentCaseId}`" ref="contractsTabRef" :case-id="currentCaseId" :download-text="downloadText" />
+        <AsyncLegalContractTab :key="`contract-${currentCaseId}`" ref="contractsTabRef" :case-id="currentCaseId" :download-text="downloadText" />
       </section>
 
       <section v-else-if="activeCaseTab === 'draft'" class="matter-panel">
         <header class="app-page-head">
           <div class="app-page-head-main"><h2 class="app-page-title">案件文书</h2></div>
         </header>
-        <LegalDraftsTab :key="`draft-${currentCaseId}`" ref="draftsTabRef" :case-id="currentCaseId" :download-text="downloadText" />
+        <AsyncLegalDraftsTab :key="`draft-${currentCaseId}`" ref="draftsTabRef" :case-id="currentCaseId" :download-text="downloadText" />
       </section>
 
       <section v-else-if="activeCaseTab === 'review'" class="matter-panel">
         <!-- 标题由 LegalReviewTab 自带，避免与外层 h2 重复 -->
-        <LegalReviewTab :key="`review-${currentCaseId}`" ref="reviewTabRef" :case-id="currentCaseId" />
+        <AsyncLegalReviewTab :key="`review-${currentCaseId}`" ref="reviewTabRef" :case-id="currentCaseId" />
       </section>
 
       <section v-else-if="activeCaseTab === 'tasks'" class="matter-panel">
@@ -314,9 +314,6 @@ import { qk } from '../query/keys'
 import CaseCreateDialog from '../components/legal/CaseCreateDialog.vue'
 import SourceDetailDialog from '../components/legal/SourceDetailDialog.vue'
 import CaseHeader from '../components/legal/CaseHeader.vue'
-import LegalContractTab from '../components/legal/LegalContractTab.vue'
-import LegalDraftsTab from '../components/legal/LegalDraftsTab.vue'
-import LegalReviewTab from '../components/legal/LegalReviewTab.vue'
 import WorkbenchHome from '../components/legal/WorkbenchHome.vue'
 import { categoryLabel, statusLabel } from '../composables/useLegalWorkspacePresentation'
 import { clearWorkspaceCrumbs, setWorkspaceCrumbs } from '../composables/workspaceBreadcrumb'
@@ -325,8 +322,12 @@ import { useCopilotDock } from '../composables/useCopilotDock'
 const AsyncLegalBilling = defineAsyncComponent(() => import('./LegalBilling.vue'))
 const AsyncLegalDeadlines = defineAsyncComponent(() => import('./LegalDeadlines.vue'))
 const AsyncLegalContracts = defineAsyncComponent(() => import('./LegalContracts.vue'))
-// 无跨 tab ref 调用（prefill/refresh 等）的面板按需加载，控制 LegalWorkspace chunk 体积；
-// LegalContractTab / LegalDraftsTab / LegalReviewTab 因存在跳转后立即 prefill/refresh 的时序依赖保持静态。
+// 案件主 tab 全部按需加载：合同审查 / 文书 / 审核是页面里最大的三块，
+// 拆成独立 chunk 后首屏与概览不再下载；ref 调用在 tab 已挂载时有效，
+// 未挂载时仍是 no-op（与拆前静态组件的行为一致，不额外改变 prefill 时序）。
+const AsyncLegalContractTab = defineAsyncComponent(() => import('../components/legal/LegalContractTab.vue'))
+const AsyncLegalDraftsTab = defineAsyncComponent(() => import('../components/legal/LegalDraftsTab.vue'))
+const AsyncLegalReviewTab = defineAsyncComponent(() => import('../components/legal/LegalReviewTab.vue'))
 const AsyncCaseDocumentsPanel = defineAsyncComponent(() => import('../components/legal/CaseDocumentsPanel.vue'))
 const AsyncLegalConsultationsTab = defineAsyncComponent(() => import('../components/legal/LegalConsultationsTab.vue'))
 const AsyncLegalSourcesTab = defineAsyncComponent(() => import('../components/legal/LegalSourcesTab.vue'))
