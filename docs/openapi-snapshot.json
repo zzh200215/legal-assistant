@@ -5490,7 +5490,7 @@
           "Legal Workspace"
         ],
         "summary": "List Consultation Exports",
-        "description": "列出某条咨询的导出记录（不含正文，只给元数据）。",
+        "description": "列出某条咨询的导出记录（不含正文）；按 id 倒序 keyset 分页。",
         "operationId": "list_consultation_exports_api_legal_consultations__item_id__exports_get",
         "security": [
           {
@@ -5518,6 +5518,25 @@
               "default": 20,
               "title": "Limit"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页最后一条记录 id",
+              "title": "Cursor"
+            },
+            "description": "上一页最后一条记录 id"
           }
         ],
         "responses": {

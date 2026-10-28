@@ -2,6 +2,7 @@
 个人默认视图维持隔离；跨组织与严格模式案件按既有 verify_case_access 口径收口。"""
 
 import unittest
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,8 +12,9 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
+from app.core.time import utc_now
 from app.main import app
-from app.models.legal import LegalCase, LegalConsultation
+from app.models.legal import LegalCase, LegalConsultation, LegalConsultationExport
 from app.models.legal_portal import LegalCaseMember
 from app.models.org import LegalMemberRole, Organization, OrganizationMember
 from app.models.user import User, UserStatus
@@ -95,7 +97,7 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
             headers=self._headers(self.member_b),
         )
         self.assertEqual(listed.status_code, 200, listed.text)
-        records = listed.json()["data"]
+        records = listed.json()["data"]["items"]
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["format"], "markdown")
         self.assertNotIn("content", records[0])
@@ -120,6 +122,52 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
             headers=self._headers(self.outsider),
         )
         self.assertEqual(resp.status_code, 404)
+
+    def test_export_records_paginate(self):
+        for _ in range(3):
+            self.client.get(
+                f"/api/legal/consultations/{self.row.id}/export/markdown",
+                headers=self._headers(self.member_a),
+            )
+        page1 = self.client.get(
+            f"/api/legal/consultations/{self.row.id}/exports?limit=2",
+            headers=self._headers(self.member_a),
+        ).json()["data"]
+        self.assertEqual(len(page1["items"]), 2)
+        self.assertTrue(page1["has_more"])
+        self.assertIsNotNone(page1["next_cursor"])
+
+        page2 = self.client.get(
+            f"/api/legal/consultations/{self.row.id}/exports?limit=2&cursor={page1['next_cursor']}",
+            headers=self._headers(self.member_a),
+        ).json()["data"]
+        self.assertEqual(len(page2["items"]), 1)
+        self.assertFalse(page2["has_more"])
+        self.assertIsNone(page2["next_cursor"])
+
+    def test_export_records_prune_old_and_excess(self):
+        now = utc_now()
+        for index in range(25):
+            self.db.add(LegalConsultationExport(
+                consultation_id=self.row.id, user_id=self.member_a.id,
+                format="markdown", filename=f"export-{index}.md", content="x",
+                created_at=now - timedelta(minutes=index),
+            ))
+        self.db.add(LegalConsultationExport(
+            consultation_id=self.row.id, user_id=self.member_a.id,
+            format="markdown", filename="too-old.md", content="x",
+            created_at=now - timedelta(days=120),
+        ))
+        self.db.commit()
+
+        listed = self.client.get(
+            f"/api/legal/consultations/{self.row.id}/exports?limit=50",
+            headers=self._headers(self.member_a),
+        ).json()["data"]
+        self.assertEqual(len(listed["items"]), 20)
+        self.assertEqual(listed["retention_days"], 90)
+        self.assertEqual(listed["max_records"], 20)
+        self.assertNotIn("too-old.md", [row["filename"] for row in listed["items"]])
 
     def test_case_member_reads_others_record(self):
         self.assertEqual(self._detail(self.member_b, self.row).status_code, 200)

@@ -3,8 +3,18 @@
 只做确定性拼装，不调用模型、不写文件；HTTP 层负责鉴权、审计与下载头。
 """
 
-from app.models.legal import LegalConsultation
+from datetime import timedelta
+
+from sqlalchemy.orm import Session
+
+from app.core.time import utc_now
+from app.models.legal import LegalConsultation, LegalConsultationExport
 from app.services.legal.legal_workspace_service import serialize_workspace_row
+
+# 导出记录保留策略：90 天 + 每条咨询最多 20 份。
+# 小文本直接存库，不做对象存储；超出部分在写入/列表时清理，避免无限增长。
+EXPORT_RETENTION_DAYS = 90
+EXPORT_MAX_PER_CONSULTATION = 20
 
 STATUS_LABELS = {
     "draft": "草稿",
@@ -43,6 +53,35 @@ def _reference_lines(references: list) -> str:
             suffix = "（法源缺条文）"
         lines.append(f"- {title} {citation}{suffix}".rstrip())
     return "\n".join(lines) if lines else "- 暂无"
+
+
+def prune_consultation_exports(db: Session, consultation_id: int, *, now=None) -> int:
+    """按「90 天 + 最多 20 份」清理某条咨询的导出记录，返回删除数量。"""
+    moment = now or utc_now()
+    cutoff = moment - timedelta(days=EXPORT_RETENTION_DAYS)
+    deleted = (
+        db.query(LegalConsultationExport)
+        .filter(
+            LegalConsultationExport.consultation_id == consultation_id,
+            LegalConsultationExport.created_at < cutoff,
+        )
+        .delete(synchronize_session=False)
+    )
+    stale_ids = [
+        row_id
+        for (row_id,) in db.query(LegalConsultationExport.id)
+        .filter(LegalConsultationExport.consultation_id == consultation_id)
+        .order_by(LegalConsultationExport.id.desc())
+        .offset(EXPORT_MAX_PER_CONSULTATION)
+        .all()
+    ]
+    if stale_ids:
+        deleted += (
+            db.query(LegalConsultationExport)
+            .filter(LegalConsultationExport.id.in_(stale_ids))
+            .delete(synchronize_session=False)
+        )
+    return deleted
 
 
 def build_consultation_markdown(row: LegalConsultation) -> str:

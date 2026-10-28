@@ -41,7 +41,12 @@ from app.services.observability.audit_log_service import AuditLogService
 from app.services.legal.legal_retrieval_service import legal_retrieval_service
 from app.services.legal.legal_knowledge_graph_service import legal_knowledge_graph_service
 from app.services.legal.consultation_evidence import attach_consultation_comparison
-from app.services.legal.consultation_export import build_consultation_markdown
+from app.services.legal.consultation_export import (
+    EXPORT_MAX_PER_CONSULTATION,
+    EXPORT_RETENTION_DAYS,
+    build_consultation_markdown,
+    prune_consultation_exports,
+)
 from app.services.legal.contract_risk_stats import summarize_contract_risk_stats
 from app.services.legal.legal_workspace_service import (
     consultation_content_version,
@@ -1012,6 +1017,9 @@ def export_consultation_markdown(
     )
     db.add(record)
     db.commit()
+    # 写入后按保留策略清理，避免导出记录无限增长。
+    if prune_consultation_exports(db, row.id):
+        db.commit()
     audit.log(
         db, current_user, "legal_consultation_export_markdown",
         target_type="consultation", target_id=row.id, detail=f"status={row.status}",
@@ -1027,33 +1035,42 @@ def export_consultation_markdown(
 def list_consultation_exports(
     item_id: int,
     limit: int = Query(20, ge=1, le=50),
+    cursor: int | None = Query(None, ge=1, description="上一页最后一条记录 id"),
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    """列出某条咨询的导出记录（不含正文，只给元数据）。"""
+    """列出某条咨询的导出记录（不含正文）；按 id 倒序 keyset 分页。"""
     try:
         legal_workspace_read_module.get_row(db, current_user, "consultation", item_id)
     except LookupError:
         raise api_error(404, "法律咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
-    rows = (
-        db.query(LegalConsultationExport, User.username)
-        .outerjoin(User, User.id == LegalConsultationExport.user_id)
-        .filter(LegalConsultationExport.consultation_id == item_id)
-        .order_by(LegalConsultationExport.created_at.desc(), LegalConsultationExport.id.desc())
-        .limit(limit)
-        .all()
-    )
-    return [
-        {
-            "id": record.id,
-            "filename": record.filename,
-            "format": record.format,
-            "status_at_export": record.status_at_export,
-            "content_version": record.content_version,
-            "created_at": record.created_at,
-            "user_name": username,
-        }
-        for record, username in rows
-    ]
+    if prune_consultation_exports(db, item_id):
+        db.commit()
+    query = db.query(LegalConsultationExport, User.username).outerjoin(
+        User, User.id == LegalConsultationExport.user_id
+    ).filter(LegalConsultationExport.consultation_id == item_id)
+    if cursor:
+        query = query.filter(LegalConsultationExport.id < cursor)
+    rows = query.order_by(LegalConsultationExport.id.desc()).limit(limit + 1).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "items": [
+            {
+                "id": record.id,
+                "filename": record.filename,
+                "format": record.format,
+                "status_at_export": record.status_at_export,
+                "content_version": record.content_version,
+                "created_at": record.created_at,
+                "user_name": username,
+            }
+            for record, username in rows
+        ],
+        "next_cursor": rows[-1][0].id if has_more and rows else None,
+        "has_more": has_more,
+        "retention_days": EXPORT_RETENTION_DAYS,
+        "max_records": EXPORT_MAX_PER_CONSULTATION,
+    }
 
 
 @router.get("/consultations/exports/{export_id}/download")

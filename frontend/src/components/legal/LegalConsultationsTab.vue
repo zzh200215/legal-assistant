@@ -114,7 +114,7 @@
               <details class="export-history" @toggle="onExportsToggle">
                 <summary class="export-history-summary">
                   <span>导出记录</span>
-                  <span class="app-card-head-meta">最近 20 条</span>
+                  <span class="app-card-head-meta">保留 90 天 · 最多 20 条</span>
                 </summary>
                 <p v-if="exportsLoading" class="legal-muted">正在加载导出记录…</p>
                 <p v-else-if="exportsError" class="legal-muted">{{ exportsError }}</p>
@@ -128,6 +128,13 @@
                     <el-button text size="small" @click="downloadExport(row)">下载</el-button>
                   </li>
                 </ul>
+                <el-button
+                  v-if="exportsHasMore"
+                  text
+                  size="small"
+                  :loading="exportsLoadingMore"
+                  @click="loadMoreExports"
+                >加载更多</el-button>
               </details>
             </div>
           </section>
@@ -381,22 +388,33 @@ const exportResultMarkdown = async () => {
 const exportsOpen = ref(false)
 const exportRows = ref([])
 const exportsLoading = ref(false)
+const exportsLoadingMore = ref(false)
+const exportsHasMore = ref(false)
+const exportNextCursor = ref(null)
 const exportsError = ref(null)
 const formatExportTime = (value) => (value ? String(value).replace('T', ' ').slice(0, 16) : '')
-const loadExports = async () => {
+const loadExports = async (reset = true) => {
   const id = consultResult.value?.id
   if (!id) return
-  exportsLoading.value = true
+  const loading = reset ? exportsLoading : exportsLoadingMore
+  if (!reset && !exportsHasMore.value) return
+  loading.value = true
   exportsError.value = null
   try {
-    const { data } = await legalWorkspace.listLegalConsultationExports(id, { params: { limit: 20 } })
-    exportRows.value = data || []
+    const params = { limit: 20 }
+    if (!reset && exportNextCursor.value) params.cursor = exportNextCursor.value
+    const { data } = await legalWorkspace.listLegalConsultationExports(id, { params })
+    const items = data?.items || []
+    exportRows.value = reset ? items : [...exportRows.value, ...items]
+    exportsHasMore.value = Boolean(data?.has_more)
+    exportNextCursor.value = data?.next_cursor || null
   } catch (error) {
     exportsError.value = error.response?.data?.detail || '加载导出记录失败'
   } finally {
-    exportsLoading.value = false
+    loading.value = false
   }
 }
+const loadMoreExports = () => loadExports(false)
 const onExportsToggle = (event) => {
   exportsOpen.value = event.target.open
   if (exportsOpen.value) loadExports()

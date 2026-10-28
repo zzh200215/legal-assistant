@@ -67,11 +67,17 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     }
     if (method === 'GET' && path === '/legal/consultations/11/exports') {
       return route.fulfill({
-        json: success([{
-          id: 301, filename: 'legal_consultation_11.md', format: 'markdown',
-          status_at_export: 'lawyer_approved', content_version: 'cv-new',
-          created_at: '2026-10-28T12:00:00', user_name: 'lawyer',
-        }]),
+        json: success({
+          items: [{
+            id: 301, filename: 'legal_consultation_11.md', format: 'markdown',
+            status_at_export: 'lawyer_approved', content_version: 'cv-new',
+            created_at: '2026-10-28T12:00:00', user_name: 'lawyer',
+          }],
+          next_cursor: null,
+          has_more: false,
+          retention_days: 90,
+          max_records: 20,
+        }),
       })
     }
     if (method === 'GET' && path === '/legal/consultations/exports/301/download') {
