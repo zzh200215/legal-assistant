@@ -23,6 +23,7 @@
               <h2>咨询结果</h2>
               <el-tag v-if="quotaHint('consultation')" size="small" effect="plain" :type="quotaSummary?.consultation?.remaining <= 0 ? 'danger' : 'warning'">{{ quotaHint('consultation') }}</el-tag>
               <el-tag :type="riskTagType(consultResult.risk_level)" size="small">{{ riskLabel(consultResult.risk_level) }}</el-tag>
+              <el-tag :type="statusTagType(consultResult.status)" size="small" effect="plain">{{ statusLabel(consultResult.status) }}</el-tag>
               <el-tag v-if="consultResult.confidence !== undefined" :type="confidenceTagType(consultResult.confidence)" size="small" effect="plain">置信度 {{ consultResult.confidence }}%</el-tag>
               <el-tag v-if="statusSynced" type="success" size="small" effect="plain" title="已按历史列表重新拉取最新详情">结果已同步</el-tag>
               <!-- 证据可核验性（0100 迁移）：生成时的确定性统计，老记录没有该字段就不显示 -->
@@ -34,6 +35,7 @@
                 :title="consultVerifiability.title"
               >依据：{{ consultVerifiability.label }}</el-tag>
               <div class="result-actions">
+                <el-button size="small" plain @click="copyResult">复制结果</el-button>
                 <el-button size="small" type="success" plain @click="emit('go-to-review', consultResult)">进入合同审查</el-button>
                 <el-button size="small" type="primary" plain @click="emit('go-to-draft', consultResult)">生成文书</el-button>
                 <el-button v-if="consultResult.status === 'pending_review' || consultResult.status === 'needs_lawyer_review'" size="small" type="primary" @click="submitConsultForReview">提交律师审核</el-button>
@@ -291,6 +293,54 @@ const referenceItems = computed(() => asReferenceList(consultResult.value?.refer
 
 // 证据可核验性：后端生成时算好的统计（老记录没有 evidence 字段 → null，不显示标签）
 const consultVerifiability = computed(() => deriveVerifiability(consultResult.value))
+
+const resultToText = () => {
+  const result = consultResult.value
+  if (!result) return ''
+  const facts = (result.known_facts || []).join('；') || '暂无'
+  const references = asReferenceList(result.references)
+    .map((ref) => `${ref.title || '法源'} ${ref.citation || ''}`.trim())
+    .filter(Boolean)
+    .join('\n') || '暂无'
+  return [
+    `咨询问题：${result.question || ''}`,
+    `当前状态：${statusLabel(result.status)}`,
+    `结论与建议：${result.advice || ''}`,
+    `已知事实：${facts}`,
+    `参考依据：\n${references}`,
+  ].join('\n')
+}
+const fallbackCopy = (text) => {
+  const area = document.createElement('textarea')
+  area.value = text
+  area.style.position = 'fixed'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.select()
+  let copied = false
+  try {
+    copied = document.execCommand('copy')
+  } finally {
+    document.body.removeChild(area)
+  }
+  return copied
+}
+const copyResult = async () => {
+  const text = resultToText()
+  if (!text) return
+  let copied = false
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      copied = true
+    } catch {
+      copied = false
+    }
+  }
+  if (!copied) copied = fallbackCopy(text)
+  if (copied) ElMessage.success('咨询结果已复制')
+  else ElMessage.error('复制失败，请手动选择结果文本')
+}
 
 // 历史咨询 → 结果卡：点击行内"查看结果"加载完整详情（含送审按钮），替代刷新后丢失的会话内状态
 const focusRowId = ref(null)

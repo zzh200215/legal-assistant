@@ -33,6 +33,13 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     }
   })
   await page.addInitScript(() => localStorage.setItem('token', 'workspace-prefill-token'))
+  await page.addInitScript(() => {
+    window.__copiedConsult = ''
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text) => { window.__copiedConsult = text } },
+    })
+  })
 
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -104,10 +111,14 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   // 历史列表 content_version 比结果卡新，结果卡应重取详情，隐藏旧的「提交律师审核」
   await expect(page.getByText('结果已同步')).toBeVisible()
   await expect(page.getByRole('button', { name: '提交律师审核' })).toHaveCount(0)
+  await expect(page.getByText('律师通过')).toBeVisible()
+  await page.getByRole('button', { name: '复制结果' }).click()
+  await expect.poll(() => page.evaluate(() => window.__copiedConsult)).toContain('当前状态：律师通过')
+  await expect.poll(() => page.evaluate(() => window.__copiedConsult)).toContain('2021年3月入职；2024年5月被辞退')
   if (SHOT_DIR) {
     await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
     await page.waitForTimeout(200)
-    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step59-consult-result-synced.png') })
+    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step61-consult-result-actions.png') })
   }
 
   // 文书：prefill 应在异步组件挂载后生效
