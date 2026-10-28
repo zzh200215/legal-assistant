@@ -302,7 +302,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onUnmounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
@@ -323,8 +323,8 @@ const AsyncLegalBilling = defineAsyncComponent(() => import('./LegalBilling.vue'
 const AsyncLegalDeadlines = defineAsyncComponent(() => import('./LegalDeadlines.vue'))
 const AsyncLegalContracts = defineAsyncComponent(() => import('./LegalContracts.vue'))
 // 案件主 tab 全部按需加载：合同审查 / 文书 / 审核是页面里最大的三块，
-// 拆成独立 chunk 后首屏与概览不再下载；ref 调用在 tab 已挂载时有效，
-// 未挂载时仍是 no-op（与拆前静态组件的行为一致，不额外改变 prefill 时序）。
+// 拆成独立 chunk 后首屏与概览不再下载；从咨询结果跳转的 prefill 先记 pending，
+// 等异步组件挂载、ref 出现后再应用，避免“提示已带入、字段却是空”。
 const AsyncLegalContractTab = defineAsyncComponent(() => import('../components/legal/LegalContractTab.vue'))
 const AsyncLegalDraftsTab = defineAsyncComponent(() => import('../components/legal/LegalDraftsTab.vue'))
 const AsyncLegalReviewTab = defineAsyncComponent(() => import('../components/legal/LegalReviewTab.vue'))
@@ -345,6 +345,10 @@ const caseSearch = ref('')
 const reviewTabRef = ref(null)
 const draftsTabRef = ref(null)
 const contractsTabRef = ref(null)
+// 从咨询结果跳 tab 时，目标组件是异步的，挂载前 ref 还不存在。
+// 先记下要带入的内容，等 ref 解析/挂载后再应用，避免“提示已带入、字段却是空”。
+const pendingDraftPrefill = ref(null)
+const pendingContractPrefill = ref(null)
 
 const overviewQuery = useQuery({ key: qk.legal.overview(), fetcher: () => legalWorkspace.getLegalOverview(), staleTime: 60_000 })
 // 自注册且未归属组织的用户 organization_id 为 null：不再回退默认组织（回退会让全部
@@ -491,18 +495,43 @@ const CATEGORY_TO_DRAFT_TYPE = {
   private_lending: 'private_lending_complaint',
   consumer_dispute: 'consumer_complaint',
 }
+const applyPendingDraftPrefill = () => {
+  const target = draftsTabRef.value
+  if (!target?.prefill || !pendingDraftPrefill.value) return
+  target.prefill(pendingDraftPrefill.value.type, pendingDraftPrefill.value.fields)
+  pendingDraftPrefill.value = null
+}
+const applyPendingContractPrefill = () => {
+  const target = contractsTabRef.value
+  if (!target?.prefill || !pendingContractPrefill.value) return
+  target.prefill(pendingContractPrefill.value.title, pendingContractPrefill.value.content)
+  pendingContractPrefill.value = null
+}
+// 异步组件解析完成后 ref 才会出现：tab 挂载时补一次应用。
+watch(draftsTabRef, applyPendingDraftPrefill, { flush: 'post' })
+watch(contractsTabRef, applyPendingContractPrefill, { flush: 'post' })
+// 用户没等到目标 tab 挂载就切走：丢弃待带入内容，避免下次打开 tab 时突然出现旧案情。
+watch(activeCaseTab, (tab) => {
+  if (tab !== 'draft') pendingDraftPrefill.value = null
+  if (tab !== 'contract') pendingContractPrefill.value = null
+})
 const handleGoToDraftFromConsult = (consultResult) => {
   if (!consultResult) return
   const type = CATEGORY_TO_DRAFT_TYPE[consultResult.category]
   const facts = (consultResult.known_facts || []).join('；')
-  draftsTabRef.value?.prefill(type, facts ? { 事实与理由: facts } : {})
+  pendingDraftPrefill.value = { type, fields: facts ? { 事实与理由: facts } : {} }
   setMatterTab('draft')
+  nextTick(applyPendingDraftPrefill)
   ElMessage.info(type ? '已带入咨询案情，请补充文书字段' : '已带入咨询案情，请选择文书类型')
 }
 const handleGoToReviewFromConsult = (consultResult) => {
   if (!consultResult) return
-  contractsTabRef.value?.prefill(`${categoryLabel(consultResult.category)}关联审查`, (consultResult.known_facts || []).join('\n'))
+  pendingContractPrefill.value = {
+    title: `${categoryLabel(consultResult.category)}关联审查`,
+    content: (consultResult.known_facts || []).join('\n'),
+  }
   setMatterTab('contract')
+  nextTick(applyPendingContractPrefill)
   ElMessage.info('已带入咨询案情，请补充合同原文后开始审查')
 }
 const downloadText = (filename, content) => {

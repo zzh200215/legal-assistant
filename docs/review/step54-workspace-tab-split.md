@@ -83,7 +83,7 @@ const AsyncLegalReviewTab = defineAsyncComponent(() => import('../components/leg
 ## 6. 边界
 
 1. **三个 tab 各自 chunk**：首次点合同审查/文书/审核会多一次网络请求；之后命中缓存。
-2. **prefill 时序未修**：`handleGoToDraftFromConsult` / `handleGoToReviewFromConsult` 仍在 `setMatterTab` 前调用 ref；tab 未挂载时 prefill 为 no-op。这是拆前就存在的问题，本次只搬加载方式，不改变行为；要修需改成「待挂载后应用」的显式状态（后续单开）。
+2. **prefill 时序**：`handleGoToDraftFromConsult` / `handleGoToReviewFromConsult` 改为 pending + ref watcher 后已修复（step55），不再依赖「调用时 tab 已挂载」；step54 当时只搬加载方式，未改时序。
 3. **ref 类型**：异步组件的 ref 在解析完成后才指向内部实例；父组件不要在挂载前假定有 `prefill/refresh`。
 4. **总资产略增**：三个 chunk 共增加 6.1 KB；如果继续拆更多 tab，先量总量，别把 21.2 KB 余量吃光。
 5. **最大页面 chunk 换人**：现在最大是 `SystemAnalyticsTabs` 85.3 KB，不再是 LegalWorkspace；后续若继续治理，应看 System 观测组。
@@ -94,4 +94,4 @@ const AsyncLegalReviewTab = defineAsyncComponent(() => import('../components/leg
 
 - 余量 21.2 KB，足够再加一个小功能或一次小拆分，但不够大改；
 - 下一个包体目标是 `SystemAnalyticsTabs`（85.3 KB），可再按「实验/投递/模板」拆，但要先量 chunk 开销；
-- 若继续做咨询闭环，优先修 prefill 时序（边界 2），它比继续拆包更影响用户感知。
+- 若继续做咨询闭环，优先修 prefill 时序（边界 2）；step55 已完成 pending + ref watcher 的修复。

@@ -595,6 +595,12 @@ const startNewReview = () => {
   diffBase.value = null
   diffTarget.value = null
 }
+// 从咨询结果「进入合同审查」带入案情：先回到新建审查态，再填标题与合同原文。
+const prefill = (title, content) => {
+  startNewReview()
+  contractForm.value = { title: title || '', content: content || '' }
+}
+defineExpose({ prefill })
 const submitForLawyerReview = async () => {
   if (!contractResult.value?.id || reviewSubmitting.value) return
   try {
