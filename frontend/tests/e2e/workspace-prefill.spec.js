@@ -100,6 +100,15 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
         body: '# 法律咨询结果\n\n导出快照\n',
       })
     }
+    if (method === 'GET' && path === '/legal/consultations/search') {
+      const keyword = new URL(route.request().url()).searchParams.get('q') || ''
+      const items = keyword === '经济补偿' ? [listRows[0]] : []
+      return route.fulfill({
+        json: success({
+          items, total: items.length, page: 1, limit: 20, has_more: false,
+        }),
+      })
+    }
     if (method === 'GET' && path === '/legal/consultations/11') {
       return route.fulfill({
         json: success({
@@ -163,6 +172,10 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   const historySearch = page.getByPlaceholder('搜索问题/答复/法源')
   await historySearch.fill('经济补偿')
   await expect(page.locator('.history-card .el-table__row')).toHaveCount(1)
+  if (SHOT_DIR) {
+    await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
+    await page.locator('.history-card').screenshot({ path: path.join(SHOT_DIR, 'step68-consult-server-search.png') })
+  }
   await historySearch.fill('不存在的关键字')
   await expect(page.getByText('没有符合筛选条件的咨询')).toBeVisible()
   await historySearch.fill('')

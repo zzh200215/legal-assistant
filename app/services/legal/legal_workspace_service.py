@@ -11,6 +11,7 @@ import difflib
 import logging
 from dataclasses import dataclass
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from fastapi import HTTPException
@@ -1253,6 +1254,48 @@ class LegalWorkspaceReadModule:
             for item, row in zip(result, rows):
                 item["submitter_name"] = names.get(row.user_id)
         return result
+
+    def search_consultations(
+        self, db: Session, user: User, *, q: str, case_id: int | None = None,
+        page: int = 1, limit: int = 20,
+    ) -> dict:
+        """服务端搜索咨询（问题/答复/法源 JSON），带总数与 offset 分页。
+
+        可见性沿用 list_rows：案件上下文校验案件访问权；否则只看本人记录。
+        搜索接口只服务历史列表，不改变旧 list_rows 的返回结构。
+        """
+        if case_id is not None:
+            verify_case_access(case_id, user.id, db)
+            query = db.query(LegalConsultation).filter(LegalConsultation.case_id == case_id)
+        else:
+            query = db.query(LegalConsultation).filter(LegalConsultation.user_id == user.id)
+        keyword = (q or "").strip()
+        if keyword:
+            query = query.filter(or_(
+                LegalConsultation.question.icontains(keyword, autoescape=True),
+                LegalConsultation.advice.icontains(keyword, autoescape=True),
+                LegalConsultation.references_json.icontains(keyword, autoescape=True),
+            ))
+        total = query.count()
+        rows = (
+            query.order_by(LegalConsultation.created_at.desc(), LegalConsultation.id.desc())
+            .offset((page - 1) * limit).limit(limit).all()
+        )
+        result = [serialize_workspace_row(row) for row in rows]
+        if case_id is not None and rows:
+            names = {
+                u.id: (u.full_name or u.username)
+                for u in db.query(User).filter(User.id.in_({r.user_id for r in rows})).all()
+            }
+            for item, row in zip(result, rows):
+                item["submitter_name"] = names.get(row.user_id)
+        return {
+            "items": result,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "has_more": page * limit < total,
+        }
 
     def get_row(self, db: Session, user: User, kind: str, item_id: int):
         model = {"consultation": LegalConsultation, "contract_review": ContractReview, "draft": LegalDraft}[kind]

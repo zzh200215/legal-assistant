@@ -123,6 +123,47 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 404)
 
+    def test_search_consultations_paginates_and_scopes_by_case(self):
+        for index in range(3):
+            self.db.add(LegalConsultation(
+                user_id=self.member_a.id, case_id=self.case.id,
+                question=f"分页问题 {index}", category="other",
+                known_facts_json="[]", missing_facts_json="[]",
+                references_json="[]", advice="分页建议", risk_level="low",
+                status="pending_review",
+            ))
+        self.db.commit()
+
+        first = self.client.get(
+            f"/api/legal/consultations/search?q=分页&case_id={self.case.id}&limit=2&page=1",
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        body = first.json()["data"]
+        self.assertEqual(body["total"], 3)
+        self.assertEqual(len(body["items"]), 2)
+        self.assertTrue(body["has_more"])
+
+        second = self.client.get(
+            f"/api/legal/consultations/search?q=分页&case_id={self.case.id}&limit=2&page=2",
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(len(second.json()["data"]["items"]), 1)
+        self.assertFalse(second.json()["data"]["has_more"])
+
+        empty = self.client.get(
+            f"/api/legal/consultations/search?q=不存在&case_id={self.case.id}",
+            headers=self._headers(self.member_a),
+        )
+        self.assertEqual(empty.json()["data"]["total"], 0)
+
+        denied = self.client.get(
+            f"/api/legal/consultations/search?q=分页&case_id={self.case.id}",
+            headers=self._headers(self.outsider),
+        )
+        self.assertIn(denied.status_code, (403, 404))
+
     def test_export_records_paginate(self):
         for _ in range(3):
             self.client.get(

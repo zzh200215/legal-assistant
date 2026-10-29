@@ -984,6 +984,20 @@ def list_consultations(
     return rows
 
 
+@router.get("/consultations/search")
+def search_consultations(
+    q: str = Query(min_length=1, max_length=100, description="搜索问题/答复/法源"),
+    case_id: int | None = Query(default=None),
+    page: int = Query(default=1, ge=1, le=1000),
+    limit: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """服务端搜索咨询历史；offset 分页，结果带 total/has_more。"""
+    return legal_workspace_read_module.search_consultations(
+        db, current_user, q=q, case_id=case_id, page=page, limit=limit,
+    )
+
+
 @router.get("/consultations/{item_id}")
 def get_consultation(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:

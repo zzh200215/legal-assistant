@@ -163,7 +163,10 @@
           <section v-if="historyVisible" class="app-card history-card">
             <div class="app-card-head">
               <h2>历史咨询</h2>
-              <span class="app-card-head-meta">共 {{ consultations.length }} 条<template v-if="filteredConsultations.length !== consultations.length"> · 匹配 {{ filteredConsultations.length }} 条</template><template v-if="noReferenceCount"> · 无引用 {{ noReferenceCount }} 条</template></span>
+              <span class="app-card-head-meta">
+                <template v-if="historyKeyword.trim()">匹配 {{ searchTotal }} 条</template>
+                <template v-else>共 {{ consultations.length }} 条<template v-if="filteredConsultations.length !== consultations.length"> · 匹配 {{ filteredConsultations.length }} 条</template><template v-if="noReferenceCount"> · 无引用 {{ noReferenceCount }} 条</template></template>
+              </span>
             </div>
             <div class="app-card-body history-body">
               <div class="history-chain-filters">
@@ -183,7 +186,9 @@
               </div>
               <!-- 三态区分（ux-audit P1-3/M-13）：加载失败与"暂无咨询"分开呈现 -->
               <QueryStateView :status="historyStatus" :error="historyError" min-height="0px" @retry="loadConsultations">
-                <el-table :data="filteredConsultations" stripe size="small" :empty-text="historyKeyword || historyChainFilter ? '没有符合筛选条件的咨询' : '暂无咨询记录'">
+                <p v-if="searchLoading" class="legal-muted">正在搜索…</p>
+                <p v-else-if="searchError" class="legal-muted">{{ searchError }}</p>
+                <el-table :data="visibleConsultations" stripe size="small" :empty-text="historyKeyword || historyChainFilter ? '没有符合筛选条件的咨询' : '暂无咨询记录'">
                   <el-table-column prop="id" label="ID" width="60" />
                   <el-table-column prop="category" label="分类" width="120">
                     <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
@@ -213,6 +218,9 @@
                     </template>
                   </el-table-column>
                 </el-table>
+                <div v-if="searchHasMore" class="history-load-more">
+                  <el-button text size="small" :loading="searchLoading" @click="loadMoreSearch">加载更多搜索结果</el-button>
+                </div>
               </QueryStateView>
             </div>
           </section>
@@ -220,7 +228,7 @@
 </template>
 
 <script setup>
-import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { ElMessage } from 'element-plus/es/components/message/index'
@@ -337,6 +345,65 @@ const filteredConsultations = computed(() => {
       .some((value) => String(value || '').toLocaleLowerCase().includes(keyword))
   })
 })
+
+const searchResults = ref(null)
+const searchLoading = ref(false)
+const searchError = ref(null)
+const searchTotal = ref(0)
+const searchPage = ref(1)
+const searchHasMore = ref(false)
+let searchTimer = null
+const visibleConsultations = computed(() => {
+  if (!historyKeyword.value.trim() || !searchResults.value) return filteredConsultations.value
+  return historyChainFilter.value
+    ? searchResults.value.filter((row) => chainLevel(row) === historyChainFilter.value)
+    : searchResults.value
+})
+const runSearch = async (page = 1) => {
+  const keyword = historyKeyword.value.trim()
+  if (!keyword) return
+  searchLoading.value = true
+  searchError.value = null
+  try {
+    const { data } = await legalWorkspace.searchLegalConsultations({
+      q: keyword,
+      page,
+      limit: 20,
+      ...(props.caseId ? { case_id: props.caseId } : {}),
+    })
+    if (historyKeyword.value.trim() !== keyword) return
+    const items = data?.items || []
+    searchResults.value = page === 1 ? items : [...(searchResults.value || []), ...items]
+    searchTotal.value = data?.total || 0
+    searchPage.value = data?.page || page
+    searchHasMore.value = Boolean(data?.has_more)
+  } catch (error) {
+    searchError.value = error.response?.data?.detail || '搜索失败'
+  } finally {
+    searchLoading.value = false
+  }
+}
+const loadMoreSearch = () => runSearch(searchPage.value + 1)
+watch(historyKeyword, (value) => {
+  clearTimeout(searchTimer)
+  const keyword = value.trim()
+  if (!keyword) {
+    searchResults.value = null
+    searchTotal.value = 0
+    searchHasMore.value = false
+    searchError.value = null
+    return
+  }
+  searchTimer = setTimeout(() => runSearch(1), 300)
+})
+watch(() => props.caseId, () => {
+  searchResults.value = null
+  searchTotal.value = 0
+  searchHasMore.value = false
+  searchError.value = null
+  if (historyKeyword.value.trim()) runSearch(1)
+})
+onBeforeUnmount(() => clearTimeout(searchTimer))
 const historyStatus = computed(() => {
   if (consultationsQuery.isLoading.value) return 'loading'
   if (consultationsQuery.isError.value) return 'error'
@@ -698,6 +765,7 @@ onMounted(() => {
 .history-chain-filters { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
 .history-search { height: 28px; min-width: 180px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }
 .history-search:focus { border-color: var(--color-primary); outline: none; }
+.history-load-more { display: flex; justify-content: center; margin-top: var(--space-2); }
 .history-chain-filters select { height: 28px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }
 .chain-chip { height: 28px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-subtle); color: var(--color-text-secondary); font-size: var(--text-xs); cursor: pointer; }
 .chain-chip:hover:not(:disabled) { color: var(--color-text-primary); }
