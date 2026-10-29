@@ -1,12 +1,11 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import tailwindcss from '@tailwindcss/vite'
 
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8001'
 
 export default defineConfig({
   cacheDir: 'node_modules/.vite-project-cache',
-  plugins: [vue(), tailwindcss()],
+  plugins: [vue()],
   build: {
     // 目标浏览器按 ES2021 标准构建（Chrome/Edge 85+、Firefox 79+、Safari 15+）。
     // 比 Vite 默认 modules 少一层旧浏览器 downlevel 辅助代码，给 System 分组 chunk 留出余量。

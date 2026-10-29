@@ -30,7 +30,6 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.48.0",
-    "@tailwindcss/vite": "^4.3.2",
     "@vitejs/plugin-vue": "^5.1.0",
     "@vue/eslint-config-prettier": "^10.2.0",
     "autoprefixer": "^10.5.2",
@@ -39,7 +38,6 @@
     "globals": "^17.11.0",
     "postcss": "^8.5.16",
     "prettier": "^3.9.6",
-    "tailwindcss": "^4.3.2",
     "vite": "^5.4.0"
   }
 }
