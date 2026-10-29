@@ -191,11 +191,11 @@
       </details>
 
       <details class="contract-fold history-details">
-        <summary>历史审查 <span>{{ filteredContractReviews.length }} 条<template v-if="contractHistoryHasMore">（还有更早）</template></span></summary>
+        <summary>历史审查 <span>{{ contractHistoryCount }} 条<template v-if="contractHistoryHasMore">（还有更早）</template></span></summary>
         <section class="app-card fold-card">
           <div class="app-card-head">
             <h2>历史审查记录</h2>
-            <span class="app-card-head-meta">{{ filteredContractReviews.length }} 条</span>
+            <span class="app-card-head-meta">{{ contractHistoryCount }} 条</span>
           </div>
           <div class="app-card-body">
             <div class="history-filters">
@@ -349,7 +349,7 @@ const { openSourceDetail } = useLegalSourceDetail()
 const {
   contractForm, contractLoading, contractResult, contractReviews, reviewsQuery, uploadLoading, contractVersionMap,
   resubmitDraftForm, resubmitLoading, riskStats, riskStatsLoading, riskStatsDays, loadRiskStats,
-  contractHistoryHasMore, contractHistoryLoadingMore, loadMoreContractReviews,
+  contractHistoryHasMore, contractHistoryTotal, contractHistoryLoadingMore, loadMoreContractReviews,
   contractHistoryLoading, reloadContractReviewsWithFilters,
   loadContractReviews, submitContractReview: runContractReview,
   onExpandContractReview, submitContractResubmit, handleContractUpload: uploadContractReview,
@@ -392,6 +392,11 @@ watch(
   () => [reviewFilter.value.status, reviewFilter.value.risk],
   ([status, risk]) => { void reloadContractReviewsWithFilters({ status, risk }) },
 )
+const contractHistoryCount = computed(() => (
+  contractHistoryTotal.value !== null
+    ? contractHistoryTotal.value
+    : filteredContractReviews.value.length
+))
 const { compareForm, compareLoading, compareResult, submitCompare } = useContractComparison({ client: legalWorkspace, message: ElMessage })
 // 历史审查三态（ux-audit P1-3/M-13）：加载失败与"暂无记录"分离，失败可重试
 const historyStatus = computed(() => {
