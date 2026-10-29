@@ -129,6 +129,10 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
       listRows = [{
         id, case_id: 1, status: 'pending_review', updated_at: '2026-10-28T12:00:00',
         content_version: 'cv-new', question: CONSULT_RESULT.question,
+        advice: CONSULT_RESULT.advice, category: CONSULT_RESULT.category,
+        risk_level: CONSULT_RESULT.risk_level,
+        evidence_summary: { level: 'none', references: 0 },
+        references: [],
       }]
       return route.fulfill({ json: success({ ...CONSULT_RESULT, id }) })
     }
@@ -155,6 +159,18 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   await expect(page.getByText('结果已同步')).toBeVisible()
   await expect(page.getByRole('button', { name: '提交律师审核' })).toHaveCount(0)
   await expect(page.getByText('律师通过')).toBeVisible()
+  // 历史咨询搜索：按问题/答复/法源关键字过滤
+  const historySearch = page.getByPlaceholder('搜索问题/答复/法源')
+  await historySearch.fill('经济补偿')
+  await expect(page.locator('.history-card .el-table__row')).toHaveCount(1)
+  await historySearch.fill('不存在的关键字')
+  await expect(page.getByText('没有符合筛选条件的咨询')).toBeVisible()
+  await historySearch.fill('')
+  await expect(page.locator('.history-card .el-table__row')).toHaveCount(1)
+  if (SHOT_DIR) {
+    await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
+    await page.locator('.history-card').screenshot({ path: path.join(SHOT_DIR, 'step67-consult-history-search.png') })
+  }
   await page.getByRole('button', { name: '复制结果' }).click()
   await expect.poll(() => page.evaluate(() => window.__copiedConsult)).toContain('当前状态：律师通过')
   await expect.poll(() => page.evaluate(() => window.__copiedConsult)).toContain('2021年3月入职；2024年5月被辞退')

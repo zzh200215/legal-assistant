@@ -163,10 +163,11 @@
           <section v-if="historyVisible" class="app-card history-card">
             <div class="app-card-head">
               <h2>历史咨询</h2>
-              <span class="app-card-head-meta">共 {{ consultations.length }} 条<template v-if="noReferenceCount"> · 无引用 {{ noReferenceCount }} 条</template></span>
+              <span class="app-card-head-meta">共 {{ consultations.length }} 条<template v-if="filteredConsultations.length !== consultations.length"> · 匹配 {{ filteredConsultations.length }} 条</template><template v-if="noReferenceCount"> · 无引用 {{ noReferenceCount }} 条</template></span>
             </div>
             <div class="app-card-body history-body">
               <div class="history-chain-filters">
+                <input v-model="historyKeyword" type="search" class="history-search" placeholder="搜索问题/答复/法源" aria-label="搜索历史咨询">
                 <select v-model="historyChainFilter" aria-label="按依据筛选">
                   <option value="">全部依据</option>
                   <option value="none">无引用</option>
@@ -182,7 +183,7 @@
               </div>
               <!-- 三态区分（ux-audit P1-3/M-13）：加载失败与"暂无咨询"分开呈现 -->
               <QueryStateView :status="historyStatus" :error="historyError" min-height="0px" @retry="loadConsultations">
-                <el-table :data="filteredConsultations" stripe size="small" :empty-text="historyChainFilter ? '没有符合筛选条件的咨询' : '暂无咨询记录'">
+                <el-table :data="filteredConsultations" stripe size="small" :empty-text="historyKeyword || historyChainFilter ? '没有符合筛选条件的咨询' : '暂无咨询记录'">
                   <el-table-column prop="id" label="ID" width="60" />
                   <el-table-column prop="category" label="分类" width="120">
                     <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
@@ -318,13 +319,24 @@ const {
 // 历史咨询三态（ux-audit P1-3/M-13）：失败态可重试，不再与"暂无咨询"混同
 // 依据筛选：无引用可单独列出（level 缺失按 none 处理，老记录即「没引用」）
 const historyChainFilter = ref('')
+const historyKeyword = ref('')
 const chainLevel = (row) => row.evidence_summary?.level || 'none'
 const noReferenceCount = computed(() => consultations.value.filter((row) => chainLevel(row) === 'none').length)
-const filteredConsultations = computed(() => (
-  historyChainFilter.value
-    ? consultations.value.filter((row) => chainLevel(row) === historyChainFilter.value)
-    : consultations.value
-))
+const filteredConsultations = computed(() => {
+  let rows = consultations.value
+  if (historyChainFilter.value) {
+    rows = rows.filter((row) => chainLevel(row) === historyChainFilter.value)
+  }
+  const keyword = historyKeyword.value.trim().toLocaleLowerCase()
+  if (!keyword) return rows
+  return rows.filter((row) => {
+    const references = Array.isArray(row.references)
+      ? row.references.map((ref) => `${ref.title || ''} ${ref.citation || ''}`).join(' ')
+      : ''
+    return [row.question, row.advice, references]
+      .some((value) => String(value || '').toLocaleLowerCase().includes(keyword))
+  })
+})
 const historyStatus = computed(() => {
   if (consultationsQuery.isLoading.value) return 'loading'
   if (consultationsQuery.isError.value) return 'error'
@@ -684,6 +696,8 @@ onMounted(() => {
 .chain-line { margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--text-xs); }
 
 .history-chain-filters { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.history-search { height: 28px; min-width: 180px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }
+.history-search:focus { border-color: var(--color-primary); outline: none; }
 .history-chain-filters select { height: 28px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-elevated); color: var(--color-text-primary); font-size: var(--text-xs); }
 .chain-chip { height: 28px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-subtle); color: var(--color-text-secondary); font-size: var(--text-xs); cursor: pointer; }
 .chain-chip:hover:not(:disabled) { color: var(--color-text-primary); }
