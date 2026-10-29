@@ -1159,11 +1159,14 @@ def contract_review_history(
     case_id: int | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=50),
     cursor: int | None = Query(default=None, ge=1, description="已加载的最后一条记录 id"),
+    status: str | None = Query(default=None, max_length=32),
+    risk_level: str | None = Query(default=None, pattern="^(high|medium|low)$"),
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    """合同审查历史「加载更多」：按 id 倒序取 cursor 之前的记录。"""
+    """合同审查历史「加载更多」：可按状态/风险等级筛选，按 id 倒序取 cursor 之前。"""
     return legal_workspace_read_module.list_history(
         db, current_user, "contract_review", case_id=case_id, limit=limit, cursor=cursor,
+        status=status, risk_level=risk_level,
     )
 
 

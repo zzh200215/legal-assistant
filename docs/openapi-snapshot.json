@@ -5968,7 +5968,7 @@
           "Legal Workspace"
         ],
         "summary": "Contract Review History",
-        "description": "合同审查历史「加载更多」：按 id 倒序取 cursor 之前的记录。",
+        "description": "合同审查历史「加载更多」：可按状态/风险等级筛选，按 id 倒序取 cursor 之前。",
         "operationId": "contract_review_history_api_legal_contract_reviews_history_get",
         "security": [
           {
@@ -6022,6 +6022,40 @@
               "title": "Cursor"
             },
             "description": "已加载的最后一条记录 id"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "risk_level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(high|medium|low)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Risk Level"
+            }
           }
         ],
         "responses": {

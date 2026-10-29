@@ -18,6 +18,10 @@ export function useContractReviews({ client, message, caseId }) {
   const contractHistoryHasMore = ref(false)
   const contractHistoryTotal = ref(null)
   const contractHistoryLoadingMore = ref(false)
+  const contractHistoryLoading = ref(false)
+  const serverFiltered = ref(false)
+  const filteredRows = ref([])
+  const activeHistoryFilter = ref({ status: '', risk: '' })
   // 跨审查风险统计：折叠展开时按需拉取，切案件/切时间窗后重新取
   const riskStats = ref(null)
   const riskStatsLoading = ref(false)
@@ -47,7 +51,8 @@ export function useContractReviews({ client, message, caseId }) {
   })
 
   const contractReviews = computed(() => {
-    const rows = [...(reviewsQuery.data.value || []), ...olderContractReviews.value]
+    const base = serverFiltered.value ? filteredRows.value : (reviewsQuery.data.value || [])
+    const rows = [...base, ...olderContractReviews.value]
     const seen = new Set()
     const unique = rows.filter((row) => {
       if (seen.has(row.id)) return false
@@ -58,7 +63,45 @@ export function useContractReviews({ client, message, caseId }) {
     return activeCaseId ? unique.filter((row) => Number(row.case_id) === Number(activeCaseId)) : unique
   })
 
+  const fetchFilteredContractReviews = async (filters) => {
+    contractHistoryLoading.value = true
+    olderContractReviews.value = []
+    contractHistoryTotal.value = null
+    try {
+      const params = { limit: 20 }
+      if (caseId?.value) params.case_id = caseId.value
+      if (filters.status) params.status = filters.status
+      if (filters.risk) params.risk_level = filters.risk
+      const { data } = await client.listContractReviewHistory(params)
+      filteredRows.value = data?.items || []
+      contractHistoryTotal.value = data?.total ?? null
+      contractHistoryHasMore.value = Boolean(data?.has_more)
+    } catch (error) {
+      filteredRows.value = []
+      contractHistoryHasMore.value = false
+      message.error(error?.response?.data?.detail || error.message || '筛选历史审查失败')
+    } finally {
+      contractHistoryLoading.value = false
+    }
+  }
+
+  const reloadContractReviewsWithFilters = async (filters = {}) => {
+    activeHistoryFilter.value = { status: filters.status || '', risk: filters.risk || '' }
+    if (!activeHistoryFilter.value.status && !activeHistoryFilter.value.risk) {
+      serverFiltered.value = false
+      filteredRows.value = []
+      await loadContractReviews()
+      return
+    }
+    serverFiltered.value = true
+    await fetchFilteredContractReviews(activeHistoryFilter.value)
+  }
+
   const loadContractReviews = async () => {
+    if (serverFiltered.value) {
+      await fetchFilteredContractReviews(activeHistoryFilter.value)
+      return
+    }
     olderContractReviews.value = []
     contractHistoryTotal.value = null
     await reviewsQuery.refetch()
@@ -73,6 +116,10 @@ export function useContractReviews({ client, message, caseId }) {
       const params = { limit: 20 }
       if (caseId?.value) params.case_id = caseId.value
       if (last?.id) params.cursor = last.id
+      if (serverFiltered.value) {
+        if (activeHistoryFilter.value.status) params.status = activeHistoryFilter.value.status
+        if (activeHistoryFilter.value.risk) params.risk_level = activeHistoryFilter.value.risk
+      }
       const { data } = await client.listContractReviewHistory(params)
       olderContractReviews.value = [...olderContractReviews.value, ...(data?.items || [])]
       contractHistoryTotal.value = data?.total ?? contractHistoryTotal.value
@@ -188,7 +235,9 @@ export function useContractReviews({ client, message, caseId }) {
     contractHistoryHasMore,
     contractHistoryTotal,
     contractHistoryLoadingMore,
+    contractHistoryLoading,
     loadMoreContractReviews,
+    reloadContractReviewsWithFilters,
     uploadLoading,
     contractVersionMap,
     resubmitDraftForm,

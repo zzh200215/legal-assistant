@@ -1,6 +1,7 @@
 """案件级协作可见性（ux-audit 方案 B）：案件成员可读/列出同案件下其他成员的工作台记录；
 个人默认视图维持隔离；跨组织与严格模式案件按既有 verify_case_access 口径收口。"""
 
+import json
 import unittest
 from datetime import timedelta
 
@@ -155,7 +156,12 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         for index in range(25):
             self.db.add(ContractReview(
                 user_id=self.member_a.id, case_id=self.case.id,
-                title=f"合同 {index}", content="合同正文", status="pending_review",
+                title=f"合同 {index}", content="合同正文",
+                status="lawyer_approved" if index < 5 else "pending_review",
+                risks_json=json.dumps(
+                    [{"risk_level": "high" if index < 7 else "low", "title": "风险"}],
+                    ensure_ascii=False,
+                ),
             ))
             self.db.add(LegalDraft(
                 user_id=self.member_a.id, case_id=self.case.id,
@@ -179,6 +185,46 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
             ).json()["data"]
             self.assertEqual(len(second["items"]), 5)
             self.assertFalse(second["has_more"])
+
+        high = self.client.get(
+            f"/api/legal/contract-reviews/history?case_id={self.case.id}&risk_level=high&limit=50",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(high["total"], 7)
+        self.assertTrue(all(
+            any(risk.get("risk_level") == "high" for risk in item["risks"])
+            for item in high["items"]
+        ))
+
+        approved = self.client.get(
+            f"/api/legal/contract-reviews/history?case_id={self.case.id}&status=lawyer_approved&limit=50",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(approved["total"], 5)
+
+        both = self.client.get(
+            f"/api/legal/contract-reviews/history?case_id={self.case.id}&status=lawyer_approved&risk_level=high&limit=50",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(both["total"], 5)
+
+        risk_page = self.client.get(
+            f"/api/legal/contract-reviews/history?case_id={self.case.id}&risk_level=high&limit=3",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(len(risk_page["items"]), 3)
+        self.assertTrue(risk_page["has_more"])
+        risk_page_2 = self.client.get(
+            f"/api/legal/contract-reviews/history?case_id={self.case.id}&risk_level=high&limit=3&cursor={risk_page['next_cursor']}",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(len(risk_page_2["items"]), 3)
+        risk_page_3 = self.client.get(
+            f"/api/legal/contract-reviews/history?case_id={self.case.id}&risk_level=high&limit=3&cursor={risk_page_2['next_cursor']}",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(len(risk_page_3["items"]), 1)
+        self.assertFalse(risk_page_3["has_more"])
 
     def test_search_consultations_paginates_and_scopes_by_case(self):
         for index in range(3):

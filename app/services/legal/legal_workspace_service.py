@@ -1258,14 +1258,27 @@ class LegalWorkspaceReadModule:
     def list_history(
         self, db: Session, user: User, kind: str, *, case_id: int | None = None,
         limit: int = 20, cursor: int | None = None,
+        status: str | None = None, risk_level: str | None = None,
     ) -> dict:
-        """历史列表「加载更多」：合同审查/文书共用，按 id 倒序 keyset。"""
+        """历史列表「加载更多」：合同审查/文书共用，按 id 倒序 keyset。
+
+        合同审查可下推 status / risk_level；risk_level 用 risks_json 的 LIKE 匹配
+        （JSON 列跨 MySQL/SQLite 的通用写法），命中后仍以序列化结果为准。
+        """
         model = {"contract_review": ContractReview, "draft": LegalDraft}[kind]
         if case_id is not None:
             verify_case_access(case_id, user.id, db)
             query = db.query(model).filter(model.case_id == case_id)
         else:
             query = db.query(model).filter(model.user_id == user.id)
+        if kind == "contract_review":
+            if status:
+                query = query.filter(model.status == status)
+            if risk_level:
+                query = query.filter(or_(
+                    model.risks_json.like(f'%"risk_level": "{risk_level}"%'),
+                    model.risks_json.like(f'%"risk_level":"{risk_level}"%'),
+                ))
         total = query.count()
         if cursor:
             rows = query.filter(model.id < cursor).order_by(model.id.desc()).limit(limit + 1).all()

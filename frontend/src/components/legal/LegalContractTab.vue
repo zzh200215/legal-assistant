@@ -350,6 +350,7 @@ const {
   contractForm, contractLoading, contractResult, contractReviews, reviewsQuery, uploadLoading, contractVersionMap,
   resubmitDraftForm, resubmitLoading, riskStats, riskStatsLoading, riskStatsDays, loadRiskStats,
   contractHistoryHasMore, contractHistoryLoadingMore, loadMoreContractReviews,
+  contractHistoryLoading, reloadContractReviewsWithFilters,
   loadContractReviews, submitContractReview: runContractReview,
   onExpandContractReview, submitContractResubmit, handleContractUpload: uploadContractReview,
 } = useContractReviews({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
@@ -387,10 +388,14 @@ const {
   reviewFilter, riskFilter, highlightedParagraph, availableClauseTypes, filteredRisks, filteredContractReviews,
   contractParagraphs, resetRiskFilter, jumpToRisk,
 } = useContractRiskPresentation({ contractForm, contractResult, contractReviews })
+watch(
+  () => [reviewFilter.value.status, reviewFilter.value.risk],
+  ([status, risk]) => { void reloadContractReviewsWithFilters({ status, risk }) },
+)
 const { compareForm, compareLoading, compareResult, submitCompare } = useContractComparison({ client: legalWorkspace, message: ElMessage })
 // 历史审查三态（ux-audit P1-3/M-13）：加载失败与"暂无记录"分离，失败可重试
 const historyStatus = computed(() => {
-  if (reviewsQuery.isLoading.value) return 'loading'
+  if (reviewsQuery.isLoading.value || contractHistoryLoading.value) return 'loading'
   if (reviewsQuery.isError.value) return 'error'
   if (!filteredContractReviews.value.length) return 'empty'
   return 'success'
