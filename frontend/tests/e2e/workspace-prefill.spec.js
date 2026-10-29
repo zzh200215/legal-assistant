@@ -65,6 +65,18 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
         body: '# 法律咨询结果\n\n**当前状态：** 律师通过\n',
       })
     }
+    if (method === 'GET' && path === '/legal/review-queue/consultation/11/history') {
+      return route.fulfill({
+        json: success({
+          target_type: 'consultation', target_id: 11,
+          history: [{
+            id: 501, action: 'approve', note: '证据充分，同意通过',
+            reviewer_name: '张律师', from_status: 'needs_lawyer_review',
+            to_status: 'lawyer_approved', created_at: '2026-10-28T12:10:00',
+          }],
+        }),
+      })
+    }
     if (method === 'GET' && path === '/legal/consultations/11/exports') {
       return route.fulfill({
         json: success({
@@ -160,10 +172,15 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     page.getByRole('button', { name: '下载', exact: true }).click(),
   ])
   expect(redownload.suggestedFilename()).toContain('.md')
+  // 审核记录：已有的审核动作按时间倒序展示
+  await page.locator('.review-history summary').click({ force: true })
+  await expect(page.locator('.review-history')).toContainText('审核通过')
+  await expect(page.locator('.review-history')).toContainText('张律师')
+  await expect(page.locator('.review-history')).toContainText('证据充分，同意通过')
   if (SHOT_DIR) {
     await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
     await page.waitForTimeout(200)
-    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step63-consult-export-history.png') })
+    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step66-consult-review-history.png') })
   }
 
   // 文书：prefill 应在异步组件挂载后生效

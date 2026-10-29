@@ -111,6 +111,27 @@
                 </el-input>
               </div>
               <AiOutputFeedback :target-type="'consultation'" :target-id="consultResult.id" :value="consultResult.feedback_score" @submit="submitConsultFeedback" />
+              <details class="review-history" @toggle="onReviewHistoryToggle">
+                <summary class="export-history-summary">
+                  <span>审核记录</span>
+                  <span class="app-card-head-meta">按时间倒序</span>
+                </summary>
+                <p v-if="reviewHistoryLoading" class="legal-muted">正在加载审核记录…</p>
+                <p v-else-if="reviewHistoryError" class="legal-muted">{{ reviewHistoryError }}</p>
+                <p v-else-if="!reviewHistoryRows.length" class="legal-muted">还没有审核动作。</p>
+                <ul v-else class="review-history-list">
+                  <li v-for="row in reviewHistoryRows" :key="row.id">
+                    <div class="review-history-head">
+                      <strong>{{ reviewActionLabel(row.action) }}</strong>
+                      <small>{{ formatExportTime(row.created_at) }} · {{ row.reviewer_name || '审核人' }}</small>
+                    </div>
+                    <p v-if="row.note" class="review-history-note">{{ row.note }}</p>
+                    <small v-if="row.from_status || row.to_status" class="review-history-status">
+                      {{ statusLabel(row.from_status) }} → {{ statusLabel(row.to_status) }}
+                    </small>
+                  </li>
+                </ul>
+              </details>
               <details class="export-history" @toggle="onExportsToggle">
                 <summary class="export-history-summary">
                   <span>导出记录</span>
@@ -443,6 +464,39 @@ watch(() => consultResult.value?.id, () => {
   if (exportsOpen.value) loadExports()
 })
 
+const reviewHistoryOpen = ref(false)
+const reviewHistoryRows = ref([])
+const reviewHistoryLoading = ref(false)
+const reviewHistoryError = ref(null)
+const REVIEW_ACTION_LABELS = {
+  approve: '审核通过', return: '退回补充', offline: '转线下',
+  submit_review: '提交审核', comment: '批注',
+}
+const reviewActionLabel = (action) => REVIEW_ACTION_LABELS[action] || action || '审核动作'
+const loadReviewHistory = async () => {
+  const id = consultResult.value?.id
+  if (!id) return
+  reviewHistoryLoading.value = true
+  reviewHistoryError.value = null
+  try {
+    const { data } = await legalWorkspace.getReviewHistory('consultation', id)
+    reviewHistoryRows.value = data?.history || []
+  } catch (error) {
+    reviewHistoryError.value = error.response?.data?.detail || '加载审核记录失败'
+  } finally {
+    reviewHistoryLoading.value = false
+  }
+}
+const onReviewHistoryToggle = (event) => {
+  reviewHistoryOpen.value = event.target.open
+  if (reviewHistoryOpen.value) loadReviewHistory()
+}
+watch(() => consultResult.value?.id, () => {
+  reviewHistoryRows.value = []
+  reviewHistoryError.value = null
+  if (reviewHistoryOpen.value) loadReviewHistory()
+})
+
 // 历史咨询 → 结果卡：点击行内"查看结果"加载完整详情（含送审按钮），替代刷新后丢失的会话内状态
 const focusRowId = ref(null)
 // 结果卡与历史列表一致性：页面级 ref 可能停在提交时的版本。
@@ -642,6 +696,13 @@ onMounted(() => {
 .comparison-meta { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); }
 
 .export-history { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
+.review-history { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
+.review-history-list { display: grid; gap: var(--space-3); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+.review-history-list li { display: grid; gap: 2px; }
+.review-history-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.review-history-head strong { font-size: var(--text-sm); }
+.review-history-head small, .review-history-status { color: var(--color-text-muted); font-size: var(--text-xs); }
+.review-history-note { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); }
 .export-history-summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: var(--color-text-secondary); font-size: var(--text-sm); list-style: none; }
 .export-history-summary::-webkit-details-marker { display: none; }
 .export-history-list { display: grid; gap: var(--space-2); margin: var(--space-2) 0 0; padding: 0; list-style: none; }

@@ -310,6 +310,7 @@ class LegalApiTests(unittest.TestCase):
         self.assertEqual(len(body["history"]), 1)
         self.assertEqual(body["history"][0]["action"], "return")
         self.assertEqual(body["history"][0]["note"], "缺少劳动合同证据")
+        self.assertEqual(body["history"][0]["reviewer_name"], "legal_admin")
 
     def test_review_history_forbidden_for_non_owner_non_reviewer(self):
         consultation = LegalConsultation(

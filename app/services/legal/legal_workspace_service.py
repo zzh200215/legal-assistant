@@ -1675,9 +1675,22 @@ class LegalWorkspaceReadModule:
             raise PermissionError("LEGAL_REVIEW_HISTORY_FORBIDDEN")
         result = serialize_workspace_row(row)
         result["target_type"] = target_type
-        result["history"] = [serialize_review_action(item) for item in db.query(LegalReviewAction).filter(
+        actions = db.query(LegalReviewAction).filter(
             LegalReviewAction.target_type == target_type, LegalReviewAction.target_id == target_id,
-        ).order_by(LegalReviewAction.created_at.desc()).all()]
+        ).order_by(LegalReviewAction.created_at.desc()).all()
+        reviewer_ids = {action.reviewer_id for action in actions if action.reviewer_id}
+        reviewer_names = {
+            user_id: username
+            for user_id, username in db.query(User.id, User.username).filter(
+                User.id.in_(reviewer_ids)
+            ).all()
+        } if reviewer_ids else {}
+        history = []
+        for action in actions:
+            item = serialize_review_action(action)
+            item["reviewer_name"] = reviewer_names.get(action.reviewer_id)
+            history.append(item)
+        result["history"] = history
         return result
 
     def review_stats(self, db: Session, user: User) -> dict:
