@@ -83,6 +83,9 @@ export default {
   searchLegalConsultations(params) {
     return http.get('/legal/consultations/search', { params })
   },
+  listConsultationHistory(params) {
+    return http.get('/legal/consultations/history', { params })
+  },
   getLegalConsultation(id, config = {}) {
     return http.get(`/legal/consultations/${id}`, config)
   },

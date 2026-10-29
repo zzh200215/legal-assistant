@@ -123,6 +123,34 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 404)
 
+    def test_history_endpoint_paginates(self):
+        for index in range(25):
+            self.db.add(LegalConsultation(
+                user_id=self.member_a.id, case_id=self.case.id,
+                question=f"历史分页 {index}", category="other",
+                known_facts_json="[]", missing_facts_json="[]",
+                references_json="[]", advice="历史建议", risk_level="low",
+                status="pending_review",
+            ))
+        self.db.commit()
+
+        first = self.client.get(
+            f"/api/legal/consultations/history?case_id={self.case.id}&limit=20",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(first["total"], 26)
+        self.assertEqual(len(first["items"]), 20)
+        self.assertTrue(first["has_more"])
+        self.assertIsNotNone(first["next_cursor"])
+
+        second = self.client.get(
+            f"/api/legal/consultations/history?case_id={self.case.id}&limit=20&cursor={first['next_cursor']}",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(len(second["items"]), 6)
+        self.assertFalse(second["has_more"])
+        self.assertIsNone(second["next_cursor"])
+
     def test_search_consultations_paginates_and_scopes_by_case(self):
         for index in range(3):
             self.db.add(LegalConsultation(

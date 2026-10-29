@@ -999,6 +999,19 @@ def search_consultations(
     )
 
 
+@router.get("/consultations/history")
+def consultation_history(
+    case_id: int | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+    cursor: int | None = Query(default=None, ge=1, description="已加载的最后一条记录 id"),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """历史咨询「加载更多」：按 id 倒序取 cursor 之前的记录，带 total/has_more。"""
+    return legal_workspace_read_module.search_consultations(
+        db, current_user, q="", case_id=case_id, limit=limit, cursor=cursor,
+    )
+
+
 @router.get("/consultations/{item_id}")
 def get_consultation(item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     try:

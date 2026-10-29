@@ -13,6 +13,10 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
   // 未注入时退回组件本地 state，保持独立使用（如测试/其他入口）不变。
   const consultResult = result || ref(null)
   const consultations = ref([])
+  const olderConsultations = ref([])
+  const historyHasMore = ref(false)
+  const historyTotal = ref(null)
+  const historyLoadingMore = ref(false)
   const followupQuestion = ref('')
   const followupLoading = ref(false)
 
@@ -26,14 +30,43 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
   })
 
   const consultationsList = computed(() => {
-    const rows = consultationsQuery.data.value || []
+    const rows = [...(consultationsQuery.data.value || []), ...olderConsultations.value]
+    const seen = new Set()
+    const unique = rows.filter((row) => {
+      if (seen.has(row.id)) return false
+      seen.add(row.id)
+      return true
+    })
     const activeCaseId = caseId?.value
-    return activeCaseId ? rows.filter((row) => Number(row.case_id) === Number(activeCaseId)) : rows
+    return activeCaseId ? unique.filter((row) => Number(row.case_id) === Number(activeCaseId)) : unique
   })
 
   const loadConsultations = async () => {
+    olderConsultations.value = []
+    historyTotal.value = null
     await consultationsQuery.refetch()
     consultations.value = consultationsList.value
+    // 后端列表固定返回最近 50 条；满 50 才认为可能还有更早记录。
+    historyHasMore.value = consultationsList.value.length >= 50
+  }
+
+  const loadMoreHistory = async () => {
+    if (!historyHasMore.value || historyLoadingMore.value) return
+    historyLoadingMore.value = true
+    try {
+      const last = consultationsList.value[consultationsList.value.length - 1]
+      const params = { limit: 20 }
+      if (caseId?.value) params.case_id = caseId.value
+      if (last?.id) params.cursor = last.id
+      const { data } = await client.listConsultationHistory(params)
+      olderConsultations.value = [...olderConsultations.value, ...(data?.items || [])]
+      historyTotal.value = data?.total ?? historyTotal.value
+      historyHasMore.value = Boolean(data?.has_more)
+    } catch (error) {
+      message.error(error?.response?.data?.detail || error.message || '加载更多历史咨询失败')
+    } finally {
+      historyLoadingMore.value = false
+    }
   }
 
   const submitMutation = useMutation({
@@ -139,6 +172,10 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
     consultResult,
     consultations: consultationsList,
     consultationsQuery,
+    historyHasMore,
+    historyTotal,
+    historyLoadingMore,
+    loadMoreHistory,
     followupQuestion,
     followupLoading,
     openDetailLoading,

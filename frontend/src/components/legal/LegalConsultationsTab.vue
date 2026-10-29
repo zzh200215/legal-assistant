@@ -165,7 +165,11 @@
               <h2>历史咨询</h2>
               <span class="app-card-head-meta">
                 <template v-if="historyKeyword.trim()">匹配 {{ searchTotal }} 条</template>
-                <template v-else>共 {{ consultations.length }} 条<template v-if="filteredConsultations.length !== consultations.length"> · 匹配 {{ filteredConsultations.length }} 条</template><template v-if="noReferenceCount"> · 无引用 {{ noReferenceCount }} 条</template></template>
+                <template v-else>
+                  <template v-if="historyHasMore && historyTotal === null">已加载 {{ consultations.length }} 条</template>
+                  <template v-else>共 {{ historyTotal ?? consultations.length }} 条</template>
+                  <template v-if="filteredConsultations.length !== consultations.length"> · 匹配 {{ filteredConsultations.length }} 条</template><template v-if="noReferenceCount"> · 无引用 {{ noReferenceCount }} 条</template>
+                </template>
               </span>
             </div>
             <div class="app-card-body history-body">
@@ -220,6 +224,9 @@
                 </el-table>
                 <div v-if="searchHasMore" class="history-load-more">
                   <el-button text size="small" :loading="searchLoading" @click="loadMoreSearch">加载更多搜索结果</el-button>
+                </div>
+                <div v-if="!historyKeyword.trim() && historyHasMore" class="history-load-more">
+                  <el-button text size="small" :loading="historyLoadingMore" @click="loadMoreHistory">加载更多历史咨询</el-button>
                 </div>
               </QueryStateView>
             </div>
@@ -307,6 +314,10 @@ const {
   consultResult,
   consultations,
   consultationsQuery,
+  historyHasMore,
+  historyTotal,
+  historyLoadingMore,
+  loadMoreHistory,
   followupQuestion,
   followupLoading,
   openDetailLoading,
