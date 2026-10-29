@@ -51,6 +51,15 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success({ id: 7, username: 'lawyer', role: 'user', legal_role: 'admin', status: 'active' }) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/legal/overview') return route.fulfill({ json: success({ organization_id: 1 }) })
+    if (method === 'GET' && path === '/legal/history-counts') {
+      return route.fulfill({
+        json: success({
+          consultations: listRows.length,
+          contract_reviews: 0,
+          drafts: 0,
+        }),
+      })
+    }
     if (method === 'GET' && path === '/legal/orgs/1/cases') return route.fulfill({ json: success([CASE]) })
     if (method === 'GET' && path === '/billing/subscriptions/quota') return route.fulfill({ json: success({ consultation: { quota: 8, remaining: 8 }, review: { quota: 8, remaining: 8 }, draft: { quota: 8, remaining: 8 } }) })
     if (method === 'GET' && path === '/legal/orgs/1/portal-branding') return route.fulfill({ json: success({ portal_logo_url: '', portal_welcome_message: '' }) })

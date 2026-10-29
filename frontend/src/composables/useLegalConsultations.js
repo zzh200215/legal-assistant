@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { useQuery } from '../query/useQuery.js'
 import { useMutation } from '../query/useMutation.js'
 import { qk, qkPrefix } from '../query/keys'
+import { useLegalHistoryCounts } from './useLegalHistoryCounts'
 
 // 法律咨询 tab 领域模块（查询层 + 幂等写）：
 // 列表走统一查询层（同 key 去重/缓存/取消），提交/追问经 useMutation（Idempotency-Key 防连点重复）。
@@ -17,6 +18,7 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
   const historyHasMore = ref(false)
   const historyTotal = ref(null)
   const historyLoadingMore = ref(false)
+  const { historyCounts } = useLegalHistoryCounts({ client, caseId })
   const followupQuestion = ref('')
   const followupLoading = ref(false)
 
@@ -71,7 +73,7 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
 
   const submitMutation = useMutation({
     mutationFn: (payload, ctx) => client.createLegalConsultation(payload.body, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qkPrefix('legal', 'consultations')],
+    invalidate: [qkPrefix('legal', 'consultations'), qkPrefix('legal', 'history-counts')],
     onSuccess: (result) => {
       consultResult.value = result.data
       consultForm.value.question = ''
@@ -175,6 +177,7 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
     historyHasMore,
     historyTotal,
     historyLoadingMore,
+    historyCounts,
     loadMoreHistory,
     followupQuestion,
     followupLoading,

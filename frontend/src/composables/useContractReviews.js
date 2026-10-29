@@ -2,6 +2,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuery } from '../query/useQuery.js'
 import { useMutation } from '../query/useMutation.js'
 import { qk, qkPrefix } from '../query/keys'
+import { useLegalHistoryCounts } from './useLegalHistoryCounts'
 
 // 合同审查 tab 领域模块（查询层 + 幂等写）：
 // 审查列表走统一查询层；提交审查/文件审查/重新提交经 useMutation（Idempotency-Key 防连点重复）。
@@ -22,6 +23,7 @@ export function useContractReviews({ client, message, caseId }) {
   const serverFiltered = ref(false)
   const filteredRows = ref([])
   const activeHistoryFilter = ref({ status: '', risk: '' })
+  const { historyCounts } = useLegalHistoryCounts({ client, caseId })
   // 跨审查风险统计：折叠展开时按需拉取，切案件/切时间窗后重新取
   const riskStats = ref(null)
   const riskStatsLoading = ref(false)
@@ -133,7 +135,7 @@ export function useContractReviews({ client, message, caseId }) {
 
   const submitMutation = useMutation({
     mutationFn: (payload, ctx) => client.createContractReview(payload.body, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qkPrefix('legal', 'contract-reviews')],
+    invalidate: [qkPrefix('legal', 'contract-reviews'), qkPrefix('legal', 'history-counts')],
     onSuccess: (result, variables) => {
       contractResult.value = result.data
       if (variables.onResult) variables.onResult()
@@ -161,7 +163,7 @@ export function useContractReviews({ client, message, caseId }) {
 
   const uploadMutation = useMutation({
     mutationFn: (payload, ctx) => client.uploadContractReview(payload.file, payload.title, payload.caseId, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qkPrefix('legal', 'contract-reviews')],
+    invalidate: [qkPrefix('legal', 'contract-reviews'), qkPrefix('legal', 'history-counts')],
     onSuccess: (result, variables) => {
       contractResult.value = result.data
       contractForm.value.title = result.data.title || contractForm.value.title
@@ -236,6 +238,7 @@ export function useContractReviews({ client, message, caseId }) {
     contractHistoryTotal,
     contractHistoryLoadingMore,
     contractHistoryLoading,
+    historyCounts,
     loadMoreContractReviews,
     reloadContractReviewsWithFilters,
     uploadLoading,

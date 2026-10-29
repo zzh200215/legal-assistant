@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { useQuery } from '../query/useQuery.js'
 import { useMutation } from '../query/useMutation.js'
 import { qk, qkPrefix } from '../query/keys'
+import { useLegalHistoryCounts } from './useLegalHistoryCounts'
 
 // 文书草稿 tab 领域模块（查询层 + 幂等写）：模板/草稿列表走统一查询层，生成草稿经 useMutation。
 
@@ -19,6 +20,7 @@ export function useLegalDrafts({ client, message, caseId }) {
   const draftHistoryHasMore = ref(false)
   const draftHistoryTotal = ref(null)
   const draftHistoryLoadingMore = ref(false)
+  const { historyCounts } = useLegalHistoryCounts({ client, caseId })
 
   const templatesQuery = useQuery({
     key: ['legal', 'templates'],
@@ -81,7 +83,7 @@ export function useLegalDrafts({ client, message, caseId }) {
 
   const submitMutation = useMutation({
     mutationFn: (payload, ctx) => client.createLegalDraft(payload.body, { idempotencyKey: ctx.idempotencyKey }),
-    invalidate: [qkPrefix('legal', 'drafts')],
+    invalidate: [qkPrefix('legal', 'drafts'), qkPrefix('legal', 'history-counts')],
     onSuccess: (result) => {
       draftResult.value = result.data
     },
@@ -235,6 +237,7 @@ export function useLegalDrafts({ client, message, caseId }) {
     draftHistoryHasMore,
     draftHistoryTotal,
     draftHistoryLoadingMore,
+    historyCounts,
     loadMoreDrafts,
     draftFieldMap,
     draftVersionMap,

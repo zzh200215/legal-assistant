@@ -966,6 +966,15 @@ def followup_consultation(item_id: int, req: FollowupIn, db: Session = Depends(g
     return attach_consultation_comparison(db, serialize(row), row)
 
 
+@router.get("/history-counts")
+def legal_history_counts(
+    case_id: int | None = Query(default=None),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """首屏历史总数：咨询/合同审查/文书，口径与各自列表一致。"""
+    return legal_workspace_read_module.history_counts(db, current_user, case_id=case_id)
+
+
 @router.get("/consultations")
 def list_consultations(
     case_id: int | None = Query(default=None),

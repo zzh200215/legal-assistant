@@ -80,6 +80,9 @@ export default {
   listLegalConsultations(config = {}) {
     return http.get('/legal/consultations', config)
   },
+  getLegalHistoryCounts(config = {}) {
+    return http.get('/legal/history-counts', config)
+  },
   searchLegalConsultations(params) {
     return http.get('/legal/consultations/search', { params })
   },

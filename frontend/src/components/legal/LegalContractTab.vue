@@ -350,7 +350,7 @@ const {
   contractForm, contractLoading, contractResult, contractReviews, reviewsQuery, uploadLoading, contractVersionMap,
   resubmitDraftForm, resubmitLoading, riskStats, riskStatsLoading, riskStatsDays, loadRiskStats,
   contractHistoryHasMore, contractHistoryTotal, contractHistoryLoadingMore, loadMoreContractReviews,
-  contractHistoryLoading, reloadContractReviewsWithFilters,
+  contractHistoryLoading, reloadContractReviewsWithFilters, historyCounts,
   loadContractReviews, submitContractReview: runContractReview,
   onExpandContractReview, submitContractResubmit, handleContractUpload: uploadContractReview,
 } = useContractReviews({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
@@ -392,11 +392,14 @@ watch(
   () => [reviewFilter.value.status, reviewFilter.value.risk],
   ([status, risk]) => { void reloadContractReviewsWithFilters({ status, risk }) },
 )
-const contractHistoryCount = computed(() => (
-  contractHistoryTotal.value !== null
-    ? contractHistoryTotal.value
-    : filteredContractReviews.value.length
-))
+const contractHistoryCount = computed(() => {
+  if (contractHistoryTotal.value !== null) return contractHistoryTotal.value
+  if (!reviewFilter.value.status && !reviewFilter.value.risk
+    && typeof historyCounts.value?.contract_reviews === 'number') {
+    return historyCounts.value.contract_reviews
+  }
+  return filteredContractReviews.value.length
+})
 const { compareForm, compareLoading, compareResult, submitCompare } = useContractComparison({ client: legalWorkspace, message: ElMessage })
 // 历史审查三态（ux-audit P1-3/M-13）：加载失败与"暂无记录"分离，失败可重试
 const historyStatus = computed(() => {

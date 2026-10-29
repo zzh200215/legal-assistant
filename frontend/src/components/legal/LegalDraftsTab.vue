@@ -113,7 +113,7 @@
     <details class="app-card draft-history">
       <summary class="app-card-head draft-history-summary">
         <h2>文书版本</h2>
-        <span class="app-card-head-meta">{{ draftHistoryTotal ?? drafts.length }} 份历史草稿<template v-if="draftHistoryHasMore">（还有更早）</template></span>
+        <span class="app-card-head-meta">{{ draftHistoryCount ?? drafts.length }} 份历史草稿<template v-if="draftHistoryHasMore">（还有更早）</template></span>
       </summary>
       <QueryStateView :status="draftsStatus" :error="draftsError" empty-text="还没有历史文书。" min-height="80px" @retry="loadDrafts">
         <div class="draft-history-list">
@@ -166,13 +166,16 @@ const { loadQuota } = useQuota()
 const { openSourceDetail } = useLegalSourceDetail()
 const {
   templates, draftForm, draftLoading, draftResult, drafts, draftsQuery, draftFieldMap, draftVersionMap,
-  draftHistoryHasMore, draftHistoryTotal, draftHistoryLoadingMore, loadMoreDrafts,
+  draftHistoryHasMore, draftHistoryTotal, historyCounts, draftHistoryLoadingMore, loadMoreDrafts,
   loadTemplates, setTemplateFields, loadDrafts, submitDraft: runDraftSubmit,
   resubmitDraftForm, resubmitLoading, loadDraftVersions, resubmitDraft: saveDraft,
   autosaveDraft, saveDraftVersion: persistDraftVersion, restoreDraftVersion: restoreVersion,
   draftComments, draftCollaboration, loadDraftComments, loadDraftCollaboration, loadDraftDiff,
   addDraftComment, updateDraftComment,
 } = useLegalDrafts({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
+const draftHistoryCount = computed(() => (
+  draftHistoryTotal.value ?? historyCounts.value?.drafts ?? null
+))
 
 // LLM 起草约需 20-30 秒，阶段性提示缓解等待焦虑（ux-audit M-6）
 const draftStageText = useStagedProgress(draftLoading, [

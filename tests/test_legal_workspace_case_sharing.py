@@ -226,6 +226,51 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(len(risk_page_3["items"]), 1)
         self.assertFalse(risk_page_3["has_more"])
 
+    def test_history_counts_are_scoped(self):
+        self.db.add_all([
+            ContractReview(
+                user_id=self.member_a.id, case_id=self.case.id,
+                title="合同计数", content="正文", status="pending_review",
+            ),
+            ContractReview(
+                user_id=self.member_a.id, case_id=self.case.id,
+                title="合同计数2", content="正文", status="pending_review",
+            ),
+            LegalDraft(
+                user_id=self.member_a.id, case_id=self.case.id,
+                document_type="complaint", title="文书计数", content="正文",
+            ),
+            LegalDraft(
+                user_id=self.member_a.id, case_id=self.case.id,
+                document_type="complaint", title="文书计数2", content="正文",
+            ),
+            LegalDraft(
+                user_id=self.member_a.id, case_id=self.case.id,
+                document_type="complaint", title="文书计数3", content="正文",
+            ),
+        ])
+        self.db.commit()
+
+        case_counts = self.client.get(
+            f"/api/legal/history-counts?case_id={self.case.id}",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(case_counts, {"consultations": 1, "contract_reviews": 2, "drafts": 3})
+
+        mine = self.client.get(
+            "/api/legal/history-counts",
+            headers=self._headers(self.member_a),
+        ).json()["data"]
+        self.assertEqual(mine["consultations"], 2)
+        self.assertEqual(mine["contract_reviews"], 2)
+        self.assertEqual(mine["drafts"], 3)
+
+        denied = self.client.get(
+            f"/api/legal/history-counts?case_id={self.case.id}",
+            headers=self._headers(self.outsider),
+        )
+        self.assertIn(denied.status_code, (403, 404))
+
     def test_search_consultations_paginates_and_scopes_by_case(self):
         for index in range(3):
             self.db.add(LegalConsultation(

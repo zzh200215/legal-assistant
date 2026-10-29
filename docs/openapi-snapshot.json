@@ -5393,6 +5393,59 @@
         }
       }
     },
+    "/api/legal/history-counts": {
+      "get": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "Legal History Counts",
+        "description": "首屏历史总数：咨询/合同审查/文书，口径与各自列表一致。",
+        "operationId": "legal_history_counts_api_legal_history_counts_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/consultations/search": {
       "get": {
         "tags": [

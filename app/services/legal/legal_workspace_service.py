@@ -1255,6 +1255,23 @@ class LegalWorkspaceReadModule:
                 item["submitter_name"] = names.get(row.user_id)
         return result
 
+    def history_counts(self, db: Session, user: User, *, case_id: int | None = None) -> dict:
+        """首屏历史计数：咨询/合同审查/文书各一条 COUNT，避免标题只能显示已加载数。"""
+        if case_id is not None:
+            verify_case_access(case_id, user.id, db)
+            scopes = {
+                "consultations": db.query(LegalConsultation).filter(LegalConsultation.case_id == case_id),
+                "contract_reviews": db.query(ContractReview).filter(ContractReview.case_id == case_id),
+                "drafts": db.query(LegalDraft).filter(LegalDraft.case_id == case_id),
+            }
+        else:
+            scopes = {
+                "consultations": db.query(LegalConsultation).filter(LegalConsultation.user_id == user.id),
+                "contract_reviews": db.query(ContractReview).filter(ContractReview.user_id == user.id),
+                "drafts": db.query(LegalDraft).filter(LegalDraft.user_id == user.id),
+            }
+        return {name: query.count() for name, query in scopes.items()}
+
     def list_history(
         self, db: Session, user: User, kind: str, *, case_id: int | None = None,
         limit: int = 20, cursor: int | None = None,

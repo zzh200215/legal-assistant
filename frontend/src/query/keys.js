@@ -33,6 +33,7 @@ export const qk = {  auth: {
     matterActivity: (caseId) => ['legal', 'matter-activity', caseId],
     quota: () => ['billing', 'quota'],
     consultations: (caseId = null) => ['legal', 'consultations', caseId],
+    historyCounts: (caseId = null) => ['legal', 'history-counts', caseId],
     contractReviews: (caseId = null) => ['legal', 'contract-reviews', caseId],
     drafts: (caseId = null) => ['legal', 'drafts', caseId],
     sources: () => ['legal', 'sources'],
