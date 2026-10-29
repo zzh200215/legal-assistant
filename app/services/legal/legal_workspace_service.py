@@ -1257,12 +1257,12 @@ class LegalWorkspaceReadModule:
 
     def search_consultations(
         self, db: Session, user: User, *, q: str, case_id: int | None = None,
-        page: int = 1, limit: int = 20,
+        page: int = 1, limit: int = 20, cursor: int | None = None,
     ) -> dict:
-        """服务端搜索咨询（问题/答复/法源 JSON），带总数与 offset 分页。
+        """服务端搜索咨询（问题/答复/法源 JSON），支持 cursor 或 offset 分页。
 
         可见性沿用 list_rows：案件上下文校验案件访问权；否则只看本人记录。
-        搜索接口只服务历史列表，不改变旧 list_rows 的返回结构。
+        cursor 按 id 倒序 keyset（id 随创建时间递增）；未给 cursor 时保留 page/offset 兼容。
         """
         if case_id is not None:
             verify_case_access(case_id, user.id, db)
@@ -1277,10 +1277,19 @@ class LegalWorkspaceReadModule:
                 LegalConsultation.references_json.icontains(keyword, autoescape=True),
             ))
         total = query.count()
-        rows = (
-            query.order_by(LegalConsultation.created_at.desc(), LegalConsultation.id.desc())
-            .offset((page - 1) * limit).limit(limit).all()
-        )
+        if cursor:
+            rows = (
+                query.filter(LegalConsultation.id < cursor)
+                .order_by(LegalConsultation.id.desc()).limit(limit + 1).all()
+            )
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+        else:
+            rows = (
+                query.order_by(LegalConsultation.id.desc())
+                .offset((page - 1) * limit).limit(limit).all()
+            )
+            has_more = page * limit < total
         result = [serialize_workspace_row(row) for row in rows]
         if case_id is not None and rows:
             names = {
@@ -1294,7 +1303,8 @@ class LegalWorkspaceReadModule:
             "total": total,
             "page": page,
             "limit": limit,
-            "has_more": page * limit < total,
+            "has_more": has_more,
+            "next_cursor": rows[-1].id if has_more and rows else None,
         }
 
     def get_row(self, db: Session, user: User, kind: str, item_id: int):

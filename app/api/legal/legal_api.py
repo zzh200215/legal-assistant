@@ -990,11 +990,12 @@ def search_consultations(
     case_id: int | None = Query(default=None),
     page: int = Query(default=1, ge=1, le=1000),
     limit: int = Query(default=20, ge=1, le=50),
+    cursor: int | None = Query(default=None, ge=1, description="上一页最后一条记录 id"),
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    """服务端搜索咨询历史；offset 分页，结果带 total/has_more。"""
+    """服务端搜索咨询历史；优先 cursor keyset，未给 cursor 时用 page/offset。"""
     return legal_workspace_read_module.search_consultations(
-        db, current_user, q=q, case_id=case_id, page=page, limit=limit,
+        db, current_user, q=q, case_id=case_id, page=page, limit=limit, cursor=cursor,
     )
 
 

@@ -143,6 +143,17 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(body["total"], 3)
         self.assertEqual(len(body["items"]), 2)
         self.assertTrue(body["has_more"])
+        self.assertIsNotNone(body["next_cursor"])
+
+        follow = self.client.get(
+            f"/api/legal/consultations/search?q=分页&case_id={self.case.id}&limit=2&cursor={body['next_cursor']}",
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(follow.status_code, 200, follow.text)
+        follow_body = follow.json()["data"]
+        self.assertEqual(len(follow_body["items"]), 1)
+        self.assertFalse(follow_body["has_more"])
+        self.assertIsNone(follow_body["next_cursor"])
 
         second = self.client.get(
             f"/api/legal/consultations/search?q=分页&case_id={self.case.id}&limit=2&page=2",

@@ -106,6 +106,7 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
       return route.fulfill({
         json: success({
           items, total: items.length, page: 1, limit: 20, has_more: false,
+          next_cursor: null,
         }),
       })
     }

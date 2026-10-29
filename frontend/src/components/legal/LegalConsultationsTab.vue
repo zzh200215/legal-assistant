@@ -350,8 +350,8 @@ const searchResults = ref(null)
 const searchLoading = ref(false)
 const searchError = ref(null)
 const searchTotal = ref(0)
-const searchPage = ref(1)
 const searchHasMore = ref(false)
+const searchCursor = ref(null)
 let searchTimer = null
 const visibleConsultations = computed(() => {
   if (!historyKeyword.value.trim() || !searchResults.value) return filteredConsultations.value
@@ -359,7 +359,7 @@ const visibleConsultations = computed(() => {
     ? searchResults.value.filter((row) => chainLevel(row) === historyChainFilter.value)
     : searchResults.value
 })
-const runSearch = async (page = 1) => {
+const runSearch = async (cursor = null) => {
   const keyword = historyKeyword.value.trim()
   if (!keyword) return
   searchLoading.value = true
@@ -367,23 +367,23 @@ const runSearch = async (page = 1) => {
   try {
     const { data } = await legalWorkspace.searchLegalConsultations({
       q: keyword,
-      page,
       limit: 20,
       ...(props.caseId ? { case_id: props.caseId } : {}),
+      ...(cursor ? { cursor } : {}),
     })
     if (historyKeyword.value.trim() !== keyword) return
     const items = data?.items || []
-    searchResults.value = page === 1 ? items : [...(searchResults.value || []), ...items]
+    searchResults.value = cursor ? [...(searchResults.value || []), ...items] : items
     searchTotal.value = data?.total || 0
-    searchPage.value = data?.page || page
     searchHasMore.value = Boolean(data?.has_more)
+    searchCursor.value = data?.next_cursor || null
   } catch (error) {
     searchError.value = error.response?.data?.detail || '搜索失败'
   } finally {
     searchLoading.value = false
   }
 }
-const loadMoreSearch = () => runSearch(searchPage.value + 1)
+const loadMoreSearch = () => runSearch(searchCursor.value)
 watch(historyKeyword, (value) => {
   clearTimeout(searchTimer)
   const keyword = value.trim()
@@ -391,17 +391,20 @@ watch(historyKeyword, (value) => {
     searchResults.value = null
     searchTotal.value = 0
     searchHasMore.value = false
+    searchCursor.value = null
     searchError.value = null
     return
   }
-  searchTimer = setTimeout(() => runSearch(1), 300)
+  searchCursor.value = null
+  searchTimer = setTimeout(() => runSearch(), 300)
 })
 watch(() => props.caseId, () => {
   searchResults.value = null
   searchTotal.value = 0
   searchHasMore.value = false
+  searchCursor.value = null
   searchError.value = null
-  if (historyKeyword.value.trim()) runSearch(1)
+  if (historyKeyword.value.trim()) runSearch()
 })
 onBeforeUnmount(() => clearTimeout(searchTimer))
 const historyStatus = computed(() => {

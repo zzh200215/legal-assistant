@@ -5399,7 +5399,7 @@
           "Legal Workspace"
         ],
         "summary": "Search Consultations",
-        "description": "服务端搜索咨询历史；offset 分页，结果带 total/has_more。",
+        "description": "服务端搜索咨询历史；优先 cursor keyset，未给 cursor 时用 page/offset。",
         "operationId": "search_consultations_api_legal_consultations_search_get",
         "security": [
           {
@@ -5459,6 +5459,25 @@
               "default": 20,
               "title": "Limit"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "上一页最后一条记录 id",
+              "title": "Cursor"
+            },
+            "description": "上一页最后一条记录 id"
           }
         ],
         "responses": {
