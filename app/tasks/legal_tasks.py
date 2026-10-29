@@ -14,6 +14,22 @@ from app.models.user import User
 import json
 
 
+@celery_app.task(name="prune_legal_consultation_exports")
+@_beat_lock(task_name="prune_legal_consultation_exports", ttl_seconds=3600)
+def prune_legal_consultation_exports_task():
+    """每天清理咨询导出记录：超过保留天数或每条咨询超过份数上限的硬删除。"""
+    _record_beat_heartbeat()
+    from app.services.legal.consultation_export import prune_all_consultation_exports
+
+    db = SessionLocal()
+    try:
+        result = prune_all_consultation_exports(db)
+        db.commit()
+        return result
+    finally:
+        db.close()
+
+
 @celery_app.task(name="check_legal_deadline_reminders")
 @_beat_lock(task_name="check_legal_deadline_reminders", ttl_seconds=1800)
 def check_legal_deadline_reminders_task():

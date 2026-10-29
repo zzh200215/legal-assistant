@@ -85,6 +85,10 @@ celery_app.conf.update(
             "task": "check_legal_review_sla",
             "schedule": 900.0,  # 每15分钟
         },
+        "prune-legal-consultation-exports": {
+            "task": "prune_legal_consultation_exports",
+            "schedule": crontab(minute=23, hour=3),  # 每天 03:23 清理导出记录
+        },
         "check-outbox-health": {
             "task": "check_outbox_health",
             "schedule": 900.0,  # 每15分钟（同告警冷却 180 分钟）

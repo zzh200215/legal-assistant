@@ -5,16 +5,28 @@
 
 from datetime import timedelta
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.time import utc_now
 from app.models.legal import LegalConsultation, LegalConsultationExport
 from app.services.legal.legal_workspace_service import serialize_workspace_row
 
-# 导出记录保留策略：90 天 + 每条咨询最多 20 份。
-# 小文本直接存库，不做对象存储；超出部分在写入/列表时清理，避免无限增长。
+# 默认保留策略：90 天 + 每条咨询最多 20 份；可被 settings 覆盖。
 EXPORT_RETENTION_DAYS = 90
 EXPORT_MAX_PER_CONSULTATION = 20
+
+
+def export_retention_limits(retention_days: int | None = None,
+                            max_records: int | None = None) -> tuple[int, int]:
+    settings = get_settings()
+    return (
+        int(retention_days if retention_days is not None
+            else settings.LEGAL_CONSULTATION_EXPORT_RETENTION_DAYS),
+        int(max_records if max_records is not None
+            else settings.LEGAL_CONSULTATION_EXPORT_MAX_PER_CONSULTATION),
+    )
 
 STATUS_LABELS = {
     "draft": "草稿",
@@ -55,10 +67,14 @@ def _reference_lines(references: list) -> str:
     return "\n".join(lines) if lines else "- 暂无"
 
 
-def prune_consultation_exports(db: Session, consultation_id: int, *, now=None) -> int:
-    """按「90 天 + 最多 20 份」清理某条咨询的导出记录，返回删除数量。"""
+def prune_consultation_exports(
+    db: Session, consultation_id: int, *, now=None,
+    retention_days: int | None = None, max_records: int | None = None,
+) -> int:
+    """按保留策略清理某条咨询的导出记录，返回删除数量。"""
+    days, keep = export_retention_limits(retention_days, max_records)
     moment = now or utc_now()
-    cutoff = moment - timedelta(days=EXPORT_RETENTION_DAYS)
+    cutoff = moment - timedelta(days=days)
     deleted = (
         db.query(LegalConsultationExport)
         .filter(
@@ -72,7 +88,7 @@ def prune_consultation_exports(db: Session, consultation_id: int, *, now=None) -
         for (row_id,) in db.query(LegalConsultationExport.id)
         .filter(LegalConsultationExport.consultation_id == consultation_id)
         .order_by(LegalConsultationExport.id.desc())
-        .offset(EXPORT_MAX_PER_CONSULTATION)
+        .offset(keep)
         .all()
     ]
     if stale_ids:
@@ -82,6 +98,48 @@ def prune_consultation_exports(db: Session, consultation_id: int, *, now=None) -
             .delete(synchronize_session=False)
         )
     return deleted
+
+
+def prune_all_consultation_exports(
+    db: Session, *, now=None,
+    retention_days: int | None = None, max_records: int | None = None,
+) -> dict:
+    """定时任务入口：全表按「天数 + 每咨询份数」清理，返回删除统计。"""
+    days, keep = export_retention_limits(retention_days, max_records)
+    moment = now or utc_now()
+    cutoff = moment - timedelta(days=days)
+    deleted = (
+        db.query(LegalConsultationExport)
+        .filter(LegalConsultationExport.created_at < cutoff)
+        .delete(synchronize_session=False)
+    )
+    over_limit = (
+        db.query(LegalConsultationExport.consultation_id, func.count(LegalConsultationExport.id))
+        .group_by(LegalConsultationExport.consultation_id)
+        .having(func.count(LegalConsultationExport.id) > keep)
+        .all()
+    )
+    for consultation_id, _count in over_limit:
+        stale_ids = [
+            row_id
+            for (row_id,) in db.query(LegalConsultationExport.id)
+            .filter(LegalConsultationExport.consultation_id == consultation_id)
+            .order_by(LegalConsultationExport.id.desc())
+            .offset(keep)
+            .all()
+        ]
+        if stale_ids:
+            deleted += (
+                db.query(LegalConsultationExport)
+                .filter(LegalConsultationExport.id.in_(stale_ids))
+                .delete(synchronize_session=False)
+            )
+    return {
+        "deleted": int(deleted),
+        "consultations_over_limit": len(over_limit),
+        "retention_days": days,
+        "max_records": keep,
+    }
 
 
 def build_consultation_markdown(row: LegalConsultation) -> str:

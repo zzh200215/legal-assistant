@@ -42,9 +42,8 @@ from app.services.legal.legal_retrieval_service import legal_retrieval_service
 from app.services.legal.legal_knowledge_graph_service import legal_knowledge_graph_service
 from app.services.legal.consultation_evidence import attach_consultation_comparison
 from app.services.legal.consultation_export import (
-    EXPORT_MAX_PER_CONSULTATION,
-    EXPORT_RETENTION_DAYS,
     build_consultation_markdown,
+    export_retention_limits,
     prune_consultation_exports,
 )
 from app.services.legal.contract_risk_stats import summarize_contract_risk_stats
@@ -1053,6 +1052,7 @@ def list_consultation_exports(
     rows = query.order_by(LegalConsultationExport.id.desc()).limit(limit + 1).all()
     has_more = len(rows) > limit
     rows = rows[:limit]
+    retention_days, max_records = export_retention_limits()
     return {
         "items": [
             {
@@ -1068,8 +1068,8 @@ def list_consultation_exports(
         ],
         "next_cursor": rows[-1][0].id if has_more and rows else None,
         "has_more": has_more,
-        "retention_days": EXPORT_RETENTION_DAYS,
-        "max_records": EXPORT_MAX_PER_CONSULTATION,
+        "retention_days": retention_days,
+        "max_records": max_records,
     }
 
 

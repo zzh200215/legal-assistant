@@ -2,10 +2,23 @@
 
 import json
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from app.models.legal import LegalConsultation
-from app.services.legal.consultation_export import build_consultation_markdown
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+import app.models  # noqa: F401
+from app.core.auth import hash_password
+from app.core.database import Base
+from app.core.time import utc_now
+from app.models.legal import LegalConsultation, LegalConsultationExport
+from app.models.org import Organization
+from app.models.user import User
+from app.services.legal.consultation_export import (
+    build_consultation_markdown,
+    prune_all_consultation_exports,
+)
 
 
 def _consultation(**overrides):
@@ -68,6 +81,67 @@ class ConsultationExportMarkdownTests(unittest.TestCase):
         content = build_consultation_markdown(_consultation(status="weird_status", risk_level="unknown"))
         self.assertIn("**当前状态：** weird_status", content)
         self.assertIn("**风险等级：** unknown", content)
+
+
+class PruneConsultationExportsTests(unittest.TestCase):
+    def setUp(self):
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        self.db = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+        self.org = Organization(name="导出所", code="EXPORT")
+        self.db.add(self.org)
+        self.db.flush()
+        self.user = User(
+            username="export_user", email="export@example.com",
+            hashed_password=hash_password("pw"), organization_id=self.org.id,
+        )
+        self.db.add(self.user)
+        self.db.flush()
+        self.consultation = LegalConsultation(
+            user_id=self.user.id, question="导出保留测试", category="other",
+            known_facts_json="[]", missing_facts_json="[]", references_json="[]",
+            advice="建议", risk_level="low", status="pending_review",
+        )
+        self.db.add(self.consultation)
+        self.db.commit()
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_prune_all_keeps_latest_and_drops_old(self):
+        now = utc_now()
+        for index in range(25):
+            self.db.add(LegalConsultationExport(
+                consultation_id=self.consultation.id, user_id=self.user.id,
+                format="markdown", filename=f"export-{index}.md", content="x",
+                created_at=now - timedelta(minutes=index),
+            ))
+        self.db.add(LegalConsultationExport(
+            consultation_id=self.consultation.id, user_id=self.user.id,
+            format="markdown", filename="too-old.md", content="x",
+            created_at=now - timedelta(days=120),
+        ))
+        self.db.commit()
+
+        result = prune_all_consultation_exports(
+            self.db, now=now, retention_days=90, max_records=20,
+        )
+        self.db.commit()
+        rows = self.db.query(LegalConsultationExport).all()
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(result["retention_days"], 90)
+        self.assertEqual(result["max_records"], 20)
+        self.assertNotIn("too-old.md", [row.filename for row in rows])
+
+    def test_beat_schedule_registers_prune_task(self):
+        from app.core.celery_app import celery_app
+
+        entry = celery_app.conf.beat_schedule["prune-legal-consultation-exports"]
+        self.assertEqual(entry["task"], "prune_legal_consultation_exports")
 
 
 if __name__ == "__main__":
