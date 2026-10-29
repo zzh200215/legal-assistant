@@ -113,7 +113,7 @@
     <details class="app-card draft-history">
       <summary class="app-card-head draft-history-summary">
         <h2>文书版本</h2>
-        <span class="app-card-head-meta">{{ drafts.length }} 份历史草稿<template v-if="draftHistoryHasMore">（还有更早）</template></span>
+        <span class="app-card-head-meta">{{ draftHistoryTotal ?? drafts.length }} 份历史草稿<template v-if="draftHistoryHasMore">（还有更早）</template></span>
       </summary>
       <QueryStateView :status="draftsStatus" :error="draftsError" empty-text="还没有历史文书。" min-height="80px" @retry="loadDrafts">
         <div class="draft-history-list">
@@ -166,7 +166,7 @@ const { loadQuota } = useQuota()
 const { openSourceDetail } = useLegalSourceDetail()
 const {
   templates, draftForm, draftLoading, draftResult, drafts, draftsQuery, draftFieldMap, draftVersionMap,
-  draftHistoryHasMore, draftHistoryLoadingMore, loadMoreDrafts,
+  draftHistoryHasMore, draftHistoryTotal, draftHistoryLoadingMore, loadMoreDrafts,
   loadTemplates, setTemplateFields, loadDrafts, submitDraft: runDraftSubmit,
   resubmitDraftForm, resubmitLoading, loadDraftVersions, resubmitDraft: saveDraft,
   autosaveDraft, saveDraftVersion: persistDraftVersion, restoreDraftVersion: restoreVersion,

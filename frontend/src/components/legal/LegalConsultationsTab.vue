@@ -166,8 +166,8 @@
               <span class="app-card-head-meta">
                 <template v-if="historyKeyword.trim()">匹配 {{ searchTotal }} 条</template>
                 <template v-else>
-                  <template v-if="historyHasMore && historyTotal === null">已加载 {{ consultations.length }} 条</template>
-                  <template v-else>共 {{ historyTotal ?? consultations.length }} 条</template>
+                  <template v-if="historyHasMore && historyTotal === null">已加载 {{ consultations.length }} 条（还有更早）</template>
+                  <template v-else>共 {{ historyTotal ?? consultations.length }} 条<template v-if="historyHasMore">（还有更早）</template></template>
                   <template v-if="filteredConsultations.length !== consultations.length"> · 匹配 {{ filteredConsultations.length }} 条</template><template v-if="noReferenceCount"> · 无引用 {{ noReferenceCount }} 条</template>
                 </template>
               </span>
