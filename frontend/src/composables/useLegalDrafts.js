@@ -15,6 +15,10 @@ export function useLegalDrafts({ client, message, caseId }) {
   const resubmitLoading = ref({})
   const draftComments = ref([])
   const draftCollaboration = ref(null)
+  const olderDrafts = ref([])
+  const draftHistoryHasMore = ref(false)
+  const draftHistoryTotal = ref(null)
+  const draftHistoryLoadingMore = ref(false)
 
   const templatesQuery = useQuery({
     key: ['legal', 'templates'],
@@ -30,9 +34,15 @@ export function useLegalDrafts({ client, message, caseId }) {
 
   const templates = computed(() => templatesQuery.data.value || [])
   const drafts = computed(() => {
-    const rows = draftsQuery.data.value || []
+    const rows = [...(draftsQuery.data.value || []), ...olderDrafts.value]
+    const seen = new Set()
+    const unique = rows.filter((row) => {
+      if (seen.has(row.id)) return false
+      seen.add(row.id)
+      return true
+    })
     const activeCaseId = caseId?.value
-    return activeCaseId ? rows.filter((row) => Number(row.case_id) === Number(activeCaseId)) : rows
+    return activeCaseId ? unique.filter((row) => Number(row.case_id) === Number(activeCaseId)) : unique
   })
 
   const loadTemplates = async () => {
@@ -44,7 +54,29 @@ export function useLegalDrafts({ client, message, caseId }) {
   }
 
   const loadDrafts = async () => {
+    olderDrafts.value = []
+    draftHistoryTotal.value = null
     await draftsQuery.refetch()
+    draftHistoryHasMore.value = drafts.value.length >= 50
+  }
+
+  const loadMoreDrafts = async () => {
+    if (!draftHistoryHasMore.value || draftHistoryLoadingMore.value) return
+    draftHistoryLoadingMore.value = true
+    try {
+      const last = drafts.value[drafts.value.length - 1]
+      const params = { limit: 20 }
+      if (caseId?.value) params.case_id = caseId.value
+      if (last?.id) params.cursor = last.id
+      const { data } = await client.listLegalDraftHistory(params)
+      olderDrafts.value = [...olderDrafts.value, ...(data?.items || [])]
+      draftHistoryTotal.value = data?.total ?? draftHistoryTotal.value
+      draftHistoryHasMore.value = Boolean(data?.has_more)
+    } catch (error) {
+      message.error(error?.response?.data?.detail || error.message || '加载更多历史文书失败')
+    } finally {
+      draftHistoryLoadingMore.value = false
+    }
   }
 
   const submitMutation = useMutation({
@@ -200,6 +232,10 @@ export function useLegalDrafts({ client, message, caseId }) {
     draftResult,
     drafts,
     draftsQuery,
+    draftHistoryHasMore,
+    draftHistoryTotal,
+    draftHistoryLoadingMore,
+    loadMoreDrafts,
     draftFieldMap,
     draftVersionMap,
     draftComments,

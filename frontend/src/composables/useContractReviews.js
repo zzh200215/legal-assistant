@@ -14,6 +14,10 @@ export function useContractReviews({ client, message, caseId }) {
   const contractVersionMap = ref({})
   const resubmitDraftForm = ref({})
   const resubmitLoading = ref({})
+  const olderContractReviews = ref([])
+  const contractHistoryHasMore = ref(false)
+  const contractHistoryTotal = ref(null)
+  const contractHistoryLoadingMore = ref(false)
   // 跨审查风险统计：折叠展开时按需拉取，切案件/切时间窗后重新取
   const riskStats = ref(null)
   const riskStatsLoading = ref(false)
@@ -43,13 +47,41 @@ export function useContractReviews({ client, message, caseId }) {
   })
 
   const contractReviews = computed(() => {
-    const rows = reviewsQuery.data.value || []
+    const rows = [...(reviewsQuery.data.value || []), ...olderContractReviews.value]
+    const seen = new Set()
+    const unique = rows.filter((row) => {
+      if (seen.has(row.id)) return false
+      seen.add(row.id)
+      return true
+    })
     const activeCaseId = caseId?.value
-    return activeCaseId ? rows.filter((row) => Number(row.case_id) === Number(activeCaseId)) : rows
+    return activeCaseId ? unique.filter((row) => Number(row.case_id) === Number(activeCaseId)) : unique
   })
 
   const loadContractReviews = async () => {
+    olderContractReviews.value = []
+    contractHistoryTotal.value = null
     await reviewsQuery.refetch()
+    contractHistoryHasMore.value = contractReviews.value.length >= 50
+  }
+
+  const loadMoreContractReviews = async () => {
+    if (!contractHistoryHasMore.value || contractHistoryLoadingMore.value) return
+    contractHistoryLoadingMore.value = true
+    try {
+      const last = contractReviews.value[contractReviews.value.length - 1]
+      const params = { limit: 20 }
+      if (caseId?.value) params.case_id = caseId.value
+      if (last?.id) params.cursor = last.id
+      const { data } = await client.listContractReviewHistory(params)
+      olderContractReviews.value = [...olderContractReviews.value, ...(data?.items || [])]
+      contractHistoryTotal.value = data?.total ?? contractHistoryTotal.value
+      contractHistoryHasMore.value = Boolean(data?.has_more)
+    } catch (error) {
+      message.error(error?.response?.data?.detail || error.message || '加载更多历史审查失败')
+    } finally {
+      contractHistoryLoadingMore.value = false
+    }
   }
 
   const submitMutation = useMutation({
@@ -153,6 +185,10 @@ export function useContractReviews({ client, message, caseId }) {
     contractResult,
     contractReviews,
     reviewsQuery,
+    contractHistoryHasMore,
+    contractHistoryTotal,
+    contractHistoryLoadingMore,
+    loadMoreContractReviews,
     uploadLoading,
     contractVersionMap,
     resubmitDraftForm,

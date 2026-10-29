@@ -191,7 +191,7 @@
       </details>
 
       <details class="contract-fold history-details">
-        <summary>历史审查 <span>{{ filteredContractReviews.length }} 条</span></summary>
+        <summary>历史审查 <span>{{ filteredContractReviews.length }} 条<template v-if="contractHistoryHasMore">（还有更早）</template></span></summary>
         <section class="app-card fold-card">
           <div class="app-card-head">
             <h2>历史审查记录</h2>
@@ -221,6 +221,9 @@
                     <DocumentVersion :versions="contractVersionMap[item.id] || []" />
                   </div>
                 </details>
+              </div>
+              <div v-if="contractHistoryHasMore" class="history-load-more">
+                <el-button text size="small" :loading="contractHistoryLoadingMore" @click="loadMoreContractReviews">加载更多历史审查</el-button>
               </div>
             </QueryStateView>
           </div>
@@ -346,6 +349,7 @@ const { openSourceDetail } = useLegalSourceDetail()
 const {
   contractForm, contractLoading, contractResult, contractReviews, reviewsQuery, uploadLoading, contractVersionMap,
   resubmitDraftForm, resubmitLoading, riskStats, riskStatsLoading, riskStatsDays, loadRiskStats,
+  contractHistoryHasMore, contractHistoryLoadingMore, loadMoreContractReviews,
   loadContractReviews, submitContractReview: runContractReview,
   onExpandContractReview, submitContractResubmit, handleContractUpload: uploadContractReview,
 } = useContractReviews({ client: legalWorkspace, message: ElMessage, caseId: computed(() => props.caseId) })
@@ -838,4 +842,5 @@ onMounted(openLatestContractReview)
 .risk-select { display: flex; align-items: center; padding: 0 4px 0 10px; cursor: pointer; }
 .risk-select input { width: 14px; height: 14px; cursor: pointer; }
 .risk-row .risk-issue { flex: 1; }
+.history-load-more { display: flex; justify-content: center; margin-top: var(--space-2); }
 </style>

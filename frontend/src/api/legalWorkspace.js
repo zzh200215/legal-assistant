@@ -99,6 +99,9 @@ export default {
   listContractReviews(config = {}) {
     return http.get('/legal/contract-reviews', config)
   },
+  listContractReviewHistory(params) {
+    return http.get('/legal/contract-reviews/history', { params })
+  },
   getContractRiskStats(config = {}) {
     return http.get('/legal/contract-reviews/risk-stats', config)
   },
@@ -139,6 +142,9 @@ export default {
   },
   listLegalDrafts(config = {}) {
     return http.get('/legal/drafts', config)
+  },
+  listLegalDraftHistory(params) {
+    return http.get('/legal/drafts/history', { params })
   },
   exportLegalConsultationMarkdown(id) {
     return http.get(`/legal/consultations/${id}/export/markdown`, { responseType: 'blob' })

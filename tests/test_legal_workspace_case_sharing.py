@@ -14,7 +14,7 @@ from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
 from app.core.time import utc_now
 from app.main import app
-from app.models.legal import LegalCase, LegalConsultation, LegalConsultationExport
+from app.models.legal import ContractReview, LegalCase, LegalConsultation, LegalConsultationExport, LegalDraft
 from app.models.legal_portal import LegalCaseMember
 from app.models.org import LegalMemberRole, Organization, OrganizationMember
 from app.models.user import User, UserStatus
@@ -150,6 +150,35 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(len(second["items"]), 6)
         self.assertFalse(second["has_more"])
         self.assertIsNone(second["next_cursor"])
+
+    def test_contract_and_draft_history_paginate(self):
+        for index in range(25):
+            self.db.add(ContractReview(
+                user_id=self.member_a.id, case_id=self.case.id,
+                title=f"合同 {index}", content="合同正文", status="pending_review",
+            ))
+            self.db.add(LegalDraft(
+                user_id=self.member_a.id, case_id=self.case.id,
+                document_type="complaint", title=f"文书 {index}", content="正文",
+                status="draft",
+            ))
+        self.db.commit()
+
+        for path in ("contract-reviews", "drafts"):
+            first = self.client.get(
+                f"/api/legal/{path}/history?case_id={self.case.id}&limit=20",
+                headers=self._headers(self.member_b),
+            ).json()["data"]
+            self.assertEqual(first["total"], 25)
+            self.assertEqual(len(first["items"]), 20)
+            self.assertTrue(first["has_more"])
+
+            second = self.client.get(
+                f"/api/legal/{path}/history?case_id={self.case.id}&limit=20&cursor={first['next_cursor']}",
+                headers=self._headers(self.member_b),
+            ).json()["data"]
+            self.assertEqual(len(second["items"]), 5)
+            self.assertFalse(second["has_more"])
 
     def test_search_consultations_paginates_and_scopes_by_case(self):
         for index in range(3):

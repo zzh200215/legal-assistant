@@ -1154,6 +1154,19 @@ def list_contract_reviews(case_id: int | None = Query(default=None), db: Session
     return legal_workspace_read_module.list_rows(db, current_user, "contract_review", case_id=case_id)
 
 
+@router.get("/contract-reviews/history")
+def contract_review_history(
+    case_id: int | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+    cursor: int | None = Query(default=None, ge=1, description="已加载的最后一条记录 id"),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """合同审查历史「加载更多」：按 id 倒序取 cursor 之前的记录。"""
+    return legal_workspace_read_module.list_history(
+        db, current_user, "contract_review", case_id=case_id, limit=limit, cursor=cursor,
+    )
+
+
 @router.get("/contract-reviews/risk-stats")
 def contract_review_risk_stats(
     case_id: int | None = Query(default=None),
@@ -1372,6 +1385,19 @@ def create_draft(req: DraftIn, db: Session = Depends(get_db), current_user: User
 @router.get("/drafts")
 def list_drafts(case_id: int | None = Query(default=None), db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return legal_workspace_read_module.list_rows(db, current_user, "draft", case_id=case_id)
+
+
+@router.get("/drafts/history")
+def legal_draft_history(
+    case_id: int | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+    cursor: int | None = Query(default=None, ge=1, description="已加载的最后一条记录 id"),
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """文书草稿历史「加载更多」：按 id 倒序取 cursor 之前的记录。"""
+    return legal_workspace_read_module.list_history(
+        db, current_user, "draft", case_id=case_id, limit=limit, cursor=cursor,
+    )
 
 
 @router.get("/drafts/{item_id}")

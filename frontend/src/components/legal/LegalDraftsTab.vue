@@ -113,7 +113,7 @@
     <details class="app-card draft-history">
       <summary class="app-card-head draft-history-summary">
         <h2>文书版本</h2>
-        <span class="app-card-head-meta">{{ drafts.length }} 份历史草稿</span>
+        <span class="app-card-head-meta">{{ drafts.length }} 份历史草稿<template v-if="draftHistoryHasMore">（还有更早）</template></span>
       </summary>
       <QueryStateView :status="draftsStatus" :error="draftsError" empty-text="还没有历史文书。" min-height="80px" @retry="loadDrafts">
         <div class="draft-history-list">
@@ -121,6 +121,9 @@
             <span><strong>{{ draft.title || '未命名文书' }}</strong><small>{{ formatDate(draft.created_at) }}</small></span>
             <span>Version {{ draft.version || 1 }}</span><em>{{ statusLabel(draft.status) }}</em><em v-if="draft.submitter_name">· {{ draft.submitter_name }}</em>
           </button>
+        </div>
+        <div v-if="draftHistoryHasMore" class="history-load-more">
+          <el-button text size="small" :loading="draftHistoryLoadingMore" @click="loadMoreDrafts">加载更多历史文书</el-button>
         </div>
       </QueryStateView>
     </details>
@@ -163,6 +166,7 @@ const { loadQuota } = useQuota()
 const { openSourceDetail } = useLegalSourceDetail()
 const {
   templates, draftForm, draftLoading, draftResult, drafts, draftsQuery, draftFieldMap, draftVersionMap,
+  draftHistoryHasMore, draftHistoryLoadingMore, loadMoreDrafts,
   loadTemplates, setTemplateFields, loadDrafts, submitDraft: runDraftSubmit,
   resubmitDraftForm, resubmitLoading, loadDraftVersions, resubmitDraft: saveDraft,
   autosaveDraft, saveDraftVersion: persistDraftVersion, restoreDraftVersion: restoreVersion,
@@ -512,4 +516,5 @@ defineExpose({ prefill(documentType, fields) { if (documentType) draftForm.value
   .version-note-input { width: 100%; }
   .comment-meta time { margin-left: 0; }
 }
+.history-load-more { display: flex; justify-content: center; margin-top: var(--space-2); }
 </style>
