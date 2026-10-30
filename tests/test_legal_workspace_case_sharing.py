@@ -153,6 +153,14 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertIn(body["id"], [item["id"] for item in listed["items"]])
         self.assertEqual(listed["items"][0]["case_title"], "共享案件")
 
+        # 深链打开详情（GET /tasks/{id}）也要带 case_title，详情面板才能显示案件入口
+        detail = self.client.get(
+            f"/api/tasks/{body['id']}",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertEqual(detail["case_id"], self.case.id)
+        self.assertEqual(detail["case_title"], "共享案件")
+
         other_case = self.client.get(
             f"/api/tasks/?case_id={self.strict_case.id}",
             headers=self._headers(self.member_b),

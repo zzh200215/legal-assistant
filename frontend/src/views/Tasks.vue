@@ -180,6 +180,7 @@
       @status-change="changeStatus"
       @decompose="decompose"
       @open-source="openSource"
+      @open-case="openCase"
       @open-agent-run="openAgentRun"
     />
 
@@ -357,6 +358,11 @@ const openSource = (task) => {
 
 const openAgentRun = (runId) => {
   router.push({ path: '/agent', query: { runId: String(runId) } })
+}
+
+const openCase = (task) => {
+  if (!task?.case_id) return
+  router.push({ path: '/legal-workspace', query: { case_id: String(task.case_id) } })
 }
 
 const handleTaskUpdated = (task) => {

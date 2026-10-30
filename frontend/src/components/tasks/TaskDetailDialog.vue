@@ -22,6 +22,15 @@
       <el-descriptions :column="2" border class="detail-descriptions">
         <el-descriptions-item label="ID">{{ task.id }}</el-descriptions-item>
         <el-descriptions-item label="标题">{{ task.title }}</el-descriptions-item>
+        <el-descriptions-item label="所属案件" :span="2">
+          <span v-if="task.case_id" class="case-entry">
+            <span class="case-entry-name">{{ task.case_title || `案件 #${task.case_id}` }}</span>
+            <button type="button" class="case-entry-link" @click="emit('open-case', task)">
+              打开案件<span aria-hidden="true"> →</span>
+            </button>
+          </span>
+          <span v-else class="inline-hint">未关联案件</span>
+        </el-descriptions-item>
         <el-descriptions-item label="状态">
           <StatusTag kind="task" :status="task.status" />
         </el-descriptions-item>
@@ -147,7 +156,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   canEdit: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:visible', 'refresh', 'task-updated', 'status-change', 'decompose', 'open-source', 'open-agent-run'])
+const emit = defineEmits(['update:visible', 'refresh', 'task-updated', 'status-change', 'decompose', 'open-source', 'open-case', 'open-agent-run'])
 
 const authStore = useAuthStore()
 const currentUser = () => authStore.user
@@ -327,6 +336,28 @@ defineExpose({
 .detail-descriptions,
 .detail-table {
   margin-top: var(--space-2);
+}
+.case-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.case-entry-name {
+  color: var(--color-text);
+}
+.case-entry-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.case-entry-link:hover {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
 }
 .detail-section {
   margin-top: var(--space-5);

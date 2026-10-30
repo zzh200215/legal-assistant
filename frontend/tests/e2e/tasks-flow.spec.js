@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { test, expect } from '@playwright/test'
 
 // 任务中心（/tasks）联调回归：
@@ -6,6 +7,7 @@ import { test, expect } from '@playwright/test'
 //   → 新建任务 POST → scope 筛选 → 路由 taskId 深链。
 // 全 mock，锁定 API 契约与 UI 接线。
 const success = (data) => ({ success: true, data })
+const SHOT_DIR = process.env.E2E_SHOT_DIR || ''
 const ME = { id: 15, username: 'pilot01-lawyer', role: 'dept_admin', organization_id: 5, department_id: 51, status: 'active' }
 
 const ownerTask = (overrides = {}) => ({
@@ -234,6 +236,9 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
     }
     if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/301/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/301/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/301/logs') return route.fulfill({ json: success([]) })
     await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
   })
 
@@ -244,6 +249,21 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
   await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toBeVisible()
   expect(requests.some((item) => item.includes('/tasks/') && item.includes('case_id=7'))).toBe(true)
 
+  // 详情面板案件入口：所属案件显示名称，点「打开案件」进案件工作台并带上 case_id
+  await page.locator('.kanban-task', { hasText: '案件专属任务' }).first().click()
+  const dialog = page.locator('.el-dialog:visible')
+  await expect(dialog.getByText('所属案件')).toBeVisible()
+  await expect(dialog.getByText('试点案件')).toBeVisible()
+  if (SHOT_DIR) {
+    await page.setViewportSize({ width: 1280, height: 1100 })
+    await page.screenshot({ path: path.join(SHOT_DIR, 'step81-task-detail-case.png') })
+  }
+  await dialog.getByRole('button', { name: '打开案件' }).click()
+  await expect(page).toHaveURL(/\/legal-workspace\?case_id=7$/)
+
+  // 案件工作台接口不在本用例 mock 范围，整页切回任务列表继续验证清除过滤
+  await page.goto('/tasks?case_id=7')
+  await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toBeVisible()
   await page.getByRole('button', { name: '仅看案件 #7 ×' }).click()
   await expect(page.getByText('普通任务')).toBeVisible()
   await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toHaveCount(0)
