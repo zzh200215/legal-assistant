@@ -94,6 +94,7 @@
                     <span v-if="task.source_type" class="app-tag">
                       {{ sourceTypeLabelMap[task.source_type] || task.source_type }}
                     </span>
+                    <span v-if="task.case_title" class="app-tag is-accent">{{ task.case_title }}</span>
                     <span v-if="task.due_date" class="kanban-task-due" :class="{ 'is-overdue': isTaskOverdue(task) }">
                       {{ dueLabel(task) }}
                     </span>
@@ -114,6 +115,9 @@
           <el-table v-else v-loading="loading" :data="tasks" border :empty-text="taskEmptyText" class="task-table">
             <el-table-column prop="title" label="标题" />
             <el-table-column prop="description" label="事项说明" show-overflow-tooltip />
+            <el-table-column prop="case_title" label="案件" width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.case_title || '—' }}</template>
+            </el-table-column>
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">
                 <span class="app-tag" :class="statusTagClass(row.status)">{{ statusLabel(row.status) }}</span>

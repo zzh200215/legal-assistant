@@ -7,12 +7,29 @@ from app.core.api_response import api_error, paginated_payload, should_passthrou
 from app.core.auth import get_current_user, verify_case_access
 from app.core.database import get_db
 from app.core.versioning import etag_for, parse_if_match
+from app.models.legal import LegalCase
 from app.models.task import Task
 from app.models.user import User
 from app.schemas.task import TaskCommentCreate, TaskCommentOut, TaskCreate, TaskLogOut, TaskOut, TaskUpdate
 from app.services.jobs.task_service import task_service
 
 router = APIRouter()
+
+
+def _attach_case_titles(db: Session, payloads: list[dict]) -> list[dict]:
+    """批量补 case_title，避免任务列表按案件 N+1 查询。"""
+    case_ids = {item.get("case_id") for item in payloads if item.get("case_id")}
+    titles = {}
+    if case_ids:
+        titles = {
+            case_id: title
+            for case_id, title in db.query(LegalCase.id, LegalCase.title).filter(
+                LegalCase.id.in_(case_ids)
+            ).all()
+        }
+    for item in payloads:
+        item["case_title"] = titles.get(item.get("case_id"))
+    return payloads
 
 
 class ExtractFromDocRequest(BaseModel):
@@ -40,7 +57,8 @@ def create_task(req: TaskCreate, db: Session = Depends(get_db), current_user: Us
             progress=req.progress,
             case_id=req.case_id,
         )
-        return TaskOut.model_validate(task_service.serialize_task(task))
+        payload = _attach_case_titles(db, [task_service.serialize_task(task)])[0]
+        return TaskOut.model_validate(payload)
     except Exception as e:
         if should_passthrough_exception(e):
             raise
@@ -73,7 +91,8 @@ def list_tasks(
         source_id=source_id,
         case_id=case_id,
     )
-    items = [TaskOut.model_validate(task_service.serialize_task(task)).model_dump() for task in rows]
+    payloads = _attach_case_titles(db, [task_service.serialize_task(task) for task in rows])
+    items = [TaskOut.model_validate(payload).model_dump() for payload in payloads]
     return paginated_payload(items, total=total, page=page, page_size=page_size)
 
 
@@ -128,7 +147,8 @@ def get_task(
     if not task:
         raise api_error(404, "任务不存在", code="TASK_NOT_FOUND")
     response.headers["ETag"] = etag_for(task.version)
-    return TaskOut.model_validate(task_service.serialize_task(task))
+    payload = _attach_case_titles(db, [task_service.serialize_task(task)])[0]
+    return TaskOut.model_validate(payload)
 
 
 @router.put("/{task_id}", response_model=TaskOut)
@@ -148,7 +168,8 @@ def update_task(
             if_match_version=parse_if_match(if_match),
             **update_data,
         )
-        return TaskOut.model_validate(task_service.serialize_task(task))
+        payload = _attach_case_titles(db, [task_service.serialize_task(task)])[0]
+        return TaskOut.model_validate(payload)
     except ValueError as e:
         raise api_error(404, str(e), code="TASK_NOT_FOUND")
     except StaleDataError:
@@ -218,7 +239,8 @@ def get_sub_tasks(
         organization_id=current_user.organization_id,
         department_id=current_user.department_id,
     )
-    items = [TaskOut.model_validate(task_service.serialize_task(task)).model_dump() for task in sub_tasks]
+    payloads = _attach_case_titles(db, [task_service.serialize_task(task) for task in sub_tasks])
+    items = [TaskOut.model_validate(payload).model_dump() for payload in payloads]
     return paginated_payload(items, total=total, page=page, page_size=page_size)
 
 

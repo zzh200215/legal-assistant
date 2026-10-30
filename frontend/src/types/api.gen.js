@@ -885,6 +885,7 @@
  * @typedef {Object} TaskOut
  * @property {string | null}= assignee
  * @property {number | null}= case_id
+ * @property {string | null}= case_title
  * @property {Array<string>}= collaborators
  * @property {string} created_at
  * @property {number | null}= department_id

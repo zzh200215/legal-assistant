@@ -34,6 +34,7 @@ class TaskOut(TaskBase):
     organization_id: int | None = None
     department_id: int | None = None
     status: str
+    case_title: str | None = None
     source_type: str | None = None
     source_id: int | None = None
     parent_id: int | None = None

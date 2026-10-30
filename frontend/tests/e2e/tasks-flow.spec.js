@@ -228,7 +228,7 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
     if (method === 'GET' && path === '/tasks/') {
       const caseId = url.searchParams.get('case_id')
       const items = caseId
-        ? [ownerTask({ id: 301, title: '案件专属任务', case_id: Number(caseId) })]
+        ? [ownerTask({ id: 301, title: '案件专属任务', case_id: Number(caseId), case_title: '试点案件' })]
         : [ownerTask({ id: 101, title: '普通任务' }), ownerTask({ id: 302, title: '另一案件任务', case_id: 8 })]
       return route.fulfill({ json: success({ items, total: items.length, page: 1, page_size: 12 }) })
     }
@@ -239,6 +239,7 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
 
   await page.goto('/tasks?case_id=7')
   await expect(page.getByText('案件专属任务')).toBeVisible()
+  await expect(page.getByText('试点案件')).toBeVisible()
   await expect(page.getByText('普通任务')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toBeVisible()
   expect(requests.some((item) => item.includes('/tasks/') && item.includes('case_id=7'))).toBe(true)

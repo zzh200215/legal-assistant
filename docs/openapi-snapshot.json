@@ -32474,6 +32474,17 @@
             "type": "string",
             "title": "Status"
           },
+          "case_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Case Title"
+          },
           "source_type": {
             "anyOf": [
               {
