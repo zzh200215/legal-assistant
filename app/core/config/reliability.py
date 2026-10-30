@@ -93,6 +93,8 @@ class ReliabilitySettings(BaseSettings):
     # 咨询导出记录保留：默认 90 天 / 每条咨询最多 20 份；由 prune_legal_consultation_exports 执行。
     LEGAL_CONSULTATION_EXPORT_RETENTION_DAYS: int = Field(default=90, ge=7, le=3650)
     LEGAL_CONSULTATION_EXPORT_MAX_PER_CONSULTATION: int = Field(default=20, ge=1, le=200)
+    # 工作台首屏历史计数缓存 TTL（秒）；0 = 关闭缓存。
+    LEGAL_HISTORY_COUNTS_CACHE_TTL_SECONDS: int = Field(default=5, ge=0, le=300)
 
     # ── DLP 发送前硬门禁 ──────────────────────────────────────────────
     # 扫描器异常/未配置时的默认行为：block（fail closed）。对外邮件与敏感内容强制 block。

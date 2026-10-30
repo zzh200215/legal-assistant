@@ -19,10 +19,12 @@ from app.models.legal import ContractReview, LegalCase, LegalConsultation, Legal
 from app.models.legal_portal import LegalCaseMember
 from app.models.org import LegalMemberRole, Organization, OrganizationMember
 from app.models.user import User, UserStatus
+from app.services.legal.history_counts_cache import history_counts_cache
 
 
 class LegalWorkspaceCaseSharingTests(unittest.TestCase):
     def setUp(self):
+        history_counts_cache.clear()
         engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         self.session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
         Base.metadata.create_all(engine)
@@ -65,6 +67,7 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.client = TestClient(app)
 
     def tearDown(self):
+        history_counts_cache.clear()
         app.dependency_overrides.clear()
         self.db.close()
 
@@ -270,6 +273,27 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
             headers=self._headers(self.outsider),
         )
         self.assertIn(denied.status_code, (403, 404))
+
+    def test_history_counts_cache_hits_until_cleared(self):
+        url = f"/api/legal/history-counts?case_id={self.case.id}"
+        first = self.client.get(url, headers=self._headers(self.member_a)).json()["data"]
+        self.assertEqual(first["consultations"], 1)
+
+        self.db.add(LegalConsultation(
+            user_id=self.member_a.id, case_id=self.case.id,
+            question="缓存测试", category="other",
+            known_facts_json="[]", missing_facts_json="[]",
+            references_json="[]", advice="建议", risk_level="low",
+            status="pending_review",
+        ))
+        self.db.commit()
+
+        cached = self.client.get(url, headers=self._headers(self.member_a)).json()["data"]
+        self.assertEqual(cached["consultations"], 1)
+
+        history_counts_cache.clear()
+        fresh = self.client.get(url, headers=self._headers(self.member_a)).json()["data"]
+        self.assertEqual(fresh["consultations"], 2)
 
     def test_search_consultations_paginates_and_scopes_by_case(self):
         for index in range(3):

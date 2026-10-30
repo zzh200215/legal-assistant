@@ -1257,6 +1257,12 @@ class LegalWorkspaceReadModule:
 
     def history_counts(self, db: Session, user: User, *, case_id: int | None = None) -> dict:
         """首屏历史计数：咨询/合同审查/文书各一条 COUNT，避免标题只能显示已加载数。"""
+        from app.services.legal.history_counts_cache import history_counts_cache
+
+        cache_key = f"user:{user.id}:case:{case_id if case_id is not None else 'none'}"
+        cached = history_counts_cache.get(cache_key)
+        if cached is not None:
+            return cached
         if case_id is not None:
             verify_case_access(case_id, user.id, db)
             scopes = {
@@ -1270,7 +1276,9 @@ class LegalWorkspaceReadModule:
                 "contract_reviews": db.query(ContractReview).filter(ContractReview.user_id == user.id),
                 "drafts": db.query(LegalDraft).filter(LegalDraft.user_id == user.id),
             }
-        return {name: query.count() for name, query in scopes.items()}
+        counts = {name: query.count() for name, query in scopes.items()}
+        history_counts_cache.put(cache_key, counts)
+        return counts
 
     def list_history(
         self, db: Session, user: User, kind: str, *, case_id: int | None = None,
