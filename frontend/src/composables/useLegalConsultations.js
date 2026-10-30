@@ -18,7 +18,7 @@ export function useLegalConsultations({ client, message, confirm, onReviewSubmit
   const historyHasMore = ref(false)
   const historyTotal = ref(null)
   const historyLoadingMore = ref(false)
-  const { historyCounts } = useLegalHistoryCounts({ client, caseId })
+  const { historyCounts } = useLegalHistoryCounts({ client, caseId, enabled: withHistory })
   const followupQuestion = ref('')
   const followupLoading = ref(false)
 

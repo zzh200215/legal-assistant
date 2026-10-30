@@ -24,6 +24,7 @@ class Task(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True, index=True)
+    case_id = Column(Integer, ForeignKey("legal_cases.id"), nullable=True, index=True)
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     assignee = Column(String(128), nullable=True)

@@ -869,6 +869,7 @@
  * @property {number} user_id
  * @typedef {Object} TaskCreate
  * @property {string | null}= assignee
+ * @property {number | null}= case_id
  * @property {Array<string>}= collaborators
  * @property {string | null}= description
  * @property {string | null}= due_date
@@ -883,6 +884,7 @@
  * @property {number} task_id
  * @typedef {Object} TaskOut
  * @property {string | null}= assignee
+ * @property {number | null}= case_id
  * @property {Array<string>}= collaborators
  * @property {string} created_at
  * @property {number | null}= department_id

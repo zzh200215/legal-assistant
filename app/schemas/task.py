@@ -10,6 +10,7 @@ class TaskBase(BaseModel):
     priority: str = "medium"
     progress: int = 0
     due_date: datetime | None = None
+    case_id: int | None = None
 
 
 class TaskCreate(TaskBase):

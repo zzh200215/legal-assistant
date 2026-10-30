@@ -73,12 +73,14 @@ class TaskService:
         source_type: str | None = None,
         source_id: int | None = None,
         parent_id: int | None = None,
+        case_id: int | None = None,
     ) -> Task:
         owner = db.query(User).filter(User.id == user_id).first()
         task = Task(
             user_id=user_id,
             organization_id=owner.organization_id if owner else None,
             department_id=owner.department_id if owner else None,
+            case_id=case_id,
             title=title,
             description=description,
             assignee=assignee,
@@ -487,6 +489,7 @@ class TaskService:
         scope: str | None = None,
         source_type: str | None = None,
         source_id: int | None = None,
+        case_id: int | None = None,
     ) -> tuple[list[Task], int]:
         """数据库分页版 list_visible：可见性过滤全部下沉 SQL，count 走 DB。"""
         cond = self._visible_filter(
@@ -503,6 +506,8 @@ class TaskService:
             q = q.filter(Task.source_type == source_type)
         if source_id is not None:
             q = q.filter(Task.source_id == source_id)
+        if case_id is not None:
+            q = q.filter(Task.case_id == case_id)
         total = q.count()
         items = (
             q.order_by(Task.created_at.desc(), Task.id.desc())
@@ -620,6 +625,7 @@ class TaskService:
             "user_id": task.user_id,
             "organization_id": task.organization_id,
             "department_id": task.department_id,
+            "case_id": getattr(task, "case_id", None),
             "title": task.title,
             "description": task.description,
             "assignee": task.assignee,

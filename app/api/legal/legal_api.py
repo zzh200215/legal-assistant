@@ -1165,6 +1165,7 @@ def create_consultation_follow_up_task(
         priority="medium",
         source_type="legal_consultation",
         source_id=row.id,
+        case_id=row.case_id,
     )
     db.add(task)
     db.commit()

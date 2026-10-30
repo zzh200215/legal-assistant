@@ -7,6 +7,9 @@
         <p class="app-page-sub">跟进案件中的待办、负责人和截止日期。</p>
       </div>
       <div class="app-page-head-actions">
+        <button v-if="workflowCaseId" type="button" class="case-filter-chip" @click="clearCaseFilter">
+          仅看案件 #{{ workflowCaseId }} ×
+        </button>
         <el-select v-model="scopeFilter" class="scope-select" @change="handleScopeChange">
           <el-option v-for="item in scopeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -277,6 +280,7 @@ const sourceFilterMeta = computed(() => {
 })
 
 const taskEmptyText = computed(() => {
+  if (workflowCaseId.value) return `案件 #${workflowCaseId.value} 暂无任务`
   if (sourceFilterMeta.value) return `当前筛选下暂无来自${sourceFilterMeta.value.label} #${sourceFilterMeta.value.sourceId} 的任务`
   if (scopeFilter.value === 'mine') return '暂无我的任务'
   if (scopeFilter.value === 'department') return '暂无部门共享任务'
@@ -366,6 +370,7 @@ const fetchTasks = async () => {
       scope: scopeFilter.value,
       source_type: sourceFilterMeta.value?.sourceType || undefined,
       source_id: sourceFilterMeta.value?.sourceId || undefined,
+      case_id: workflowCaseId.value || undefined,
     })
     tasks.value = data?.items || []
     taskTotal.value = data?.total || 0
@@ -382,6 +387,14 @@ const clearSourceFilter = async () => {
   const nextQuery = { ...route.query }
   delete nextQuery.sourceType
   delete nextQuery.sourceId
+  await router.replace({ query: nextQuery })
+  taskPage.value = 1
+  await fetchTasks()
+}
+
+const clearCaseFilter = async () => {
+  const nextQuery = { ...route.query }
+  delete nextQuery.case_id
   await router.replace({ query: nextQuery })
   taskPage.value = 1
   await fetchTasks()
@@ -470,6 +483,15 @@ watch(
   async (value, oldValue) => {
     if (value === oldValue) return
     await applyTaskRoute(value)
+  }
+)
+
+watch(
+  () => route.query.case_id,
+  async (value, oldValue) => {
+    if (value === oldValue) return
+    taskPage.value = 1
+    await fetchTasks()
   }
 )
 
@@ -638,6 +660,21 @@ watch(detailVisible, (visible) => {
 /* 页面栅格已给出与上方的间距，去掉工具类的额外上边距 */
 .app-pagination-end {
   margin-top: 0;
+}
+
+.case-filter-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--color-primary-light);
+  border-radius: var(--radius-full);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.case-filter-chip:hover {
+  border-color: var(--color-primary);
 }
 
 @media (max-width: 1100px) {

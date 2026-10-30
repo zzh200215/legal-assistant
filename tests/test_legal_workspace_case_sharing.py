@@ -144,6 +144,19 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         ).all()
         self.assertEqual(len(tasks), 1)
         self.assertIn("成员A的咨询", tasks[0].description)
+        self.assertEqual(tasks[0].case_id, self.case.id)
+
+        listed = self.client.get(
+            f"/api/tasks/?case_id={self.case.id}",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertIn(body["id"], [item["id"] for item in listed["items"]])
+
+        other_case = self.client.get(
+            f"/api/tasks/?case_id={self.strict_case.id}",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertNotIn(body["id"], [item["id"] for item in other_case["items"]])
 
         denied = self.client.post(
             f"/api/legal/consultations/{self.row.id}/follow-up-task",

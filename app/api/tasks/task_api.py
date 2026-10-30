@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.api_response import api_error, paginated_payload, should_passthrough_exception
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, verify_case_access
 from app.core.database import get_db
 from app.core.versioning import etag_for, parse_if_match
 from app.models.task import Task
@@ -25,6 +25,8 @@ class ExtractFromChatRequest(BaseModel):
 
 @router.post("/", response_model=TaskOut)
 def create_task(req: TaskCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if req.case_id is not None:
+        verify_case_access(req.case_id, current_user.id, db)
     try:
         task = task_service.create(
             title=req.title,
@@ -36,6 +38,7 @@ def create_task(req: TaskCreate, db: Session = Depends(get_db), current_user: Us
             due_date=req.due_date,
             priority=req.priority,
             progress=req.progress,
+            case_id=req.case_id,
         )
         return TaskOut.model_validate(task_service.serialize_task(task))
     except Exception as e:
@@ -50,6 +53,7 @@ def list_tasks(
     scope: str = Query("all", description="可见范围筛选：all/mine/department/organization/shared"),
     source_type: str | None = Query(None, description="按来源筛选：document/meeting/chat/decompose"),
     source_id: int | None = Query(None, description="按来源对象 ID 筛选"),
+    case_id: int | None = Query(None, description="按案件筛选（案件任务视图）"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     db: Session = Depends(get_db),
@@ -67,6 +71,7 @@ def list_tasks(
         scope=scope,
         source_type=source_type,
         source_id=source_id,
+        case_id=case_id,
     )
     items = [TaskOut.model_validate(task_service.serialize_task(task)).model_dump() for task in rows]
     return paginated_payload(items, total=total, page=page, page_size=page_size)

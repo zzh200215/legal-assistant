@@ -212,3 +212,40 @@ test('路由 taskId 深链：不在列表中的任务经 GET /tasks/{id} 拉取�
   expect(failed).toEqual([])
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('案件任务视图：case_id 查询参数只显示该案件任务，清除后恢复全部', async ({ page }) => {
+  const requests = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+    requests.push(`${method} ${path}?${url.searchParams.toString()}`)
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/') {
+      const caseId = url.searchParams.get('case_id')
+      const items = caseId
+        ? [ownerTask({ id: 301, title: '案件专属任务', case_id: Number(caseId) })]
+        : [ownerTask({ id: 101, title: '普通任务' }), ownerTask({ id: 302, title: '另一案件任务', case_id: 8 })]
+      return route.fulfill({ json: success({ items, total: items.length, page: 1, page_size: 12 }) })
+    }
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks?case_id=7')
+  await expect(page.getByText('案件专属任务')).toBeVisible()
+  await expect(page.getByText('普通任务')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toBeVisible()
+  expect(requests.some((item) => item.includes('/tasks/') && item.includes('case_id=7'))).toBe(true)
+
+  await page.getByRole('button', { name: '仅看案件 #7 ×' }).click()
+  await expect(page.getByText('普通任务')).toBeVisible()
+  await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toHaveCount(0)
+  expect(requests.some((item) => item.includes('/tasks/') && !item.includes('case_id='))).toBe(true)
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
