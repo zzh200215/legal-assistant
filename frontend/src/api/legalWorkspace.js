@@ -152,6 +152,9 @@ export default {
   exportLegalConsultationMarkdown(id) {
     return http.get(`/legal/consultations/${id}/export/markdown`, { responseType: 'blob' })
   },
+  createConsultationFollowUpTask(id) {
+    return http.post(`/legal/consultations/${id}/follow-up-task`)
+  },
   listLegalConsultationExports(id, config = {}) {
     return http.get(`/legal/consultations/${id}/exports`, config)
   },

@@ -18,6 +18,7 @@ from app.main import app
 from app.models.legal import ContractReview, LegalCase, LegalConsultation, LegalConsultationExport, LegalDraft
 from app.models.legal_portal import LegalCaseMember
 from app.models.org import LegalMemberRole, Organization, OrganizationMember
+from app.models.task import Task
 from app.models.user import User, UserStatus
 from app.services.legal.history_counts_cache import history_counts_cache
 
@@ -116,6 +117,36 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
 
         denied = self.client.get(
             f"/api/legal/consultations/exports/{export_id}/download",
+            headers=self._headers(self.outsider),
+        )
+        self.assertEqual(denied.status_code, 404)
+
+    def test_create_follow_up_task_idempotent(self):
+        first = self.client.post(
+            f"/api/legal/consultations/{self.row.id}/follow-up-task",
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        body = first.json()["data"]
+        self.assertTrue(body["created"])
+
+        second = self.client.post(
+            f"/api/legal/consultations/{self.row.id}/follow-up-task",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertFalse(second["created"])
+        self.assertEqual(second["id"], body["id"])
+
+        tasks = self.db.query(Task).filter(
+            Task.user_id == self.member_b.id,
+            Task.source_type == "legal_consultation",
+            Task.source_id == self.row.id,
+        ).all()
+        self.assertEqual(len(tasks), 1)
+        self.assertIn("成员A的咨询", tasks[0].description)
+
+        denied = self.client.post(
+            f"/api/legal/consultations/{self.row.id}/follow-up-task",
             headers=self._headers(self.outsider),
         )
         self.assertEqual(denied.status_code, 404)

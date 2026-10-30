@@ -1134,6 +1134,48 @@ def download_consultation_export(
     )
 
 
+@router.post("/consultations/{item_id}/follow-up-task")
+def create_consultation_follow_up_task(
+    item_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """把咨询结论转成一条跟进任务；同一用户/同一咨询只建一次（幂等）。"""
+    from app.models.task import Task
+
+    try:
+        row = legal_workspace_read_module.get_row(db, current_user, "consultation", item_id)
+    except LookupError:
+        raise api_error(404, "法律咨询记录不存在", code="LEGAL_CONSULTATION_NOT_FOUND")
+    existing = db.query(Task).filter(
+        Task.user_id == current_user.id,
+        Task.source_type == "legal_consultation",
+        Task.source_id == row.id,
+    ).first()
+    if existing:
+        return {"id": existing.id, "title": existing.title, "created": False}
+    title = f"跟进咨询：{(row.question or '').strip()[:40]}"
+    task = Task(
+        user_id=current_user.id,
+        organization_id=current_user.organization_id,
+        title=title,
+        description=(
+            f"咨询问题：{row.question or '—'}\n\n"
+            f"咨询建议：{row.advice or '—'}\n\n"
+            f"当前状态：{row.status}"
+        ),
+        priority="medium",
+        source_type="legal_consultation",
+        source_id=row.id,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    audit.log(
+        db, current_user, "legal_consultation_create_task",
+        target_type="consultation", target_id=row.id, detail=f"task_id={task.id}",
+    )
+    return {"id": task.id, "title": task.title, "created": True}
+
+
 @router.post("/contract-reviews")
 @router.post("/contracts/analyze")
 def create_contract_review(req: ContractReviewIn, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

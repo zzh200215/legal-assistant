@@ -5853,6 +5853,62 @@
         }
       }
     },
+    "/api/legal/consultations/{item_id}/follow-up-task": {
+      "post": {
+        "tags": [
+          "Legal Workspace"
+        ],
+        "summary": "Create Consultation Follow Up Task",
+        "description": "把咨询结论转成一条跟进任务；同一用户/同一咨询只建一次（幂等）。",
+        "operationId": "create_consultation_follow_up_task_api_legal_consultations__item_id__follow_up_task_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/legal/contracts/analyze": {
       "post": {
         "tags": [

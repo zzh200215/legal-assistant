@@ -23,7 +23,7 @@ const CONSULT_RESULT = {
 }
 
 test('工作台：咨询结果带入文书与合同审查', async ({ page }) => {
-  const requests = { consults: 0, drafts: 0, contracts: 0 }
+  const requests = { consults: 0, drafts: 0, contracts: 0, followUps: 0 }
   let listRows = []
   const unexpected = []
   const failed = []
@@ -73,6 +73,10 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
         contentType: 'text/markdown; charset=utf-8',
         body: '# 法律咨询结果\n\n**当前状态：** 律师通过\n',
       })
+    }
+    if (method === 'POST' && path === '/legal/consultations/11/follow-up-task') {
+      requests.followUps += 1
+      return route.fulfill({ json: success({ id: 401, title: '跟进咨询：公司未支付经济补偿金', created: true }) })
     }
     if (method === 'GET' && path === '/legal/review-queue/consultation/11/history') {
       return route.fulfill({
@@ -197,6 +201,13 @@ test('工作台：咨询结果带入文书与合同审查', async ({ page }) => 
   await page.getByRole('button', { name: '复制结果' }).click()
   await expect.poll(() => page.evaluate(() => window.__copiedConsult)).toContain('当前状态：律师通过')
   await expect.poll(() => page.evaluate(() => window.__copiedConsult)).toContain('2021年3月入职；2024年5月被辞退')
+  await page.getByRole('button', { name: '生成跟进任务' }).click()
+  await expect.poll(() => requests.followUps).toBe(1)
+  if (SHOT_DIR) {
+    await page.addStyleTag({ content: '.workspace-topbar { display: none !important; } .el-message { display: none !important; }' })
+    await page.waitForTimeout(150)
+    await page.locator('.result-card').screenshot({ path: path.join(SHOT_DIR, 'step78-consult-followup-task.png') })
+  }
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     page.getByRole('button', { name: '导出 Markdown' }).click(),

@@ -39,6 +39,7 @@
                 <el-button size="small" plain @click="exportResultMarkdown">导出 Markdown</el-button>
                 <el-button size="small" type="success" plain @click="emit('go-to-review', consultResult)">进入合同审查</el-button>
                 <el-button size="small" type="primary" plain @click="emit('go-to-draft', consultResult)">生成文书</el-button>
+                <el-button size="small" plain :loading="followUpTaskLoading" @click="createFollowUpTask">生成跟进任务</el-button>
                 <el-button v-if="consultResult.status === 'pending_review' || consultResult.status === 'needs_lawyer_review'" size="small" type="primary" @click="submitConsultForReview">提交律师审核</el-button>
               </div>
             </div>
@@ -469,6 +470,7 @@ const fallbackCopy = (text) => {
   }
   return copied
 }
+const followUpTaskLoading = ref(false)
 const copyResult = async () => {
   const text = resultToText()
   if (!text) return
@@ -500,6 +502,20 @@ const exportResultMarkdown = async () => {
     if (exportsOpen.value) await loadExports()
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || '导出失败')
+  }
+}
+
+const createFollowUpTask = async () => {
+  const id = consultResult.value?.id
+  if (!id || followUpTaskLoading.value) return
+  followUpTaskLoading.value = true
+  try {
+    const { data } = await legalWorkspace.createConsultationFollowUpTask(id)
+    ElMessage.success(data?.created === false ? `已存在跟进任务 #${data.id}` : `已生成跟进任务 #${data.id}`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '生成跟进任务失败')
+  } finally {
+    followUpTaskLoading.value = false
   }
 }
 
