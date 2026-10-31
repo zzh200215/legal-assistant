@@ -345,3 +345,90 @@ test('任务来源：咨询标签中文化 + 「查看来源咨询」深链', as
   await expect(page).toHaveURL(/tab=consultation/)
   await expect(page).toHaveURL(/consultation_id=77/)
 })
+
+test('任务截止日期：创建带日期 → 详情展示 → 修改/清除', async ({ page }) => {
+  let currentDue = '2026-12-31T23:59:59'
+  let currentProgress = 20
+  let detailGets = 0
+  const createBodies = []
+  const putBodies = []
+
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+    const dueTask = () => ownerTask({
+      id: 501, title: '带截止日期任务', due_date: currentDue, progress: currentProgress, collaborators: [],
+    })
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/') return route.fulfill({ json: success({ items: [dueTask()], total: 1, page: 1, page_size: 12 }) })
+    if (method === 'GET' && path === '/tasks/501') {
+      detailGets += 1
+      return route.fulfill({ json: success(dueTask()) })
+    }
+    if (method === 'GET' && path === '/tasks/501/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/501/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/501/logs') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'POST' && path === '/tasks/') {
+      const body = route.request().postDataJSON()
+      createBodies.push(body)
+      return route.fulfill({ json: success(ownerTask({ id: 502, title: body.title, due_date: body.due_date })) })
+    }
+    if (method === 'PUT' && path === '/tasks/501') {
+      const body = route.request().postDataJSON()
+      putBodies.push(body)
+      if ('due_date' in body) currentDue = body.due_date
+      if (typeof body.progress === 'number') currentProgress = body.progress
+      return route.fulfill({ json: success(dueTask()) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await expect(page.getByText('带截止日期任务')).toBeVisible()
+
+  // 新建：日期只到天，提交时补 23:59:59，避免当天 00:00 就被判逾期
+  await page.getByRole('button', { name: '新建任务' }).click()
+  const createDialog = page.locator('.el-dialog:visible')
+  await createDialog.getByPlaceholder('任务标题').fill('带期限的新任务')
+  await createDialog.getByLabel('截止日期').fill('2026-12-31')
+  await createDialog.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.getByText('创建成功')).toBeVisible()
+  expect(createBodies[0]).toEqual({
+    title: '带期限的新任务', description: '', assignee: '', collaborators: [],
+    priority: 'medium', progress: 0, due_date: '2026-12-31T23:59:59',
+  })
+
+  // 详情：展示日期；不动日期只保存协作信息，不提交 due_date（避免改写原时间）
+  await page.locator('.kanban-task', { hasText: '带截止日期任务' }).first().click()
+  const dialog = page.locator('.el-dialog:visible')
+  await expect(dialog.getByText('2026-12-31')).toBeVisible()
+  await dialog.getByRole('button', { name: '保存协作信息' }).click()
+  await expect.poll(() => putBodies.length).toBe(1)
+  expect(putBodies[0]).toEqual({ progress: 20, collaborators: [] })
+  // 等保存后的详情回拉落定，避免它把刚填的日期重置回旧值
+  await expect.poll(() => detailGets).toBeGreaterThanOrEqual(1)
+  await expect(dialog.getByLabel('截止日期')).toHaveValue('2026-12-31')
+
+  // 修改日期 → 提交当天 23:59:59，并回显新日期
+  await dialog.getByLabel('截止日期').fill('2027-01-05')
+  await expect(dialog.getByLabel('截止日期')).toHaveValue('2027-01-05')
+  await dialog.getByRole('button', { name: '保存协作信息' }).click()
+  await expect.poll(() => putBodies.length).toBe(2)
+  expect(putBodies[1].due_date).toBe('2027-01-05T23:59:59')
+  await expect(dialog.getByText('2027-01-05')).toBeVisible()
+
+  // 清空日期 → 提交 null，回显「未设置」
+  await dialog.getByLabel('截止日期').fill('')
+  await dialog.getByRole('button', { name: '保存协作信息' }).click()
+  await expect.poll(() => putBodies.length).toBe(3)
+  expect(putBodies[2].due_date).toBeNull()
+  await expect(dialog.getByText('未设置')).toBeVisible()
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})

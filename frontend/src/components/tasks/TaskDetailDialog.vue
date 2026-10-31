@@ -42,6 +42,9 @@
         <el-descriptions-item label="负责人">{{ task.assignee || '-' }}</el-descriptions-item>
         <el-descriptions-item label="协作者">{{ (task.collaborators || []).join('、') || '-' }}</el-descriptions-item>
         <el-descriptions-item label="进度">{{ task.progress || 0 }}%</el-descriptions-item>
+        <el-descriptions-item label="截止日期">
+          <span :class="{ 'is-overdue-text': isOverdue }">{{ formatDueDate(task.due_date) || '未设置' }}</span>
+        </el-descriptions-item>
         <el-descriptions-item label="来源">
           <el-tag v-if="task.source_type" size="small" type="info">
             {{ taskSourceLabel(task.source_type) }}
@@ -92,6 +95,13 @@
       <div class="detail-section">
         <h4>协作更新</h4>
         <div class="editor-row">
+          <label class="date-field">
+            <span>截止日期</span>
+            <input v-model="dueDraft" type="date" class="date-input" :disabled="!canEdit" aria-label="截止日期" />
+          </label>
+          <button v-if="dueDraft" type="button" class="clear-date" :disabled="!canEdit" @click="dueDraft = ''">清除日期</button>
+        </div>
+        <div class="editor-row">
           <el-input v-model.number="progressDraft" :disabled="!canEdit" type="number" style="width: 120px" placeholder="进度 %" />
           <el-input v-model="collaboratorsDraft" :disabled="!canEdit" placeholder="协作者，逗号分隔" style="width: 260px" />
           <el-button type="primary" :disabled="!canEdit" @click="updateCollaboration">保存协作信息</el-button>
@@ -140,7 +150,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElDescriptions, ElDescriptionsItem } from 'element-plus/es/components/descriptions/index'
 import { ElDialog } from 'element-plus/es/components/dialog/index'
 import { ElInput } from 'element-plus/es/components/input/index'
@@ -178,6 +188,16 @@ const relatedAgentRuns = ref([])
 const commentDraft = ref('')
 const progressDraft = ref(0)
 const collaboratorsDraft = ref('')
+const dueDraft = ref('')
+const initialDueDraft = ref('')
+
+const formatDueDate = (value) => (value ? String(value).slice(0, 10) : '')
+const isOverdue = computed(() => {
+  const task = props.task
+  if (!task?.due_date || task.status === 'done' || task.status === 'cancelled') return false
+  const dueTime = new Date(task.due_date).getTime()
+  return Number.isFinite(dueTime) && dueTime < Date.now()
+})
 
 const scopeLabel = (item) => {
   const user = currentUser()
@@ -246,13 +266,18 @@ const loadRelatedAgentRuns = async (taskId) => {
 
 const updateCollaboration = async () => {
   if (!props.task) return
+  const payload = {
+    progress: progressDraft.value,
+    collaborators: collaboratorsDraft.value
+      ? collaboratorsDraft.value.split(',').map((item) => item.trim()).filter(Boolean)
+      : [],
+  }
+  // 只在用户改过日期时提交，避免「只改进度」把原截止时间改写成当天 23:59
+  if (dueDraft.value !== initialDueDraft.value) {
+    payload.due_date = dueDraft.value ? `${dueDraft.value}T23:59:59` : null
+  }
   try {
-    await api.updateTask(props.task.id, {
-      progress: progressDraft.value,
-      collaborators: collaboratorsDraft.value
-        ? collaboratorsDraft.value.split(',').map((item) => item.trim()).filter(Boolean)
-        : [],
-    })
+    await api.updateTask(props.task.id, payload)
     ElMessage.success('协作信息已更新')
     const { data } = await api.getTask(props.task.id)
     emit('task-updated', data)
@@ -287,6 +312,8 @@ watch(
     if (!task) return
     progressDraft.value = task.progress || 0
     collaboratorsDraft.value = (task.collaborators || []).join(', ')
+    dueDraft.value = formatDueDate(task.due_date)
+    initialDueDraft.value = dueDraft.value
     commentDraft.value = ''
     loadSubData(task.id)
   },
@@ -381,6 +408,43 @@ defineExpose({
   gap: var(--space-3);
   align-items: center;
   flex-wrap: wrap;
+}
+.date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+.date-input {
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+.date-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.clear-date {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.clear-date:disabled {
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+.is-overdue-text {
+  color: var(--color-danger);
+  font-weight: 600;
 }
 .editor-row-top {
   align-items: flex-start;

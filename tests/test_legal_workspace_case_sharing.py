@@ -204,6 +204,33 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(denied.json()["error"]["code"], "CASE_NOT_FOUND")
         self.assertEqual(self.db.query(Task).filter(Task.title == "越权任务").count(), 0)
 
+    def test_task_due_date_create_update_clear(self):
+        created = self.client.post(
+            "/api/tasks/",
+            json={"title": "带截止日期任务", "due_date": "2026-12-31T23:59:59"},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        body = created.json()["data"]
+        self.assertTrue(body["due_date"].startswith("2026-12-31T23:59:59"))
+        task_id = body["id"]
+
+        updated = self.client.put(
+            f"/api/tasks/{task_id}",
+            json={"due_date": "2027-01-15T23:59:59"},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertTrue(updated.json()["data"]["due_date"].startswith("2027-01-15T23:59:59"))
+
+        cleared = self.client.put(
+            f"/api/tasks/{task_id}",
+            json={"due_date": None},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        self.assertIsNone(cleared.json()["data"]["due_date"])
+
     def test_strict_case_title_hidden_until_member(self):
         task = Task(
             user_id=self.member_a.id,

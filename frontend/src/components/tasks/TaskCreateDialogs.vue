@@ -7,6 +7,12 @@
       <el-input v-model="newTask.assignee" placeholder="负责人（可选）" />
       <el-input v-model="newTask.collaborators" placeholder="协作者，逗号分隔" />
       <div class="form-inline">
+        <label class="date-field">
+          <span class="date-label">截止日期</span>
+          <input v-model="newTask.dueDate" type="date" class="date-input" aria-label="截止日期" />
+        </label>
+      </div>
+      <div class="form-inline">
         <el-input v-model.number="newTask.progress" type="number" placeholder="进度 0-100" />
         <el-select v-model="newTask.priority">
           <el-option label="高优先级" value="high" />
@@ -65,7 +71,7 @@ const props = defineProps({
 const emit = defineEmits(['refresh'])
 
 const showCreateDialog = ref(false)
-const newTask = ref({ title: '', description: '', assignee: '', collaborators: '', priority: 'medium', progress: 0 })
+const newTask = ref({ title: '', description: '', assignee: '', collaborators: '', priority: 'medium', progress: 0, dueDate: '' })
 
 const showExtractDialog = ref(false)
 const extractDocId = ref(null)
@@ -74,7 +80,7 @@ const showChatExtractDialog = ref(false)
 const chatMessage = ref('')
 
 const resetCreateForm = () => {
-  newTask.value = { title: '', description: '', assignee: '', collaborators: '', priority: 'medium', progress: 0 }
+  newTask.value = { title: '', description: '', assignee: '', collaborators: '', priority: 'medium', progress: 0, dueDate: '' }
 }
 
 const createTask = async () => {
@@ -85,6 +91,9 @@ const createTask = async () => {
       ? newTask.value.collaborators.split(',').map((item) => item.trim()).filter(Boolean)
       : [],
   }
+  // 日期控件只到天：统一落到当天 23:59:59，避免当天 00:00 就被判逾期
+  delete payload.dueDate
+  if (newTask.value.dueDate) payload.due_date = `${newTask.value.dueDate}T23:59:59`
   // 案件任务视图下新建：默认归入当前案件，避免创建后从筛选结果里消失
   if (props.caseId) payload.case_id = props.caseId
   try {
@@ -150,6 +159,26 @@ defineExpose({
 .dialog-copy {
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
+}
+.date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+.date-input {
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+.date-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
 }
 .case-hint {
   color: var(--color-primary);

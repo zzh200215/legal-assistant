@@ -118,6 +118,14 @@
             <el-table-column prop="case_title" label="案件" width="150" show-overflow-tooltip>
               <template #default="{ row }">{{ row.case_title || '—' }}</template>
             </el-table-column>
+            <el-table-column prop="due_date" label="截止" width="100">
+              <template #default="{ row }">
+                <span v-if="row.due_date" class="task-due" :class="{ 'is-overdue': isTaskOverdue(row) }">
+                  {{ dueDateText(row.due_date) }}
+                </span>
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">
                 <span class="app-tag" :class="statusTagClass(row.status)">{{ statusLabel(row.status) }}</span>
@@ -354,6 +362,7 @@ const scopeTagClass = (item) => {
 }
 
 const dueLabel = (item) => `截止 ${String(item?.due_date || '').slice(5, 10)}`
+const dueDateText = (value) => String(value || '').slice(0, 10)
 
 const replaceTaskQuery = (taskId) => {
   const nextQuery = { ...route.query, view: viewMode.value }
@@ -681,6 +690,10 @@ watch(detailVisible, (visible) => {
   font-size: var(--text-xs);
 }
 .kanban-task-due.is-overdue {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+.task-due.is-overdue {
   color: var(--color-danger);
   font-weight: 600;
 }
