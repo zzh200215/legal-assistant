@@ -11,6 +11,7 @@
 """
 
 import asyncio
+import json
 import unittest
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
@@ -21,6 +22,8 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401
 from app.core.database import Base
+from app.models.document import Document
+from app.models.legal import LegalCase
 from app.models.org import Organization
 from app.models.user import User
 from app.services.jobs.task_service import task_service
@@ -100,6 +103,33 @@ class TaskServiceOperationsTests(unittest.TestCase):
             tasks = asyncio.run(task_service.extract_from_chat("帮我安排回复客户", self.user.id, self.db))
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks[0].source_type, "chat")
+        self.assertIsNone(tasks[0].case_id)
+
+    def test_extract_from_document_inherits_case_id(self):
+        case = LegalCase(
+            title="文档所属案件", case_type="other", organization_id=self.org.id, user_id=self.user.id
+        )
+        self.db.add(case)
+        self.db.commit()
+        doc = Document(
+            user_id=self.user.id,
+            title="案件资料",
+            file_type="txt",
+            metadata_json=json.dumps({"case_id": case.id}),
+        )
+        self.db.add(doc)
+        self.db.commit()
+
+        with (
+            patch("app.services.documents.document_service.document_service._get_document_text", return_value="文本"),
+            patch("app.services.documents.analysis_service.analysis_service.extract_document_todos",
+                  AsyncMock(return_value=[{"task": "跟进付款"}])),
+        ):
+            tasks = asyncio.run(task_service.extract_from_document(doc.id, self.user.id, self.db))
+
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0].source_type, "document")
+        self.assertEqual(tasks[0].case_id, case.id)
 
     # ── decompose ───────────────────────────────────────────────────────────
     def test_decompose_creates_subtasks_and_advances_parent(self):
@@ -115,6 +145,21 @@ class TaskServiceOperationsTests(unittest.TestCase):
         self.assertEqual(subs[0].source_type, "decompose")
         self.db.refresh(parent)
         self.assertEqual(parent.status, "in_progress")  # todo → in_progress
+
+    def test_decompose_inherits_parent_case_id(self):
+        case = LegalCase(
+            title="拆解所属案件", case_type="other", organization_id=self.org.id, user_id=self.user.id
+        )
+        self.db.add(case)
+        self.db.commit()
+        parent = task_service.create("案件大目标", self.user.id, self.db, case_id=case.id)
+        with patch("app.services.documents.analysis_service.analysis_service.decompose_task",
+                   AsyncMock(return_value=[{"title": "子任务A"}])):
+            subs = asyncio.run(task_service.decompose(parent.id, self.user.id, self.db))
+
+        self.assertEqual(len(subs), 1)
+        self.assertEqual(subs[0].case_id, case.id)
+        self.assertEqual(subs[0].source_type, "decompose")
 
     def test_decompose_no_items_keeps_status(self):
         parent = task_service.create("大目标2", self.user.id, self.db)

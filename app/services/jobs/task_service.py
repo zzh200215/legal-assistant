@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.task import Task, TaskComment, TaskLog
 from app.models.user import User
 from app.services.documents.analysis_service import analysis_service
+from app.services.documents.case_link import document_case_id
 
 
 class TaskService:
@@ -183,6 +184,7 @@ class TaskService:
         source_id: int | None,
         db: Session,
         source_type: str = "meeting",
+        case_id: int | None = None,
     ) -> list[Task]:
         tasks = []
         for item in action_items:
@@ -216,6 +218,7 @@ class TaskService:
                 progress=0,
                 source_type=source_type,
                 source_id=source_id,
+                case_id=case_id,
             )
             tasks.append(task)
         return tasks
@@ -233,6 +236,7 @@ class TaskService:
             source_id=document_id,
             db=db,
             source_type="document",
+            case_id=document_case_id(db, document_id),
         )
 
     async def extract_from_chat(self, message: str, user_id: int, db: Session) -> list[Task]:
@@ -269,6 +273,7 @@ class TaskService:
                 source_type="decompose",
                 source_id=task_id,
                 parent_id=task_id,
+                case_id=task.case_id,
             )
             sub_tasks.append(sub)
 

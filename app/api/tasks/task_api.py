@@ -8,6 +8,8 @@ from app.core.auth import get_current_user, verify_case_access
 from app.core.database import get_db
 from app.core.versioning import etag_for, parse_if_match
 from app.models.legal import LegalCase
+from app.models.legal_portal import LegalCaseMember
+from app.models.org import OrganizationMember
 from app.models.task import Task
 from app.models.user import User
 from app.schemas.task import TaskCommentCreate, TaskCommentOut, TaskCreate, TaskLogOut, TaskOut, TaskUpdate
@@ -16,17 +18,56 @@ from app.services.jobs.task_service import task_service
 router = APIRouter()
 
 
-def _attach_case_titles(db: Session, payloads: list[dict]) -> list[dict]:
-    """批量补 case_title，避免任务列表按案件 N+1 查询。"""
+def _accessible_case_ids(db: Session, case_ids: set[int], user: User) -> set[int]:
+    """按 verify_case_access 的口径批量过滤：所属组织成员 + 严格案件成员。"""
+    if not case_ids:
+        return set()
+    org_ids = {
+        org_id
+        for (org_id,) in db.query(OrganizationMember.organization_id)
+        .filter(OrganizationMember.user_id == user.id)
+        .all()
+    }
+    if not org_ids:
+        return set()
+    rows = (
+        db.query(LegalCase.id, LegalCase.is_strict_mode)
+        .filter(LegalCase.id.in_(case_ids), LegalCase.organization_id.in_(org_ids))
+        .all()
+    )
+    accessible = {case_id for case_id, is_strict in rows if not is_strict}
+    strict_ids = [case_id for case_id, is_strict in rows if is_strict]
+    if strict_ids:
+        accessible |= {
+            case_id
+            for (case_id,) in db.query(LegalCaseMember.case_id)
+            .filter(
+                LegalCaseMember.case_id.in_(strict_ids),
+                LegalCaseMember.user_id == user.id,
+                LegalCaseMember.revoked_at.is_(None),
+            )
+            .all()
+        }
+    return accessible
+
+
+def _attach_case_titles(db: Session, payloads: list[dict], current_user: User) -> list[dict]:
+    """批量补 case_title，避免任务列表按案件 N+1 查询。
+
+    step83 起按 verify_case_access 的口径过滤：无权限的案件（含严格案件非成员）
+    不返回标题，避免共享任务把案件名带给不该看的人。
+    """
     case_ids = {item.get("case_id") for item in payloads if item.get("case_id")}
     titles = {}
     if case_ids:
-        titles = {
-            case_id: title
-            for case_id, title in db.query(LegalCase.id, LegalCase.title).filter(
-                LegalCase.id.in_(case_ids)
-            ).all()
-        }
+        accessible = _accessible_case_ids(db, case_ids, current_user)
+        if accessible:
+            titles = {
+                case_id: title
+                for case_id, title in db.query(LegalCase.id, LegalCase.title).filter(
+                    LegalCase.id.in_(accessible)
+                ).all()
+            }
     for item in payloads:
         item["case_title"] = titles.get(item.get("case_id"))
     return payloads
@@ -57,7 +98,7 @@ def create_task(req: TaskCreate, db: Session = Depends(get_db), current_user: Us
             progress=req.progress,
             case_id=req.case_id,
         )
-        payload = _attach_case_titles(db, [task_service.serialize_task(task)])[0]
+        payload = _attach_case_titles(db, [task_service.serialize_task(task)], current_user)[0]
         return TaskOut.model_validate(payload)
     except Exception as e:
         if should_passthrough_exception(e):
@@ -91,7 +132,9 @@ def list_tasks(
         source_id=source_id,
         case_id=case_id,
     )
-    payloads = _attach_case_titles(db, [task_service.serialize_task(task) for task in rows])
+    payloads = _attach_case_titles(
+        db, [task_service.serialize_task(task) for task in rows], current_user
+    )
     items = [TaskOut.model_validate(payload).model_dump() for payload in payloads]
     return paginated_payload(items, total=total, page=page, page_size=page_size)
 
@@ -147,7 +190,7 @@ def get_task(
     if not task:
         raise api_error(404, "任务不存在", code="TASK_NOT_FOUND")
     response.headers["ETag"] = etag_for(task.version)
-    payload = _attach_case_titles(db, [task_service.serialize_task(task)])[0]
+    payload = _attach_case_titles(db, [task_service.serialize_task(task)], current_user)[0]
     return TaskOut.model_validate(payload)
 
 
@@ -168,7 +211,7 @@ def update_task(
             if_match_version=parse_if_match(if_match),
             **update_data,
         )
-        payload = _attach_case_titles(db, [task_service.serialize_task(task)])[0]
+        payload = _attach_case_titles(db, [task_service.serialize_task(task)], current_user)[0]
         return TaskOut.model_validate(payload)
     except ValueError as e:
         raise api_error(404, str(e), code="TASK_NOT_FOUND")
@@ -239,7 +282,9 @@ def get_sub_tasks(
         organization_id=current_user.organization_id,
         department_id=current_user.department_id,
     )
-    payloads = _attach_case_titles(db, [task_service.serialize_task(task) for task in sub_tasks])
+    payloads = _attach_case_titles(
+        db, [task_service.serialize_task(task) for task in sub_tasks], current_user
+    )
     items = [TaskOut.model_validate(payload).model_dump() for payload in payloads]
     return paginated_payload(items, total=total, page=page, page_size=page_size)
 

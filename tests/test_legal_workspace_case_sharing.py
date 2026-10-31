@@ -204,6 +204,39 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(denied.json()["error"]["code"], "CASE_NOT_FOUND")
         self.assertEqual(self.db.query(Task).filter(Task.title == "越权任务").count(), 0)
 
+    def test_strict_case_title_hidden_until_member(self):
+        task = Task(
+            user_id=self.member_a.id,
+            organization_id=self.org1.id,
+            title="严格案件任务",
+            case_id=self.strict_case.id,
+        )
+        self.db.add(task)
+        self.db.commit()
+
+        listed = self.client.get(
+            "/api/tasks/", headers=self._headers(self.member_b)
+        ).json()["data"]
+        item = next(item for item in listed["items"] if item["id"] == task.id)
+        self.assertEqual(item["case_id"], self.strict_case.id)
+        self.assertIsNone(item["case_title"])
+
+        self.db.add(
+            LegalCaseMember(
+                case_id=self.strict_case.id,
+                organization_id=self.org1.id,
+                user_id=self.member_b.id,
+                case_role="collaborator",
+                granted_by=self.member_a.id,
+            )
+        )
+        self.db.commit()
+        listed = self.client.get(
+            "/api/tasks/", headers=self._headers(self.member_b)
+        ).json()["data"]
+        item = next(item for item in listed["items"] if item["id"] == task.id)
+        self.assertEqual(item["case_title"], "严格案件")
+
     def test_export_markdown_denied_for_outsider(self):
         resp = self.client.get(
             f"/api/legal/consultations/{self.row.id}/export/markdown",
