@@ -8,7 +8,7 @@
       </div>
       <div class="app-page-head-actions">
         <button v-if="workflowCaseId" type="button" class="case-filter-chip" @click="clearCaseFilter">
-          仅看案件 #{{ workflowCaseId }} ×
+          仅看案件 {{ caseLabel }} ×
         </button>
         <el-select v-model="scopeFilter" class="scope-select" @change="handleScopeChange">
           <el-option v-for="item in scopeOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -92,7 +92,7 @@
                     <span class="app-tag" :class="scopeTagClass(task)">{{ scopeLabel(task) }}</span>
                     <span v-if="task.assignee" class="app-tag is-accent">{{ task.assignee }}</span>
                     <span v-if="task.source_type" class="app-tag">
-                      {{ sourceTypeLabelMap[task.source_type] || task.source_type }}
+                      {{ taskSourceLabel(task.source_type) }}
                     </span>
                     <span v-if="task.case_title" class="app-tag is-accent">{{ task.case_title }}</span>
                     <span v-if="task.due_date" class="kanban-task-due" :class="{ 'is-overdue': isTaskOverdue(task) }">
@@ -144,7 +144,7 @@
             <el-table-column prop="source_type" label="来源" width="80">
               <template #default="{ row }">
                 <span v-if="row.source_type" class="app-tag">
-                  {{ sourceTypeLabelMap[row.source_type] || row.source_type }}
+                  {{ taskSourceLabel(row.source_type) }}
                 </span>
                 <span v-else>-</span>
               </template>
@@ -205,10 +205,12 @@ import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import api from '../api'
+import legalWorkspace from '../api/legalWorkspace'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import QueryStateView from '../components/QueryStateView.vue'
 import { normalizeError } from '../api/errors.js'
 import { getStatusLabel } from '../utils/status'
+import { taskSourceLabel } from '../utils/taskSource'
 import { useAuthStore } from '../stores/auth'
 import TaskCreateDialogs from '../components/tasks/TaskCreateDialogs.vue'
 import TaskDetailDialog from '../components/tasks/TaskDetailDialog.vue'
@@ -241,17 +243,28 @@ const workflowCaseId = computed(() => {
   const value = Number(route.query.case_id)
   return Number.isFinite(value) && value > 0 ? value : null
 })
+// 案件任务视图标题：优先案件名，取不到时回退 #id，不阻塞任务列表。
+const caseTitle = ref('')
+const caseLabel = computed(() => caseTitle.value || (workflowCaseId.value ? `#${workflowCaseId.value}` : ''))
+
+const loadCaseTitle = async (caseId) => {
+  if (!caseId) {
+    caseTitle.value = ''
+    return
+  }
+  try {
+    const { data } = await legalWorkspace.getMatterSummary(caseId)
+    if (workflowCaseId.value !== caseId) return
+    caseTitle.value = data?.case?.title || data?.matter?.title || ''
+  } catch {
+    if (workflowCaseId.value === caseId) caseTitle.value = ''
+  }
+}
 
 const priorityLabelMap = {
   high: '高',
   medium: '中',
   low: '低',
-}
-
-const sourceTypeLabelMap = {
-  document: '文档',
-  chat: '聊天',
-  decompose: '拆解',
 }
 
 const columns = [
@@ -280,12 +293,14 @@ const sourceFilterMeta = computed(() => {
   return {
     sourceType,
     sourceId,
-    label: sourceTypeLabelMap[sourceType] || sourceType,
+    label: taskSourceLabel(sourceType),
   }
 })
 
 const taskEmptyText = computed(() => {
-  if (workflowCaseId.value) return `案件 #${workflowCaseId.value} 暂无任务`
+  if (workflowCaseId.value) {
+    return caseTitle.value ? `案件「${caseTitle.value}」暂无任务` : `案件 #${workflowCaseId.value} 暂无任务`
+  }
   if (sourceFilterMeta.value) return `当前筛选下暂无来自${sourceFilterMeta.value.label} #${sourceFilterMeta.value.sourceId} 的任务`
   if (scopeFilter.value === 'mine') return '暂无我的任务'
   if (scopeFilter.value === 'department') return '暂无部门共享任务'
@@ -351,8 +366,22 @@ const replaceTaskQuery = (taskId) => {
 }
 
 const openSource = (task) => {
-  if (task.source_type === 'document' && task.source_id) {
-    router.push({ path: '/documents', query: { documentId: String(task.source_id) } })
+  if (!task?.source_id) return
+  if (task.source_type === 'document') {
+    const query = { documentId: String(task.source_id) }
+    if (task.case_id) query.case_id = String(task.case_id)
+    router.push({ path: '/documents', query })
+    return
+  }
+  if (task.source_type === 'legal_consultation' && task.case_id) {
+    router.push({
+      path: '/legal-workspace',
+      query: {
+        case_id: String(task.case_id),
+        tab: 'consultation',
+        consultation_id: String(task.source_id),
+      },
+    })
   }
 }
 
@@ -475,6 +504,7 @@ onMounted(async () => {
   if (typeof route.query.scope === 'string' && scopeOptions.some(item => item.value === route.query.scope)) {
     scopeFilter.value = route.query.scope
   }
+  if (workflowCaseId.value) loadCaseTitle(workflowCaseId.value)
   await fetchTasks()
   await applyTaskRoute(route.query.taskId)
 })
@@ -501,6 +531,7 @@ watch(
   async (value, oldValue) => {
     if (value === oldValue) return
     taskPage.value = 1
+    loadCaseTitle(workflowCaseId.value)
     await fetchTasks()
   }
 )

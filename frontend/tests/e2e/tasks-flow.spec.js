@@ -236,6 +236,10 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
     }
     if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/legal/matters/7/summary') {
+      requests.caseSummary = true
+      return route.fulfill({ json: success({ case: { id: 7, title: '试点案件' } }) })
+    }
     if (method === 'POST' && path === '/tasks/') {
       requests.taskCreate = route.request().postDataJSON()
       return route.fulfill({ json: success(ownerTask({ id: 305, title: requests.taskCreate.title, case_id: 7, case_title: '试点案件' })) })
@@ -248,9 +252,10 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
 
   await page.goto('/tasks?case_id=7')
   await expect(page.getByText('案件专属任务')).toBeVisible()
-  await expect(page.getByText('试点案件')).toBeVisible()
+  await expect(page.locator('.kanban-task', { hasText: '案件专属任务' }).getByText('试点案件')).toBeVisible()
   await expect(page.getByText('普通任务')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '仅看案件 试点案件 ×' })).toBeVisible()
+  expect(requests.caseSummary).toBe(true)
   expect(requests.some((item) => item.includes('/tasks/') && item.includes('case_id=7'))).toBe(true)
 
   // 详情面板案件入口：所属案件显示名称，点「打开案件」进案件工作台并带上 case_id
@@ -267,7 +272,7 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
 
   // 案件工作台接口不在本用例 mock 范围，整页切回任务列表继续验证
   await page.goto('/tasks?case_id=7')
-  await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '仅看案件 试点案件 ×' })).toBeVisible()
 
   // 案件视图内新建任务：默认归入当前案件，请求体带 case_id，创建后仍按案件筛选
   await page.getByRole('button', { name: '新建任务' }).click()
@@ -283,9 +288,60 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
   })
   expect(requests.filter((item) => item.startsWith('GET /tasks/') && item.includes('case_id=7')).length).toBeGreaterThanOrEqual(2)
 
-  await page.getByRole('button', { name: '仅看案件 #7 ×' }).click()
+  await page.getByRole('button', { name: '仅看案件 试点案件 ×' }).click()
   await expect(page.getByText('普通任务')).toBeVisible()
-  await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '仅看案件 试点案件 ×' })).toHaveCount(0)
   expect(requests.some((item) => item.includes('/tasks/') && !item.includes('case_id='))).toBe(true)
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
+
+test('任务来源：咨询标签中文化 + 「查看来源咨询」深链', async ({ page }) => {
+  const requests = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+    requests.push(`${method} ${path}`)
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/') {
+      const items = [
+        ownerTask({ id: 401, title: '跟进劳动争议咨询', source_type: 'legal_consultation', source_id: 77, case_id: 7, case_title: '试点案件' }),
+        ownerTask({ id: 402, title: '会议纪要待办', source_type: 'meeting', source_id: 3 }),
+      ]
+      return route.fulfill({ json: success({ items, total: items.length, page: 1, page_size: 12 }) })
+    }
+    if (method === 'GET' && path === '/tasks/401/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/401/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/401/logs') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/legal/matters/7/summary') return route.fulfill({ json: success({ case: { id: 7, title: '试点案件' } }) })
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  const consultCard = page.locator('.kanban-task', { hasText: '跟进劳动争议咨询' }).first()
+  await expect(consultCard).toBeVisible()
+  // 看板来源标签：中文，不出现原始枚举
+  await expect(consultCard.getByText('咨询', { exact: true })).toBeVisible()
+  await expect(consultCard.getByText('legal_consultation')).toHaveCount(0)
+  await expect(page.locator('.kanban-task', { hasText: '会议纪要待办' }).getByText('会议', { exact: true })).toBeVisible()
+
+  await consultCard.click()
+  const dialog = page.locator('.el-dialog:visible')
+  await expect(dialog.getByText('咨询 #77')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '查看来源咨询' })).toBeVisible()
+  if (SHOT_DIR) {
+    await page.setViewportSize({ width: 1280, height: 1000 })
+    await page.screenshot({ path: path.join(SHOT_DIR, 'step84-task-source-consultation.png') })
+  }
+
+  await dialog.getByRole('button', { name: '查看来源咨询' }).click()
+  await expect(page).toHaveURL(/case_id=7/)
+  await expect(page).toHaveURL(/tab=consultation/)
+  await expect(page).toHaveURL(/consultation_id=77/)
 })

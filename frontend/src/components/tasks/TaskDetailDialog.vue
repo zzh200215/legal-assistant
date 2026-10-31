@@ -44,7 +44,7 @@
         <el-descriptions-item label="进度">{{ task.progress || 0 }}%</el-descriptions-item>
         <el-descriptions-item label="来源">
           <el-tag v-if="task.source_type" size="small" type="info">
-            {{ sourceTypeLabelMap[task.source_type] || task.source_type }}
+            {{ taskSourceLabel(task.source_type) }}
             <span v-if="task.source_id"> #{{ task.source_id }}</span>
           </el-tag>
           <span v-else>手动创建</span>
@@ -74,6 +74,13 @@
           @click="emit('open-source', task)"
         >
           查看来源文档
+        </el-button>
+        <el-button
+          v-if="task.source_type === 'legal_consultation' && task.source_id && task.case_id"
+          type="info"
+          @click="emit('open-source', task)"
+        >
+          查看来源咨询
         </el-button>
         <el-button v-if="task.status !== 'in_progress'" type="primary" :disabled="!canEdit" @click="emit('status-change', task, 'in_progress')">开始执行</el-button>
         <el-button v-if="task.status !== 'done'" type="success" :disabled="!canEdit" @click="emit('status-change', task, 'done')">标记完成</el-button>
@@ -149,6 +156,7 @@ import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import StatusTag from '../StatusTag.vue'
+import { taskSourceLabel } from '../../utils/taskSource'
 import { useAuthStore } from '../../stores/auth'
 
 const props = defineProps({
@@ -162,7 +170,6 @@ const authStore = useAuthStore()
 const currentUser = () => authStore.user
 
 const priorityLabelMap = { high: '高', medium: '中', low: '低' }
-const sourceTypeLabelMap = { document: '文档', chat: '聊天', decompose: '拆解' }
 
 const subTasks = ref([])
 const comments = ref([])
