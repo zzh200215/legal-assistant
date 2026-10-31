@@ -236,6 +236,10 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
     }
     if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'POST' && path === '/tasks/') {
+      requests.taskCreate = route.request().postDataJSON()
+      return route.fulfill({ json: success(ownerTask({ id: 305, title: requests.taskCreate.title, case_id: 7, case_title: '试点案件' })) })
+    }
     if (method === 'GET' && path === '/tasks/301/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
     if (method === 'GET' && path === '/tasks/301/comments') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/tasks/301/logs') return route.fulfill({ json: success([]) })
@@ -261,9 +265,24 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
   await dialog.getByRole('button', { name: '打开案件' }).click()
   await expect(page).toHaveURL(/\/legal-workspace\?case_id=7$/)
 
-  // 案件工作台接口不在本用例 mock 范围，整页切回任务列表继续验证清除过滤
+  // 案件工作台接口不在本用例 mock 范围，整页切回任务列表继续验证
   await page.goto('/tasks?case_id=7')
   await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toBeVisible()
+
+  // 案件视图内新建任务：默认归入当前案件，请求体带 case_id，创建后仍按案件筛选
+  await page.getByRole('button', { name: '新建任务' }).click()
+  const createDialog = page.locator('.el-dialog:visible')
+  await expect(createDialog.getByText('创建后自动归入案件 #7')).toBeVisible()
+  if (SHOT_DIR) await createDialog.screenshot({ path: path.join(SHOT_DIR, 'step82-task-create-in-case.png') })
+  await createDialog.getByPlaceholder('任务标题').fill('案件内新建任务')
+  await createDialog.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.getByText('创建成功')).toBeVisible()
+  expect(requests.taskCreate).toEqual({
+    title: '案件内新建任务', description: '', assignee: '', collaborators: [],
+    priority: 'medium', progress: 0, case_id: 7,
+  })
+  expect(requests.filter((item) => item.startsWith('GET /tasks/') && item.includes('case_id=7')).length).toBeGreaterThanOrEqual(2)
+
   await page.getByRole('button', { name: '仅看案件 #7 ×' }).click()
   await expect(page.getByText('普通任务')).toBeVisible()
   await expect(page.getByRole('button', { name: '仅看案件 #7 ×' })).toHaveCount(0)

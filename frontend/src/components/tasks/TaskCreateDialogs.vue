@@ -1,6 +1,7 @@
 <template>
   <el-dialog v-model="showCreateDialog" title="新建任务" width="560px" class="task-dialog">
     <div class="form-grid">
+      <div v-if="caseId" class="dialog-copy case-hint">创建后自动归入案件 #{{ caseId }}</div>
       <el-input v-model="newTask.title" placeholder="任务标题" />
       <el-input v-model="newTask.description" type="textarea" :rows="3" placeholder="任务描述（可选）" />
       <el-input v-model="newTask.assignee" placeholder="负责人（可选）" />
@@ -57,8 +58,9 @@ import 'element-plus/es/components/select/style/css'
 import api from '../../api'
 import { ElMessage } from 'element-plus/es/components/message/index'
 
-defineProps({
+const props = defineProps({
   loading: { type: Boolean, default: false },
+  caseId: { type: Number, default: null },
 })
 const emit = defineEmits(['refresh'])
 
@@ -77,13 +79,16 @@ const resetCreateForm = () => {
 
 const createTask = async () => {
   if (!newTask.value.title.trim()) return ElMessage.warning('请输入标题')
+  const payload = {
+    ...newTask.value,
+    collaborators: newTask.value.collaborators
+      ? newTask.value.collaborators.split(',').map((item) => item.trim()).filter(Boolean)
+      : [],
+  }
+  // 案件任务视图下新建：默认归入当前案件，避免创建后从筛选结果里消失
+  if (props.caseId) payload.case_id = props.caseId
   try {
-    await api.createTask({
-      ...newTask.value,
-      collaborators: newTask.value.collaborators
-        ? newTask.value.collaborators.split(',').map((item) => item.trim()).filter(Boolean)
-        : [],
-    })
+    await api.createTask(payload)
     ElMessage.success('创建成功')
     showCreateDialog.value = false
     resetCreateForm()
@@ -145,5 +150,9 @@ defineExpose({
 .dialog-copy {
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
+}
+.case-hint {
+  color: var(--color-primary);
+  font-weight: 600;
 }
 </style>

@@ -184,7 +184,7 @@
       @open-agent-run="openAgentRun"
     />
 
-    <TaskCreateDialogs ref="createDialogs" :loading="loading" @refresh="handleDialogsRefresh" />
+    <TaskCreateDialogs ref="createDialogs" :loading="loading" :case-id="workflowCaseId" @refresh="handleDialogsRefresh" />
   </section>
 </template>
 

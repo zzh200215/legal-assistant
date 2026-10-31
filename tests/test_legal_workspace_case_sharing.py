@@ -173,6 +173,37 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 404)
 
+    def test_create_task_with_case_id(self):
+        created = self.client.post(
+            "/api/tasks/",
+            json={"title": "案件内新建任务", "case_id": self.case.id},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        body = created.json()["data"]
+        self.assertEqual(body["case_id"], self.case.id)
+        self.assertEqual(body["case_title"], "共享案件")
+
+        task = self.db.query(Task).filter(Task.id == body["id"]).one()
+        self.assertEqual(task.case_id, self.case.id)
+        self.assertEqual(task.user_id, self.member_b.id)
+
+        listed = self.client.get(
+            f"/api/tasks/?case_id={self.case.id}",
+            headers=self._headers(self.member_b),
+        ).json()["data"]
+        self.assertIn(body["id"], [item["id"] for item in listed["items"]])
+
+        # 严格案件非成员不能建案内任务：按既有口径返回 404，不泄露案件存在性
+        denied = self.client.post(
+            "/api/tasks/",
+            json={"title": "越权任务", "case_id": self.strict_case.id},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(denied.status_code, 404)
+        self.assertEqual(denied.json()["error"]["code"], "CASE_NOT_FOUND")
+        self.assertEqual(self.db.query(Task).filter(Task.title == "越权任务").count(), 0)
+
     def test_export_markdown_denied_for_outsider(self):
         resp = self.client.get(
             f"/api/legal/consultations/{self.row.id}/export/markdown",
