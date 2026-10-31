@@ -490,3 +490,49 @@ test('任务搜索与截止排序：q/sort 下推服务端并写回 URL', async 
   await expect(page.getByText('合同审查待办')).toHaveCount(0)
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('任务到期通知：点击直达任务详情', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') {
+      return route.fulfill({ json: success({
+        unread: 1,
+        items: [{
+          id: 1, title: '任务今天到期：出具律师函', body: 'task:due_today · 任务 #601 的截止日期为 2026-12-30',
+          status: 'delivered', reference_type: 'task', reference_id: 601, case_id: null,
+          template_key: 'task_due_today', created_at: '2026-12-30T09:00:00',
+        }],
+      }) })
+    }
+    if (method === 'POST' && path === '/developer/notifications/1/read') {
+      return route.fulfill({ json: success({ id: 1, status: 'read' }) })
+    }
+    if (method === 'GET' && path === '/tasks/') {
+      return route.fulfill({ json: success({ items: [ownerTask({ id: 601, title: '出具律师函', due_date: '2026-12-30T23:59:59' })], total: 1, page: 1, page_size: 12 }) })
+    }
+    if (method === 'GET' && path === '/tasks/601') {
+      return route.fulfill({ json: success(ownerTask({ id: 601, title: '出具律师函', due_date: '2026-12-30T23:59:59' })) })
+    }
+    if (method === 'GET' && path === '/tasks/601/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/601/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/601/logs') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await page.locator('.bell-pill').click()
+  await page.locator('.bell-item', { hasText: '任务今天到期' }).click()
+  await expect(page).toHaveURL(/taskId=601/)
+  const dialog = page.locator('.el-dialog:visible')
+  await expect(dialog.getByText('出具律师函').first()).toBeVisible()
+  await expect(dialog.getByText('2026-12-30')).toBeVisible()
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})

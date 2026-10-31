@@ -142,6 +142,14 @@ const requestEvidence = async (n) => {
 
 const openNotification = async (n) => {
   await markRead(n)
+  if (n.reference_type === 'task' && n.reference_id) {
+    // 任务到期提醒：直达任务中心并打开详情；有案件时保留案件筛选上下文
+    const query = { taskId: String(n.reference_id) }
+    if (n.case_id) query.case_id = String(n.case_id)
+    router.push({ path: '/tasks', query })
+    open.value = false
+    return
+  }
   if (n.reference_type === 'workflow_run') {
     const workflowId = n.reference_id ? String(n.reference_id) : undefined
     if (n.case_id) {

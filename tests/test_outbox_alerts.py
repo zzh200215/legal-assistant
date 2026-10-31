@@ -195,7 +195,14 @@ class OutboxAlertTaskTests(unittest.TestCase):
                                         allowed_recipient_domains_json='["example.com"]'))
         self.db.commit()
 
-    def _quiet_pref(self, user, *, start="00:00", end="23:59"):
+    def _quiet_pref(self, user, *, start=None, end=None):
+        from zoneinfo import ZoneInfo
+
+        if start is None or end is None:
+            # 用「当前前后 1 小时」构造静默窗口，避免在 23:59 / 00:00 分钟边界上抖动
+            moment = datetime.now(ZoneInfo("Asia/Shanghai"))
+            start = (moment - timedelta(hours=1)).strftime("%H:%M")
+            end = (moment + timedelta(hours=1)).strftime("%H:%M")
         from app.models.legal_notifications import LegalNotificationPreference
 
         self.db.add(LegalNotificationPreference(

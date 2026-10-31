@@ -40,6 +40,18 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "立即处理",
         "footnote": "逾期记录会在审核队列中以「已逾期」标记。",
     },
+    "task_due_tomorrow": {
+        "subject": "【律智检】{{title}}",
+        "lead": "以下任务将于明天到期，请及时跟进。",
+        "action_label": "去处理",
+        "footnote": "任务到期当天还会再提醒一次。",
+    },
+    "task_due_today": {
+        "subject": "【律智检】{{title}}",
+        "lead": "以下任务今天到期，请尽快处理。",
+        "action_label": "去处理",
+        "footnote": "完成后请在任务中心标记完成。",
+    },
     "review_consultation_uncited": {
         "subject": "【律智检】{{title}}",
         "lead": "有新的咨询进入审核队列，但该咨询没有关联法源引用。",

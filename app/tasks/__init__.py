@@ -33,6 +33,7 @@ from app.tasks.legal_tasks import (
     scan_contract_expiry_alerts_task,
     scan_expired_portal_links_task,
 )
+from app.tasks.task_reminder_tasks import check_task_due_reminders_task
 from app.tasks.billing_tasks import (
     dispatch_payment_events_task,
     recover_stale_payment_events_task,
