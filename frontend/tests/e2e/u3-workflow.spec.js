@@ -185,6 +185,10 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
       await route.fulfill({ json: success({ organization_id: 5, brand: '律智检', workflows: [{ key: 'consultation', label: '法律咨询' }] }) })
       return
     }
+    if (method === 'GET' && path === '/legal/history-counts') {
+      await route.fulfill({ json: success({ consultations: 0, contract_reviews: 0, drafts: 0 }) })
+      return
+    }
     if (method === 'GET' && path === '/legal/orgs/5/cases') {
       await route.fulfill({ json: success([{ id: 3, title: '联调测试案件', status: 'in_progress', case_type: 'labor_dispute', organization_id: 5 }]) })
       return
@@ -261,6 +265,11 @@ test('U-3 一键流转：咨询→提交审核→合同审查→起草→审核�
     if (method === 'GET' && path === '/legal/consultations/989') {
       // 通知直达：按 consultation_id 恢复结果卡
       await route.fulfill({ json: success(CONSULT_NO_REF_ROW) })
+      return
+    }
+    if (method === 'GET' && path === '/legal/consultations/991') {
+      // 队列里选中过 991 后跳通知，页面补拉一次 991 详情（既有行为）
+      await route.fulfill({ json: success(CONSULT_ROW) })
       return
     }
     if (method === 'GET' && path === '/legal/consultations') {

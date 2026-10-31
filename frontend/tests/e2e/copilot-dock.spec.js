@@ -59,6 +59,7 @@ async function mockApi(page, { onConsult, onFaithfulness, onConsultSocket } = {}
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/legal/overview') return route.fulfill({ json: success({ organization_id: 5, organization_name: '示例律所' }) })
+    if (method === 'GET' && path === '/legal/history-counts') return route.fulfill({ json: success({ consultations: 0, contract_reviews: 0, drafts: 0 }) })
     if (method === 'GET' && path === '/legal/orgs/5/cases') return route.fulfill({ json: success([CASE]) })
     if (method === 'GET' && path === '/legal/orgs/5/cases/3/items') return route.fulfill({ json: success({ consultations: [], contract_reviews: [], drafts: [] }) })
     if (method === 'GET' && path === '/legal/review-queue') return route.fulfill({ json: success({ items: [], total: 0 }) })

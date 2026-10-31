@@ -135,3 +135,66 @@ test('幂等写：上传连点只发一次 POST 且携带 Idempotency-Key', asyn
   expect(uploads[0].idemKey.length).toBeGreaterThan(0)
   expect(uploads[0].filename).toBe('合同草稿.txt')
 })
+
+test('401 单飞刷新：并发 401 只刷新一次并重放原请求', async ({ page }) => {
+  let refreshCalls = 0
+  const calls = { documents: 0, knowledgeBases: 0 }
+  const replayedAuth = []
+
+  await page.addInitScript(() => {
+    localStorage.setItem('token', 'expired-token')
+    localStorage.setItem('refresh_token', 'valid-refresh-token')
+  })
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (!url.pathname.startsWith('/api/')) {
+      await route.continue()
+      return
+    }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = request.method()
+
+    if (method === 'GET' && path === '/auth/me') {
+      return route.fulfill({ json: success({ id: 3, username: 'e2e-user', role: 'user', status: 'active' }) })
+    }
+    if (method === 'GET' && path === '/developer/notifications/me') {
+      return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    }
+    if (method === 'POST' && path === '/auth/refresh') {
+      refreshCalls += 1
+      const body = request.postDataJSON()
+      expect(body).toEqual({ refresh_token: 'valid-refresh-token' })
+      return route.fulfill({ json: success({ access_token: 'fresh-token', refresh_token: 'new-refresh-token' }) })
+    }
+    if (method === 'GET' && path === '/documents/') {
+      calls.documents += 1
+      if (calls.documents === 1) {
+        return route.fulfill({ status: 401, json: { detail: 'token expired' } })
+      }
+      replayedAuth.push(request.headers().authorization)
+      return route.fulfill({ json: success({ items: [DOC], total: 1, page: 1, page_size: 10, has_next: false, has_previous: false }) })
+    }
+    if (method === 'GET' && path === '/documents/knowledge-bases') {
+      calls.knowledgeBases += 1
+      if (calls.knowledgeBases === 1) {
+        return route.fulfill({ status: 401, json: { detail: 'token expired' } })
+      }
+      replayedAuth.push(request.headers().authorization)
+      return route.fulfill({ json: success([]) })
+    }
+    await route.continue()
+  })
+
+  await page.goto('/documents')
+  await expect(page.locator('.doc-item', { hasText: '测试法规.txt' })).toBeVisible()
+
+  expect(refreshCalls).toBe(1)
+  expect(calls.documents).toBe(2)
+  expect(calls.knowledgeBases).toBe(2)
+  expect(replayedAuth).toEqual(['Bearer fresh-token', 'Bearer fresh-token'])
+  const tokens = await page.evaluate(() => ({ access: localStorage.getItem('token'), refresh: localStorage.getItem('refresh_token') }))
+  expect(tokens).toEqual({ access: 'fresh-token', refresh: 'new-refresh-token' })
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})

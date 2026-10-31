@@ -146,6 +146,11 @@ test('试点主链路：登录、合同审查、关键日期与门户发布', as
       return
     }
 
+    if (method === 'GET' && path === '/legal/history-counts') {
+      await route.fulfill({ json: success({ consultations: 0, contract_reviews: 0, drafts: 0 }) })
+      return
+    }
+
     if (method === 'GET' && path === '/legal/review-stats') {
       await route.fulfill({ json: success({ total_actions: 0, action_distribution: {}, target_type_distribution: {}, return_reasons: [], recent_actions: [] }) })
       return

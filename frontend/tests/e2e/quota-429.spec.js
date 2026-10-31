@@ -40,6 +40,7 @@ async function setup(page, { quota, consultStatus }) {
     if (method === 'GET' && path === '/developer/onboarding') return route.fulfill({ json: success({ user_role: 'solo_lawyer', completed_steps_json: '[]' }) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/legal/overview') return route.fulfill({ json: success({ organization_id: 5, brand: '律智检' }) })
+    if (method === 'GET' && path === '/legal/history-counts') return route.fulfill({ json: success({ consultations: 0, contract_reviews: 0, drafts: 0 }) })
     if (method === 'GET' && path === '/legal/orgs/5/cases') return route.fulfill({ json: success([{ id: 3, title: '联调测试案件', status: 'in_progress', organization_id: 5 }]) })
     if (method === 'GET' && path === '/billing/subscriptions/quota') return route.fulfill({ json: success(QUOTA(quota)) })
     if (method === 'GET' && ['/legal/consultations', '/legal/contract-reviews', '/legal/drafts', '/legal/document-templates', '/legal/sources', '/legal/review-queue'].includes(path)) return route.fulfill({ json: success([]) })
