@@ -231,6 +231,60 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(cleared.status_code, 200, cleared.text)
         self.assertIsNone(cleared.json()["data"]["due_date"])
 
+    def test_task_list_search_and_sort(self):
+        def create(title, description, due_date=None):
+            response = self.client.post(
+                "/api/tasks/",
+                json={"title": title, "description": description, "due_date": due_date},
+                headers=self._headers(self.member_b),
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()["data"]
+
+        contract_task = create("合同审查待办", "核对付款条款", "2026-12-31T23:59:59")
+        archive_task = create("归档材料", "合同附件整理")
+        visit_task = create("客户回访", "与关键词无关的说明", "2026-11-15T23:59:59")
+
+        def ids(**params):
+            response = self.client.get(
+                "/api/tasks/", params=params, headers=self._headers(self.member_b)
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            return [item["id"] for item in response.json()["data"]["items"]]
+
+        # 标题/描述都参与；空白被裁剪；默认排序仍是创建时间倒序
+        self.assertEqual(
+            ids(), [visit_task["id"], archive_task["id"], contract_task["id"]]
+        )
+        self.assertEqual(ids(q="合同"), [archive_task["id"], contract_task["id"]])
+        self.assertEqual(
+            ids(q="  合同  "), [archive_task["id"], contract_task["id"]]
+        )
+        self.assertEqual(ids(q="付款条款"), [contract_task["id"]])
+
+        # LIKE 通配符按字面量处理，不能把 % 当任意匹配
+        self.assertEqual(ids(q="%"), [])
+
+        # 截止日期排序：无日期的排最后，不随数据库 NULL 顺序漂移
+        self.assertEqual(
+            ids(sort="due_asc"),
+            [visit_task["id"], contract_task["id"], archive_task["id"]],
+        )
+        self.assertEqual(
+            ids(sort="due_desc"),
+            [contract_task["id"], visit_task["id"], archive_task["id"]],
+        )
+
+        invalid_sort = self.client.get(
+            "/api/tasks/", params={"sort": "bad"}, headers=self._headers(self.member_b)
+        )
+        self.assertEqual(invalid_sort.status_code, 422, invalid_sort.text)
+
+        too_long = self.client.get(
+            "/api/tasks/", params={"q": "x" * 101}, headers=self._headers(self.member_b)
+        )
+        self.assertEqual(too_long.status_code, 422, too_long.text)
+
     def test_strict_case_title_hidden_until_member(self):
         task = Task(
             user_id=self.member_a.id,

@@ -64,6 +64,21 @@
         </details>
       </div>
       <div class="app-card-body">
+        <div class="task-toolbar app-filter-bar">
+          <el-input
+            v-model="searchDraft"
+            class="task-search"
+            placeholder="搜索标题或描述"
+            clearable
+            @input="scheduleSearch"
+            @clear="applySearchNow"
+            @keyup.enter="applySearchNow"
+          />
+          <span class="task-sort-label">排序</span>
+          <el-select v-model="sortOrder" class="task-sort" @change="handleSortChange">
+            <el-option v-for="item in sortOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </div>
         <div v-if="sourceFilterMeta" class="source-filter-row app-chip-row">
           <span class="app-tag is-pending">来源筛选：{{ sourceFilterMeta.label }} #{{ sourceFilterMeta.sourceId }}</span>
           <el-button size="small" text type="info" @click="clearSourceFilter">清除来源筛选</el-button>
@@ -197,14 +212,16 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton } from 'element-plus/es/components/button/index'
+import { ElInput } from 'element-plus/es/components/input/index'
 import { ElPagination } from 'element-plus/es/components/pagination/index'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
 import { ElRadioButton, ElRadioGroup } from 'element-plus/es/components/radio/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/radio-button/style/css'
@@ -269,6 +286,49 @@ const loadCaseTitle = async (caseId) => {
   }
 }
 
+const sortOptions = [
+  { label: '最近创建', value: 'created_desc' },
+  { label: '截止最近', value: 'due_asc' },
+  { label: '截止最远', value: 'due_desc' },
+]
+const normalizeSort = (value) => (sortOptions.some((item) => item.value === value) ? value : 'created_desc')
+const searchDraft = ref(typeof route.query.q === 'string' ? route.query.q : '')
+const sortOrder = ref(normalizeSort(route.query.sort))
+let searchTimer = null
+
+const applySearchQuery = (value) => {
+  const keyword = String(value || '').trim()
+  const current = typeof route.query.q === 'string' ? route.query.q : ''
+  if (keyword === current) return
+  const nextQuery = { ...route.query }
+  if (keyword) nextQuery.q = keyword
+  else delete nextQuery.q
+  taskPage.value = 1
+  router.replace({ query: nextQuery })
+  fetchTasks()
+}
+
+const scheduleSearch = () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => applySearchQuery(searchDraft.value), 350)
+}
+
+const applySearchNow = () => {
+  clearTimeout(searchTimer)
+  applySearchQuery(searchDraft.value)
+}
+
+const handleSortChange = () => {
+  const nextQuery = { ...route.query }
+  if (sortOrder.value === 'created_desc') delete nextQuery.sort
+  else nextQuery.sort = sortOrder.value
+  taskPage.value = 1
+  router.replace({ query: nextQuery })
+  fetchTasks()
+}
+
+onBeforeUnmount(() => clearTimeout(searchTimer))
+
 const priorityLabelMap = {
   high: '高',
   medium: '中',
@@ -306,6 +366,8 @@ const sourceFilterMeta = computed(() => {
 })
 
 const taskEmptyText = computed(() => {
+  const keyword = searchDraft.value.trim()
+  if (keyword) return `没有匹配「${keyword}」的任务`
   if (workflowCaseId.value) {
     return caseTitle.value ? `案件「${caseTitle.value}」暂无任务` : `案件 #${workflowCaseId.value} 暂无任务`
   }
@@ -409,7 +471,11 @@ const handleTaskUpdated = (task) => {
   }
 }
 
+let fetchSeq = 0
+
 const fetchTasks = async () => {
+  // 搜索/排序会连续触发请求：只让最后一次落盘，避免旧响应覆盖新列表
+  const seq = ++fetchSeq
   loading.value = true
   try {
     const { data } = await api.listTasks(null, {
@@ -419,11 +485,17 @@ const fetchTasks = async () => {
       source_type: sourceFilterMeta.value?.sourceType || undefined,
       source_id: sourceFilterMeta.value?.sourceId || undefined,
       case_id: workflowCaseId.value || undefined,
+      q: searchDraft.value.trim() || undefined,
+      sort: sortOrder.value,
     })
+    if (seq !== fetchSeq) return
     tasks.value = data?.items || []
     taskTotal.value = data?.total || 0
-  } catch (e) { taskError.value = normalizeError(e) }
-  loading.value = false
+  } catch (e) {
+    if (seq === fetchSeq) taskError.value = normalizeError(e)
+  } finally {
+    if (seq === fetchSeq) loading.value = false
+  }
 }
 
 const handleScopeChange = async () => {
@@ -564,6 +636,30 @@ watch(
   }
 )
 
+watch(
+  () => route.query.q,
+  async (value, oldValue) => {
+    if (value === oldValue) return
+    const keyword = typeof value === 'string' ? value : ''
+    if (keyword === searchDraft.value) return
+    searchDraft.value = keyword
+    taskPage.value = 1
+    await fetchTasks()
+  }
+)
+
+watch(
+  () => route.query.sort,
+  async (value, oldValue) => {
+    if (value === oldValue) return
+    const next = normalizeSort(value)
+    if (next === sortOrder.value) return
+    sortOrder.value = next
+    taskPage.value = 1
+    await fetchTasks()
+  }
+)
+
 watch(detailVisible, (visible) => {
   if (!visible) {
     selectedTask.value = null
@@ -640,6 +736,19 @@ watch(detailVisible, (visible) => {
 
 .source-filter-row {
   margin-bottom: var(--space-4);
+}
+.task-toolbar {
+  margin-bottom: var(--space-3);
+}
+.task-search {
+  width: 280px;
+}
+.task-sort-label {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+.task-sort {
+  width: 132px;
 }
 
 /* ─── 看板：外层一张卡，列是浅底泳道，任务卡复用 .app-thread ─── */

@@ -432,3 +432,61 @@ test('任务截止日期：创建带日期 → 详情展示 → 修改/清除', 
   await expect(dialog.getByText('未设置')).toBeVisible()
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('任务搜索与截止排序：q/sort 下推服务端并写回 URL', async ({ page }) => {
+  const taskRequests = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/') {
+      const q = url.searchParams.get('q') || ''
+      const sort = url.searchParams.get('sort') || 'created_desc'
+      taskRequests.push({ q, sort })
+      let items = [
+        ownerTask({ id: 601, title: '合同审查待办', description: '核对付款条款', due_date: '2026-12-31T23:59:59' }),
+        ownerTask({ id: 602, title: '归档材料', description: '整理附件', due_date: null }),
+      ]
+      if (q) items = items.filter((item) => `${item.title}${item.description}`.includes(q))
+      return route.fulfill({ json: success({ items, total: items.length, page: 1, page_size: 12 }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await expect(page.getByText('合同审查待办')).toBeVisible()
+
+  // 输入关键词 → 350ms 防抖后带 q 请求，URL 可分享
+  await page.getByPlaceholder('搜索标题或描述').fill('合同')
+  await expect.poll(() => taskRequests.some((item) => item.q === '合同')).toBe(true)
+  await expect(page.getByText('合同审查待办')).toBeVisible()
+  await expect(page.getByText('归档材料')).toHaveCount(0)
+  expect(new URL(page.url()).searchParams.get('q')).toBe('合同')
+
+  // 切换排序 → sort=due_asc 下推，并写回 URL
+  await page.locator('.task-sort').click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("截止最近")').click()
+  await expect.poll(() => taskRequests.some((item) => item.sort === 'due_asc')).toBe(true)
+  expect(new URL(page.url()).searchParams.get('sort')).toBe('due_asc')
+
+  // 清空关键词 → q 从 URL 和请求里移除，列表恢复
+  await page.getByPlaceholder('搜索标题或描述').fill('')
+  await expect.poll(() => taskRequests.some((item) => item.q === '')).toBe(true)
+  await expect(page.getByText('归档材料')).toBeVisible()
+  expect(new URL(page.url()).searchParams.get('q')).toBeNull()
+
+  // 深链：URL 上的 q/sort 直接初始化输入与列表
+  await page.goto('/tasks?q=归档&sort=due_desc')
+  await expect(page.getByPlaceholder('搜索标题或描述')).toHaveValue('归档')
+  await expect(page.locator('.task-sort')).toContainText('截止最远')
+  await expect(page.getByText('归档材料')).toBeVisible()
+  await expect(page.getByText('合同审查待办')).toHaveCount(0)
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})

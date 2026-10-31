@@ -1,13 +1,20 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.task import Task, TaskComment, TaskLog
 from app.models.user import User
 from app.services.documents.analysis_service import analysis_service
 from app.services.documents.case_link import document_case_id
+
+# 任务列表排序白名单：due_* 把无截止日期的任务放最后，避免 NULL 排在最前/最后随数据库而异。
+TASK_LIST_SORTS = {
+    "created_desc": (Task.created_at.desc(), Task.id.desc()),
+    "due_asc": (Task.due_date.is_(None).asc(), Task.due_date.asc(), Task.id.desc()),
+    "due_desc": (Task.due_date.is_(None).asc(), Task.due_date.desc(), Task.id.desc()),
+}
 
 
 class TaskService:
@@ -495,6 +502,8 @@ class TaskService:
         source_type: str | None = None,
         source_id: int | None = None,
         case_id: int | None = None,
+        keyword: str | None = None,
+        sort: str = "created_desc",
     ) -> tuple[list[Task], int]:
         """数据库分页版 list_visible：可见性过滤全部下沉 SQL，count 走 DB。"""
         cond = self._visible_filter(
@@ -513,9 +522,18 @@ class TaskService:
             q = q.filter(Task.source_id == source_id)
         if case_id is not None:
             q = q.filter(Task.case_id == case_id)
+        search = (keyword or "").strip()
+        if search:
+            q = q.filter(
+                or_(
+                    Task.title.icontains(search, autoescape=True),
+                    Task.description.icontains(search, autoescape=True),
+                )
+            )
         total = q.count()
+        order_by = TASK_LIST_SORTS.get(sort, TASK_LIST_SORTS["created_desc"])
         items = (
-            q.order_by(Task.created_at.desc(), Task.id.desc())
+            q.order_by(*order_by)
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()

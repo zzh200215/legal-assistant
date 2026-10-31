@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Header, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -113,6 +115,10 @@ def list_tasks(
     source_type: str | None = Query(None, description="按来源筛选：document/meeting/chat/decompose"),
     source_id: int | None = Query(None, description="按来源对象 ID 筛选"),
     case_id: int | None = Query(None, description="按案件筛选（案件任务视图）"),
+    q: str | None = Query(None, max_length=100, description="关键词（匹配标题/描述）"),
+    sort: Literal["created_desc", "due_asc", "due_desc"] = Query(
+        "created_desc", description="排序：created_desc/due_asc/due_desc"
+    ),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     db: Session = Depends(get_db),
@@ -131,6 +137,8 @@ def list_tasks(
         source_type=source_type,
         source_id=source_id,
         case_id=case_id,
+        keyword=q,
+        sort=sort,
     )
     payloads = _attach_case_titles(
         db, [task_service.serialize_task(task) for task in rows], current_user
