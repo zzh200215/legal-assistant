@@ -52,6 +52,18 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "去处理",
         "footnote": "完成后请在任务中心标记完成。",
     },
+    "task_overdue_1d": {
+        "subject": "【律智检】{{title}}",
+        "lead": "以下任务已逾期 1 天，请尽快处理。",
+        "action_label": "去处理",
+        "footnote": "逾期任务会在任务中心标红，完成后请标记完成。",
+    },
+    "task_overdue_3d": {
+        "subject": "【律智检】{{title}}",
+        "lead": "以下任务已逾期 3 天，请优先处理。",
+        "action_label": "去处理",
+        "footnote": "逾期 3 天为最后一次自动提醒，后续请人工跟进。",
+    },
     "review_consultation_uncited": {
         "subject": "【律智检】{{title}}",
         "lead": "有新的咨询进入审核队列，但该咨询没有关联法源引用。",
