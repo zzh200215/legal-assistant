@@ -25,7 +25,7 @@
     <div class="task-brief app-metric-grid-4" aria-label="任务摘要">
       <div class="app-stat">
         <span class="app-stat-label">任务总数</span>
-        <div class="app-stat-value">{{ taskTotal || tasks.length }}<small> 项任务</small></div>
+        <div class="app-stat-value">{{ statsTotal }}<small> 项任务</small></div>
       </div>
       <div class="app-stat">
         <span class="app-stat-label">进行中</span>
@@ -251,6 +251,7 @@ const tasks = ref([])
 const taskPage = ref(1)
 const taskPageSize = ref(12)
 const taskTotal = ref(0)
+const taskStats = ref(null)
 const loading = ref(false)
 // 三态（ux-audit M-13）：任务列表加载失败与"暂无任务"分离，失败可重试；看板/表格两视图共用
 const taskError = ref(null)
@@ -385,9 +386,18 @@ const isTaskOverdue = (item) => {
   return Number.isFinite(dueTime) && dueTime < Date.now()
 }
 
-const inProgressCount = computed(() => tasks.value.filter((item) => item.status === 'in_progress').length)
-const overdueCount = computed(() => tasks.value.filter((item) => isTaskOverdue(item)).length)
-const sharedTaskCount = computed(() => tasks.value.filter((item) => scopeLabel(item) !== '我的').length)
+const inProgressCount = computed(() => (
+  taskStats.value?.in_progress ?? tasks.value.filter((item) => item.status === 'in_progress').length
+))
+const overdueCount = computed(() => (
+  taskStats.value?.overdue ?? tasks.value.filter((item) => isTaskOverdue(item)).length
+))
+const sharedTaskCount = computed(() => (
+  taskStats.value?.shared ?? tasks.value.filter((item) => scopeLabel(item) !== '我的').length
+))
+const statsTotal = computed(() => (
+  taskStats.value?.total ?? (taskTotal.value || tasks.value.length)
+))
 
 const getTasksByStatus = (status) => tasks.value.filter(t => t.status === status)
 
@@ -491,6 +501,7 @@ const fetchTasks = async () => {
     if (seq !== fetchSeq) return
     tasks.value = data?.items || []
     taskTotal.value = data?.total || 0
+    taskStats.value = data?.stats || null
   } catch (e) {
     if (seq === fetchSeq) taskError.value = normalizeError(e)
   } finally {

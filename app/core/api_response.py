@@ -77,20 +77,21 @@ def paginated_payload(
     page: int,
     page_size: int,
     message: str = "OK",
+    stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     has_previous = page > 1
     has_next = page * page_size < total
-    return success_payload(
-        {
-            "items": items,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "has_next": has_next,
-            "has_previous": has_previous,
-        },
-        message=message,
-    )
+    payload = {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "has_next": has_next,
+        "has_previous": has_previous,
+    }
+    if stats is not None:
+        payload["stats"] = stats
+    return success_payload(payload, message=message)
 
 
 class ApiResponseMiddleware(BaseHTTPMiddleware):

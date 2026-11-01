@@ -285,6 +285,65 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         )
         self.assertEqual(too_long.status_code, 422, too_long.text)
 
+    def test_task_list_stats_are_global_not_page(self):
+        def create(user, title, *, status="todo", due=None):
+            response = self.client.post(
+                "/api/tasks/",
+                json={"title": title, "due_date": due},
+                headers=self._headers(user),
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            task = response.json()["data"]
+            if status != "todo":
+                updated = self.client.put(
+                    f"/api/tasks/{task['id']}",
+                    json={"status": status},
+                    headers=self._headers(user),
+                )
+                self.assertEqual(updated.status_code, 200, updated.text)
+            return task
+
+        yesterday = (utc_now() - timedelta(days=1)).isoformat()
+        create(self.member_b, "进行中已逾期", status="in_progress", due=yesterday)
+        create(self.member_b, "普通待办")
+        create(self.member_b, "已完成不逾期", status="done", due=yesterday)
+        create(self.member_b, "未来任务", due=(utc_now() + timedelta(days=5)).isoformat())
+        create(self.member_a, "统计命中任务")
+        create(self.member_a, "组织共享任务")
+
+        def stats(**params):
+            response = self.client.get(
+                "/api/tasks/", params={"page": 1, "page_size": 1, **params},
+                headers=self._headers(self.member_b),
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            data = response.json()["data"]
+            return data["total"], len(data["items"]), data["stats"]
+
+        total, page_items, summary = stats(scope="all")
+        self.assertEqual(total, 6)
+        self.assertEqual(page_items, 1)  # 分页只回 1 条，统计仍是全量
+        self.assertEqual(summary, {
+            "total": 6, "in_progress": 1, "overdue": 1, "shared": 2,
+        })
+
+        total, _, summary = stats(scope="mine")
+        self.assertEqual(total, 4)
+        self.assertEqual(summary["shared"], 0)
+        self.assertEqual(summary["overdue"], 1)
+
+        total, _, summary = stats(q="统计命中")
+        self.assertEqual(total, 1)
+        self.assertEqual(summary, {
+            "total": 1, "in_progress": 0, "overdue": 0, "shared": 1,
+        })
+
+        total, _, summary = stats(status="done")
+        self.assertEqual(total, 1)
+        self.assertEqual(summary["total"], 1)
+        self.assertEqual(summary["in_progress"], 0)
+        self.assertEqual(summary["overdue"], 0)
+
     def test_strict_case_title_hidden_until_member(self):
         task = Task(
             user_id=self.member_a.id,

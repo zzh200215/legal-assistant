@@ -124,7 +124,7 @@ def list_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    rows, total = task_service.paginate_visible(
+    rows, total, stats = task_service.paginate_visible(
         db=db,
         user_id=current_user.id,
         page=page,
@@ -144,7 +144,9 @@ def list_tasks(
         db, [task_service.serialize_task(task) for task in rows], current_user
     )
     items = [TaskOut.model_validate(payload).model_dump() for payload in payloads]
-    return paginated_payload(items, total=total, page=page, page_size=page_size)
+    return paginated_payload(
+        items, total=total, page=page, page_size=page_size, stats=stats
+    )
 
 
 @router.post("/extract-from-document")

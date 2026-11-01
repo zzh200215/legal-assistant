@@ -487,13 +487,11 @@ class TaskService:
             scope_cond = True
         return and_(access, scope_cond)
 
-    def paginate_visible(
+    def _filtered_query(
         self,
         *,
         db: Session,
         user_id: int,
-        page: int,
-        page_size: int,
         role: str | None = None,
         organization_id: int | None = None,
         department_id: int | None = None,
@@ -503,9 +501,8 @@ class TaskService:
         source_id: int | None = None,
         case_id: int | None = None,
         keyword: str | None = None,
-        sort: str = "created_desc",
-    ) -> tuple[list[Task], int]:
-        """数据库分页版 list_visible：可见性过滤全部下沉 SQL，count 走 DB。"""
+    ):
+        """列表/统计共用的过滤查询：可见性 + 业务筛选全部下沉 SQL。"""
         cond = self._visible_filter(
             user_id=user_id,
             role=role,
@@ -530,7 +527,97 @@ class TaskService:
                     Task.description.icontains(search, autoescape=True),
                 )
             )
+        return q
+
+    @staticmethod
+    def _overdue_cutoff(
+        db: Session, *, user_id: int, organization_id: int | None
+    ) -> datetime:
+        """按当前用户通知偏好时区取「现在」的 naive 墙上时间，与任务截止日期同口径。"""
+        from zoneinfo import ZoneInfo
+
+        from app.core.time import utc_now
+        from app.services.notification.notification_service import notification_service
+
+        tz_name = "Asia/Shanghai"
+        if organization_id:
+            pref = notification_service.preference_for(
+                db=db,
+                user_id=user_id,
+                organization_id=organization_id,
+                event_type="deadline",
+            )
+            tz_name = (pref.timezone if pref and pref.timezone else tz_name)
+        try:
+            zone = ZoneInfo(tz_name)
+        except Exception:  # noqa: BLE001 - 时区非法按默认时区
+            zone = ZoneInfo("Asia/Shanghai")
+        return utc_now().astimezone(zone).replace(tzinfo=None)
+
+    def _list_stats(
+        self,
+        q,
+        *,
+        total: int,
+        db: Session,
+        user_id: int,
+        organization_id: int | None,
+    ) -> dict[str, int]:
+        """统计口径与列表过滤一致，但不分页：统计卡不再只算当前页。"""
+        cutoff = self._overdue_cutoff(
+            db, user_id=user_id, organization_id=organization_id
+        )
+        return {
+            "total": total,
+            "in_progress": q.filter(Task.status == "in_progress").count(),
+            "overdue": q.filter(
+                Task.due_date.isnot(None),
+                Task.status.in_(("todo", "in_progress")),
+                Task.due_date < cutoff,
+            ).count(),
+            "shared": q.filter(Task.user_id != user_id).count(),
+        }
+
+    def paginate_visible(
+        self,
+        *,
+        db: Session,
+        user_id: int,
+        page: int,
+        page_size: int,
+        role: str | None = None,
+        organization_id: int | None = None,
+        department_id: int | None = None,
+        status: str | None = None,
+        scope: str | None = None,
+        source_type: str | None = None,
+        source_id: int | None = None,
+        case_id: int | None = None,
+        keyword: str | None = None,
+        sort: str = "created_desc",
+    ) -> tuple[list[Task], int, dict[str, int]]:
+        """数据库分页版 list_visible：可见性过滤全部下沉 SQL，count 走 DB。"""
+        q = self._filtered_query(
+            db=db,
+            user_id=user_id,
+            role=role,
+            organization_id=organization_id,
+            department_id=department_id,
+            status=status,
+            scope=scope,
+            source_type=source_type,
+            source_id=source_id,
+            case_id=case_id,
+            keyword=keyword,
+        )
         total = q.count()
+        stats = self._list_stats(
+            q,
+            total=total,
+            db=db,
+            user_id=user_id,
+            organization_id=organization_id,
+        )
         order_by = TASK_LIST_SORTS.get(sort, TASK_LIST_SORTS["created_desc"])
         items = (
             q.order_by(*order_by)
@@ -538,7 +625,7 @@ class TaskService:
             .limit(page_size)
             .all()
         )
-        return items, total
+        return items, total, stats
 
     def paginate_sub_tasks(
         self,

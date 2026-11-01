@@ -536,3 +536,35 @@ test('任务到期通知：点击直达任务详情', async ({ page }) => {
   await expect(dialog.getByText('2026-12-30')).toBeVisible()
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('任务统计：使用服务端全量统计而非当前页', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/') {
+      return route.fulfill({ json: success({
+        items: [ownerTask({ id: 601, title: '当前页唯一任务' })],
+        total: 25, page: 1, page_size: 12,
+        stats: { total: 25, in_progress: 7, overdue: 3, shared: 5 },
+      }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  const brief = page.locator('.task-brief')
+  await expect(brief).toContainText('25 项任务')
+  await expect(brief).toContainText('7 项进行中')
+  await expect(brief).toContainText('3 项逾期')
+  await expect(brief).toContainText('5 项共享')
+  await expect(page.getByText('当前页唯一任务')).toBeVisible()
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
