@@ -569,7 +569,7 @@ test('任务统计：使用服务端全量统计而非当前页', async ({ page 
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
 
-test('统计卡点击筛选：进行中/逾期/共享可切换并写回 URL', async ({ page }) => {
+test('统计卡点击筛选：进行中/逾期/共享可组合并写回 URL', async ({ page }) => {
   const requests = []
   await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
   await page.route('**/api/**', async (route) => {
@@ -602,31 +602,56 @@ test('统计卡点击筛选：进行中/逾期/共享可切换并写回 URL', as
   const inProgress = page.locator('.task-stat-card', { hasText: '进行中' })
   const overdue = page.locator('.task-stat-card', { hasText: '已逾期' })
   const shared = page.locator('.task-stat-card', { hasText: '共享任务' })
+  const total = page.getByTitle('显示全部任务')
 
   await inProgress.click()
   await expect.poll(() => requests.at(-1)?.status).toBe('in_progress')
   await expect(inProgress).toHaveAttribute('aria-pressed', 'true')
   expect(new URL(page.url()).searchParams.get('status')).toBe('in_progress')
 
+  // 叠加逾期：两个条件同时下推，互不清除
   await overdue.click()
   await expect.poll(() => requests.at(-1)?.overdue).toBe('true')
+  await expect.poll(() => requests.at(-1)?.status).toBe('in_progress')
   await expect(overdue).toHaveAttribute('aria-pressed', 'true')
-  await expect(inProgress).toHaveAttribute('aria-pressed', 'false')
+  await expect(inProgress).toHaveAttribute('aria-pressed', 'true')
   expect(new URL(page.url()).searchParams.get('overdue')).toBe('1')
+  expect(new URL(page.url()).searchParams.get('status')).toBe('in_progress')
+
+  // 取消进行中：只移除 status，逾期保留
+  await inProgress.click()
+  await expect.poll(() => requests.at(-1)?.status).toBeNull()
+  await expect.poll(() => requests.at(-1)?.overdue).toBe('true')
+  await expect(inProgress).toHaveAttribute('aria-pressed', 'false')
+  await expect(overdue).toHaveAttribute('aria-pressed', 'true')
   expect(new URL(page.url()).searchParams.get('status')).toBeNull()
 
+  await overdue.click()
+  await expect.poll(() => requests.at(-1)?.overdue).toBeNull()
+  await expect(overdue).toHaveAttribute('aria-pressed', 'false')
+
+  // 共享可与进行中叠加
   await shared.click()
+  await expect.poll(() => requests.at(-1)?.scope).toBe('shared')
+  await inProgress.click()
+  await expect.poll(() => requests.at(-1)?.status).toBe('in_progress')
   await expect.poll(() => requests.at(-1)?.scope).toBe('shared')
   await expect(shared).toHaveAttribute('aria-pressed', 'true')
   expect(new URL(page.url()).searchParams.get('scope')).toBe('shared')
-  expect(new URL(page.url()).searchParams.get('overdue')).toBeNull()
 
-  await shared.click()
+  // 任务总数清空全部筛选
+  await total.click()
+  await expect.poll(() => requests.at(-1)?.status).toBeNull()
+  await expect.poll(() => requests.at(-1)?.overdue).toBeNull()
   await expect.poll(() => requests.at(-1)?.scope === null || requests.at(-1)?.scope === 'all').toBe(true)
+  await expect(inProgress).toHaveAttribute('aria-pressed', 'false')
   await expect(shared).toHaveAttribute('aria-pressed', 'false')
+  await expect(total).toHaveAttribute('aria-pressed', 'true')
 
-  await page.goto('/tasks?overdue=1')
+  await page.goto('/tasks?status=in_progress&overdue=1')
+  await expect.poll(() => requests.at(-1)?.status).toBe('in_progress')
   await expect.poll(() => requests.at(-1)?.overdue).toBe('true')
+  await expect(inProgress).toHaveAttribute('aria-pressed', 'true')
   await expect(overdue).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })

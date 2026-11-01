@@ -382,6 +382,22 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(data["stats"]["total"], 1)
         self.assertEqual(data["stats"]["overdue"], 1)
 
+        combined = self.client.get(
+            "/api/tasks/",
+            params={"status": "in_progress", "overdue": "true", "page": 1, "page_size": 50},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(combined.status_code, 200, combined.text)
+        self.assertEqual(combined.json()["data"]["total"], 1)
+
+        excluded = self.client.get(
+            "/api/tasks/",
+            params={"status": "todo", "overdue": "true", "page": 1, "page_size": 50},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(excluded.status_code, 200, excluded.text)
+        self.assertEqual(excluded.json()["data"]["total"], 0)
+
         normal = self.client.get(
             "/api/tasks/",
             params={"page": 1, "page_size": 50},

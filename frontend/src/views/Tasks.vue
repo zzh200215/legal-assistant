@@ -26,20 +26,20 @@
       <button
         type="button"
         class="app-stat task-stat-card"
-        :class="{ 'is-active': statsFilter === 'all' }"
-        :aria-pressed="statsFilter === 'all'"
+        :class="{ 'is-active': statsTotalActive }"
+        :aria-pressed="statsTotalActive"
         title="显示全部任务"
         @click="applyStatsFilter('total')"
       >
-        <span class="app-stat-label">{{ statsFilter === 'all' ? '任务总数' : '当前结果' }}</span>
+        <span class="app-stat-label">{{ statFiltersActive ? '当前结果' : '任务总数' }}</span>
         <div class="app-stat-value">{{ statsTotal }}<small> 项任务</small></div>
       </button>
       <button
         type="button"
         class="app-stat task-stat-card"
-        :class="{ 'is-active': statsFilter === 'in_progress' }"
-        :aria-pressed="statsFilter === 'in_progress'"
-        title="只看进行中"
+        :class="{ 'is-active': statsInProgressActive }"
+        :aria-pressed="statsInProgressActive"
+        title="只看进行中（可叠加逾期/共享）"
         @click="applyStatsFilter('in_progress')"
       >
         <span class="app-stat-label">进行中</span>
@@ -48,9 +48,9 @@
       <button
         type="button"
         class="app-stat task-stat-card"
-        :class="{ 'is-alert': overdueCount, 'is-active': statsFilter === 'overdue' }"
-        :aria-pressed="statsFilter === 'overdue'"
-        title="只看已逾期"
+        :class="{ 'is-alert': overdueCount, 'is-active': statsOverdueActive }"
+        :aria-pressed="statsOverdueActive"
+        title="只看已逾期（可叠加进行中/共享）"
         @click="applyStatsFilter('overdue')"
       >
         <span class="app-stat-label">已逾期</span>
@@ -59,16 +59,16 @@
       <button
         type="button"
         class="app-stat task-stat-card"
-        :class="{ 'is-active': statsFilter === 'shared' }"
-        :aria-pressed="statsFilter === 'shared'"
-        title="只看共享任务"
+        :class="{ 'is-active': statsSharedActive }"
+        :aria-pressed="statsSharedActive"
+        title="只看共享任务（可叠加进行中/逾期）"
         @click="applyStatsFilter('shared')"
       >
         <span class="app-stat-label">共享任务</span>
         <div class="app-stat-value">{{ sharedTaskCount }}<small> 项共享</small></div>
       </button>
     </div>
-    <p class="task-stat-hint">点击统计卡筛选：进行中 / 已逾期 / 共享；再次点击取消。</p>
+    <p class="task-stat-hint">统计卡可组合筛选（如「进行中 + 已逾期」），再次点击取消；点任务总数清空。</p>
 
     <WorkflowRunsPanel
       :case-id="workflowCaseId"
@@ -364,30 +364,29 @@ const handleSortChange = () => {
 }
 
 const applyStatsFilter = (kind) => {
-  if (kind === 'total' && statsFilter.value === 'all') return
-  const active = statsFilter.value === kind
   const nextQuery = { ...route.query }
-  if (kind === 'total' || active) {
+  if (kind === 'total') {
+    if (statsTotalActive.value) return
     delete nextQuery.status
     delete nextQuery.overdue
     delete nextQuery.scope
   } else if (kind === 'in_progress') {
-    nextQuery.status = 'in_progress'
-    delete nextQuery.overdue
-    delete nextQuery.scope
+    if (nextQuery.status === 'in_progress') delete nextQuery.status
+    else nextQuery.status = 'in_progress'
   } else if (kind === 'overdue') {
-    nextQuery.overdue = '1'
-    delete nextQuery.status
-    delete nextQuery.scope
+    if (nextQuery.overdue === '1' || nextQuery.overdue === 'true') delete nextQuery.overdue
+    else nextQuery.overdue = '1'
   } else if (kind === 'shared') {
-    nextQuery.scope = 'shared'
-    delete nextQuery.status
-    delete nextQuery.overdue
+    if (nextQuery.scope === 'shared') delete nextQuery.scope
+    else nextQuery.scope = 'shared'
   } else {
     return
   }
-  statusFilter.value = typeof nextQuery.status === 'string' ? nextQuery.status : ''
-  overdueFilter.value = nextQuery.overdue === '1'
+  statusFilter.value = typeof nextQuery.status === 'string'
+    && ['todo', 'in_progress', 'done', 'cancelled'].includes(nextQuery.status)
+    ? nextQuery.status
+    : ''
+  overdueFilter.value = nextQuery.overdue === '1' || nextQuery.overdue === 'true'
   scopeFilter.value = typeof nextQuery.scope === 'string' && scopeOptions.some((item) => item.value === nextQuery.scope)
     ? nextQuery.scope
     : 'all'
@@ -438,8 +437,11 @@ const sourceFilterMeta = computed(() => {
 const taskEmptyText = computed(() => {
   const keyword = searchDraft.value.trim()
   if (keyword) return `没有匹配「${keyword}」的任务`
-  if (overdueFilter.value) return '当前没有逾期任务'
-  if (statusFilter.value === 'in_progress') return '暂无进行中的任务'
+  const labels = []
+  if (statusFilter.value === 'in_progress') labels.push('进行中')
+  if (overdueFilter.value) labels.push('逾期')
+  if (scopeFilter.value === 'shared') labels.push('共享')
+  if (labels.length) return `当前没有${labels.join('且')}的任务`
   if (workflowCaseId.value) {
     return caseTitle.value ? `案件「${caseTitle.value}」暂无任务` : `案件 #${workflowCaseId.value} 暂无任务`
   }
@@ -447,7 +449,6 @@ const taskEmptyText = computed(() => {
   if (scopeFilter.value === 'mine') return '暂无我的任务'
   if (scopeFilter.value === 'department') return '暂无部门共享任务'
   if (scopeFilter.value === 'organization') return '暂无组织共享任务'
-  if (scopeFilter.value === 'shared') return '暂无共享任务'
   return '暂无任务'
 })
 
@@ -470,13 +471,15 @@ const sharedTaskCount = computed(() => (
 const statsTotal = computed(() => (
   taskStats.value?.total ?? (taskTotal.value || tasks.value.length)
 ))
-const statsFilter = computed(() => {
-  if (overdueFilter.value) return 'overdue'
-  if (statusFilter.value === 'in_progress') return 'in_progress'
-  if (statusFilter.value) return 'custom'
-  if (scopeFilter.value === 'shared') return 'shared'
-  return 'all'
-})
+const statsTotalActive = computed(() => (
+  !statusFilter.value && !overdueFilter.value && scopeFilter.value === 'all'
+))
+const statsInProgressActive = computed(() => statusFilter.value === 'in_progress')
+const statsOverdueActive = computed(() => overdueFilter.value)
+const statsSharedActive = computed(() => scopeFilter.value === 'shared')
+const statFiltersActive = computed(() => (
+  Boolean(statusFilter.value) || overdueFilter.value || scopeFilter.value !== 'all'
+))
 
 const getTasksByStatus = (status) => tasks.value.filter(t => t.status === status)
 
