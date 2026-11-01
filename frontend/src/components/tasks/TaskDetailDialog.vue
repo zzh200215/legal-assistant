@@ -128,8 +128,12 @@
       <div v-if="taskLogs.length" class="detail-section">
         <h4>操作日志</h4>
         <el-table :data="taskLogs" border size="small" class="detail-table">
-          <el-table-column prop="action" label="动作" width="160" />
-          <el-table-column prop="detail" label="详情" show-overflow-tooltip />
+          <el-table-column label="动作" width="110">
+            <template #default="{ row }">{{ taskLogActionLabel(row.action) }}</template>
+          </el-table-column>
+          <el-table-column label="详情" show-overflow-tooltip>
+            <template #default="{ row }">{{ taskLogDetail(row.action, row.detail) }}</template>
+          </el-table-column>
           <el-table-column prop="created_at" label="时间" width="180" />
         </el-table>
       </div>
@@ -170,6 +174,7 @@ import api from '../../api'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import StatusTag from '../StatusTag.vue'
 import { taskSourceLabel } from '../../utils/taskSource'
+import { taskLogActionLabel, taskLogDetail } from '../../utils/taskLog'
 import { useAuthStore } from '../../stores/auth'
 
 const props = defineProps({
