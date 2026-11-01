@@ -35,6 +35,7 @@ class TaskOut(TaskBase):
     department_id: int | None = None
     status: str
     case_title: str | None = None
+    archived_at: datetime | None = None
     source_type: str | None = None
     source_id: int | None = None
     parent_id: int | None = None

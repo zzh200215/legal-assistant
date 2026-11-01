@@ -883,6 +883,7 @@
  * @property {number} id
  * @property {number} task_id
  * @typedef {Object} TaskOut
+ * @property {string | null}= archived_at
  * @property {string | null}= assignee
  * @property {number | null}= case_id
  * @property {string | null}= case_title

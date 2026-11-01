@@ -116,6 +116,7 @@ def list_tasks(
     source_id: int | None = Query(None, description="按来源对象 ID 筛选"),
     case_id: int | None = Query(None, description="按案件筛选（案件任务视图）"),
     overdue: bool = Query(False, description="只看已逾期（todo/in_progress 且截止日期早于现在）"),
+    archived: bool = Query(False, description="只看已归档任务（默认只看未归档）"),
     q: str | None = Query(None, max_length=100, description="关键词（匹配标题/描述）"),
     sort: Literal["created_desc", "due_asc", "due_desc"] = Query(
         "created_desc", description="排序：created_desc/due_asc/due_desc"
@@ -140,6 +141,7 @@ def list_tasks(
         case_id=case_id,
         keyword=q,
         overdue=overdue,
+        archived=archived,
         sort=sort,
     )
     payloads = _attach_case_titles(
@@ -245,6 +247,34 @@ def patch_task(
     current_user: User = Depends(get_current_user),
 ):
     return update_task(task_id=task_id, req=req, if_match=if_match, db=db, current_user=current_user)
+
+
+@router.post("/{task_id}/archive", response_model=TaskOut)
+def archive_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        task = task_service.archive(task_id, db, user_id=current_user.id)
+        payload = _attach_case_titles(db, [task_service.serialize_task(task)], current_user)[0]
+        return TaskOut.model_validate(payload)
+    except ValueError as e:
+        raise api_error(404, str(e), code="TASK_NOT_FOUND")
+
+
+@router.post("/{task_id}/unarchive", response_model=TaskOut)
+def unarchive_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        task = task_service.unarchive(task_id, db, user_id=current_user.id)
+        payload = _attach_case_titles(db, [task_service.serialize_task(task)], current_user)[0]
+        return TaskOut.model_validate(payload)
+    except ValueError as e:
+        raise api_error(404, str(e), code="TASK_NOT_FOUND")
 
 
 @router.post("/{task_id}/decompose")

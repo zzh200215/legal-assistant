@@ -31,7 +31,7 @@
         title="显示全部任务"
         @click="applyStatsFilter('total')"
       >
-        <span class="app-stat-label">{{ statFiltersActive ? '当前结果' : '任务总数' }}</span>
+        <span class="app-stat-label">{{ totalCardLabel }}</span>
         <div class="app-stat-value">{{ statsTotal }}<small> 项任务</small></div>
       </button>
       <button
@@ -107,6 +107,15 @@
           <el-select v-model="sortOrder" class="task-sort" @change="handleSortChange">
             <el-option v-for="item in sortOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
+          <button
+            type="button"
+            class="task-archived-toggle"
+            :class="{ 'is-active': archivedFilter }"
+            :aria-pressed="archivedFilter"
+            @click="toggleArchived"
+          >
+            {{ archivedFilter ? '返回未归档' : '查看已归档' }}
+          </button>
         </div>
         <div v-if="sourceFilterMeta" class="source-filter-row app-chip-row">
           <span class="app-tag is-pending">来源筛选：{{ sourceFilterMeta.label }} #{{ sourceFilterMeta.sourceId }}</span>
@@ -234,6 +243,8 @@
       @open-source="openSource"
       @open-case="openCase"
       @open-agent-run="openAgentRun"
+      @archive="handleArchive"
+      @unarchive="handleUnarchive"
     />
 
     <TaskCreateDialogs ref="createDialogs" :loading="loading" :case-id="workflowCaseId" @refresh="handleDialogsRefresh" />
@@ -298,6 +309,7 @@ const statusFilter = ref(
     : ''
 )
 const overdueFilter = ref(route.query.overdue === '1' || route.query.overdue === 'true')
+const archivedFilter = ref(route.query.archived === '1' || route.query.archived === 'true')
 const detailVisible = ref(false)
 const selectedTask = ref(null)
 const workflowCaseId = computed(() => {
@@ -441,7 +453,8 @@ const taskEmptyText = computed(() => {
   if (statusFilter.value === 'in_progress') labels.push('进行中')
   if (overdueFilter.value) labels.push('逾期')
   if (scopeFilter.value === 'shared') labels.push('共享')
-  if (labels.length) return `当前没有${labels.join('且')}的任务`
+  if (labels.length) return `当前没有${labels.join('且')}的${archivedFilter.value ? '已归档' : ''}任务`
+  if (archivedFilter.value) return '暂无已归档任务'
   if (workflowCaseId.value) {
     return caseTitle.value ? `案件「${caseTitle.value}」暂无任务` : `案件 #${workflowCaseId.value} 暂无任务`
   }
@@ -480,6 +493,10 @@ const statsSharedActive = computed(() => scopeFilter.value === 'shared')
 const statFiltersActive = computed(() => (
   Boolean(statusFilter.value) || overdueFilter.value || scopeFilter.value !== 'all'
 ))
+const totalCardLabel = computed(() => {
+  if (statFiltersActive.value) return '当前结果'
+  return archivedFilter.value ? '归档任务' : '任务总数'
+})
 
 const getTasksByStatus = (status) => tasks.value.filter(t => t.status === status)
 
@@ -576,6 +593,7 @@ const fetchTasks = async () => {
       scope: scopeFilter.value,
       status: statusFilter.value || undefined,
       overdue: overdueFilter.value || undefined,
+      archived: archivedFilter.value || undefined,
       source_type: sourceFilterMeta.value?.sourceType || undefined,
       source_id: sourceFilterMeta.value?.sourceId || undefined,
       case_id: workflowCaseId.value || undefined,
@@ -600,6 +618,16 @@ const handleScopeChange = async () => {
   taskPage.value = 1
   await router.replace({ query: nextQuery })
   await fetchTasks()
+}
+
+const toggleArchived = () => {
+  const nextQuery = { ...route.query }
+  if (archivedFilter.value) delete nextQuery.archived
+  else nextQuery.archived = '1'
+  archivedFilter.value = !archivedFilter.value
+  taskPage.value = 1
+  router.replace({ query: nextQuery })
+  fetchTasks()
 }
 
 const clearSourceFilter = async () => {
@@ -635,6 +663,24 @@ const changeStatus = async (task, status) => {
     ElMessage.success('状态已更新')
     fetchTasks()
   } catch (e) { ElMessage.error(e.response?.data?.detail || '更新失败') }
+}
+
+const handleArchive = async (task) => {
+  try {
+    await api.archiveTask(task.id)
+    ElMessage.success('任务已归档')
+    detailVisible.value = false
+    await fetchTasks()
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '归档失败') }
+}
+
+const handleUnarchive = async (task) => {
+  try {
+    await api.unarchiveTask(task.id)
+    ElMessage.success('任务已恢复')
+    detailVisible.value = false
+    await fetchTasks()
+  } catch (e) { ElMessage.error(e.response?.data?.detail || '恢复失败') }
 }
 
 const decompose = async (task) => {
@@ -695,16 +741,38 @@ watch(viewMode, (value) => {
 })
 
 watch(
-  () => [route.query.status, route.query.overdue],
+  () => route.query.status,
   async (value, oldValue) => {
-    if (JSON.stringify(value) === JSON.stringify(oldValue)) return
-    const status = typeof value[0] === 'string' && ['todo', 'in_progress', 'done', 'cancelled'].includes(value[0])
-      ? value[0]
+    if (value === oldValue) return
+    const status = typeof value === 'string' && ['todo', 'in_progress', 'done', 'cancelled'].includes(value)
+      ? value
       : ''
-    const overdue = value[1] === '1' || value[1] === 'true'
-    if (status === statusFilter.value && overdue === overdueFilter.value) return
+    if (status === statusFilter.value) return
     statusFilter.value = status
+    taskPage.value = 1
+    await fetchTasks()
+  }
+)
+
+watch(
+  () => route.query.overdue,
+  async (value, oldValue) => {
+    if (value === oldValue) return
+    const overdue = value === '1' || value === 'true'
+    if (overdue === overdueFilter.value) return
     overdueFilter.value = overdue
+    taskPage.value = 1
+    await fetchTasks()
+  }
+)
+
+watch(
+  () => route.query.archived,
+  async (value, oldValue) => {
+    if (value === oldValue) return
+    const archived = value === '1' || value === 'true'
+    if (archived === archivedFilter.value) return
+    archivedFilter.value = archived
     taskPage.value = 1
     await fetchTasks()
   }
@@ -864,6 +932,22 @@ watch(detailVisible, (visible) => {
 }
 .task-sort {
   width: 132px;
+}
+.task-archived-toggle {
+  margin-left: auto;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.task-archived-toggle:hover,
+.task-archived-toggle.is-active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 .task-stat-card {
   width: 100%;

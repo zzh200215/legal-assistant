@@ -655,3 +655,64 @@ test('统计卡点击筛选：进行中/逾期/共享可组合并写回 URL', as
   await expect(overdue).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('任务归档：详情归档→列表隐藏→已归档视图恢复', async ({ page }) => {
+  let archived = false
+  const task = () => ownerTask({
+    id: 601, title: '可归档任务', archived_at: archived ? '2026-11-01T12:00:00' : null,
+  })
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'POST' && path === '/tasks/601/archive') {
+      archived = true
+      return route.fulfill({ json: success(task()) })
+    }
+    if (method === 'POST' && path === '/tasks/601/unarchive') {
+      archived = false
+      return route.fulfill({ json: success(task()) })
+    }
+    if (method === 'GET' && path === '/tasks/601') return route.fulfill({ json: success(task()) })
+    if (method === 'GET' && path === '/tasks/601/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/601/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/601/logs') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/') {
+      const wantArchived = url.searchParams.get('archived') === 'true'
+      const visible = archived === wantArchived
+      return route.fulfill({ json: success({
+        items: visible ? [task()] : [], total: visible ? 1 : 0, page: 1, page_size: 12,
+        stats: { total: visible ? 1 : 0, in_progress: 0, overdue: 0, shared: 0 },
+      }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await page.locator('.kanban-task', { hasText: '可归档任务' }).click()
+  const dialog = page.locator('.el-dialog:visible')
+  await dialog.getByRole('button', { name: '归档', exact: true }).click()
+  await expect(page.getByText('任务已归档')).toBeVisible()
+  await expect(page.locator('.kanban-task', { hasText: '可归档任务' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '查看已归档' }).click()
+  await expect(page).toHaveURL(/archived=1/)
+  await expect(page.locator('.kanban-task', { hasText: '可归档任务' })).toBeVisible()
+
+  await page.locator('.kanban-task', { hasText: '可归档任务' }).click()
+  await expect(page.locator('.el-dialog:visible').getByText('已归档')).toBeVisible()
+  await page.locator('.el-dialog:visible').getByRole('button', { name: '恢复', exact: true }).click()
+  await expect(page.getByText('任务已恢复')).toBeVisible()
+  await expect(page.locator('.kanban-task', { hasText: '可归档任务' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '返回未归档' }).click()
+  await expect(page.getByText('可归档任务')).toBeVisible()
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})

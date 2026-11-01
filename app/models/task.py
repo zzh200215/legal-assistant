@@ -33,6 +33,7 @@ class Task(Base):
     priority = Column(String(32), default=TaskPriority.medium.value, nullable=False)
     progress = Column(Integer, default=0, nullable=False)
     due_date = Column(DateTime(timezone=True), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True, index=True)
     source_type = Column(String(32), nullable=True)
     source_id = Column(Integer, nullable=True)
     parent_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)

@@ -9,6 +9,8 @@ export default {
   getTask(id) { return http.get(`/tasks/${id}`) },
   createTask(data) { return http.post('/tasks/', data) },
   updateTask(id, data) { return http.put(`/tasks/${id}`, data) },
+  archiveTask(id) { return http.post(`/tasks/${id}/archive`) },
+  unarchiveTask(id) { return http.post(`/tasks/${id}/unarchive`) },
   decomposeTask(id) { return http.post(`/tasks/${id}/decompose`) },
   getSubTasks(id, params) { return http.get(`/tasks/${id}/sub-tasks`, { params }) },
   listTaskComments(id) { return http.get(`/tasks/${id}/comments`) },

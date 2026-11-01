@@ -79,7 +79,11 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
 
     rows = (
         db.query(Task)
-        .filter(Task.due_date.isnot(None), Task.status.in_(ACTIVE_STATUSES))
+        .filter(
+            Task.due_date.isnot(None),
+            Task.status.in_(ACTIVE_STATUSES),
+            Task.archived_at.is_(None),
+        )
         .all()
     )
     created = skipped_no_org = 0

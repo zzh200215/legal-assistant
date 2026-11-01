@@ -6,6 +6,7 @@
           <span>当前状态</span>
           <strong>{{ task.title }}</strong>
           <StatusTag kind="task" :status="task.status" size="small" />
+          <el-tag v-if="task.archived_at" type="info" size="small">已归档</el-tag>
         </div>
         <div class="detail-metric">
           <span>执行归属</span>
@@ -87,6 +88,8 @@
         </el-button>
         <el-button v-if="task.status !== 'in_progress'" type="primary" :disabled="!canEdit" @click="emit('status-change', task, 'in_progress')">开始执行</el-button>
         <el-button v-if="task.status !== 'done'" type="success" :disabled="!canEdit" @click="emit('status-change', task, 'done')">标记完成</el-button>
+        <el-button v-if="canEdit && !task.archived_at" type="info" plain @click="emit('archive', task)">归档</el-button>
+        <el-button v-if="canEdit && task.archived_at" type="info" plain @click="emit('unarchive', task)">恢复</el-button>
       </div>
       <div v-if="!canEdit" class="readonly-note app-readonly-banner">
         共享任务当前仅支持查看，更新、评论和状态变更需由创建人操作
@@ -174,7 +177,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   canEdit: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:visible', 'refresh', 'task-updated', 'status-change', 'decompose', 'open-source', 'open-case', 'open-agent-run'])
+const emit = defineEmits(['update:visible', 'refresh', 'task-updated', 'status-change', 'decompose', 'open-source', 'open-case', 'open-agent-run', 'archive', 'unarchive'])
 
 const authStore = useAuthStore()
 const currentUser = () => authStore.user

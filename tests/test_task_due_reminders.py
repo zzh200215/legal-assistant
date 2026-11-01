@@ -85,6 +85,9 @@ class TaskDueReminderTests(unittest.TestCase):
         self._task(TOMORROW, status="done", title="已完成")
         self._task(TODAY, status="cancelled", title="已取消")
         self._task(None, title="无截止日期")
+        archived = self._task(TODAY, title="已归档")
+        archived.archived_at = datetime(2026, 12, 30, 9, 0, 0)
+        self.db.commit()
 
         result = scan_task_due_reminders(self.db, now=NOW)
 

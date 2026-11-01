@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.task import Task, TaskComment, TaskLog
 from app.models.user import User
+from app.core.time import utc_now
 from app.services.documents.analysis_service import analysis_service
 from app.services.documents.case_link import document_case_id
 
@@ -182,6 +183,32 @@ class TaskService:
             db.add(log)
             db.commit()
 
+        return task
+
+    def archive(self, task_id: int, db: Session, *, user_id: int) -> Task:
+        """软归档：仅 owner 可操作；幂等，已归档再调用不重复写日志。"""
+        task = self.get(task_id, db, user_id=user_id, require_owner=True)
+        if not task:
+            raise ValueError("Task not found")
+        if task.archived_at is not None:
+            return task
+        task.archived_at = utc_now()
+        db.add(TaskLog(task_id=task.id, action="archived", detail="Task archived"))
+        db.commit()
+        db.refresh(task)
+        return task
+
+    def unarchive(self, task_id: int, db: Session, *, user_id: int) -> Task:
+        """恢复归档：仅 owner 可操作；幂等。"""
+        task = self.get(task_id, db, user_id=user_id, require_owner=True)
+        if not task:
+            raise ValueError("Task not found")
+        if task.archived_at is None:
+            return task
+        task.archived_at = None
+        db.add(TaskLog(task_id=task.id, action="unarchived", detail="Task unarchived"))
+        db.commit()
+        db.refresh(task)
         return task
 
     def create_from_action_items(
@@ -498,6 +525,7 @@ class TaskService:
         status: str | None = None,
         overdue: bool = False,
         overdue_cutoff: datetime | None = None,
+        archived: bool = False,
         scope: str | None = None,
         source_type: str | None = None,
         source_id: int | None = None,
@@ -513,6 +541,10 @@ class TaskService:
             scope=scope,
         )
         q = db.query(Task).filter(cond)
+        if archived:
+            q = q.filter(Task.archived_at.isnot(None))
+        else:
+            q = q.filter(Task.archived_at.is_(None))
         if status:
             q = q.filter(Task.status == status)
         if overdue:
@@ -597,6 +629,7 @@ class TaskService:
         department_id: int | None = None,
         status: str | None = None,
         overdue: bool = False,
+        archived: bool = False,
         scope: str | None = None,
         source_type: str | None = None,
         source_id: int | None = None,
@@ -617,6 +650,7 @@ class TaskService:
             status=status,
             overdue=overdue,
             overdue_cutoff=cutoff,
+            archived=archived,
             scope=scope,
             source_type=source_type,
             source_id=source_id,
@@ -756,6 +790,7 @@ class TaskService:
             "priority": task.priority,
             "progress": task.progress,
             "due_date": task.due_date,
+            "archived_at": getattr(task, "archived_at", None),
             "source_type": task.source_type,
             "source_id": task.source_id,
             "parent_id": task.parent_id,
