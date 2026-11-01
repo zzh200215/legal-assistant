@@ -496,6 +496,8 @@ class TaskService:
         organization_id: int | None = None,
         department_id: int | None = None,
         status: str | None = None,
+        overdue: bool = False,
+        overdue_cutoff: datetime | None = None,
         scope: str | None = None,
         source_type: str | None = None,
         source_id: int | None = None,
@@ -513,6 +515,15 @@ class TaskService:
         q = db.query(Task).filter(cond)
         if status:
             q = q.filter(Task.status == status)
+        if overdue:
+            cutoff = overdue_cutoff or self._overdue_cutoff(
+                db, user_id=user_id, organization_id=organization_id
+            )
+            q = q.filter(
+                Task.due_date.isnot(None),
+                Task.status.in_(("todo", "in_progress")),
+                Task.due_date < cutoff,
+            )
         if source_type:
             q = q.filter(Task.source_type == source_type)
         if source_id is not None:
@@ -559,14 +570,10 @@ class TaskService:
         q,
         *,
         total: int,
-        db: Session,
+        cutoff: datetime,
         user_id: int,
-        organization_id: int | None,
     ) -> dict[str, int]:
         """统计口径与列表过滤一致，但不分页：统计卡不再只算当前页。"""
-        cutoff = self._overdue_cutoff(
-            db, user_id=user_id, organization_id=organization_id
-        )
         return {
             "total": total,
             "in_progress": q.filter(Task.status == "in_progress").count(),
@@ -589,6 +596,7 @@ class TaskService:
         organization_id: int | None = None,
         department_id: int | None = None,
         status: str | None = None,
+        overdue: bool = False,
         scope: str | None = None,
         source_type: str | None = None,
         source_id: int | None = None,
@@ -597,6 +605,9 @@ class TaskService:
         sort: str = "created_desc",
     ) -> tuple[list[Task], int, dict[str, int]]:
         """数据库分页版 list_visible：可见性过滤全部下沉 SQL，count 走 DB。"""
+        cutoff = self._overdue_cutoff(
+            db, user_id=user_id, organization_id=organization_id
+        )
         q = self._filtered_query(
             db=db,
             user_id=user_id,
@@ -604,6 +615,8 @@ class TaskService:
             organization_id=organization_id,
             department_id=department_id,
             status=status,
+            overdue=overdue,
+            overdue_cutoff=cutoff,
             scope=scope,
             source_type=source_type,
             source_id=source_id,
@@ -614,9 +627,8 @@ class TaskService:
         stats = self._list_stats(
             q,
             total=total,
-            db=db,
+            cutoff=cutoff,
             user_id=user_id,
-            organization_id=organization_id,
         )
         order_by = TASK_LIST_SORTS.get(sort, TASK_LIST_SORTS["created_desc"])
         items = (

@@ -21,25 +21,54 @@
       </div>
     </header>
 
-    <!-- 统计：版式走 .app-stat；.task-brief 是 tasks-flow e2e 的断言锚点（断言“2 项任务”），保留 -->
+    <!-- 统计：卡可点击筛选；.task-brief 是 tasks-flow e2e 的断言锚点，保留 -->
     <div class="task-brief app-metric-grid-4" aria-label="任务摘要">
-      <div class="app-stat">
-        <span class="app-stat-label">任务总数</span>
+      <button
+        type="button"
+        class="app-stat task-stat-card"
+        :class="{ 'is-active': statsFilter === 'all' }"
+        :aria-pressed="statsFilter === 'all'"
+        title="显示全部任务"
+        @click="applyStatsFilter('total')"
+      >
+        <span class="app-stat-label">{{ statsFilter === 'all' ? '任务总数' : '当前结果' }}</span>
         <div class="app-stat-value">{{ statsTotal }}<small> 项任务</small></div>
-      </div>
-      <div class="app-stat">
+      </button>
+      <button
+        type="button"
+        class="app-stat task-stat-card"
+        :class="{ 'is-active': statsFilter === 'in_progress' }"
+        :aria-pressed="statsFilter === 'in_progress'"
+        title="只看进行中"
+        @click="applyStatsFilter('in_progress')"
+      >
         <span class="app-stat-label">进行中</span>
         <div class="app-stat-value">{{ inProgressCount }}<small> 项进行中</small></div>
-      </div>
-      <div class="app-stat" :class="{ 'is-alert': overdueCount }">
+      </button>
+      <button
+        type="button"
+        class="app-stat task-stat-card"
+        :class="{ 'is-alert': overdueCount, 'is-active': statsFilter === 'overdue' }"
+        :aria-pressed="statsFilter === 'overdue'"
+        title="只看已逾期"
+        @click="applyStatsFilter('overdue')"
+      >
         <span class="app-stat-label">已逾期</span>
         <div class="app-stat-value">{{ overdueCount }}<small> 项逾期</small></div>
-      </div>
-      <div class="app-stat">
+      </button>
+      <button
+        type="button"
+        class="app-stat task-stat-card"
+        :class="{ 'is-active': statsFilter === 'shared' }"
+        :aria-pressed="statsFilter === 'shared'"
+        title="只看共享任务"
+        @click="applyStatsFilter('shared')"
+      >
         <span class="app-stat-label">共享任务</span>
         <div class="app-stat-value">{{ sharedTaskCount }}<small> 项共享</small></div>
-      </div>
+      </button>
     </div>
+    <p class="task-stat-hint">点击统计卡筛选：进行中 / 已逾期 / 共享；再次点击取消。</p>
 
     <WorkflowRunsPanel
       :case-id="workflowCaseId"
@@ -263,6 +292,12 @@ const taskStatus = computed(() => {
 })
 const viewMode = ref('kanban')
 const scopeFilter = ref('all')
+const statusFilter = ref(
+  typeof route.query.status === 'string' && ['todo', 'in_progress', 'done', 'cancelled'].includes(route.query.status)
+    ? route.query.status
+    : ''
+)
+const overdueFilter = ref(route.query.overdue === '1' || route.query.overdue === 'true')
 const detailVisible = ref(false)
 const selectedTask = ref(null)
 const workflowCaseId = computed(() => {
@@ -328,6 +363,39 @@ const handleSortChange = () => {
   fetchTasks()
 }
 
+const applyStatsFilter = (kind) => {
+  if (kind === 'total' && statsFilter.value === 'all') return
+  const active = statsFilter.value === kind
+  const nextQuery = { ...route.query }
+  if (kind === 'total' || active) {
+    delete nextQuery.status
+    delete nextQuery.overdue
+    delete nextQuery.scope
+  } else if (kind === 'in_progress') {
+    nextQuery.status = 'in_progress'
+    delete nextQuery.overdue
+    delete nextQuery.scope
+  } else if (kind === 'overdue') {
+    nextQuery.overdue = '1'
+    delete nextQuery.status
+    delete nextQuery.scope
+  } else if (kind === 'shared') {
+    nextQuery.scope = 'shared'
+    delete nextQuery.status
+    delete nextQuery.overdue
+  } else {
+    return
+  }
+  statusFilter.value = typeof nextQuery.status === 'string' ? nextQuery.status : ''
+  overdueFilter.value = nextQuery.overdue === '1'
+  scopeFilter.value = typeof nextQuery.scope === 'string' && scopeOptions.some((item) => item.value === nextQuery.scope)
+    ? nextQuery.scope
+    : 'all'
+  taskPage.value = 1
+  router.replace({ query: nextQuery })
+  fetchTasks()
+}
+
 onBeforeUnmount(() => clearTimeout(searchTimer))
 
 const priorityLabelMap = {
@@ -348,6 +416,7 @@ const scopeOptions = [
   { label: '我的', value: 'mine' },
   { label: '部门共享', value: 'department' },
   { label: '组织共享', value: 'organization' },
+  { label: '共享任务', value: 'shared' },
 ]
 
 const canEditSelectedTask = computed(() => {
@@ -369,6 +438,8 @@ const sourceFilterMeta = computed(() => {
 const taskEmptyText = computed(() => {
   const keyword = searchDraft.value.trim()
   if (keyword) return `没有匹配「${keyword}」的任务`
+  if (overdueFilter.value) return '当前没有逾期任务'
+  if (statusFilter.value === 'in_progress') return '暂无进行中的任务'
   if (workflowCaseId.value) {
     return caseTitle.value ? `案件「${caseTitle.value}」暂无任务` : `案件 #${workflowCaseId.value} 暂无任务`
   }
@@ -376,6 +447,7 @@ const taskEmptyText = computed(() => {
   if (scopeFilter.value === 'mine') return '暂无我的任务'
   if (scopeFilter.value === 'department') return '暂无部门共享任务'
   if (scopeFilter.value === 'organization') return '暂无组织共享任务'
+  if (scopeFilter.value === 'shared') return '暂无共享任务'
   return '暂无任务'
 })
 
@@ -398,6 +470,13 @@ const sharedTaskCount = computed(() => (
 const statsTotal = computed(() => (
   taskStats.value?.total ?? (taskTotal.value || tasks.value.length)
 ))
+const statsFilter = computed(() => {
+  if (overdueFilter.value) return 'overdue'
+  if (statusFilter.value === 'in_progress') return 'in_progress'
+  if (statusFilter.value) return 'custom'
+  if (scopeFilter.value === 'shared') return 'shared'
+  return 'all'
+})
 
 const getTasksByStatus = (status) => tasks.value.filter(t => t.status === status)
 
@@ -492,6 +571,8 @@ const fetchTasks = async () => {
       page: taskPage.value,
       page_size: taskPageSize.value,
       scope: scopeFilter.value,
+      status: statusFilter.value || undefined,
+      overdue: overdueFilter.value || undefined,
       source_type: sourceFilterMeta.value?.sourceType || undefined,
       source_id: sourceFilterMeta.value?.sourceId || undefined,
       case_id: workflowCaseId.value || undefined,
@@ -510,7 +591,11 @@ const fetchTasks = async () => {
 }
 
 const handleScopeChange = async () => {
+  const nextQuery = { ...route.query, view: viewMode.value }
+  if (scopeFilter.value === 'all') delete nextQuery.scope
+  else nextQuery.scope = scopeFilter.value
   taskPage.value = 1
+  await router.replace({ query: nextQuery })
   await fetchTasks()
 }
 
@@ -606,9 +691,21 @@ watch(viewMode, (value) => {
   router.replace({ query: nextQuery })
 })
 
-watch(scopeFilter, (value) => {
-  router.replace({ query: { ...route.query, view: viewMode.value, scope: value } })
-})
+watch(
+  () => [route.query.status, route.query.overdue],
+  async (value, oldValue) => {
+    if (JSON.stringify(value) === JSON.stringify(oldValue)) return
+    const status = typeof value[0] === 'string' && ['todo', 'in_progress', 'done', 'cancelled'].includes(value[0])
+      ? value[0]
+      : ''
+    const overdue = value[1] === '1' || value[1] === 'true'
+    if (status === statusFilter.value && overdue === overdueFilter.value) return
+    statusFilter.value = status
+    overdueFilter.value = overdue
+    taskPage.value = 1
+    await fetchTasks()
+  }
+)
 
 watch(
   () => route.query.taskId,
@@ -631,8 +728,12 @@ watch(
 watch(
   () => route.query.scope,
   async (value, oldValue) => {
-    if (value === oldValue || typeof value !== 'string' || !scopeOptions.some(item => item.value === value) || value === scopeFilter.value) return
-    scopeFilter.value = value
+    if (value === oldValue) return
+    const next = typeof value === 'string' && scopeOptions.some((item) => item.value === value)
+      ? value
+      : 'all'
+    if (next === scopeFilter.value) return
+    scopeFilter.value = next
     taskPage.value = 1
     await fetchTasks()
   }
@@ -760,6 +861,31 @@ watch(detailVisible, (visible) => {
 }
 .task-sort {
   width: 132px;
+}
+.task-stat-card {
+  width: 100%;
+  appearance: none;
+  border: 1px solid transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.task-stat-card:hover {
+  border-color: var(--color-primary);
+}
+.task-stat-card.is-active {
+  border-color: var(--color-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
+}
+.task-stat-card:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.task-stat-hint {
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
 }
 
 /* ─── 看板：外层一张卡，列是浅底泳道，任务卡复用 .app-thread ─── */

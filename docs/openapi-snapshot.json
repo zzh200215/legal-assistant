@@ -9513,6 +9513,18 @@
             "description": "按案件筛选（案件任务视图）"
           },
           {
+            "name": "overdue",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "只看已逾期（todo/in_progress 且截止日期早于现在）",
+              "default": false,
+              "title": "Overdue"
+            },
+            "description": "只看已逾期（todo/in_progress 且截止日期早于现在）"
+          },
+          {
             "name": "q",
             "in": "query",
             "required": false,

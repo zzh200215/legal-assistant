@@ -344,6 +344,56 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(summary["in_progress"], 0)
         self.assertEqual(summary["overdue"], 0)
 
+    def test_task_list_overdue_filter(self):
+        yesterday = (utc_now() - timedelta(days=1)).isoformat()
+
+        def create(title, *, status="todo", due=yesterday):
+            response = self.client.post(
+                "/api/tasks/",
+                json={"title": title, "due_date": due},
+                headers=self._headers(self.member_b),
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            task = response.json()["data"]
+            if status != "todo":
+                updated = self.client.put(
+                    f"/api/tasks/{task['id']}",
+                    json={"status": status},
+                    headers=self._headers(self.member_b),
+                )
+                self.assertEqual(updated.status_code, 200, updated.text)
+            return task
+
+        overdue = create("逾期进行中", status="in_progress")
+        create("逾期但已完成", status="done")
+        create("逾期但已取消", status="cancelled")
+        create("未来任务", due=(utc_now() + timedelta(days=3)).isoformat())
+        create("无截止日期", due=None)
+
+        response = self.client.get(
+            "/api/tasks/",
+            params={"overdue": "true", "page": 1, "page_size": 50},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertEqual(data["total"], 1)
+        self.assertEqual([item["id"] for item in data["items"]], [overdue["id"]])
+        self.assertEqual(data["stats"]["total"], 1)
+        self.assertEqual(data["stats"]["overdue"], 1)
+
+        normal = self.client.get(
+            "/api/tasks/",
+            params={"page": 1, "page_size": 50},
+            headers=self._headers(self.member_b),
+        )
+        self.assertEqual(normal.json()["data"]["total"], 5)
+
+        invalid = self.client.get(
+            "/api/tasks/", params={"overdue": "maybe"}, headers=self._headers(self.member_b)
+        )
+        self.assertEqual(invalid.status_code, 422, invalid.text)
+
     def test_strict_case_title_hidden_until_member(self):
         task = Task(
             user_id=self.member_a.id,

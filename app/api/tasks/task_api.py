@@ -115,6 +115,7 @@ def list_tasks(
     source_type: str | None = Query(None, description="按来源筛选：document/meeting/chat/decompose"),
     source_id: int | None = Query(None, description="按来源对象 ID 筛选"),
     case_id: int | None = Query(None, description="按案件筛选（案件任务视图）"),
+    overdue: bool = Query(False, description="只看已逾期（todo/in_progress 且截止日期早于现在）"),
     q: str | None = Query(None, max_length=100, description="关键词（匹配标题/描述）"),
     sort: Literal["created_desc", "due_asc", "due_desc"] = Query(
         "created_desc", description="排序：created_desc/due_asc/due_desc"
@@ -138,6 +139,7 @@ def list_tasks(
         source_id=source_id,
         case_id=case_id,
         keyword=q,
+        overdue=overdue,
         sort=sort,
     )
     payloads = _attach_case_titles(

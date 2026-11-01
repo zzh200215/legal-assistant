@@ -568,3 +568,65 @@ test('任务统计：使用服务端全量统计而非当前页', async ({ page 
   await expect(page.getByText('当前页唯一任务')).toBeVisible()
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('统计卡点击筛选：进行中/逾期/共享可切换并写回 URL', async ({ page }) => {
+  const requests = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/') {
+      requests.push({
+        status: url.searchParams.get('status'),
+        overdue: url.searchParams.get('overdue'),
+        scope: url.searchParams.get('scope'),
+      })
+      return route.fulfill({ json: success({
+        items: [ownerTask({ id: 601, title: '筛选命中任务' })],
+        total: 12, page: 1, page_size: 12,
+        stats: { total: 12, in_progress: 4, overdue: 2, shared: 3 },
+      }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await expect(page.getByText('筛选命中任务')).toBeVisible()
+  const inProgress = page.locator('.task-stat-card', { hasText: '进行中' })
+  const overdue = page.locator('.task-stat-card', { hasText: '已逾期' })
+  const shared = page.locator('.task-stat-card', { hasText: '共享任务' })
+
+  await inProgress.click()
+  await expect.poll(() => requests.at(-1)?.status).toBe('in_progress')
+  await expect(inProgress).toHaveAttribute('aria-pressed', 'true')
+  expect(new URL(page.url()).searchParams.get('status')).toBe('in_progress')
+
+  await overdue.click()
+  await expect.poll(() => requests.at(-1)?.overdue).toBe('true')
+  await expect(overdue).toHaveAttribute('aria-pressed', 'true')
+  await expect(inProgress).toHaveAttribute('aria-pressed', 'false')
+  expect(new URL(page.url()).searchParams.get('overdue')).toBe('1')
+  expect(new URL(page.url()).searchParams.get('status')).toBeNull()
+
+  await shared.click()
+  await expect.poll(() => requests.at(-1)?.scope).toBe('shared')
+  await expect(shared).toHaveAttribute('aria-pressed', 'true')
+  expect(new URL(page.url()).searchParams.get('scope')).toBe('shared')
+  expect(new URL(page.url()).searchParams.get('overdue')).toBeNull()
+
+  await shared.click()
+  await expect.poll(() => requests.at(-1)?.scope === null || requests.at(-1)?.scope === 'all').toBe(true)
+  await expect(shared).toHaveAttribute('aria-pressed', 'false')
+
+  await page.goto('/tasks?overdue=1')
+  await expect.poll(() => requests.at(-1)?.overdue).toBe('true')
+  await expect(overdue).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
