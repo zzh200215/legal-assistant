@@ -211,7 +211,12 @@ const requestEvidence = async (item) => {
 
 const openNotification = async (item) => {
   await markRead(item)
-  if (item.reference_type === 'workflow_run') {
+  if (item.reference_type === 'task' && item.reference_id) {
+    // 任务到期/协作者提醒：直达任务中心并打开详情；有案件时保留案件上下文
+    const query = { taskId: String(item.reference_id) }
+    if (item.case_id) query.case_id = String(item.case_id)
+    router.push({ path: '/tasks', query })
+  } else if (item.reference_type === 'workflow_run') {
     const workflowId = item.reference_id ? String(item.reference_id) : undefined
     if (item.case_id) {
       router.push({ path: '/legal-workspace', query: { case_id: String(item.case_id), tab: 'tasks', workflow_id: workflowId } })

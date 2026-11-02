@@ -64,6 +64,31 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "去处理",
         "footnote": "逾期 3 天为最后一次自动提醒，后续请人工跟进。",
     },
+    # 协作者提醒：阶段与负责人一致，文案强调「参与」而非「负责」。
+    "task_collaborator_due_tomorrow": {
+        "subject": "【律智检】{{title}}",
+        "lead": "你参与的任务将于明天到期，请及时跟进。",
+        "action_label": "去处理",
+        "footnote": "任务到期当天还会再提醒一次；如需调整分工，请联系任务负责人。",
+    },
+    "task_collaborator_due_today": {
+        "subject": "【律智检】{{title}}",
+        "lead": "你参与的任务今天到期，请尽快处理。",
+        "action_label": "去处理",
+        "footnote": "完成后请在任务中心标记完成；如需调整分工，请联系任务负责人。",
+    },
+    "task_collaborator_overdue_1d": {
+        "subject": "【律智检】{{title}}",
+        "lead": "你参与的任务已逾期 1 天，请尽快处理。",
+        "action_label": "去处理",
+        "footnote": "逾期任务会在任务中心标红，完成后请标记完成。",
+    },
+    "task_collaborator_overdue_3d": {
+        "subject": "【律智检】{{title}}",
+        "lead": "你参与的任务已逾期 3 天，请优先处理。",
+        "action_label": "去处理",
+        "footnote": "逾期 3 天为最后一次自动提醒，后续请人工跟进。",
+    },
     "review_consultation_uncited": {
         "subject": "【律智检】{{title}}",
         "lead": "有新的咨询进入审核队列，但该咨询没有关联法源引用。",
@@ -113,6 +138,7 @@ _ACTION_PATHS = {
     "consultation": "/legal-workspace?view=review",
     "contract_review": "/legal-workspace?view=review",
     "draft": "/legal-workspace?view=review",
+    "task": "/tasks",
     "outbox_health": "/system?tab=delivery",
 }
 _DEFAULT_ACTION_PATH = "/notifications"
@@ -187,12 +213,18 @@ def html_to_text(html: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def action_url(reference_type: str | None) -> str | None:
-    """按组织配置的前端地址拼深链；未配置返回 None（不渲染按钮）。"""
+def action_url(reference_type: str | None, reference_id: int | None = None) -> str | None:
+    """按组织配置的前端地址拼深链；未配置返回 None（不渲染按钮）。
+
+    ``reference_type=task`` 且带 ``reference_id`` 时直达任务详情（/tasks?taskId=），
+    否则只到任务中心；其他类型沿用固定路径。
+    """
     base = (get_settings().NOTIFICATION_EMAIL_ACTION_BASE_URL or "").strip().rstrip("/")
     if not base:
         return None
     path = _ACTION_PATHS.get(str(reference_type or ""), _DEFAULT_ACTION_PATH)
+    if reference_type == "task" and reference_id:
+        path = f"/tasks?taskId={reference_id}"
     return f"{base}{path}"
 
 

@@ -108,6 +108,7 @@ class TaskDueReminderTests(unittest.TestCase):
                 "due_today": 1,
                 "overdue_1d": 1,
                 "overdue_3d": 1,
+                "collaborator_created": 0,
                 "skipped_no_org": 0,
             },
         )
@@ -138,6 +139,7 @@ class TaskDueReminderTests(unittest.TestCase):
                 "due_today": 0,
                 "overdue_1d": 0,
                 "overdue_3d": 0,
+                "collaborator_created": 0,
                 "skipped_no_org": 0,
             },
         )

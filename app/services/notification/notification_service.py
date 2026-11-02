@@ -634,7 +634,8 @@ class NotificationService:
                     if not overrides.get("subject") and template.subject_template:
                         overrides["subject"] = template.subject_template
                     builtin = render_builtin_email(event.template_key, params={
-                        **params, "action_url": action_url(event.reference_type),
+                        **params,
+                        "action_url": action_url(event.reference_type, event.reference_id),
                     }, layout_overrides=overrides)
                     if builtin is not None:
                         return builtin["subject"] or event.title, builtin["text"], builtin["html"]
@@ -648,7 +649,8 @@ class NotificationService:
             logger.warning("数据库模板渲染失败 event_id=%s: %s", event.id, exc)
 
         builtin = render_builtin_email(event.template_key, params={
-            **params, "action_url": action_url(event.reference_type),
+            **params,
+            "action_url": action_url(event.reference_type, event.reference_id),
         })
         if builtin is not None:
             return builtin["subject"] or event.title, builtin["text"], builtin["html"]

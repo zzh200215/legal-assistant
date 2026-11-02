@@ -1164,3 +1164,56 @@ test('任务优先级筛选：选择高优先级并写回 URL/请求', async ({ 
   await expect(page.getByText('高优先级任务')).toBeVisible()
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('通知中心任务提醒：点击直达任务详情', async ({ page }) => {
+  const requests = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  const reminder = {
+    id: 1,
+    title: '协作者提醒 · 任务今天到期：起草合同初稿',
+    body: 'task:today · 任务 #101 的截止日期为 2026-12-30',
+    event_type: 'deadline',
+    reference_type: 'task',
+    reference_id: 101,
+    case_id: null,
+    status: 'delivered',
+    created_at: '2026-12-30T10:00:00',
+  }
+
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+    requests.push(`${method} ${path}`)
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/developer/notifications/me') {
+      return route.fulfill({ json: success({ items: [reminder], unread: 1, total: 1 }) })
+    }
+    if (method === 'POST' && path === '/developer/notifications/1/read') {
+      return route.fulfill({ json: success({ ...reminder, status: 'read' }) })
+    }
+    if (method === 'GET' && path === '/tasks/') {
+      return route.fulfill({ json: success({ items: [ownerTask()], total: 1, page: 1, page_size: 12 }) })
+    }
+    if (method === 'GET' && path === '/tasks/101') return route.fulfill({ json: success(ownerTask()) })
+    if (method === 'GET' && path === '/tasks/101/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/101/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/101/logs') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/notifications')
+  await expect(page.getByText('协作者提醒 · 任务今天到期：起草合同初稿')).toBeVisible()
+  await page.locator('.notification-main').first().click()
+
+  await expect(page).toHaveURL(/\/tasks\?taskId=101/)
+  await expect(page.locator('.el-dialog:visible').getByText('起草合同初稿').first()).toBeVisible()
+  expect(requests).toContain('POST /developer/notifications/1/read')
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
