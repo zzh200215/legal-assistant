@@ -70,6 +70,8 @@ class TaskCommentOut(BaseModel):
     id: int
     task_id: int
     user_id: int
+    username: str | None = None
+    full_name: str | None = None
     content: str
     created_at: datetime
 
@@ -79,6 +81,9 @@ class TaskCommentOut(BaseModel):
 class TaskLogOut(BaseModel):
     id: int
     task_id: int
+    user_id: int | None = None
+    username: str | None = None
+    full_name: str | None = None
     action: str
     detail: str | None = None
     created_at: datetime

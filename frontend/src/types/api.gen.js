@@ -871,9 +871,11 @@
  * @typedef {Object} TaskCommentOut
  * @property {string} content
  * @property {string} created_at
+ * @property {string | null}= full_name
  * @property {number} id
  * @property {number} task_id
  * @property {number} user_id
+ * @property {string | null}= username
  * @typedef {Object} TaskCreate
  * @property {string | null}= assignee
  * @property {number | null}= assignee_user_id
@@ -889,8 +891,11 @@
  * @property {string} action
  * @property {string} created_at
  * @property {string | null}= detail
+ * @property {string | null}= full_name
  * @property {number} id
  * @property {number} task_id
+ * @property {number | null}= user_id
+ * @property {string | null}= username
  * @typedef {Object} TaskOut
  * @property {string | null}= archived_at
  * @property {string | null}= assignee

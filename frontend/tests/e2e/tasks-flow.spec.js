@@ -28,7 +28,7 @@ const sharedTask = (overrides = {}) => ({
 test('任务看板：加载→详情并行→评论/协作/状态变更', async ({ page }) => {
   const requests = []
   const failed = []
-  let comments = [{ id: 1, task_id: 101, user_id: 15, content: '联调评论一', created_at: '2026-08-06T10:00:00' }]
+  let comments = [{ id: 1, task_id: 101, user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', content: '联调评论一', created_at: '2026-08-06T10:00:00' }]
 
   page.on('response', (r) => {
     if (r.url().includes('/api/') && r.status() >= 400) failed.push(`${r.request().method()} ${new URL(r.url()).pathname} -> ${r.status()}`)
@@ -53,7 +53,7 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
     if (method === 'GET' && path === '/tasks/101') return route.fulfill({ json: success(ownerTask({ progress: 80, collaborators: ['张三', '李四'] })) })
     if (method === 'GET' && path === '/tasks/101/sub-tasks') return route.fulfill({ json: success({ items: [{ id: 1001, title: '子任务A', status: 'todo' }], total: 1 }) })
     if (method === 'GET' && path === '/tasks/101/comments') return route.fulfill({ json: success(comments) })
-    if (method === 'GET' && path === '/tasks/101/logs') return route.fulfill({ json: success([{ id: 1, task_id: 101, action: 'task.created', detail: '创建任务', created_at: '2026-08-06T09:00:00' }]) })
+    if (method === 'GET' && path === '/tasks/101/logs') return route.fulfill({ json: success([{ id: 1, task_id: 101, user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', action: 'created', detail: 'Task created (source: None)', created_at: '2026-08-06T09:00:00' }]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [{ id: 501, goal: '完成合同审查', status: 'completed', created_at: '2026-08-06T11:00:00', total_steps: 3 }], total: 1 }) })
     if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'POST' && path === '/tasks/101/comments') {
@@ -90,6 +90,7 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
   await expect(dialog.getByText('起草合同初稿').first()).toBeVisible()
   await expect(dialog.getByText('子任务A')).toBeVisible()
   await expect(dialog.getByText('联调评论一')).toBeVisible()
+  await expect(dialog.locator('.comment-meta').first()).toContainText('主办律师')
   await expect(dialog.getByText('完成合同审查')).toBeVisible()
   // 详情对话框 4 路并行 = 子任务/评论/日志（/tasks/{id}/…）+ 关联 Agent（/agent/runs）
   expect(requests.filter((r) => r.startsWith('GET /tasks/101/')).length).toBeGreaterThanOrEqual(3)

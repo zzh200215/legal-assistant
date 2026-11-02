@@ -156,7 +156,10 @@ class TaskService:
         db.commit()
         db.refresh(task)
 
-        log = TaskLog(task_id=task.id, action="created", detail=f"Task created (source: {source_type})")
+        log = TaskLog(
+            task_id=task.id, user_id=user_id,
+            action="created", detail=f"Task created (source: {source_type})",
+        )
         db.add(log)
         db.commit()
         return task
@@ -264,6 +267,7 @@ class TaskService:
         if "status" in kwargs and kwargs["status"] != old_status:
             log = TaskLog(
                 task_id=task.id,
+                user_id=user_id,
                 action="status_changed",
                 detail=f"{old_status} -> {kwargs['status']}",
             )
@@ -272,6 +276,7 @@ class TaskService:
         if "progress" in kwargs and kwargs["progress"] is not None and kwargs["progress"] != old_progress:
             log = TaskLog(
                 task_id=task.id,
+                user_id=user_id,
                 action="progress_changed",
                 detail=f"{old_progress} -> {task.progress}",
             )
@@ -280,6 +285,7 @@ class TaskService:
         if task.assignee != old_assignee:
             db.add(TaskLog(
                 task_id=task.id,
+                user_id=user_id,
                 action="assignee_changed",
                 detail=f"{old_assignee or '未指派'} -> {task.assignee or '未指派'}",
             ))
@@ -326,6 +332,7 @@ class TaskService:
             if task.assignee != old_assignee:
                 db.add(TaskLog(
                     task_id=task.id,
+                    user_id=user_id,
                     action="assignee_changed",
                     detail=f"{old_assignee or '未指派'} -> {task.assignee or '未指派'}",
                 ))
@@ -380,12 +387,12 @@ class TaskService:
                 task.progress = 100
                 if old_status != "done":
                     db.add(TaskLog(
-                        task_id=task.id, action="status_changed",
+                        task_id=task.id, user_id=user_id, action="status_changed",
                         detail=f"{old_status} -> done",
                     ))
                 if old_progress != 100:
                     db.add(TaskLog(
-                        task_id=task.id, action="progress_changed",
+                        task_id=task.id, user_id=user_id, action="progress_changed",
                         detail=f"{old_progress} -> 100",
                     ))
             elif action == "archive":
@@ -393,7 +400,10 @@ class TaskService:
                     skipped += 1
                     continue
                 task.archived_at = utc_now()
-                db.add(TaskLog(task_id=task.id, action="archived", detail="Task archived"))
+                db.add(TaskLog(
+                    task_id=task.id, user_id=user_id,
+                    action="archived", detail="Task archived",
+                ))
             elif action == "priority":
                 if not is_owner or task.archived_at is not None:
                     skipped += 1
@@ -402,7 +412,7 @@ class TaskService:
                 task.priority = priority
                 if old_priority != priority:
                     db.add(TaskLog(
-                        task_id=task.id, action="priority_changed",
+                        task_id=task.id, user_id=user_id, action="priority_changed",
                         detail=f"{old_priority} -> {priority}",
                     ))
             else:
@@ -420,7 +430,10 @@ class TaskService:
         if task.archived_at is not None:
             return task
         task.archived_at = utc_now()
-        db.add(TaskLog(task_id=task.id, action="archived", detail="Task archived"))
+        db.add(TaskLog(
+            task_id=task.id, user_id=user_id,
+            action="archived", detail="Task archived",
+        ))
         db.commit()
         db.refresh(task)
         return task
@@ -433,7 +446,10 @@ class TaskService:
         if task.archived_at is None:
             return task
         task.archived_at = None
-        db.add(TaskLog(task_id=task.id, action="unarchived", detail="Task unarchived"))
+        db.add(TaskLog(
+            task_id=task.id, user_id=user_id,
+            action="unarchived", detail="Task unarchived",
+        ))
         db.commit()
         db.refresh(task)
         return task
@@ -540,7 +556,10 @@ class TaskService:
 
         if task.status == "todo":
             task.status = "in_progress"
-            log = TaskLog(task_id=task.id, action="status_changed", detail="todo -> in_progress (decomposed)")
+            log = TaskLog(
+                task_id=task.id, user_id=user_id,
+                action="status_changed", detail="todo -> in_progress (decomposed)",
+            )
             db.add(log)
             db.commit()
 
@@ -998,7 +1017,10 @@ class TaskService:
         db.add(comment)
         db.commit()
         db.refresh(comment)
-        log = TaskLog(task_id=task_id, action="comment_added", detail=normalized[:120])
+        log = TaskLog(
+            task_id=task_id, user_id=user_id,
+            action="comment_added", detail=normalized[:120],
+        )
         db.add(log)
         db.commit()
         return comment

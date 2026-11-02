@@ -152,7 +152,7 @@
         </div>
         <div v-if="comments.length" class="comment-list">
           <div v-for="item in comments" :key="`comment-${item.id}`" class="comment-item">
-            <div class="comment-meta">用户 {{ item.user_id }} · {{ item.created_at }}</div>
+            <div class="comment-meta">{{ item.full_name || item.username || `用户 ${item.user_id}` }} · {{ item.created_at }}</div>
             <div class="comment-content">{{ item.content }}</div>
           </div>
         </div>
@@ -161,6 +161,9 @@
       <div v-if="taskLogs.length" class="detail-section">
         <h4>操作日志</h4>
         <el-table :data="taskLogs" border size="small" class="detail-table">
+          <el-table-column label="操作人" width="120">
+            <template #default="{ row }">{{ row.full_name || row.username || (row.user_id ? `用户 ${row.user_id}` : '系统') }}</template>
+          </el-table-column>
           <el-table-column label="动作" width="110">
             <template #default="{ row }">{{ taskLogActionLabel(row.action) }}</template>
           </el-table-column>

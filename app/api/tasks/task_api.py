@@ -62,6 +62,18 @@ def _accessible_case_ids(db: Session, case_ids: set[int], user: User) -> set[int
     return accessible
 
 
+def _user_display_map(db: Session, user_ids: set[int | None]) -> dict[int, tuple[str | None, str | None]]:
+    ids = {user_id for user_id in user_ids if user_id}
+    if not ids:
+        return {}
+    return {
+        user_id: (username, full_name)
+        for user_id, username, full_name in db.query(
+            User.id, User.username, User.full_name
+        ).filter(User.id.in_(ids)).all()
+    }
+
+
 def _attach_case_titles(db: Session, payloads: list[dict], current_user: User) -> list[dict]:
     """批量补 case_title，避免任务列表按案件 N+1 查询。
 
@@ -399,7 +411,14 @@ def list_task_comments(task_id: int, db: Session = Depends(get_db), current_user
             organization_id=current_user.organization_id,
             department_id=current_user.department_id,
         )
-        return [TaskCommentOut.model_validate(row) for row in rows]
+        names = _user_display_map(db, {row.user_id for row in rows})
+        return [
+            TaskCommentOut.model_validate(row).model_copy(update={
+                "username": names.get(row.user_id, (None, None))[0],
+                "full_name": names.get(row.user_id, (None, None))[1],
+            })
+            for row in rows
+        ]
     except ValueError as exc:
         raise api_error(404, "任务不存在", code="TASK_NOT_FOUND", detail=str(exc))
 
@@ -421,7 +440,10 @@ def add_task_comment(
             organization_id=current_user.organization_id,
             department_id=current_user.department_id,
         )
-        return TaskCommentOut.model_validate(row)
+        return TaskCommentOut.model_validate(row).model_copy(update={
+            "username": current_user.username,
+            "full_name": current_user.full_name,
+        })
     except PermissionError as exc:
         raise api_error(403, "无权评论该任务", code="TASK_COMMENT_FORBIDDEN", detail=str(exc))
     except ValueError as exc:
@@ -442,6 +464,13 @@ def list_task_logs(task_id: int, db: Session = Depends(get_db), current_user: Us
             organization_id=current_user.organization_id,
             department_id=current_user.department_id,
         )
-        return [TaskLogOut.model_validate(row) for row in rows]
+        names = _user_display_map(db, {row.user_id for row in rows})
+        return [
+            TaskLogOut.model_validate(row).model_copy(update={
+                "username": names.get(row.user_id, (None, None))[0],
+                "full_name": names.get(row.user_id, (None, None))[1],
+            })
+            for row in rows
+        ]
     except ValueError as exc:
         raise api_error(404, "任务不存在", code="TASK_NOT_FOUND", detail=str(exc))
