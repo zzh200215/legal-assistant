@@ -14,7 +14,15 @@ from app.models.legal_portal import LegalCaseMember
 from app.models.org import OrganizationMember
 from app.models.task import Task
 from app.models.user import User
-from app.schemas.task import TaskCommentCreate, TaskCommentOut, TaskCreate, TaskLogOut, TaskOut, TaskUpdate
+from app.schemas.task import (
+    TaskBulkReassign,
+    TaskCommentCreate,
+    TaskCommentOut,
+    TaskCreate,
+    TaskLogOut,
+    TaskOut,
+    TaskUpdate,
+)
 from app.services.jobs.task_service import task_service
 
 router = APIRouter()
@@ -187,6 +195,24 @@ async def extract_from_chat(req: ExtractFromChatRequest, db: Session = Depends(g
         if should_passthrough_exception(e):
             raise
         raise api_error(500, "从聊天提取任务失败", code="TASK_EXTRACT_FROM_CHAT_FAILED", detail=str(e))
+
+
+@router.post("/bulk-reassign")
+def bulk_reassign_tasks(
+    req: TaskBulkReassign,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return task_service.bulk_reassign(
+            req.task_ids,
+            db,
+            user_id=current_user.id,
+            assignee_user_id=req.assignee_user_id,
+            organization_id=current_user.organization_id,
+        )
+    except ValueError as e:
+        raise api_error(400, "负责人不合法", code="TASK_ASSIGNEE_INVALID", detail=str(e))
 
 
 @router.get("/{task_id}", response_model=TaskOut)

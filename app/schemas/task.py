@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 
 
@@ -49,6 +49,11 @@ class TaskOut(TaskBase):
 
 class TaskCommentCreate(BaseModel):
     content: str
+
+
+class TaskBulkReassign(BaseModel):
+    task_ids: list[int] = Field(min_length=1, max_length=100)
+    assignee_user_id: int | None = None
 
 
 class TaskCommentOut(BaseModel):

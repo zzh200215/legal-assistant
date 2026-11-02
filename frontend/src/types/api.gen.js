@@ -859,6 +859,9 @@
  * @typedef {Object} SummarizeRequest
  * @property {boolean}= async_mode
  * @property {number}= max_length
+ * @typedef {Object} TaskBulkReassign
+ * @property {number | null}= assignee_user_id
+ * @property {Array<number>} task_ids
  * @typedef {Object} TaskCommentCreate
  * @property {string} content
  * @typedef {Object} TaskCommentOut

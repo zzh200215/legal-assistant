@@ -121,6 +121,20 @@
           <span class="app-tag is-pending">来源筛选：{{ sourceFilterMeta.label }} #{{ sourceFilterMeta.sourceId }}</span>
           <el-button size="small" text type="info" @click="clearSourceFilter">清除来源筛选</el-button>
         </div>
+        <div v-if="viewMode === 'table' && selectedTaskIds.length" class="task-bulk-bar">
+          <span class="task-bulk-count">已选 {{ selectedTaskIds.length }} 项</span>
+          <el-select v-if="members.length" v-model="bulkAssigneeId" clearable filterable placeholder="新负责人（留空=清除）" style="width: 220px">
+            <el-option
+              v-for="member in members"
+              :key="member.user_id"
+              :label="member.full_name || member.username || `用户 ${member.user_id}`"
+              :value="member.user_id"
+            />
+          </el-select>
+          <span v-else class="task-bulk-count">没有可指派的组织成员</span>
+          <el-button type="primary" :loading="bulkLoading" :disabled="!members.length" @click="submitBulkReassign">批量改派</el-button>
+          <el-button text @click="clearTableSelection">取消</el-button>
+        </div>
 
         <QueryStateView :status="taskStatus" :error="taskError" :empty-text="taskEmptyText" min-height="240px" @retry="fetchTasks">
           <div v-if="viewMode === 'kanban'" class="kanban-board">
@@ -165,7 +179,17 @@
             </section>
           </div>
 
-          <el-table v-else v-loading="loading" :data="tasks" border :empty-text="taskEmptyText" class="task-table">
+          <el-table
+            v-else
+            ref="taskTableRef"
+            v-loading="loading"
+            :data="tasks"
+            border
+            :empty-text="taskEmptyText"
+            class="task-table"
+            @selection-change="handleTableSelectionChange"
+          >
+            <el-table-column type="selection" width="42" />
             <el-table-column prop="title" label="标题" />
             <el-table-column prop="description" label="事项说明" show-overflow-tooltip />
             <el-table-column prop="case_title" label="案件" width="150" show-overflow-tooltip>
@@ -302,6 +326,11 @@ const taskPage = ref(1)
 const taskPageSize = ref(12)
 const taskTotal = ref(0)
 const taskStats = ref(null)
+const taskTableRef = ref(null)
+const selectedTaskIds = ref([])
+const members = ref([])
+const bulkAssigneeId = ref(null)
+const bulkLoading = ref(false)
 const loading = ref(false)
 // 三态（ux-audit M-13）：任务列表加载失败与"暂无任务"分离，失败可重试；看板/表格两视图共用
 const taskError = ref(null)
@@ -637,6 +666,49 @@ const handleScopeChange = async () => {
   await fetchTasks()
 }
 
+const loadTaskMembers = async () => {
+  const orgId = currentUser.value?.organization_id
+  if (!orgId) {
+    members.value = []
+    return
+  }
+  try {
+    const { data } = await api.listOrgMembers(orgId)
+    members.value = data || []
+  } catch {
+    members.value = []
+  }
+}
+
+const handleTableSelectionChange = (rows) => {
+  selectedTaskIds.value = rows.map((row) => row.id)
+}
+
+const clearTableSelection = () => {
+  selectedTaskIds.value = []
+  bulkAssigneeId.value = null
+  taskTableRef.value?.clearSelection()
+}
+
+const submitBulkReassign = async () => {
+  if (!selectedTaskIds.value.length) return
+  bulkLoading.value = true
+  try {
+    const { data } = await api.bulkReassignTasks({
+      task_ids: selectedTaskIds.value,
+      assignee_user_id: bulkAssigneeId.value ?? null,
+    })
+    const skipped = data?.skipped || 0
+    ElMessage.success(`已改派 ${data?.updated || 0} 项${skipped ? `，跳过 ${skipped} 项` : ''}`)
+    clearTableSelection()
+    await fetchTasks()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '批量改派失败')
+  } finally {
+    bulkLoading.value = false
+  }
+}
+
 const toggleArchived = () => {
   const nextQuery = { ...route.query }
   if (archivedFilter.value) delete nextQuery.archived
@@ -741,6 +813,7 @@ const applyTaskRoute = async (rawTaskId) => {
 
 onMounted(async () => {
   await authStore.loadMe()
+  loadTaskMembers()
   if (route.query.view === 'table' || route.query.taskId) {
     viewMode.value = 'table'
   }
@@ -949,6 +1022,21 @@ watch(detailVisible, (visible) => {
 }
 .task-sort {
   width: 132px;
+}
+.task-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+.task-bulk-count {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
 }
 .task-archived-toggle {
   margin-left: auto;

@@ -9736,6 +9736,62 @@
         ]
       }
     },
+    "/api/tasks/bulk-reassign": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Bulk Reassign Tasks",
+        "operationId": "bulk_reassign_tasks_api_tasks_bulk_reassign_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskBulkReassign"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
+      }
+    },
     "/api/tasks/{task_id}": {
       "get": {
         "tags": [
@@ -32381,6 +32437,35 @@
         },
         "type": "object",
         "title": "SummarizeRequest"
+      },
+      "TaskBulkReassign": {
+        "properties": {
+          "task_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Task Ids"
+          },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_ids"
+        ],
+        "title": "TaskBulkReassign"
       },
       "TaskCommentCreate": {
         "properties": {

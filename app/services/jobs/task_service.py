@@ -240,6 +240,57 @@ class TaskService:
 
         return task
 
+    def bulk_reassign(
+        self,
+        task_ids: list[int],
+        db: Session,
+        *,
+        user_id: int,
+        assignee_user_id: int | None,
+        organization_id: int | None = None,
+    ) -> dict:
+        """批量改派：只处理当前用户为 owner 的任务，其余计入 skipped。
+
+        一次请求最多 100 条（API 限制）；同一负责人只解析一次，
+        跨组织/无效负责人直接 400，避免部分成功。
+        """
+        assignee_user = self._resolve_assignee(db, assignee_user_id, organization_id)
+        updated = 0
+        skipped = 0
+        seen: set[int] = set()
+        for task_id in task_ids:
+            if task_id in seen:
+                continue
+            seen.add(task_id)
+            task = self.get(task_id, db, user_id=user_id, require_owner=True)
+            if not task:
+                skipped += 1
+                continue
+            if (
+                assignee_user is not None
+                and task.organization_id
+                and task.organization_id != organization_id
+            ):
+                skipped += 1
+                continue
+            old_assignee = task.assignee
+            task.assignee_user_id = assignee_user.id if assignee_user else None
+            task.assignee = self._assignee_display(assignee_user) if assignee_user else None
+            if task.assignee != old_assignee:
+                db.add(TaskLog(
+                    task_id=task.id,
+                    action="assignee_changed",
+                    detail=f"{old_assignee or '未指派'} -> {task.assignee or '未指派'}",
+                ))
+            updated += 1
+        db.commit()
+        return {
+            "updated": updated,
+            "skipped": skipped,
+            "assignee_user_id": assignee_user.id if assignee_user else None,
+            "assignee": self._assignee_display(assignee_user) if assignee_user else None,
+        }
+
     def archive(self, task_id: int, db: Session, *, user_id: int) -> Task:
         """软归档：仅 owner 可操作；幂等，已归档再调用不重复写日志。"""
         task = self.get(task_id, db, user_id=user_id, require_owner=True)

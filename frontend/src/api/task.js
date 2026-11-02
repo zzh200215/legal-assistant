@@ -11,6 +11,7 @@ export default {
   updateTask(id, data) { return http.put(`/tasks/${id}`, data) },
   archiveTask(id) { return http.post(`/tasks/${id}/archive`) },
   unarchiveTask(id) { return http.post(`/tasks/${id}/unarchive`) },
+  bulkReassignTasks(data) { return http.post('/tasks/bulk-reassign', data) },
   decomposeTask(id) { return http.post(`/tasks/${id}/decompose`) },
   getSubTasks(id, params) { return http.get(`/tasks/${id}/sub-tasks`, { params }) },
   listTaskComments(id) { return http.get(`/tasks/${id}/comments`) },
