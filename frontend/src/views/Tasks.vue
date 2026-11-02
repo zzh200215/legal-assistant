@@ -478,6 +478,7 @@ const columns = [
 const scopeOptions = [
   { label: '全部可见', value: 'all' },
   { label: '我的', value: 'mine' },
+  { label: '我参与的', value: 'participating' },
   { label: '部门共享', value: 'department' },
   { label: '组织共享', value: 'organization' },
   { label: '共享任务', value: 'shared' },
@@ -539,7 +540,7 @@ const overdueCount = computed(() => (
   taskStats.value?.overdue ?? tasks.value.filter((item) => isTaskOverdue(item)).length
 ))
 const sharedTaskCount = computed(() => (
-  taskStats.value?.shared ?? tasks.value.filter((item) => !['我的', '我负责'].includes(scopeLabel(item))).length
+  taskStats.value?.shared ?? tasks.value.filter((item) => !['我的', '我负责', '我参与'].includes(scopeLabel(item))).length
 ))
 const statsTotal = computed(() => (
   taskStats.value?.total ?? (taskTotal.value || tasks.value.length)
@@ -564,6 +565,7 @@ const scopeLabel = (item) => {
   if (!item || !currentUser.value) return '我的'
   if (item.user_id === currentUser.value.id) return '我的'
   if (item.assignee_user_id === currentUser.value.id) return '我负责'
+  if ((item.collaborator_user_ids || []).includes(currentUser.value.id)) return '我参与'
   if (item.department_id && currentUser.value.department_id && item.department_id === currentUser.value.department_id) return '部门共享'
   if (item.organization_id && currentUser.value.organization_id && item.organization_id === currentUser.value.organization_id) return '组织共享'
   return '共享'

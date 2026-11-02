@@ -152,3 +152,25 @@ class TaskCollaboratorTests(unittest.TestCase):
         task = self._create(collaborators=["张三", "李四"])
         self.assertEqual(task["collaborator_user_ids"], [])
         self.assertEqual(task["collaborators"], ["张三", "李四"])
+
+    def test_participating_scope_includes_collaborator(self):
+        task = self._create(collaborator_ids=[self.collaborator.id])
+        participating = self.client.get(
+            "/api/tasks/?scope=participating", headers=self._headers(self.collaborator)
+        )
+        self.assertEqual(participating.status_code, 200, participating.text)
+        self.assertEqual(
+            [item["id"] for item in participating.json()["data"]["items"]], [task["id"]]
+        )
+
+        mine = self.client.get(
+            "/api/tasks/?scope=mine", headers=self._headers(self.collaborator)
+        )
+        self.assertEqual(mine.status_code, 200, mine.text)
+        self.assertEqual(mine.json()["data"]["items"], [])
+
+        shared = self.client.get(
+            "/api/tasks/?scope=shared", headers=self._headers(self.collaborator)
+        )
+        self.assertEqual(shared.status_code, 200, shared.text)
+        self.assertEqual(shared.json()["data"]["items"], [])

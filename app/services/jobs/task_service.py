@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, exists, or_
 from sqlalchemy.orm import Session
 
 from app.models.task import Task, TaskCollaborator, TaskComment, TaskLog
@@ -677,6 +677,7 @@ class TaskService:
                 department_id=department_id,
                 scope=scope,
                 assignee_user_id=task.assignee_user_id,
+                collaborator_ids={link.user_id for link in task.collaborator_links},
             ):
                 result.append(task)
         return result
@@ -692,11 +693,14 @@ class TaskService:
         department_id: int | None = None,
         scope: str | None = None,
         assignee_user_id: int | None = None,
+        collaborator_ids: set[int] | None = None,
     ) -> bool:
         normalized_scope = (scope or "all").strip().lower()
         is_mine = owner_user_id == user_id or (
             assignee_user_id is not None and assignee_user_id == user_id
         )
+        is_collaborator = user_id in (collaborator_ids or set())
+        is_participating = is_mine or is_collaborator
         is_same_department = bool(
             not is_mine
             and department_id
@@ -715,6 +719,8 @@ class TaskService:
             return True
         if normalized_scope == "mine":
             return is_mine
+        if normalized_scope == "participating":
+            return is_participating
         if normalized_scope == "department":
             return is_same_department
         if normalized_scope == "organization":
@@ -742,9 +748,20 @@ class TaskService:
             Task.organization_id == organization_id,
         )
         normalized_scope = (scope or "all").strip().lower()
+        collaborator_exists = exists().where(
+            TaskCollaborator.task_id == Task.id,
+            TaskCollaborator.user_id == user_id,
+        )
         if normalized_scope == "mine":
             # 「我的」= 我创建的 + 指派给我的；负责人可以在自己的列表里直接找到任务。
             scope_cond = or_(Task.user_id == user_id, Task.assignee_user_id == user_id)
+        elif normalized_scope == "participating":
+            # 「我参与的」= 我创建的 + 指派给我的 + 我作为协作者的。
+            scope_cond = or_(
+                Task.user_id == user_id,
+                Task.assignee_user_id == user_id,
+                collaborator_exists,
+            )
         elif normalized_scope == "department":
             scope_cond = Task.department_id == department_id
         elif normalized_scope == "organization":
@@ -761,6 +778,7 @@ class TaskService:
                 ),
                 Task.user_id != user_id,
                 or_(Task.assignee_user_id.is_(None), Task.assignee_user_id != user_id),
+                ~collaborator_exists,
             )
         else:
             scope_cond = True

@@ -9452,11 +9452,11 @@
             "required": false,
             "schema": {
               "type": "string",
-              "description": "可见范围筛选：all/mine/department/organization/shared",
+              "description": "可见范围筛选：all/mine/participating/department/organization/shared",
               "default": "all",
               "title": "Scope"
             },
-            "description": "可见范围筛选：all/mine/department/organization/shared"
+            "description": "可见范围筛选：all/mine/participating/department/organization/shared"
           },
           {
             "name": "source_type",

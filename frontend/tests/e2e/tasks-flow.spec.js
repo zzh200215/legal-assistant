@@ -178,6 +178,12 @@ test('共享任务只读 + 新建任务 + scope 筛选', async ({ page }) => {
   await page.waitForTimeout(400)
   expect(requests.some((r) => r.startsWith('GET /tasks/') && r.includes('scope=mine'))).toBe(true)
 
+  // 「我参与的」→ 请求携带 scope=participating
+  await page.locator('.el-select', { hasText: '我的' }).click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("我参与的")').click()
+  await page.waitForTimeout(400)
+  expect(requests.some((r) => r.startsWith('GET /tasks/') && r.includes('scope=participating'))).toBe(true)
+
   expect(failed).toEqual([])
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
