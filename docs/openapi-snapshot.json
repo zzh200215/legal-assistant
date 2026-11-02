@@ -9792,6 +9792,62 @@
         ]
       }
     },
+    "/api/tasks/bulk-action": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Bulk Action Tasks",
+        "operationId": "bulk_action_tasks_api_tasks_bulk_action_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskBulkAction"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
+      }
+    },
     "/api/tasks/{task_id}": {
       "get": {
         "tags": [
@@ -32437,6 +32493,50 @@
         },
         "type": "object",
         "title": "SummarizeRequest"
+      },
+      "TaskBulkAction": {
+        "properties": {
+          "task_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Task Ids"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "archive",
+              "priority"
+            ],
+            "title": "Action"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_ids",
+          "action"
+        ],
+        "title": "TaskBulkAction"
       },
       "TaskBulkReassign": {
         "properties": {

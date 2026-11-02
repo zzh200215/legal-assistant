@@ -15,6 +15,7 @@ from app.models.org import OrganizationMember
 from app.models.task import Task
 from app.models.user import User
 from app.schemas.task import (
+    TaskBulkAction,
     TaskBulkReassign,
     TaskCommentCreate,
     TaskCommentOut,
@@ -213,6 +214,27 @@ def bulk_reassign_tasks(
         )
     except ValueError as e:
         raise api_error(400, "负责人不合法", code="TASK_ASSIGNEE_INVALID", detail=str(e))
+
+
+@router.post("/bulk-action")
+def bulk_action_tasks(
+    req: TaskBulkAction,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return task_service.bulk_action(
+            req.task_ids,
+            db,
+            user_id=current_user.id,
+            action=req.action,
+            priority=req.priority,
+            role=current_user.role,
+            organization_id=current_user.organization_id,
+            department_id=current_user.department_id,
+        )
+    except ValueError as e:
+        raise api_error(400, "批量操作不合法", code="TASK_BULK_ACTION_INVALID", detail=str(e))
 
 
 @router.get("/{task_id}", response_model=TaskOut)

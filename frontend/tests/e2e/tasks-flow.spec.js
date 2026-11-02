@@ -903,12 +903,72 @@ test('任务批量改派：表格多选 + 选择负责人 + 提交', async ({ pa
   await rows.nth(1).locator('.el-checkbox').click()
   await expect(page.getByText('已选 2 项')).toBeVisible()
 
-  await page.locator('.task-bulk-bar .el-select').click()
+  await page.locator('.task-bulk-bar .el-select').first().click()
   await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("协办律师")').click()
   await page.getByRole('button', { name: '批量改派' }).click()
   await expect(page.getByText('已改派 2 项')).toBeVisible()
   expect(bulkPayload.task_ids.sort()).toEqual([601, 602])
   expect(bulkPayload.assignee_user_id).toBe(16)
   await expect(page.getByText('已选 2 项')).toHaveCount(0)
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
+
+test('任务批量操作：完成 / 修改优先级', async ({ page }) => {
+  const actions = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+    ]) })
+    if (method === 'POST' && path === '/tasks/bulk-action') {
+      const body = route.request().postDataJSON()
+      actions.push(body)
+      return route.fulfill({ json: success({ updated: 2, skipped: 0, action: body.action }) })
+    }
+    if (method === 'GET' && path === '/tasks/') {
+      return route.fulfill({ json: success({
+        items: [
+          ownerTask({ id: 601, title: '批量操作一' }),
+          ownerTask({ id: 602, title: '批量操作二' }),
+        ],
+        total: 2, page: 1, page_size: 12,
+        stats: { total: 2, in_progress: 0, overdue: 0, shared: 0 },
+      }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks?view=table')
+  const rows = page.locator('.el-table__row')
+  const selectRows = async () => {
+    await rows.nth(0).locator('.el-checkbox').click()
+    await rows.nth(1).locator('.el-checkbox').click()
+  }
+
+  await selectRows()
+  await page.locator('.task-bulk-bar .el-select').nth(1).click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("标记完成")').click()
+  await page.getByRole('button', { name: '执行' }).click()
+  await expect(page.getByText('已完成 2 项')).toBeVisible()
+  expect(actions.at(-1).action).toBe('complete')
+
+  await selectRows()
+  await page.locator('.task-bulk-bar .el-select').nth(1).click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("修改优先级")').click()
+  await page.locator('.task-bulk-bar .el-select').nth(2).click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("高")').click()
+  await page.getByRole('button', { name: '执行' }).click()
+  await expect(page.getByText('已修改优先级 2 项')).toBeVisible()
+  expect(actions.at(-1).action).toBe('priority')
+  expect(actions.at(-1).priority).toBe('high')
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })

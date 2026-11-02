@@ -133,6 +133,18 @@
           </el-select>
           <span v-else class="task-bulk-count">没有可指派的组织成员</span>
           <el-button type="primary" :loading="bulkLoading" :disabled="!members.length" @click="submitBulkReassign">批量改派</el-button>
+          <span class="task-bulk-divider" aria-hidden="true"></span>
+          <el-select v-model="bulkAction" placeholder="批量操作" style="width: 130px">
+            <el-option label="标记完成" value="complete" />
+            <el-option label="归档" value="archive" />
+            <el-option label="修改优先级" value="priority" />
+          </el-select>
+          <el-select v-if="bulkAction === 'priority'" v-model="bulkPriority" style="width: 100px">
+            <el-option label="高" value="high" />
+            <el-option label="中" value="medium" />
+            <el-option label="低" value="low" />
+          </el-select>
+          <el-button type="primary" :loading="bulkLoading" :disabled="!bulkAction" @click="submitBulkAction">执行</el-button>
           <el-button text @click="clearTableSelection">取消</el-button>
         </div>
 
@@ -330,6 +342,8 @@ const taskTableRef = ref(null)
 const selectedTaskIds = ref([])
 const members = ref([])
 const bulkAssigneeId = ref(null)
+const bulkAction = ref('')
+const bulkPriority = ref('medium')
 const bulkLoading = ref(false)
 const loading = ref(false)
 // 三态（ux-audit M-13）：任务列表加载失败与"暂无任务"分离，失败可重试；看板/表格两视图共用
@@ -687,6 +701,8 @@ const handleTableSelectionChange = (rows) => {
 const clearTableSelection = () => {
   selectedTaskIds.value = []
   bulkAssigneeId.value = null
+  bulkAction.value = ''
+  bulkPriority.value = 'medium'
   taskTableRef.value?.clearSelection()
 }
 
@@ -704,6 +720,27 @@ const submitBulkReassign = async () => {
     await fetchTasks()
   } catch (e) {
     ElMessage.error(e.response?.data?.detail || '批量改派失败')
+  } finally {
+    bulkLoading.value = false
+  }
+}
+
+const submitBulkAction = async () => {
+  if (!selectedTaskIds.value.length || !bulkAction.value) return
+  bulkLoading.value = true
+  try {
+    const { data } = await api.bulkActionTasks({
+      task_ids: selectedTaskIds.value,
+      action: bulkAction.value,
+      priority: bulkAction.value === 'priority' ? bulkPriority.value : undefined,
+    })
+    const skipped = data?.skipped || 0
+    const labels = { complete: '完成', archive: '归档', priority: '修改优先级' }
+    ElMessage.success(`已${labels[bulkAction.value] || '处理'} ${data?.updated || 0} 项${skipped ? `，跳过 ${skipped} 项` : ''}`)
+    clearTableSelection()
+    await fetchTasks()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '批量操作失败')
   } finally {
     bulkLoading.value = false
   }
@@ -1037,6 +1074,11 @@ watch(detailVisible, (visible) => {
 .task-bulk-count {
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
+}
+.task-bulk-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--color-border);
 }
 .task-archived-toggle {
   margin-left: auto;

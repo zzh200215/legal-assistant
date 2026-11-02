@@ -859,6 +859,10 @@
  * @typedef {Object} SummarizeRequest
  * @property {boolean}= async_mode
  * @property {number}= max_length
+ * @typedef {Object} TaskBulkAction
+ * @property {'complete' | 'archive' | 'priority'} action
+ * @property {'low' | 'medium' | 'high' | null}= priority
+ * @property {Array<number>} task_ids
  * @typedef {Object} TaskBulkReassign
  * @property {number | null}= assignee_user_id
  * @property {Array<number>} task_ids

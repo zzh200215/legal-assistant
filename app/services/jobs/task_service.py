@@ -291,6 +291,80 @@ class TaskService:
             "assignee": self._assignee_display(assignee_user) if assignee_user else None,
         }
 
+    def bulk_action(
+        self,
+        task_ids: list[int],
+        db: Session,
+        *,
+        user_id: int,
+        action: str,
+        priority: str | None = None,
+        role: str | None = None,
+        organization_id: int | None = None,
+        department_id: int | None = None,
+    ) -> dict:
+        """批量完成/归档/改优先级：按 owner/负责人权限逐条处理，无权限计入 skipped。"""
+        if action == "priority" and priority not in ("low", "medium", "high"):
+            raise ValueError("Invalid priority")
+        updated = 0
+        skipped = 0
+        seen: set[int] = set()
+        for task_id in task_ids:
+            if task_id in seen:
+                continue
+            seen.add(task_id)
+            task = self.get(
+                task_id, db, user_id=user_id, role=role,
+                organization_id=organization_id, department_id=department_id,
+            )
+            if not task:
+                skipped += 1
+                continue
+            is_owner = task.user_id == user_id
+            is_assignee = task.assignee_user_id is not None and task.assignee_user_id == user_id
+
+            if action == "complete":
+                if not (is_owner or is_assignee) or task.archived_at is not None:
+                    skipped += 1
+                    continue
+                old_status = task.status
+                old_progress = task.progress
+                task.status = "done"
+                task.progress = 100
+                if old_status != "done":
+                    db.add(TaskLog(
+                        task_id=task.id, action="status_changed",
+                        detail=f"{old_status} -> done",
+                    ))
+                if old_progress != 100:
+                    db.add(TaskLog(
+                        task_id=task.id, action="progress_changed",
+                        detail=f"{old_progress} -> 100",
+                    ))
+            elif action == "archive":
+                if not is_owner or task.archived_at is not None:
+                    skipped += 1
+                    continue
+                task.archived_at = utc_now()
+                db.add(TaskLog(task_id=task.id, action="archived", detail="Task archived"))
+            elif action == "priority":
+                if not is_owner or task.archived_at is not None:
+                    skipped += 1
+                    continue
+                old_priority = task.priority
+                task.priority = priority
+                if old_priority != priority:
+                    db.add(TaskLog(
+                        task_id=task.id, action="priority_changed",
+                        detail=f"{old_priority} -> {priority}",
+                    ))
+            else:
+                skipped += 1
+                continue
+            updated += 1
+        db.commit()
+        return {"updated": updated, "skipped": skipped, "action": action}
+
     def archive(self, task_id: int, db: Session, *, user_id: int) -> Task:
         """软归档：仅 owner 可操作；幂等，已归档再调用不重复写日志。"""
         task = self.get(task_id, db, user_id=user_id, require_owner=True)

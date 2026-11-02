@@ -6,6 +6,7 @@ const ACTION_LABELS = Object.freeze({
   progress_changed: '进度更新',
   comment_added: '添加评论',
   assignee_changed: '负责人变更',
+  priority_changed: '优先级变更',
   archived: '归档任务',
   unarchived: '恢复任务',
 })
@@ -31,6 +32,11 @@ export const taskLogDetail = (action, detail) => {
   if (action === 'progress_changed') {
     const matched = text.match(/^(\d+)\s*->\s*(\d+)$/)
     return matched ? `进度 ${matched[1]}% → ${matched[2]}%` : text
+  }
+  if (action === 'priority_changed') {
+    return text
+      .replace(/\b(high|medium|low)\b/g, (value) => ({ high: '高', medium: '中', low: '低' }[value]))
+      .replace(/\s*->\s*/g, ' → ')
   }
   if (action === 'created') {
     const matched = text.match(/Task created \(source: ([^)]*)\)/)
