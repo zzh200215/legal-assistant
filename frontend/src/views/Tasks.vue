@@ -171,6 +171,9 @@
             <el-table-column prop="case_title" label="案件" width="150" show-overflow-tooltip>
               <template #default="{ row }">{{ row.case_title || '—' }}</template>
             </el-table-column>
+            <el-table-column prop="assignee" label="负责人" width="110" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.assignee || '—' }}</template>
+            </el-table-column>
             <el-table-column prop="due_date" label="截止" width="100">
               <template #default="{ row }">
                 <span v-if="row.due_date" class="task-due" :class="{ 'is-overdue': isTaskOverdue(row) }">
@@ -236,6 +239,7 @@
       v-model="detailVisible"
       :task="selectedTask"
       :can-edit="canEditSelectedTask"
+      :can-collaborate="canCollaborateSelectedTask"
       @refresh="fetchTasks"
       @task-updated="handleTaskUpdated"
       @status-change="changeStatus"
@@ -247,7 +251,13 @@
       @unarchive="handleUnarchive"
     />
 
-    <TaskCreateDialogs ref="createDialogs" :loading="loading" :case-id="workflowCaseId" @refresh="handleDialogsRefresh" />
+    <TaskCreateDialogs
+      ref="createDialogs"
+      :loading="loading"
+      :case-id="workflowCaseId"
+      :organization-id="currentUser?.organization_id || null"
+      @refresh="handleDialogsRefresh"
+    />
   </section>
 </template>
 
@@ -435,6 +445,12 @@ const canEditSelectedTask = computed(() => {
   return selectedTask.value.user_id === currentUser.value.id
 })
 
+const canCollaborateSelectedTask = computed(() => {
+  if (!selectedTask.value || !currentUser.value) return false
+  return canEditSelectedTask.value
+    || selectedTask.value.assignee_user_id === currentUser.value.id
+})
+
 const sourceFilterMeta = computed(() => {
   const sourceType = typeof route.query.sourceType === 'string' ? route.query.sourceType : ''
   const sourceId = Number(route.query.sourceId)
@@ -479,7 +495,7 @@ const overdueCount = computed(() => (
   taskStats.value?.overdue ?? tasks.value.filter((item) => isTaskOverdue(item)).length
 ))
 const sharedTaskCount = computed(() => (
-  taskStats.value?.shared ?? tasks.value.filter((item) => scopeLabel(item) !== '我的').length
+  taskStats.value?.shared ?? tasks.value.filter((item) => !['我的', '我负责'].includes(scopeLabel(item))).length
 ))
 const statsTotal = computed(() => (
   taskStats.value?.total ?? (taskTotal.value || tasks.value.length)
@@ -503,6 +519,7 @@ const getTasksByStatus = (status) => tasks.value.filter(t => t.status === status
 const scopeLabel = (item) => {
   if (!item || !currentUser.value) return '我的'
   if (item.user_id === currentUser.value.id) return '我的'
+  if (item.assignee_user_id === currentUser.value.id) return '我负责'
   if (item.department_id && currentUser.value.department_id && item.department_id === currentUser.value.department_id) return '部门共享'
   if (item.organization_id && currentUser.value.organization_id && item.organization_id === currentUser.value.organization_id) return '组织共享'
   return '共享'

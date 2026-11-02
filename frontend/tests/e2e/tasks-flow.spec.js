@@ -44,6 +44,10 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
     requests.push(`${method} ${path}${qs ? `?${qs}` : ''}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') {
       const scope = url.searchParams.get('scope') || 'all'
@@ -132,6 +136,10 @@ test('共享任务只读 + 新建任务 + scope 筛选', async ({ page }) => {
     requests.push(`${method} ${path}${qs ? `?${qs}` : ''}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') return route.fulfill({ json: success({ items: [ownerTask(), sharedTask()], total: 2, page: 1, page_size: 12 }) })
     if (method === 'GET' && path === '/tasks/202/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
@@ -153,7 +161,7 @@ test('共享任务只读 + 新建任务 + scope 筛选', async ({ page }) => {
   // 共享任务（非 owner）→ 只读：横幅 + 编辑按钮禁用
   await page.locator('.kanban-task', { hasText: '共享任务-案件归档' }).first().click()
   const dialog = page.locator('.el-dialog:visible')
-  await expect(dialog.getByText('共享任务当前仅支持查看，更新、评论和状态变更需由创建人操作')).toBeVisible()
+  await expect(dialog.getByText('共享任务当前仅支持查看，更新、评论和状态变更需由创建人或负责人操作')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '保存协作信息' })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: '添加评论' })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: '标记完成' })).toBeDisabled()
@@ -192,6 +200,10 @@ test('路由 taskId 深链：不在列表中的任务经 GET /tasks/{id} 拉取�
     requests.push(`${method} ${path}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') return route.fulfill({ json: success({ items: [ownerTask()], total: 1, page: 1, page_size: 12 }) })
     if (method === 'GET' && path === '/tasks/999') {
@@ -226,6 +238,10 @@ test('案件任务视图：case_id 查询参数只显示该案件任务，清除
     requests.push(`${method} ${path}?${url.searchParams.toString()}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') {
       const caseId = url.searchParams.get('case_id')
@@ -306,6 +322,10 @@ test('任务来源：咨询标签中文化 + 「查看来源咨询」深链', as
     requests.push(`${method} ${path}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') {
       const items = [
@@ -364,6 +384,10 @@ test('任务截止日期：创建带日期 → 详情展示 → 修改/清除', 
     })
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') return route.fulfill({ json: success({ items: [dueTask()], total: 1, page: 1, page_size: 12 }) })
     if (method === 'GET' && path === '/tasks/501') {
@@ -443,6 +467,10 @@ test('任务搜索与截止排序：q/sort 下推服务端并写回 URL', async 
     const method = route.request().method()
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
@@ -500,6 +528,10 @@ test('任务到期通知：点击直达任务详情', async ({ page }) => {
     const method = route.request().method()
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') {
       return route.fulfill({ json: success({
         unread: 1,
@@ -546,6 +578,10 @@ test('任务统计：使用服务端全量统计而非当前页', async ({ page 
     const method = route.request().method()
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
@@ -579,6 +615,10 @@ test('统计卡点击筛选：进行中/逾期/共享可组合并写回 URL', as
     const method = route.request().method()
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
@@ -669,6 +709,10 @@ test('任务归档：详情归档→列表隐藏→已归档视图恢复', async
     const method = route.request().method()
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
@@ -714,5 +758,106 @@ test('任务归档：详情归档→列表隐藏→已归档视图恢复', async
 
   await page.getByRole('button', { name: '返回未归档' }).click()
   await expect(page.getByText('可归档任务')).toBeVisible()
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
+
+test('任务负责人：新建任务选择真实用户并提交 assignee_user_id', async ({ page }) => {
+  let createdPayload = null
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'POST' && path === '/tasks/') {
+      createdPayload = route.request().postDataJSON()
+      return route.fulfill({ json: success(ownerTask({
+        id: 701, title: createdPayload.title,
+        assignee: '协办律师', assignee_user_id: createdPayload.assignee_user_id,
+      })) })
+    }
+    if (method === 'GET' && path === '/tasks/') {
+      return route.fulfill({ json: success({
+        items: [ownerTask({ id: 101, title: '既有任务' })],
+        total: 1, page: 1, page_size: 12,
+        stats: { total: 1, in_progress: 0, overdue: 0, shared: 0 },
+      }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await page.getByRole('button', { name: '新建任务' }).click()
+  await page.getByPlaceholder('任务标题').fill('指派给协办律师')
+  await page.locator('.el-dialog:visible .el-select').first().click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("协办律师")').click()
+  await page.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.getByText('创建成功')).toBeVisible()
+  expect(createdPayload.assignee_user_id).toBe(16)
+  expect(createdPayload.assignee).toBeUndefined()
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
+
+test('任务负责人：可推进状态/进度，但不能改截止或归档', async ({ page }) => {
+  const assignee = { ...ME, id: 16, username: 'lawyer2', role: 'user' }
+  const updates = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+    const current = () => ownerTask({
+      id: 601, title: '负责人推进任务', user_id: 15,
+      assignee: '协办律师', assignee_user_id: 16,
+      status: updates.some((item) => item.status === 'done') ? 'done' : 'todo',
+    })
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(assignee) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+    ]) })
+    if (method === 'GET' && path === '/tasks/601') return route.fulfill({ json: success(current()) })
+    if (method === 'GET' && path === '/tasks/601/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/601/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/601/logs') return route.fulfill({ json: success([]) })
+    if (method === 'PUT' && path === '/tasks/601') {
+      const body = route.request().postDataJSON()
+      updates.push(body)
+      return route.fulfill({ json: success(current()) })
+    }
+    if (method === 'GET' && path === '/tasks/') {
+      return route.fulfill({ json: success({
+        items: [current()], total: 1, page: 1, page_size: 12,
+        stats: { total: 1, in_progress: 0, overdue: 0, shared: 0 },
+      }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await page.locator('.kanban-task', { hasText: '负责人推进任务' }).click()
+  const dialog = page.locator('.el-dialog:visible')
+  await expect(dialog.getByText('你是任务负责人，可更新状态/进度和评论；标题、截止日期、负责人与归档由创建人维护')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '标记完成' })).toBeEnabled()
+  await expect(dialog.getByPlaceholder('进度 %')).toBeEnabled()
+  await expect(dialog.getByPlaceholder('协作者，逗号分隔')).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: '归档', exact: true })).toHaveCount(0)
+
+  await dialog.getByRole('button', { name: '标记完成' }).click()
+  await expect.poll(() => updates.some((item) => item.status === 'done')).toBe(true)
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })

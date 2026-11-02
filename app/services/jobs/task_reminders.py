@@ -51,13 +51,13 @@ def _org_id(db: Session, task: Task) -> int | None:
 
 
 def _zone_for(
-    db: Session, task: Task, org_id: int, cache: dict[tuple[int, int], ZoneInfo]
+    db: Session, user_id: int, org_id: int, cache: dict[tuple[int, int], ZoneInfo]
 ) -> ZoneInfo:
-    key = (task.user_id, org_id)
+    key = (user_id, org_id)
     if key in cache:
         return cache[key]
     pref = notification_service.preference_for(
-        db=db, user_id=task.user_id, organization_id=org_id, event_type="deadline"
+        db=db, user_id=user_id, organization_id=org_id, event_type="deadline"
     )
     name = getattr(pref, "timezone", None) or DEFAULT_TIMEZONE
     try:
@@ -93,13 +93,14 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
 
     for task in rows:
         org_id = _org_id(db, task)
+        recipient_id = task.assignee_user_id or task.user_id
         if org_id:
-            zone = _zone_for(db, task, org_id, zone_cache)
-            user_key = (task.user_id, org_id)
+            zone = _zone_for(db, recipient_id, org_id, zone_cache)
+            user_key = (recipient_id, org_id)
         else:
             # 无组织任务无法定位偏好，退化到默认时区判断是否命中阶段；命中后跳过。
             zone = ZoneInfo(DEFAULT_TIMEZONE)
-            user_key = (task.user_id, 0)
+            user_key = (recipient_id, 0)
         local_today = today_cache.get(user_key)
         if local_today is None:
             local_today = moment.astimezone(zone).date()
@@ -138,7 +139,7 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
         notification_service.create_multi_channel_notification(
             db=db,
             organization_id=org_id,
-            user_id=task.user_id,
+            user_id=recipient_id,
             event_type="deadline",
             title=f"{prefix}：{title}",
             body=body,

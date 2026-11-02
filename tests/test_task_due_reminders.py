@@ -43,6 +43,14 @@ class TaskDueReminderTests(unittest.TestCase):
         )
         self.db.add(self.user)
         self.db.flush()
+        self.assignee = User(
+            username="task-assignee",
+            email="task-assignee@example.com",
+            hashed_password=hash_password("pw"),
+            organization_id=self.org.id,
+        )
+        self.db.add(self.assignee)
+        self.db.flush()
         self.case = LegalCase(
             title="提醒案件", case_type="other", organization_id=self.org.id, user_id=self.user.id
         )
@@ -52,7 +60,7 @@ class TaskDueReminderTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def _task(self, due_date, *, status="todo", title="到期任务", case_id=None, org_id="default"):
+    def _task(self, due_date, *, status="todo", title="到期任务", case_id=None, org_id="default", assignee_user_id=None):
         task = Task(
             user_id=self.user.id,
             organization_id=self.org.id if org_id == "default" else org_id,
@@ -62,6 +70,7 @@ class TaskDueReminderTests(unittest.TestCase):
             priority="medium",
             progress=0,
             due_date=due_date,
+            assignee_user_id=assignee_user_id,
         )
         self.db.add(task)
         self.db.commit()
@@ -133,6 +142,19 @@ class TaskDueReminderTests(unittest.TestCase):
             },
         )
         self.assertEqual(len(self._site_events()), 4)
+
+    def test_reminder_goes_to_assignee(self):
+        task = self._task(TODAY, title="负责人提醒", assignee_user_id=self.assignee.id)
+
+        scan_task_due_reminders(self.db, now=NOW)
+
+        event = (
+            self.db.query(LegalNotificationEvent)
+            .filter(LegalNotificationEvent.reference_id == task.id)
+            .one()
+        )
+        self.assertEqual(event.user_id, self.assignee.id)
+        self.assertEqual(event.template_key, "task_due_today")
 
     def test_stage_change_from_tomorrow_to_today_notifies_again(self):
         task = self._task(TOMORROW, title="先明天后今天")

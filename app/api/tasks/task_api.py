@@ -94,6 +94,7 @@ def create_task(req: TaskCreate, db: Session = Depends(get_db), current_user: Us
             db=db,
             description=req.description,
             assignee=req.assignee,
+            assignee_user_id=req.assignee_user_id,
             collaborators=req.collaborators,
             due_date=req.due_date,
             priority=req.priority,
@@ -102,6 +103,8 @@ def create_task(req: TaskCreate, db: Session = Depends(get_db), current_user: Us
         )
         payload = _attach_case_titles(db, [task_service.serialize_task(task)], current_user)[0]
         return TaskOut.model_validate(payload)
+    except ValueError as e:
+        raise api_error(400, "负责人不合法", code="TASK_ASSIGNEE_INVALID", detail=str(e))
     except Exception as e:
         if should_passthrough_exception(e):
             raise
@@ -223,10 +226,15 @@ def update_task(
             db,
             user_id=current_user.id,
             if_match_version=parse_if_match(if_match),
+            role=current_user.role,
+            organization_id=current_user.organization_id,
+            department_id=current_user.department_id,
             **update_data,
         )
         payload = _attach_case_titles(db, [task_service.serialize_task(task)], current_user)[0]
         return TaskOut.model_validate(payload)
+    except PermissionError as e:
+        raise api_error(403, "无权修改该任务", code="TASK_EDIT_FORBIDDEN", detail=str(e))
     except ValueError as e:
         raise api_error(404, str(e), code="TASK_NOT_FOUND")
     except StaleDataError:
@@ -355,8 +363,18 @@ def add_task_comment(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        row = task_service.add_comment(task_id, current_user.id, req.content, db)
+        row = task_service.add_comment(
+            task_id,
+            current_user.id,
+            req.content,
+            db,
+            role=current_user.role,
+            organization_id=current_user.organization_id,
+            department_id=current_user.department_id,
+        )
         return TaskCommentOut.model_validate(row)
+    except PermissionError as exc:
+        raise api_error(403, "无权评论该任务", code="TASK_COMMENT_FORBIDDEN", detail=str(exc))
     except ValueError as exc:
         detail = str(exc)
         if detail == "Task not found":

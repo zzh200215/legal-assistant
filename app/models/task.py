@@ -28,6 +28,7 @@ class Task(Base):
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     assignee = Column(String(128), nullable=True)
+    assignee_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     collaborators = Column(Text, nullable=True)
     status = Column(String(32), default=TaskStatus.todo.value, nullable=False)
     priority = Column(String(32), default=TaskPriority.medium.value, nullable=False)

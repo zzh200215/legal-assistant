@@ -86,13 +86,15 @@
         >
           查看来源咨询
         </el-button>
-        <el-button v-if="task.status !== 'in_progress'" type="primary" :disabled="!canEdit" @click="emit('status-change', task, 'in_progress')">开始执行</el-button>
-        <el-button v-if="task.status !== 'done'" type="success" :disabled="!canEdit" @click="emit('status-change', task, 'done')">标记完成</el-button>
+        <el-button v-if="task.status !== 'in_progress'" type="primary" :disabled="!canCollaborate" @click="emit('status-change', task, 'in_progress')">开始执行</el-button>
+        <el-button v-if="task.status !== 'done'" type="success" :disabled="!canCollaborate" @click="emit('status-change', task, 'done')">标记完成</el-button>
         <el-button v-if="canEdit && !task.archived_at" type="info" plain @click="emit('archive', task)">归档</el-button>
         <el-button v-if="canEdit && task.archived_at" type="info" plain @click="emit('unarchive', task)">恢复</el-button>
       </div>
       <div v-if="!canEdit" class="readonly-note app-readonly-banner">
-        共享任务当前仅支持查看，更新、评论和状态变更需由创建人操作
+        {{ canCollaborate
+          ? '你是任务负责人，可更新状态/进度和评论；标题、截止日期、负责人与归档由创建人维护'
+          : '共享任务当前仅支持查看，更新、评论和状态变更需由创建人或负责人操作' }}
       </div>
 
       <div class="detail-section">
@@ -104,18 +106,29 @@
           </label>
           <button v-if="dueDraft" type="button" class="clear-date" :disabled="!canEdit" @click="dueDraft = ''">清除日期</button>
         </div>
+        <div v-if="canEdit && members.length" class="editor-row">
+          <span class="date-label">负责人</span>
+          <el-select v-model="assigneeDraft" clearable filterable placeholder="未指派" style="width: 240px">
+            <el-option
+              v-for="member in members"
+              :key="member.user_id"
+              :label="member.full_name || member.username || `用户 ${member.user_id}`"
+              :value="member.user_id"
+            />
+          </el-select>
+        </div>
         <div class="editor-row">
-          <el-input v-model.number="progressDraft" :disabled="!canEdit" type="number" style="width: 120px" placeholder="进度 %" />
+          <el-input v-model.number="progressDraft" :disabled="!canCollaborate" type="number" style="width: 120px" placeholder="进度 %" />
           <el-input v-model="collaboratorsDraft" :disabled="!canEdit" placeholder="协作者，逗号分隔" style="width: 260px" />
-          <el-button type="primary" :disabled="!canEdit" @click="updateCollaboration">保存协作信息</el-button>
+          <el-button type="primary" :disabled="!canCollaborate" @click="updateCollaboration">保存协作信息</el-button>
         </div>
       </div>
 
       <div class="detail-section">
         <h4>评论</h4>
         <div class="editor-row editor-row-top">
-          <el-input v-model="commentDraft" :disabled="!canEdit" type="textarea" :rows="2" placeholder="记录进展、阻塞项或协作说明" style="flex: 1" />
-          <el-button type="primary" :disabled="!canEdit" @click="submitComment">添加评论</el-button>
+          <el-input v-model="commentDraft" :disabled="!canCollaborate" type="textarea" :rows="2" placeholder="记录进展、阻塞项或协作说明" style="flex: 1" />
+          <el-button type="primary" :disabled="!canCollaborate" @click="submitComment">添加评论</el-button>
         </div>
         <div v-if="comments.length" class="comment-list">
           <div v-for="item in comments" :key="`comment-${item.id}`" class="comment-item">
@@ -161,12 +174,15 @@ import { computed, ref, watch } from 'vue'
 import { ElDescriptions, ElDescriptionsItem } from 'element-plus/es/components/descriptions/index'
 import { ElDialog } from 'element-plus/es/components/dialog/index'
 import { ElInput } from 'element-plus/es/components/input/index'
+import { ElOption, ElSelect } from 'element-plus/es/components/select/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/descriptions/style/css'
 import 'element-plus/es/components/descriptions-item/style/css'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/option/style/css'
+import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
@@ -181,6 +197,7 @@ const props = defineProps({
   task: { type: Object, default: null },
   visible: { type: Boolean, default: false },
   canEdit: { type: Boolean, default: false },
+  canCollaborate: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:visible', 'refresh', 'task-updated', 'status-change', 'decompose', 'open-source', 'open-case', 'open-agent-run', 'archive', 'unarchive'])
 
@@ -198,6 +215,23 @@ const progressDraft = ref(0)
 const collaboratorsDraft = ref('')
 const dueDraft = ref('')
 const initialDueDraft = ref('')
+const members = ref([])
+const assigneeDraft = ref(null)
+const initialAssigneeDraft = ref(null)
+
+const loadMembers = async () => {
+  const orgId = currentUser()?.organization_id
+  if (!orgId) {
+    members.value = []
+    return
+  }
+  try {
+    const { data } = await api.listOrgMembers(orgId)
+    members.value = data || []
+  } catch {
+    members.value = []
+  }
+}
 
 const formatDueDate = (value) => (value ? String(value).slice(0, 10) : '')
 const isOverdue = computed(() => {
@@ -211,6 +245,7 @@ const scopeLabel = (item) => {
   const user = currentUser()
   if (!item || !user) return '我的'
   if (item.user_id === user.id) return '我的'
+  if (item.assignee_user_id === user.id) return '我负责'
   if (item.department_id && user.department_id && item.department_id === user.department_id) return '部门共享'
   if (item.organization_id && user.organization_id && item.organization_id === user.organization_id) return '组织共享'
   return '共享'
@@ -219,6 +254,7 @@ const scopeLabel = (item) => {
 const scopeTagType = (item) => {
   const label = scopeLabel(item)
   if (label === '我的') return 'info'
+  if (label === '我负责') return 'primary'
   if (label === '部门共享') return 'warning'
   if (label === '组织共享') return 'success'
   return ''
@@ -274,15 +310,18 @@ const loadRelatedAgentRuns = async (taskId) => {
 
 const updateCollaboration = async () => {
   if (!props.task) return
-  const payload = {
-    progress: progressDraft.value,
-    collaborators: collaboratorsDraft.value
+  const payload = { progress: progressDraft.value }
+  if (props.canEdit) {
+    payload.collaborators = collaboratorsDraft.value
       ? collaboratorsDraft.value.split(',').map((item) => item.trim()).filter(Boolean)
-      : [],
-  }
-  // 只在用户改过日期时提交，避免「只改进度」把原截止时间改写成当天 23:59
-  if (dueDraft.value !== initialDueDraft.value) {
-    payload.due_date = dueDraft.value ? `${dueDraft.value}T23:59:59` : null
+      : []
+    // 只在用户改过日期时提交，避免「只改进度」把原截止时间改写成当天 23:59
+    if (dueDraft.value !== initialDueDraft.value) {
+      payload.due_date = dueDraft.value ? `${dueDraft.value}T23:59:59` : null
+    }
+    if (assigneeDraft.value !== initialAssigneeDraft.value) {
+      payload.assignee_user_id = assigneeDraft.value ?? null
+    }
   }
   try {
     await api.updateTask(props.task.id, payload)
@@ -322,7 +361,10 @@ watch(
     collaboratorsDraft.value = (task.collaborators || []).join(', ')
     dueDraft.value = formatDueDate(task.due_date)
     initialDueDraft.value = dueDraft.value
+    assigneeDraft.value = task.assignee_user_id ?? null
+    initialAssigneeDraft.value = assigneeDraft.value
     commentDraft.value = ''
+    if (props.canEdit) loadMembers()
     loadSubData(task.id)
   },
   { immediate: true },

@@ -4,7 +4,21 @@
       <div v-if="caseId" class="dialog-copy case-hint">创建后自动归入案件 #{{ caseId }}</div>
       <el-input v-model="newTask.title" placeholder="任务标题" />
       <el-input v-model="newTask.description" type="textarea" :rows="3" placeholder="任务描述（可选）" />
-      <el-input v-model="newTask.assignee" placeholder="负责人（可选）" />
+      <el-select
+        v-if="members.length"
+        v-model="newTask.assigneeUserId"
+        clearable
+        filterable
+        placeholder="选择负责人（可选）"
+      >
+        <el-option
+          v-for="member in members"
+          :key="member.user_id"
+          :label="member.full_name || member.username || `用户 ${member.user_id}`"
+          :value="member.user_id"
+        />
+      </el-select>
+      <el-input v-else v-model="newTask.assignee" placeholder="负责人（可选，按姓名）" />
       <el-input v-model="newTask.collaborators" placeholder="协作者，逗号分隔" />
       <div class="form-inline">
         <label class="date-field">
@@ -67,11 +81,13 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 const props = defineProps({
   loading: { type: Boolean, default: false },
   caseId: { type: Number, default: null },
+  organizationId: { type: Number, default: null },
 })
 const emit = defineEmits(['refresh'])
 
 const showCreateDialog = ref(false)
-const newTask = ref({ title: '', description: '', assignee: '', collaborators: '', priority: 'medium', progress: 0, dueDate: '' })
+const members = ref([])
+const newTask = ref({ title: '', description: '', assignee: '', assigneeUserId: null, collaborators: '', priority: 'medium', progress: 0, dueDate: '' })
 
 const showExtractDialog = ref(false)
 const extractDocId = ref(null)
@@ -80,7 +96,20 @@ const showChatExtractDialog = ref(false)
 const chatMessage = ref('')
 
 const resetCreateForm = () => {
-  newTask.value = { title: '', description: '', assignee: '', collaborators: '', priority: 'medium', progress: 0, dueDate: '' }
+  newTask.value = { title: '', description: '', assignee: '', assigneeUserId: null, collaborators: '', priority: 'medium', progress: 0, dueDate: '' }
+}
+
+const loadMembers = async () => {
+  if (!props.organizationId) {
+    members.value = []
+    return
+  }
+  try {
+    const { data } = await api.listOrgMembers(props.organizationId)
+    members.value = data || []
+  } catch {
+    members.value = []
+  }
 }
 
 const createTask = async () => {
@@ -91,6 +120,11 @@ const createTask = async () => {
       ? newTask.value.collaborators.split(',').map((item) => item.trim()).filter(Boolean)
       : [],
   }
+  if (payload.assigneeUserId) {
+    payload.assignee_user_id = payload.assigneeUserId
+    delete payload.assignee
+  }
+  delete payload.assigneeUserId
   // 日期控件只到天：统一落到当天 23:59:59，避免当天 00:00 就被判逾期
   delete payload.dueDate
   if (newTask.value.dueDate) payload.due_date = `${newTask.value.dueDate}T23:59:59`
@@ -133,7 +167,11 @@ const extractFromChat = async () => {
 }
 
 defineExpose({
-  openCreate() { showCreateDialog.value = true },
+  openCreate() {
+    resetCreateForm()
+    showCreateDialog.value = true
+    loadMembers()
+  },
   openDocExtract() { showExtractDialog.value = true },
   openChatExtract() { showChatExtractDialog.value = true },
 })

@@ -55,6 +55,23 @@ class TaskService:
             return []
 
     @staticmethod
+    def _assignee_display(user: User) -> str:
+        return (user.full_name or user.username or f"用户 {user.id}").strip()[:128]
+
+    def _resolve_assignee(
+        self, db: Session, assignee_user_id: int | None, organization_id: int | None
+    ) -> User | None:
+        """负责人必须是同组织用户；跨组织指派直接拒绝，避免通知/可见性越界。"""
+        if assignee_user_id is None:
+            return None
+        user = db.get(User, assignee_user_id)
+        if user is None:
+            raise ValueError("Assignee not found")
+        if organization_id and user.organization_id != organization_id:
+            raise ValueError("Assignee not in organization")
+        return user
+
+    @staticmethod
     def _parse_due_date(value: str | None) -> datetime | None:
         if not value:
             return None
@@ -75,6 +92,7 @@ class TaskService:
         db: Session,
         description: str | None = None,
         assignee: str | None = None,
+        assignee_user_id: int | None = None,
         collaborators: list[str] | None = None,
         due_date: datetime | None = None,
         priority: str = "medium",
@@ -85,6 +103,9 @@ class TaskService:
         case_id: int | None = None,
     ) -> Task:
         owner = db.query(User).filter(User.id == user_id).first()
+        assignee_user = self._resolve_assignee(
+            db, assignee_user_id, owner.organization_id if owner else None
+        )
         task = Task(
             user_id=user_id,
             organization_id=owner.organization_id if owner else None,
@@ -92,7 +113,8 @@ class TaskService:
             case_id=case_id,
             title=title,
             description=description,
-            assignee=assignee,
+            assignee=self._assignee_display(assignee_user) if assignee_user else assignee,
+            assignee_user_id=assignee_user.id if assignee_user else None,
             collaborators=self._dump_collaborators(collaborators),
             due_date=due_date,
             priority=priority,
@@ -139,10 +161,24 @@ class TaskService:
         ) else None
 
     def update(self, task_id: int, db: Session, user_id: int | None = None,
-               if_match_version: int | None = None, **kwargs) -> Task:
-        task = self.get(task_id, db, user_id=user_id, require_owner=True)
+               if_match_version: int | None = None, role: str | None = None,
+               organization_id: int | None = None, department_id: int | None = None,
+               **kwargs) -> Task:
+        task = self.get(
+            task_id, db, user_id=user_id, role=role,
+            organization_id=organization_id, department_id=department_id,
+        )
         if not task:
             raise ValueError("Task not found")
+        is_owner = task.user_id == user_id
+        is_assignee = task.assignee_user_id is not None and task.assignee_user_id == user_id
+        if not (is_owner or is_assignee):
+            raise PermissionError("Task edit forbidden")
+        if not is_owner:
+            # 负责人只能推进执行状态/进度；标题、截止日期、负责人、协作者与归档仍由创建人维护。
+            forbidden = set(kwargs) - {"status", "progress"}
+            if forbidden:
+                raise PermissionError("Task edit forbidden")
 
         # If-Match 前置版本校验：不匹配抛 StaleDataError（全局映射 409），
         # 幂等/版本校验顺序由调用方保证（Idempotency-Key 先于 If-Match）。
@@ -154,6 +190,18 @@ class TaskService:
 
         old_status = task.status
         old_progress = task.progress
+        old_assignee = task.assignee
+        if "assignee_user_id" in kwargs:
+            assignee_user = self._resolve_assignee(
+                db, kwargs.pop("assignee_user_id"), task.organization_id
+            )
+            task.assignee_user_id = assignee_user.id if assignee_user else None
+            task.assignee = self._assignee_display(assignee_user) if assignee_user else None
+        if "assignee" in kwargs:
+            value = kwargs.pop("assignee")
+            if task.assignee_user_id is not None and value != task.assignee:
+                task.assignee_user_id = None
+            task.assignee = value
         for key, value in kwargs.items():
             if key == "collaborators":
                 setattr(task, key, self._dump_collaborators(value))
@@ -181,6 +229,13 @@ class TaskService:
                 detail=f"{old_progress} -> {task.progress}",
             )
             db.add(log)
+            db.commit()
+        if task.assignee != old_assignee:
+            db.add(TaskLog(
+                task_id=task.id,
+                action="assignee_changed",
+                detail=f"{old_assignee or '未指派'} -> {task.assignee or '未指派'}",
+            ))
             db.commit()
 
         return task
@@ -430,6 +485,7 @@ class TaskService:
                 organization_id=organization_id,
                 department_id=department_id,
                 scope=scope,
+                assignee_user_id=task.assignee_user_id,
             ):
                 result.append(task)
         return result
@@ -444,9 +500,12 @@ class TaskService:
         organization_id: int | None = None,
         department_id: int | None = None,
         scope: str | None = None,
+        assignee_user_id: int | None = None,
     ) -> bool:
         normalized_scope = (scope or "all").strip().lower()
-        is_mine = owner_user_id == user_id
+        is_mine = owner_user_id == user_id or (
+            assignee_user_id is not None and assignee_user_id == user_id
+        )
         is_same_department = bool(
             not is_mine
             and department_id
@@ -493,7 +552,8 @@ class TaskService:
         )
         normalized_scope = (scope or "all").strip().lower()
         if normalized_scope == "mine":
-            scope_cond = Task.user_id == user_id
+            # 「我的」= 我创建的 + 指派给我的；负责人可以在自己的列表里直接找到任务。
+            scope_cond = or_(Task.user_id == user_id, Task.assignee_user_id == user_id)
         elif normalized_scope == "department":
             scope_cond = Task.department_id == department_id
         elif normalized_scope == "organization":
@@ -509,6 +569,7 @@ class TaskService:
                     Task.organization_id == organization_id,
                 ),
                 Task.user_id != user_id,
+                or_(Task.assignee_user_id.is_(None), Task.assignee_user_id != user_id),
             )
         else:
             scope_cond = True
@@ -614,7 +675,10 @@ class TaskService:
                 Task.status.in_(("todo", "in_progress")),
                 Task.due_date < cutoff,
             ).count(),
-            "shared": q.filter(Task.user_id != user_id).count(),
+            "shared": q.filter(
+                Task.user_id != user_id,
+                or_(Task.assignee_user_id.is_(None), Task.assignee_user_id != user_id),
+            ).count(),
         }
 
     def paginate_visible(
@@ -732,10 +796,25 @@ class TaskService:
             .all()
         )
 
-    def add_comment(self, task_id: int, user_id: int, content: str, db: Session) -> TaskComment:
-        task = self.get(task_id, db, user_id=user_id, require_owner=True)
+    def add_comment(
+        self,
+        task_id: int,
+        user_id: int,
+        content: str,
+        db: Session,
+        *,
+        role: str | None = None,
+        organization_id: int | None = None,
+        department_id: int | None = None,
+    ) -> TaskComment:
+        task = self.get(
+            task_id, db, user_id=user_id, role=role,
+            organization_id=organization_id, department_id=department_id,
+        )
         if not task:
             raise ValueError("Task not found")
+        if task.user_id != user_id and task.assignee_user_id != user_id:
+            raise PermissionError("Task comment forbidden")
         normalized = (content or "").strip()
         if not normalized:
             raise ValueError("Comment content is empty")
@@ -785,6 +864,7 @@ class TaskService:
             "title": task.title,
             "description": task.description,
             "assignee": task.assignee,
+            "assignee_user_id": getattr(task, "assignee_user_id", None),
             "collaborators": self._load_collaborators(task.collaborators),
             "status": task.status,
             "priority": task.priority,

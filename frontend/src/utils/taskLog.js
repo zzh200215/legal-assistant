@@ -5,6 +5,7 @@ const ACTION_LABELS = Object.freeze({
   status_changed: '状态变更',
   progress_changed: '进度更新',
   comment_added: '添加评论',
+  assignee_changed: '负责人变更',
   archived: '归档任务',
   unarchived: '恢复任务',
 })

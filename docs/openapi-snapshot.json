@@ -32457,6 +32457,17 @@
             ],
             "title": "Assignee"
           },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          },
           "collaborators": {
             "items": {
               "type": "string"
@@ -32572,6 +32583,17 @@
               }
             ],
             "title": "Assignee"
+          },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
           },
           "collaborators": {
             "items": {
@@ -32760,6 +32782,17 @@
               }
             ],
             "title": "Assignee"
+          },
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
           },
           "collaborators": {
             "anyOf": [
