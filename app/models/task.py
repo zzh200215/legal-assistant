@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, func, text
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, func, text
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 import enum
@@ -48,6 +48,10 @@ class Task(Base):
     sub_tasks = relationship("Task", backref="parent", remote_side=[id], cascade="all, delete-orphan", single_parent=True)
     logs = relationship("TaskLog", back_populates="task", cascade="all, delete-orphan")
     comments = relationship("TaskComment", back_populates="task", cascade="all, delete-orphan")
+    collaborator_links = relationship(
+        "TaskCollaborator", back_populates="task", cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class TaskLog(Base):
@@ -72,3 +76,17 @@ class TaskComment(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     task = relationship("Task", back_populates="comments")
+
+
+class TaskCollaborator(Base):
+    __tablename__ = "task_collaborators"
+    __table_args__ = (
+        UniqueConstraint("task_id", "user_id", name="uq_task_collaborators_task_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    task = relationship("Task", back_populates="collaborator_links")

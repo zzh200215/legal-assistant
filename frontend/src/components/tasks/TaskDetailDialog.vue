@@ -93,7 +93,7 @@
       </div>
       <div v-if="!canEdit" class="readonly-note app-readonly-banner">
         {{ canCollaborate
-          ? '你是任务负责人，可更新状态/进度和评论；标题、截止日期、负责人与归档由创建人维护'
+          ? `你是任务${collaborationRoleLabel}，可更新状态/进度和评论；标题、截止日期、负责人与归档由创建人维护`
           : '共享任务当前仅支持查看，更新、评论和状态变更需由创建人或负责人操作' }}
       </div>
 
@@ -119,9 +119,29 @@
         </div>
         <div class="editor-row">
           <el-input v-model.number="progressDraft" :disabled="!canCollaborate" type="number" style="width: 120px" placeholder="进度 %" />
-          <el-input v-model="collaboratorsDraft" :disabled="!canEdit" placeholder="协作者，逗号分隔" style="width: 260px" />
+          <el-select
+            v-if="members.length"
+            v-model="collaboratorIdsDraft"
+            multiple
+            filterable
+            collapse-tags
+            :disabled="!canEdit"
+            placeholder="协作者"
+            style="width: 260px"
+          >
+            <el-option
+              v-for="member in members"
+              :key="member.user_id"
+              :label="member.full_name || member.username || `用户 ${member.user_id}`"
+              :value="member.user_id"
+            />
+          </el-select>
+          <el-input v-else v-model="collaboratorsDraft" :disabled="!canEdit" placeholder="协作者，逗号分隔" style="width: 260px" />
           <el-button type="primary" :disabled="!canCollaborate" @click="updateCollaboration">保存协作信息</el-button>
         </div>
+        <p v-if="canEdit && !collaboratorIdsDraft.length && task.collaborators?.length" class="inline-hint">
+          历史协作者：{{ task.collaborators.join('、') }}（重新选择后替换为真实用户）
+        </p>
       </div>
 
       <div class="detail-section">
@@ -203,6 +223,11 @@ const emit = defineEmits(['update:visible', 'refresh', 'task-updated', 'status-c
 
 const authStore = useAuthStore()
 const currentUser = () => authStore.user
+const collaborationRoleLabel = computed(() => (
+  props.task?.user_id === currentUser()?.id
+    ? '创建人'
+    : props.task?.assignee_user_id === currentUser()?.id ? '负责人' : '协作者'
+))
 
 const priorityLabelMap = { high: '高', medium: '中', low: '低' }
 
@@ -213,6 +238,8 @@ const relatedAgentRuns = ref([])
 const commentDraft = ref('')
 const progressDraft = ref(0)
 const collaboratorsDraft = ref('')
+const collaboratorIdsDraft = ref([])
+const initialCollaboratorIds = ref([])
 const dueDraft = ref('')
 const initialDueDraft = ref('')
 const members = ref([])
@@ -312,9 +339,14 @@ const updateCollaboration = async () => {
   if (!props.task) return
   const payload = { progress: progressDraft.value }
   if (props.canEdit) {
-    payload.collaborators = collaboratorsDraft.value
-      ? collaboratorsDraft.value.split(',').map((item) => item.trim()).filter(Boolean)
-      : []
+    const idsChanged = JSON.stringify(collaboratorIdsDraft.value) !== JSON.stringify(initialCollaboratorIds.value)
+    if (idsChanged) {
+      payload.collaborator_user_ids = [...collaboratorIdsDraft.value]
+    } else if (!initialCollaboratorIds.value.length) {
+      payload.collaborators = collaboratorsDraft.value
+        ? collaboratorsDraft.value.split(',').map((item) => item.trim()).filter(Boolean)
+        : []
+    }
     // 只在用户改过日期时提交，避免「只改进度」把原截止时间改写成当天 23:59
     if (dueDraft.value !== initialDueDraft.value) {
       payload.due_date = dueDraft.value ? `${dueDraft.value}T23:59:59` : null
@@ -359,6 +391,8 @@ watch(
     if (!task) return
     progressDraft.value = task.progress || 0
     collaboratorsDraft.value = (task.collaborators || []).join(', ')
+    collaboratorIdsDraft.value = [...(task.collaborator_user_ids || [])]
+    initialCollaboratorIds.value = [...(task.collaborator_user_ids || [])]
     dueDraft.value = formatDueDate(task.due_date)
     initialDueDraft.value = dueDraft.value
     assigneeDraft.value = task.assignee_user_id ?? null

@@ -10,6 +10,7 @@ class TaskBase(BaseModel):
     assignee: str | None = None
     assignee_user_id: int | None = None
     collaborators: list[str] = []
+    collaborator_user_ids: list[int] = []
     priority: str = "medium"
     progress: int = 0
     due_date: datetime | None = None
@@ -26,6 +27,7 @@ class TaskUpdate(BaseModel):
     assignee: str | None = None
     assignee_user_id: int | None = None
     collaborators: list[str] | None = None
+    collaborator_user_ids: list[int] | None = None
     status: str | None = None
     priority: str | None = None
     progress: int | None = None

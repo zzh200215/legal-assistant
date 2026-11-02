@@ -105,6 +105,7 @@ def create_task(req: TaskCreate, db: Session = Depends(get_db), current_user: Us
             assignee=req.assignee,
             assignee_user_id=req.assignee_user_id,
             collaborators=req.collaborators,
+            collaborator_user_ids=req.collaborator_user_ids,
             due_date=req.due_date,
             priority=req.priority,
             progress=req.progress,

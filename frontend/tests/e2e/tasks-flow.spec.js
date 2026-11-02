@@ -44,10 +44,7 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
     requests.push(`${method} ${path}${qs ? `?${qs}` : ''}`)
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
-    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
-      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
-      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
-    ]) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/tasks/') {
       const scope = url.searchParams.get('scope') || 'all'
@@ -108,7 +105,7 @@ test('任务看板：加载→详情并行→评论/协作/状态变更', async 
   await dialog.getByPlaceholder('进度 %').fill('80')
   await dialog.getByPlaceholder('协作者，逗号分隔').fill('张三, 李四')
   await dialog.getByRole('button', { name: '保存协作信息' }).click()
-  await expect(dialog.getByText('张三、李四')).toBeVisible()
+  await expect(dialog.getByText('张三、李四').first()).toBeVisible()
   expect(requests.collabPut).toEqual({ progress: 80, collaborators: ['张三', '李四'] })
 
   // 状态流转 → PUT {status}
@@ -970,5 +967,54 @@ test('任务批量操作：完成 / 修改优先级', async ({ page }) => {
   await expect(page.getByText('已修改优先级 2 项')).toBeVisible()
   expect(actions.at(-1).action).toBe('priority')
   expect(actions.at(-1).priority).toBe('high')
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
+
+test('任务协作者：新建时多选真实用户并提交 collaborator_user_ids', async ({ page }) => {
+  let createdPayload = null
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([
+      { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+      { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+      { user_id: 17, username: 'lawyer3', full_name: '实习律师', legal_role: 'viewer' },
+    ]) })
+    if (method === 'POST' && path === '/tasks/') {
+      createdPayload = route.request().postDataJSON()
+      return route.fulfill({ json: success(ownerTask({
+        id: 702, title: createdPayload.title,
+        collaborator_user_ids: createdPayload.collaborator_user_ids,
+        collaborators: ['协办律师', '实习律师'],
+      })) })
+    }
+    if (method === 'GET' && path === '/tasks/') {
+      return route.fulfill({ json: success({
+        items: [ownerTask({ id: 101, title: '既有任务' })],
+        total: 1, page: 1, page_size: 12,
+        stats: { total: 1, in_progress: 0, overdue: 0, shared: 0 },
+      }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await page.getByRole('button', { name: '新建任务' }).click()
+  await page.getByPlaceholder('任务标题').fill('协作者任务')
+  await page.locator('.el-dialog:visible .el-select').nth(1).click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("协办律师")').click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("实习律师")').click()
+  await page.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.getByText('创建成功')).toBeVisible()
+  expect(createdPayload.collaborator_user_ids.sort()).toEqual([16, 17])
+  expect(createdPayload.collaborators).toBeUndefined()
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })

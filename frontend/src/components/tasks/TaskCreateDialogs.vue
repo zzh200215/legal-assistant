@@ -19,7 +19,23 @@
         />
       </el-select>
       <el-input v-else v-model="newTask.assignee" placeholder="负责人（可选，按姓名）" />
-      <el-input v-model="newTask.collaborators" placeholder="协作者，逗号分隔" />
+      <el-select
+        v-if="members.length"
+        v-model="newTask.collaboratorUserIds"
+        multiple
+        filterable
+        collapse-tags
+        placeholder="协作者（可选）"
+        style="width: 100%"
+      >
+        <el-option
+          v-for="member in members"
+          :key="member.user_id"
+          :label="member.full_name || member.username || `用户 ${member.user_id}`"
+          :value="member.user_id"
+        />
+      </el-select>
+      <el-input v-else v-model="newTask.collaborators" placeholder="协作者，逗号分隔" />
       <div class="form-inline">
         <label class="date-field">
           <span class="date-label">截止日期</span>
@@ -87,7 +103,7 @@ const emit = defineEmits(['refresh'])
 
 const showCreateDialog = ref(false)
 const members = ref([])
-const newTask = ref({ title: '', description: '', assignee: '', assigneeUserId: null, collaborators: '', priority: 'medium', progress: 0, dueDate: '' })
+const newTask = ref({ title: '', description: '', assignee: '', assigneeUserId: null, collaborators: '', collaboratorUserIds: [], priority: 'medium', progress: 0, dueDate: '' })
 
 const showExtractDialog = ref(false)
 const extractDocId = ref(null)
@@ -96,7 +112,7 @@ const showChatExtractDialog = ref(false)
 const chatMessage = ref('')
 
 const resetCreateForm = () => {
-  newTask.value = { title: '', description: '', assignee: '', assigneeUserId: null, collaborators: '', priority: 'medium', progress: 0, dueDate: '' }
+  newTask.value = { title: '', description: '', assignee: '', assigneeUserId: null, collaborators: '', collaboratorUserIds: [], priority: 'medium', progress: 0, dueDate: '' }
 }
 
 const loadMembers = async () => {
@@ -124,7 +140,12 @@ const createTask = async () => {
     payload.assignee_user_id = payload.assigneeUserId
     delete payload.assignee
   }
+  if (payload.collaboratorUserIds?.length) {
+    payload.collaborator_user_ids = payload.collaboratorUserIds
+    delete payload.collaborators
+  }
   delete payload.assigneeUserId
+  delete payload.collaboratorUserIds
   // 日期控件只到天：统一落到当天 23:59:59，避免当天 00:00 就被判逾期
   delete payload.dueDate
   if (newTask.value.dueDate) payload.due_date = `${newTask.value.dueDate}T23:59:59`

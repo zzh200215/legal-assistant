@@ -492,6 +492,7 @@ const canCollaborateSelectedTask = computed(() => {
   if (!selectedTask.value || !currentUser.value) return false
   return canEditSelectedTask.value
     || selectedTask.value.assignee_user_id === currentUser.value.id
+    || (selectedTask.value.collaborator_user_ids || []).includes(currentUser.value.id)
 })
 
 const sourceFilterMeta = computed(() => {

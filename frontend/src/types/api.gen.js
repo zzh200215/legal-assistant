@@ -878,6 +878,7 @@
  * @property {string | null}= assignee
  * @property {number | null}= assignee_user_id
  * @property {number | null}= case_id
+ * @property {Array<number>}= collaborator_user_ids
  * @property {Array<string>}= collaborators
  * @property {string | null}= description
  * @property {string | null}= due_date
@@ -896,6 +897,7 @@
  * @property {number | null}= assignee_user_id
  * @property {number | null}= case_id
  * @property {string | null}= case_title
+ * @property {Array<number>}= collaborator_user_ids
  * @property {Array<string>}= collaborators
  * @property {string} created_at
  * @property {number | null}= department_id
@@ -915,6 +917,7 @@
  * @typedef {Object} TaskUpdate
  * @property {string | null}= assignee
  * @property {number | null}= assignee_user_id
+ * @property {Array<number> | null}= collaborator_user_ids
  * @property {Array<string> | null}= collaborators
  * @property {string | null}= description
  * @property {string | null}= due_date

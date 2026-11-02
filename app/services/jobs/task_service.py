@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from app.models.task import Task, TaskComment, TaskLog
+from app.models.task import Task, TaskCollaborator, TaskComment, TaskLog
 from app.models.user import User
 from app.core.time import utc_now
 from app.services.documents.analysis_service import analysis_service
@@ -71,6 +71,23 @@ class TaskService:
             raise ValueError("Assignee not in organization")
         return user
 
+    def _resolve_collaborators(
+        self, db: Session, collaborator_user_ids: list[int] | None, organization_id: int | None
+    ) -> list[User]:
+        users: list[User] = []
+        seen: set[int] = set()
+        for user_id in collaborator_user_ids or []:
+            if user_id in seen:
+                continue
+            seen.add(user_id)
+            user = db.get(User, user_id)
+            if user is None:
+                raise ValueError("Collaborator not found")
+            if organization_id and user.organization_id != organization_id:
+                raise ValueError("Collaborator not in organization")
+            users.append(user)
+        return users
+
     @staticmethod
     def _parse_due_date(value: str | None) -> datetime | None:
         if not value:
@@ -94,6 +111,7 @@ class TaskService:
         assignee: str | None = None,
         assignee_user_id: int | None = None,
         collaborators: list[str] | None = None,
+        collaborator_user_ids: list[int] | None = None,
         due_date: datetime | None = None,
         priority: str = "medium",
         progress: int = 0,
@@ -106,6 +124,13 @@ class TaskService:
         assignee_user = self._resolve_assignee(
             db, assignee_user_id, owner.organization_id if owner else None
         )
+        collaborator_users = self._resolve_collaborators(
+            db, collaborator_user_ids, owner.organization_id if owner else None
+        )
+        collaborator_names = (
+            [self._assignee_display(user) for user in collaborator_users]
+            if collaborator_users else collaborators
+        )
         task = Task(
             user_id=user_id,
             organization_id=owner.organization_id if owner else None,
@@ -115,7 +140,7 @@ class TaskService:
             description=description,
             assignee=self._assignee_display(assignee_user) if assignee_user else assignee,
             assignee_user_id=assignee_user.id if assignee_user else None,
-            collaborators=self._dump_collaborators(collaborators),
+            collaborators=self._dump_collaborators(collaborator_names),
             due_date=due_date,
             priority=priority,
             progress=max(0, min(int(progress or 0), 100)),
@@ -125,6 +150,9 @@ class TaskService:
             status="todo",
         )
         db.add(task)
+        db.flush()
+        for collaborator in collaborator_users:
+            db.add(TaskCollaborator(task_id=task.id, user_id=collaborator.id))
         db.commit()
         db.refresh(task)
 
@@ -172,10 +200,13 @@ class TaskService:
             raise ValueError("Task not found")
         is_owner = task.user_id == user_id
         is_assignee = task.assignee_user_id is not None and task.assignee_user_id == user_id
-        if not (is_owner or is_assignee):
+        is_collaborator = any(
+            link.user_id == user_id for link in task.collaborator_links
+        )
+        if not (is_owner or is_assignee or is_collaborator):
             raise PermissionError("Task edit forbidden")
         if not is_owner:
-            # 负责人只能推进执行状态/进度；标题、截止日期、负责人、协作者与归档仍由创建人维护。
+            # 负责人/协作者只能推进执行状态/进度；标题、截止日期、负责人、协作者与归档仍由创建人维护。
             forbidden = set(kwargs) - {"status", "progress"}
             if forbidden:
                 raise PermissionError("Task edit forbidden")
@@ -191,6 +222,19 @@ class TaskService:
         old_status = task.status
         old_progress = task.progress
         old_assignee = task.assignee
+        collaborator_ids_provided = "collaborator_user_ids" in kwargs
+        if collaborator_ids_provided:
+            users = self._resolve_collaborators(
+                db, kwargs.pop("collaborator_user_ids"), task.organization_id
+            )
+            kwargs.pop("collaborators", None)
+            task.collaborator_links.clear()
+            for user in users:
+                task.collaborator_links.append(TaskCollaborator(user_id=user.id))
+            task.collaborators = (
+                self._dump_collaborators([self._assignee_display(user) for user in users])
+                if users else None
+            )
         if "assignee_user_id" in kwargs:
             assignee_user = self._resolve_assignee(
                 db, kwargs.pop("assignee_user_id"), task.organization_id
@@ -204,7 +248,10 @@ class TaskService:
             task.assignee = value
         for key, value in kwargs.items():
             if key == "collaborators":
-                setattr(task, key, self._dump_collaborators(value))
+                new_text = self._dump_collaborators(value)
+                if new_text != task.collaborators:
+                    task.collaborator_links.clear()
+                setattr(task, key, new_text)
                 continue
             if key == "progress" and value is not None:
                 setattr(task, key, max(0, min(int(value), 100)))
@@ -938,7 +985,11 @@ class TaskService:
         )
         if not task:
             raise ValueError("Task not found")
-        if task.user_id != user_id and task.assignee_user_id != user_id:
+        if (
+            task.user_id != user_id
+            and task.assignee_user_id != user_id
+            and not any(link.user_id == user_id for link in task.collaborator_links)
+        ):
             raise PermissionError("Task comment forbidden")
         normalized = (content or "").strip()
         if not normalized:
@@ -991,6 +1042,9 @@ class TaskService:
             "assignee": task.assignee,
             "assignee_user_id": getattr(task, "assignee_user_id", None),
             "collaborators": self._load_collaborators(task.collaborators),
+            "collaborator_user_ids": [
+                link.user_id for link in getattr(task, "collaborator_links", [])
+            ],
             "status": task.status,
             "priority": task.priority,
             "progress": task.progress,
