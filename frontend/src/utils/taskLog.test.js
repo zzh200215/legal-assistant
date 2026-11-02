@@ -9,6 +9,8 @@ test('日志动作：已知动作中文化，未知动作保留原值', () => {
   assert.equal(taskLogActionLabel('priority_changed'), '优先级变更')
   assert.equal(taskLogActionLabel('archived'), '归档任务')
   assert.equal(taskLogActionLabel('unarchived'), '恢复任务')
+  assert.equal(taskLogActionLabel('comment_updated'), '编辑评论')
+  assert.equal(taskLogActionLabel('comment_deleted'), '删除评论')
   assert.equal(taskLogActionLabel('custom_action'), 'custom_action')
   assert.equal(taskLogActionLabel(''), '')
 })

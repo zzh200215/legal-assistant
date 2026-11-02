@@ -152,8 +152,21 @@
         </div>
         <div v-if="comments.length" class="comment-list">
           <div v-for="item in comments" :key="`comment-${item.id}`" class="comment-item">
-            <div class="comment-meta">{{ item.full_name || item.username || `用户 ${item.user_id}` }} · {{ item.created_at }}</div>
-            <div class="comment-content">{{ item.content }}</div>
+            <div class="comment-head">
+              <div class="comment-meta">{{ item.full_name || item.username || `用户 ${item.user_id}` }} · {{ item.created_at }}</div>
+              <span v-if="canManageComment(item)" class="comment-actions">
+                <el-button link size="small" @click="startEditComment(item)">编辑</el-button>
+                <el-button link size="small" type="danger" @click="removeComment(item)">删除</el-button>
+              </span>
+            </div>
+            <div v-if="editingCommentId === item.id" class="comment-edit">
+              <el-input v-model="editCommentDraft" type="textarea" :rows="2" placeholder="修改评论" />
+              <div class="comment-edit-actions">
+                <el-button size="small" type="primary" :loading="commentSaving" @click="saveCommentEdit">保存</el-button>
+                <el-button size="small" @click="cancelEditComment">取消</el-button>
+              </div>
+            </div>
+            <div v-else class="comment-content">{{ item.content }}</div>
           </div>
         </div>
       </div>
@@ -211,6 +224,7 @@ import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
 import api from '../../api'
 import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import StatusTag from '../StatusTag.vue'
 import { taskSourceLabel } from '../../utils/taskSource'
 import { taskLogActionLabel, taskLogDetail } from '../../utils/taskLog'
@@ -239,6 +253,9 @@ const comments = ref([])
 const taskLogs = ref([])
 const relatedAgentRuns = ref([])
 const commentDraft = ref('')
+const editingCommentId = ref(null)
+const editCommentDraft = ref('')
+const commentSaving = ref(false)
 const progressDraft = ref(0)
 const collaboratorsDraft = ref('')
 const collaboratorIdsDraft = ref([])
@@ -383,6 +400,56 @@ const submitComment = async () => {
   }
 }
 
+const canManageComment = (item) => Boolean(
+  props.canEdit || (item?.user_id && item.user_id === currentUser()?.id)
+)
+
+const startEditComment = (item) => {
+  editingCommentId.value = item.id
+  editCommentDraft.value = item.content
+}
+
+const cancelEditComment = () => {
+  editingCommentId.value = null
+  editCommentDraft.value = ''
+}
+
+const saveCommentEdit = async () => {
+  if (!props.task || !editingCommentId.value || !editCommentDraft.value.trim()) return
+  commentSaving.value = true
+  try {
+    await api.updateTaskComment(props.task.id, editingCommentId.value, {
+      content: editCommentDraft.value.trim(),
+    })
+    ElMessage.success('评论已更新')
+    cancelEditComment()
+    await Promise.all([loadComments(props.task.id), loadTaskLogs(props.task.id)])
+    emit('refresh')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '修改评论失败')
+  } finally {
+    commentSaving.value = false
+  }
+}
+
+const removeComment = async (item) => {
+  if (!props.task) return
+  try {
+    await ElMessageBox.confirm('删除这条评论？', '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await api.deleteTaskComment(props.task.id, item.id)
+    if (editingCommentId.value === item.id) cancelEditComment()
+    ElMessage.success('评论已删除')
+    await Promise.all([loadComments(props.task.id), loadTaskLogs(props.task.id)])
+    emit('refresh')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '删除评论失败')
+  }
+}
+
 const handleDecompose = () => {
   emit('decompose', props.task)
   emit('update:visible', false)
@@ -401,6 +468,8 @@ watch(
     assigneeDraft.value = task.assignee_user_id ?? null
     initialAssigneeDraft.value = assigneeDraft.value
     commentDraft.value = ''
+    editingCommentId.value = null
+    editCommentDraft.value = ''
     if (props.canEdit) loadMembers()
     loadSubData(task.id)
   },
@@ -552,6 +621,26 @@ defineExpose({
   margin-top: var(--space-1);
   white-space: pre-wrap;
   color: var(--color-text);
+}
+.comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.comment-actions {
+  flex-shrink: 0;
+}
+.comment-edit {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.comment-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 .task-dialog :deep(.el-dialog) {
   border-radius: var(--radius-xl);

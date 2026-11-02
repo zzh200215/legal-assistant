@@ -876,6 +876,8 @@
  * @property {number} task_id
  * @property {number} user_id
  * @property {string | null}= username
+ * @typedef {Object} TaskCommentUpdate
+ * @property {string} content
  * @typedef {Object} TaskCreate
  * @property {string | null}= assignee
  * @property {number | null}= assignee_user_id

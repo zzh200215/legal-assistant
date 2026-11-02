@@ -1034,3 +1034,56 @@ test('任务协作者：新建时多选真实用户并提交 collaborator_user_i
   expect(createdPayload.collaborators).toBeUndefined()
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('任务评论：作者可编辑/删除自己的评论', async ({ page }) => {
+  let comments = [{ id: 1, task_id: 101, user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', content: '旧评论', created_at: '2026-08-06T10:00:00' }]
+  const requests = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/') return route.fulfill({ json: success({ items: [ownerTask()], total: 1, page: 1, page_size: 12 }) })
+    if (method === 'GET' && path === '/tasks/101') return route.fulfill({ json: success(ownerTask()) })
+    if (method === 'GET' && path === '/tasks/101/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/101/comments') return route.fulfill({ json: success(comments) })
+    if (method === 'GET' && path === '/tasks/101/logs') return route.fulfill({ json: success([]) })
+    if (method === 'PATCH' && path === '/tasks/101/comments/1') {
+      requests.push({ method, body: route.request().postDataJSON() })
+      comments = [{ ...comments[0], content: requests.at(-1).body.content }]
+      return route.fulfill({ json: success(comments[0]) })
+    }
+    if (method === 'DELETE' && path === '/tasks/101/comments/1') {
+      requests.push({ method })
+      comments = []
+      return route.fulfill({ status: 204, body: '' })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await page.locator('.kanban-task', { hasText: '起草合同初稿' }).first().click()
+  const dialog = page.locator('.el-dialog:visible')
+  await expect(dialog.getByText('旧评论')).toBeVisible()
+
+  await dialog.getByRole('button', { name: '编辑' }).click()
+  await dialog.getByPlaceholder('修改评论').fill('更新后的评论')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByText('评论已更新')).toBeVisible()
+  expect(requests.at(-1)).toEqual({ method: 'PATCH', body: { content: '更新后的评论' } })
+  await expect(dialog.getByText('更新后的评论')).toBeVisible()
+
+  await dialog.getByRole('button', { name: '删除' }).click()
+  await page.locator('.el-message-box:visible .el-message-box__btns .el-button--primary').click()
+  await expect(page.getByText('评论已删除')).toBeVisible()
+  expect(requests.at(-1)).toEqual({ method: 'DELETE' })
+  await expect(dialog.getByText('旧评论')).toHaveCount(0)
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})

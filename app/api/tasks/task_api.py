@@ -19,6 +19,7 @@ from app.schemas.task import (
     TaskBulkReassign,
     TaskCommentCreate,
     TaskCommentOut,
+    TaskCommentUpdate,
     TaskCreate,
     TaskLogOut,
     TaskOut,
@@ -451,6 +452,60 @@ def add_task_comment(
         if detail == "Task not found":
             raise api_error(404, "任务不存在", code="TASK_NOT_FOUND", detail=detail)
         raise api_error(400, "评论内容不合法", code="TASK_COMMENT_INVALID", detail=detail)
+
+
+@router.patch("/{task_id}/comments/{comment_id}", response_model=TaskCommentOut)
+def update_task_comment(
+    task_id: int,
+    comment_id: int,
+    req: TaskCommentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        row = task_service.update_comment(
+            task_id, comment_id, req.content, db,
+            user_id=current_user.id,
+            role=current_user.role,
+            organization_id=current_user.organization_id,
+            department_id=current_user.department_id,
+        )
+        return TaskCommentOut.model_validate(row).model_copy(update={
+            "username": current_user.username,
+            "full_name": current_user.full_name,
+        })
+    except PermissionError as exc:
+        raise api_error(403, "无权修改该评论", code="TASK_COMMENT_FORBIDDEN", detail=str(exc))
+    except ValueError as exc:
+        detail = str(exc)
+        if detail in ("Task not found", "Comment not found"):
+            raise api_error(404, "评论不存在", code="TASK_COMMENT_NOT_FOUND", detail=detail)
+        raise api_error(400, "评论内容不合法", code="TASK_COMMENT_INVALID", detail=detail)
+
+
+@router.delete("/{task_id}/comments/{comment_id}", status_code=204)
+def delete_task_comment(
+    task_id: int,
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        task_service.delete_comment(
+            task_id, comment_id, db,
+            user_id=current_user.id,
+            role=current_user.role,
+            organization_id=current_user.organization_id,
+            department_id=current_user.department_id,
+        )
+        return Response(status_code=204)
+    except PermissionError as exc:
+        raise api_error(403, "无权删除该评论", code="TASK_COMMENT_FORBIDDEN", detail=str(exc))
+    except ValueError as exc:
+        detail = str(exc)
+        if detail in ("Task not found", "Comment not found"):
+            raise api_error(404, "评论不存在", code="TASK_COMMENT_NOT_FOUND", detail=detail)
+        raise api_error(400, "评论操作失败", code="TASK_COMMENT_INVALID", detail=detail)
 
 
 @router.get("/{task_id}/logs", response_model=list[TaskLogOut])

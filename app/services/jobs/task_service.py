@@ -1101,6 +1101,74 @@ class TaskService:
         db.commit()
         return comment
 
+    def update_comment(
+        self,
+        task_id: int,
+        comment_id: int,
+        content: str,
+        db: Session,
+        *,
+        user_id: int,
+        role: str | None = None,
+        organization_id: int | None = None,
+        department_id: int | None = None,
+    ) -> TaskComment:
+        task = self.get(
+            task_id, db, user_id=user_id, role=role,
+            organization_id=organization_id, department_id=department_id,
+        )
+        if not task:
+            raise ValueError("Task not found")
+        comment = db.query(TaskComment).filter(
+            TaskComment.id == comment_id, TaskComment.task_id == task_id
+        ).first()
+        if not comment:
+            raise ValueError("Comment not found")
+        if comment.user_id != user_id:
+            raise PermissionError("Task comment forbidden")
+        normalized = (content or "").strip()
+        if not normalized:
+            raise ValueError("Comment content is empty")
+        comment.content = normalized
+        db.add(TaskLog(
+            task_id=task_id, user_id=user_id,
+            action="comment_updated", detail=normalized[:120],
+        ))
+        db.commit()
+        db.refresh(comment)
+        return comment
+
+    def delete_comment(
+        self,
+        task_id: int,
+        comment_id: int,
+        db: Session,
+        *,
+        user_id: int,
+        role: str | None = None,
+        organization_id: int | None = None,
+        department_id: int | None = None,
+    ) -> None:
+        task = self.get(
+            task_id, db, user_id=user_id, role=role,
+            organization_id=organization_id, department_id=department_id,
+        )
+        if not task:
+            raise ValueError("Task not found")
+        comment = db.query(TaskComment).filter(
+            TaskComment.id == comment_id, TaskComment.task_id == task_id
+        ).first()
+        if not comment:
+            raise ValueError("Comment not found")
+        if comment.user_id != user_id and task.user_id != user_id:
+            raise PermissionError("Task comment forbidden")
+        db.delete(comment)
+        db.add(TaskLog(
+            task_id=task_id, user_id=user_id,
+            action="comment_deleted", detail=f"comment #{comment_id}",
+        ))
+        db.commit()
+
     def list_logs(
         self,
         task_id: int,
