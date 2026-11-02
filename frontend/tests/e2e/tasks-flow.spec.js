@@ -593,7 +593,7 @@ test('任务统计：使用服务端全量统计而非当前页', async ({ page 
       return route.fulfill({ json: success({
         items: [ownerTask({ id: 601, title: '当前页唯一任务' })],
         total: 25, page: 1, page_size: 12,
-        stats: { total: 25, in_progress: 7, overdue: 3, shared: 5 },
+        stats: { total: 25, in_progress: 7, overdue: 3, shared: 5, participating: 6 },
       }) })
     }
     await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
@@ -605,6 +605,7 @@ test('任务统计：使用服务端全量统计而非当前页', async ({ page 
   await expect(brief).toContainText('7 项进行中')
   await expect(brief).toContainText('3 项逾期')
   await expect(brief).toContainText('5 项共享')
+  await expect(brief).toContainText('6 项参与')
   await expect(page.getByText('当前页唯一任务')).toBeVisible()
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
@@ -646,6 +647,7 @@ test('统计卡点击筛选：进行中/逾期/共享可组合并写回 URL', as
   const inProgress = page.locator('.task-stat-card', { hasText: '进行中' })
   const overdue = page.locator('.task-stat-card', { hasText: '已逾期' })
   const shared = page.locator('.task-stat-card', { hasText: '共享任务' })
+  const participating = page.locator('.task-stat-card', { hasText: '我参与的' })
   const total = page.getByTitle('显示全部任务')
 
   await inProgress.click()
@@ -682,6 +684,13 @@ test('统计卡点击筛选：进行中/逾期/共享可组合并写回 URL', as
   await expect.poll(() => requests.at(-1)?.scope).toBe('shared')
   await expect(shared).toHaveAttribute('aria-pressed', 'true')
   expect(new URL(page.url()).searchParams.get('scope')).toBe('shared')
+
+  // 「我参与的」卡与共享互斥，切到 participating
+  await participating.click()
+  await expect.poll(() => requests.at(-1)?.scope).toBe('participating')
+  await expect(participating).toHaveAttribute('aria-pressed', 'true')
+  await expect(shared).toHaveAttribute('aria-pressed', 'false')
+  expect(new URL(page.url()).searchParams.get('scope')).toBe('participating')
 
   // 任务总数清空全部筛选
   await total.click()

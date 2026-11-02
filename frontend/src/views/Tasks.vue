@@ -67,6 +67,17 @@
         <span class="app-stat-label">共享任务</span>
         <div class="app-stat-value">{{ sharedTaskCount }}<small> 项共享</small></div>
       </button>
+      <button
+        type="button"
+        class="app-stat task-stat-card"
+        :class="{ 'is-active': statsParticipatingActive }"
+        :aria-pressed="statsParticipatingActive"
+        title="只看我参与的（可叠加进行中/逾期）"
+        @click="applyStatsFilter('participating')"
+      >
+        <span class="app-stat-label">我参与的</span>
+        <div class="app-stat-value">{{ participatingCount }}<small> 项参与</small></div>
+      </button>
     </div>
     <p class="task-stat-hint">统计卡可组合筛选（如「进行中 + 已逾期」），再次点击取消；点任务总数清空。</p>
 
@@ -444,6 +455,9 @@ const applyStatsFilter = (kind) => {
   } else if (kind === 'shared') {
     if (nextQuery.scope === 'shared') delete nextQuery.scope
     else nextQuery.scope = 'shared'
+  } else if (kind === 'participating') {
+    if (nextQuery.scope === 'participating') delete nextQuery.scope
+    else nextQuery.scope = 'participating'
   } else {
     return
   }
@@ -514,6 +528,7 @@ const taskEmptyText = computed(() => {
   if (statusFilter.value === 'in_progress') labels.push('进行中')
   if (overdueFilter.value) labels.push('逾期')
   if (scopeFilter.value === 'shared') labels.push('共享')
+  if (scopeFilter.value === 'participating') labels.push('我参与的')
   if (labels.length) return `当前没有${labels.join('且')}的${archivedFilter.value ? '已归档' : ''}任务`
   if (archivedFilter.value) return '暂无已归档任务'
   if (workflowCaseId.value) {
@@ -542,6 +557,15 @@ const overdueCount = computed(() => (
 const sharedTaskCount = computed(() => (
   taskStats.value?.shared ?? tasks.value.filter((item) => !['我的', '我负责', '我参与'].includes(scopeLabel(item))).length
 ))
+const participatingCount = computed(() => {
+  if (taskStats.value?.participating != null) return taskStats.value.participating
+  const me = currentUser.value?.id
+  return tasks.value.filter((item) => (
+    item.user_id === me
+    || item.assignee_user_id === me
+    || (item.collaborator_user_ids || []).includes(me)
+  )).length
+})
 const statsTotal = computed(() => (
   taskStats.value?.total ?? (taskTotal.value || tasks.value.length)
 ))
@@ -551,6 +575,7 @@ const statsTotalActive = computed(() => (
 const statsInProgressActive = computed(() => statusFilter.value === 'in_progress')
 const statsOverdueActive = computed(() => overdueFilter.value)
 const statsSharedActive = computed(() => scopeFilter.value === 'shared')
+const statsParticipatingActive = computed(() => scopeFilter.value === 'participating')
 const statFiltersActive = computed(() => (
   Boolean(statusFilter.value) || overdueFilter.value || scopeFilter.value !== 'all'
 ))
@@ -995,6 +1020,12 @@ watch(detailVisible, (visible) => {
 /* .task-brief 仅作为 e2e 断言锚点保留（tasks-flow 断言“2 项任务”），版式由 .app-metric-grid-4 提供 */
 .task-brief {
   min-width: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+@media (max-width: 1100px) {
+  .task-brief {
+    grid-template-columns: 1fr;
+  }
 }
 
 .app-stat.is-alert .app-stat-value {

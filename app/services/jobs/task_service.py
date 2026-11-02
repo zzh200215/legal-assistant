@@ -887,6 +887,20 @@ class TaskService:
             "shared": q.filter(
                 Task.user_id != user_id,
                 or_(Task.assignee_user_id.is_(None), Task.assignee_user_id != user_id),
+                ~exists().where(
+                    TaskCollaborator.task_id == Task.id,
+                    TaskCollaborator.user_id == user_id,
+                ),
+            ).count(),
+            "participating": q.filter(
+                or_(
+                    Task.user_id == user_id,
+                    Task.assignee_user_id == user_id,
+                    exists().where(
+                        TaskCollaborator.task_id == Task.id,
+                        TaskCollaborator.user_id == user_id,
+                    ),
+                )
             ).count(),
         }
 

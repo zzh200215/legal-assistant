@@ -162,6 +162,8 @@ class TaskCollaboratorTests(unittest.TestCase):
         self.assertEqual(
             [item["id"] for item in participating.json()["data"]["items"]], [task["id"]]
         )
+        self.assertEqual(participating.json()["data"]["stats"]["participating"], 1)
+        self.assertEqual(participating.json()["data"]["stats"]["shared"], 0)
 
         mine = self.client.get(
             "/api/tasks/?scope=mine", headers=self._headers(self.collaborator)

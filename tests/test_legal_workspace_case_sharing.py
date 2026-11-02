@@ -324,7 +324,7 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         self.assertEqual(total, 6)
         self.assertEqual(page_items, 1)  # 分页只回 1 条，统计仍是全量
         self.assertEqual(summary, {
-            "total": 6, "in_progress": 1, "overdue": 1, "shared": 2,
+            "total": 6, "in_progress": 1, "overdue": 1, "shared": 2, "participating": 4,
         })
 
         total, _, summary = stats(scope="mine")
@@ -335,7 +335,7 @@ class LegalWorkspaceCaseSharingTests(unittest.TestCase):
         total, _, summary = stats(q="统计命中")
         self.assertEqual(total, 1)
         self.assertEqual(summary, {
-            "total": 1, "in_progress": 0, "overdue": 0, "shared": 1,
+            "total": 1, "in_progress": 0, "overdue": 0, "shared": 1, "participating": 0,
         })
 
         total, _, summary = stats(status="done")
