@@ -97,10 +97,11 @@ def test_list_flag_prints_stages_without_running(capsys):
         if stage.e2e_only:
             continue
         assert stage.id in out
-    assert "e2e" not in out  # e2e 需显式 --e2e
+    assert "frontend-e2e-tasks" in out
+    assert "Playwright e2e（全量" not in out  # 全量 e2e 需显式 --e2e
 
     assert main(["--list", "--e2e"]) == 0
-    assert "e2e" in capsys.readouterr().out
+    assert "Playwright e2e（全量" in capsys.readouterr().out
 
 
 def test_usage_error_for_unknown_only(capsys):

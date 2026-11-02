@@ -1,8 +1,8 @@
-"""一键门禁：本地一条命令复刻 CI 的全部门禁（后端全量 + 静态检查 + 契约 + 前端 + 冻结评测）。
+"""一键门禁：本地一条命令复刻 CI 的全部门禁（后端全量 + 静态检查 + 契约 + 前端 + 任务 e2e + 冻结评测）。
 
 用法：
-    python scripts/check_all.py                 # 默认门禁（不含 e2e）
-    python scripts/check_all.py --e2e           # 追加 Playwright e2e（需后端已在 :8001 运行）
+    python scripts/check_all.py                 # 默认门禁（含任务中心 Playwright e2e）
+    python scripts/check_all.py --e2e           # 追加全量 Playwright e2e（需后端已在 :8001 运行）
     python scripts/check_all.py --list          # 只列出门禁清单
     python scripts/check_all.py --only api,ruff # 只跑指定门禁
     python scripts/check_all.py --skip backend  # 跳过指定门禁
@@ -115,6 +115,17 @@ STAGES: tuple[Stage, ...] = (
         timeout=600,
     ),
     Stage(
+        id="frontend-e2e-tasks",
+        title="Playwright e2e（任务中心，全 mock）",
+        command=(
+            "{npm}", "run", "test:e2e", "--",
+            "tests/e2e/tasks-flow.spec.js", "--reporter=list",
+        ),
+        cwd="frontend",
+        tool="npm",
+        timeout=900,
+    ),
+    Stage(
         id="frontend-build",
         title="前端构建（vite build）",
         command=("{npm}", "run", "build"),
@@ -141,7 +152,7 @@ STAGES: tuple[Stage, ...] = (
     ),
     Stage(
         id="e2e",
-        title="Playwright e2e（需后端 :8001）",
+        title="Playwright e2e（全量，需后端 :8001）",
         command=("{npm}", "run", "test:e2e"),
         cwd="frontend",
         tool="npm",
@@ -462,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--list", action="store_true", help="只列出门禁，不执行")
     parser.add_argument("--only", default="", help="只跑这些门禁（逗号分隔）")
     parser.add_argument("--skip", default="", help="跳过这些门禁（逗号分隔）")
-    parser.add_argument("--e2e", action="store_true", help="追加 Playwright e2e（需后端在 :8001 运行）")
+    parser.add_argument("--e2e", action="store_true", help="追加全量 Playwright e2e（需后端在 :8001 运行）")
     parser.add_argument("--strict", action="store_true", help="缺工具/告警按失败处理")
     parser.add_argument(
         "--allow-low-integrity",

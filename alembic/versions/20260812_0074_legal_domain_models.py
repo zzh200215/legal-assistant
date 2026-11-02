@@ -288,6 +288,22 @@ def _backfill(bind) -> None:
     - references：无多态回指列，整体判断（表为空才回填）。迁移只执行一次，
       部分失败后重跑最多造成部分遗漏，旧数据仍可经 JSON 列读取。
     """
+    # 全新库（升级路径最常见的场景）没有任何旧 JSON 数据，直接跳过回填。
+    # 历史迁移不能依赖当前 ORM 模型：模型已增加 review_due_at 等后置列，
+    # 在只建到 0074 的空库上查询会因列不存在而失败。
+    legacy_count_sql = sa.text(
+        "SELECT (SELECT COUNT(*) FROM legal_contract_reviews)"
+        " + (SELECT COUNT(*) FROM legal_consultations)"
+        " + (SELECT COUNT(*) FROM legal_drafts)"
+    )
+    if hasattr(bind, "execute"):
+        legacy_rows = bind.execute(legacy_count_sql).scalar() or 0
+    else:
+        with bind.connect() as connection:
+            legacy_rows = connection.execute(legacy_count_sql).scalar() or 0
+    if not legacy_rows:
+        return
+
     from app.models.legal import ContractReview, LegalConsultation, LegalDraft, LegalCase
     from app.models.legal_domain import LegalFact, LegalReference
 

@@ -111,6 +111,11 @@ try {
   await visit(lawyer.page, '/legal-workspace?view=research', 'legal-sources')
   await visit(lawyer.page, '/agent', 'agent')
   await visit(lawyer.page, '/tasks', 'tasks')
+  const tableToggle = lawyer.page.locator('.el-radio-button', { hasText: '表格' }).first()
+  if (await tableToggle.count()) {
+    await tableToggle.click()
+    await capture(lawyer.page, 'tasks-table', { settle: 1200 })
+  }
   await lawyer.context.close()
 
   // ── 登录页（保持未登录状态） ──
