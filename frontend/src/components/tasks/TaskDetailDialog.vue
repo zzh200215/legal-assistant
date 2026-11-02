@@ -171,9 +171,15 @@
         </div>
       </div>
 
-      <div v-if="taskLogs.length" class="detail-section">
+      <div v-if="taskLogs.length || logActionFilter" class="detail-section">
         <h4>操作日志</h4>
-        <el-table :data="taskLogs" border size="small" class="detail-table">
+        <div class="log-toolbar">
+          <el-select v-model="logActionFilter" size="small" style="width: 150px" @change="handleLogFilterChange">
+            <el-option v-for="item in logActionOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+          <el-button v-if="logHasMore" size="small" :loading="logLoadingMore" @click="loadMoreLogs">加载更多</el-button>
+        </div>
+        <el-table v-if="taskLogs.length" :data="taskLogs" border size="small" class="detail-table">
           <el-table-column label="操作人" width="120">
             <template #default="{ row }">{{ row.full_name || row.username || (row.user_id ? `用户 ${row.user_id}` : '系统') }}</template>
           </el-table-column>
@@ -185,6 +191,7 @@
           </el-table-column>
           <el-table-column prop="created_at" label="时间" width="180" />
         </el-table>
+        <div v-else class="readonly-note">当前筛选下暂无日志</div>
       </div>
 
       <div class="detail-section">
@@ -251,6 +258,24 @@ const priorityLabelMap = { high: '高', medium: '中', low: '低' }
 const subTasks = ref([])
 const comments = ref([])
 const taskLogs = ref([])
+const logActionFilter = ref('')
+const logOffset = ref(0)
+const logHasMore = ref(false)
+const logLoadingMore = ref(false)
+const logActionOptions = [
+  { label: '全部动作', value: '' },
+  { label: '创建任务', value: 'created' },
+  { label: '状态变更', value: 'status_changed' },
+  { label: '进度更新', value: 'progress_changed' },
+  { label: '添加评论', value: 'comment_added' },
+  { label: '编辑评论', value: 'comment_updated' },
+  { label: '删除评论', value: 'comment_deleted' },
+  { label: '负责人变更', value: 'assignee_changed' },
+  { label: '优先级变更', value: 'priority_changed' },
+  { label: '归档任务', value: 'archived' },
+  { label: '恢复任务', value: 'unarchived' },
+]
+const LOG_PAGE_SIZE = 20
 const relatedAgentRuns = ref([])
 const commentDraft = ref('')
 const editingCommentId = ref(null)
@@ -333,14 +358,41 @@ const loadComments = async (taskId) => {
   }
 }
 
-const loadTaskLogs = async (taskId) => {
+const loadTaskLogs = async (taskId, { append = false } = {}) => {
   try {
-    const { data } = await api.listTaskLogs(taskId)
+    const offset = append ? logOffset.value : 0
+    const { data } = await api.listTaskLogs(taskId, {
+      limit: LOG_PAGE_SIZE,
+      offset,
+      order: 'desc',
+      action: logActionFilter.value || undefined,
+    })
     if (props.task?.id !== taskId) return
-    taskLogs.value = data || []
+    const rows = Array.isArray(data) ? data : []
+    taskLogs.value = append ? [...taskLogs.value, ...rows] : rows
+    logOffset.value = offset + rows.length
+    logHasMore.value = rows.length === LOG_PAGE_SIZE
   } catch {
     if (props.task?.id !== taskId) return
-    taskLogs.value = []
+    if (!append) taskLogs.value = []
+    logHasMore.value = false
+  }
+}
+
+const handleLogFilterChange = async () => {
+  if (!props.task) return
+  logOffset.value = 0
+  logHasMore.value = false
+  await loadTaskLogs(props.task.id)
+}
+
+const loadMoreLogs = async () => {
+  if (!props.task || logLoadingMore.value) return
+  logLoadingMore.value = true
+  try {
+    await loadTaskLogs(props.task.id, { append: true })
+  } finally {
+    logLoadingMore.value = false
   }
 }
 
@@ -470,6 +522,9 @@ watch(
     commentDraft.value = ''
     editingCommentId.value = null
     editCommentDraft.value = ''
+    logActionFilter.value = ''
+    logOffset.value = 0
+    logHasMore.value = false
     if (props.canEdit) loadMembers()
     loadSubData(task.id)
   },
@@ -641,6 +696,12 @@ defineExpose({
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+.log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 .task-dialog :deep(.el-dialog) {
   border-radius: var(--radius-xl);

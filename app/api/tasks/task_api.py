@@ -509,7 +509,15 @@ def delete_task_comment(
 
 
 @router.get("/{task_id}/logs", response_model=list[TaskLogOut])
-def list_task_logs(task_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def list_task_logs(
+    task_id: int,
+    action: str | None = Query(None, max_length=64, description="按动作筛选"),
+    limit: int | None = Query(None, ge=1, le=100, description="返回条数"),
+    offset: int = Query(0, ge=0),
+    order: Literal["asc", "desc"] = Query("desc", description="时间排序"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         rows = task_service.list_logs(
             task_id,
@@ -518,6 +526,10 @@ def list_task_logs(task_id: int, db: Session = Depends(get_db), current_user: Us
             role=current_user.role,
             organization_id=current_user.organization_id,
             department_id=current_user.department_id,
+            action=action,
+            limit=limit,
+            offset=offset,
+            order=order,
         )
         names = _user_display_map(db, {row.user_id for row in rows})
         return [

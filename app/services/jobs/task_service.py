@@ -1178,6 +1178,10 @@ class TaskService:
         role: str | None = None,
         organization_id: int | None = None,
         department_id: int | None = None,
+        action: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        order: str = "desc",
     ) -> list[TaskLog]:
         task = self.get(
             task_id,
@@ -1189,12 +1193,18 @@ class TaskService:
         )
         if not task:
             raise ValueError("Task not found")
-        return (
-            db.query(TaskLog)
-            .filter(TaskLog.task_id == task_id)
-            .order_by(TaskLog.created_at.desc(), TaskLog.id.desc())
-            .all()
-        )
+        q = db.query(TaskLog).filter(TaskLog.task_id == task_id)
+        if action:
+            q = q.filter(TaskLog.action == action)
+        if order == "asc":
+            q = q.order_by(TaskLog.created_at.asc(), TaskLog.id.asc())
+        else:
+            q = q.order_by(TaskLog.created_at.desc(), TaskLog.id.desc())
+        if offset:
+            q = q.offset(offset)
+        if limit:
+            q = q.limit(limit)
+        return q.all()
 
     def serialize_task(self, task: Task) -> dict:
         return {

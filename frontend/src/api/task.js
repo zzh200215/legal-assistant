@@ -19,7 +19,7 @@ export default {
   addTaskComment(id, data) { return http.post(`/tasks/${id}/comments`, data) },
   updateTaskComment(id, commentId, data) { return http.patch(`/tasks/${id}/comments/${commentId}`, data) },
   deleteTaskComment(id, commentId) { return http.delete(`/tasks/${id}/comments/${commentId}`) },
-  listTaskLogs(id) { return http.get(`/tasks/${id}/logs`) },
+  listTaskLogs(id, params) { return http.get(`/tasks/${id}/logs`, { params }) },
   extractTasksFromDoc(docId) {
     return http.post('/tasks/extract-from-document', { document_id: docId })
   },

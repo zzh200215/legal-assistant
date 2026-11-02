@@ -1087,3 +1087,45 @@ test('任务评论：作者可编辑/删除自己的评论', async ({ page }) =>
   await expect(dialog.getByText('旧评论')).toHaveCount(0)
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('任务日志：按动作筛选并下推 action 参数', async ({ page }) => {
+  const logRequests = []
+  const logs = [
+    { id: 2, task_id: 101, user_id: 15, username: 'pilot01-lawyer', action: 'comment_added', detail: '一条评论', created_at: '2026-08-06T10:00:00' },
+    { id: 1, task_id: 101, user_id: 15, username: 'pilot01-lawyer', action: 'created', detail: 'Task created (source: None)', created_at: '2026-08-06T09:00:00' },
+  ]
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/') return route.fulfill({ json: success({ items: [ownerTask()], total: 1, page: 1, page_size: 12 }) })
+    if (method === 'GET' && path === '/tasks/101') return route.fulfill({ json: success(ownerTask()) })
+    if (method === 'GET' && path === '/tasks/101/sub-tasks') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/101/comments') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/tasks/101/logs') {
+      logRequests.push(url.searchParams.get('action'))
+      const action = url.searchParams.get('action')
+      return route.fulfill({ json: success(action ? logs.filter((row) => row.action === action) : logs) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await page.locator('.kanban-task', { hasText: '起草合同初稿' }).first().click()
+  const dialog = page.locator('.el-dialog:visible')
+  await expect(dialog.locator('.detail-table').getByText('添加评论')).toBeVisible()
+  await dialog.locator('.log-toolbar .el-select').click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("添加评论")').click()
+  await expect.poll(() => logRequests.at(-1)).toBe('comment_added')
+  await expect(dialog.getByText('一条评论')).toBeVisible()
+  await expect(dialog.getByText('Task created (source: None)')).toHaveCount(0)
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
