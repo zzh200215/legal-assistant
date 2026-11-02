@@ -1129,3 +1129,38 @@ test('任务日志：按动作筛选并下推 action 参数', async ({ page }) =
   await expect(dialog.getByText('Task created (source: None)')).toHaveCount(0)
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
+
+test('任务优先级筛选：选择高优先级并写回 URL/请求', async ({ page }) => {
+  const priorities = []
+  await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/tasks/workflows') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/agent/runs') return route.fulfill({ json: success({ items: [], total: 0 }) })
+    if (method === 'GET' && path === '/tasks/') {
+      priorities.push(url.searchParams.get('priority'))
+      return route.fulfill({ json: success({
+        items: [ownerTask({ id: 601, title: '高优先级任务', priority: 'high' })],
+        total: 1, page: 1, page_size: 12,
+        stats: { total: 1, in_progress: 0, overdue: 0, shared: 0, participating: 1 },
+      }) })
+    }
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/tasks')
+  await expect(page.getByText('高优先级任务')).toBeVisible()
+  await page.locator('.task-priority-filter').click()
+  await page.locator('.el-select-dropdown:visible .el-select-dropdown__item:has-text("高")').first().click()
+  await expect.poll(() => priorities.at(-1)).toBe('high')
+  expect(new URL(page.url()).searchParams.get('priority')).toBe('high')
+  await expect(page.getByText('高优先级任务')).toBeVisible()
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})

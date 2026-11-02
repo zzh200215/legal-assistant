@@ -137,6 +137,7 @@ def create_task(req: TaskCreate, db: Session = Depends(get_db), current_user: Us
 @router.get("/")
 def list_tasks(
     status: str | None = Query(None, description="按状态筛选：todo/in_progress/done/cancelled"),
+    priority: Literal["low", "medium", "high"] | None = Query(None, description="按优先级筛选"),
     scope: str = Query("all", description="可见范围筛选：all/mine/participating/department/organization/shared"),
     source_type: str | None = Query(None, description="按来源筛选：document/meeting/chat/decompose"),
     source_id: int | None = Query(None, description="按来源对象 ID 筛选"),
@@ -161,6 +162,7 @@ def list_tasks(
         organization_id=current_user.organization_id,
         department_id=current_user.department_id,
         status=status,
+        priority=priority,
         scope=scope,
         source_type=source_type,
         source_id=source_id,

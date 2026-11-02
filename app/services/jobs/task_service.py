@@ -837,6 +837,7 @@ class TaskService:
         organization_id: int | None = None,
         department_id: int | None = None,
         status: str | None = None,
+        priority: str | None = None,
         overdue: bool = False,
         overdue_cutoff: datetime | None = None,
         archived: bool = False,
@@ -861,6 +862,8 @@ class TaskService:
             q = q.filter(Task.archived_at.is_(None))
         if status:
             q = q.filter(Task.status == status)
+        if priority:
+            q = q.filter(Task.priority == priority)
         if overdue:
             cutoff = overdue_cutoff or self._overdue_cutoff(
                 db, user_id=user_id, organization_id=organization_id
@@ -959,6 +962,7 @@ class TaskService:
         organization_id: int | None = None,
         department_id: int | None = None,
         status: str | None = None,
+        priority: str | None = None,
         overdue: bool = False,
         archived: bool = False,
         scope: str | None = None,
@@ -979,6 +983,7 @@ class TaskService:
             organization_id=organization_id,
             department_id=department_id,
             status=status,
+            priority=priority,
             overdue=overdue,
             overdue_cutoff=cutoff,
             archived=archived,

@@ -9447,6 +9447,29 @@
             "description": "按状态筛选：todo/in_progress/done/cancelled"
           },
           {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按优先级筛选",
+              "title": "Priority"
+            },
+            "description": "按优先级筛选"
+          },
+          {
             "name": "scope",
             "in": "query",
             "required": false,

@@ -118,6 +118,11 @@
           <el-select v-model="sortOrder" class="task-sort" @change="handleSortChange">
             <el-option v-for="item in sortOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
+          <el-select v-model="priorityFilter" class="task-priority-filter" clearable placeholder="优先级" @change="handlePriorityChange">
+            <el-option label="高" value="high" />
+            <el-option label="中" value="medium" />
+            <el-option label="低" value="low" />
+          </el-select>
           <button
             type="button"
             class="task-archived-toggle"
@@ -373,6 +378,11 @@ const statusFilter = ref(
     : ''
 )
 const overdueFilter = ref(route.query.overdue === '1' || route.query.overdue === 'true')
+const priorityFilter = ref(
+  typeof route.query.priority === 'string' && ['low', 'medium', 'high'].includes(route.query.priority)
+    ? route.query.priority
+    : ''
+)
 const archivedFilter = ref(route.query.archived === '1' || route.query.archived === 'true')
 const detailVisible = ref(false)
 const selectedTask = ref(null)
@@ -446,6 +456,7 @@ const applyStatsFilter = (kind) => {
     delete nextQuery.status
     delete nextQuery.overdue
     delete nextQuery.scope
+    delete nextQuery.priority
   } else if (kind === 'in_progress') {
     if (nextQuery.status === 'in_progress') delete nextQuery.status
     else nextQuery.status = 'in_progress'
@@ -466,6 +477,10 @@ const applyStatsFilter = (kind) => {
     ? nextQuery.status
     : ''
   overdueFilter.value = nextQuery.overdue === '1' || nextQuery.overdue === 'true'
+  priorityFilter.value = typeof nextQuery.priority === 'string'
+    && ['low', 'medium', 'high'].includes(nextQuery.priority)
+    ? nextQuery.priority
+    : ''
   scopeFilter.value = typeof nextQuery.scope === 'string' && scopeOptions.some((item) => item.value === nextQuery.scope)
     ? nextQuery.scope
     : 'all'
@@ -526,6 +541,7 @@ const taskEmptyText = computed(() => {
   if (keyword) return `没有匹配「${keyword}」的任务`
   const labels = []
   if (statusFilter.value === 'in_progress') labels.push('进行中')
+  if (priorityFilter.value) labels.push(`优先级${priorityFilter.value === 'high' ? '高' : priorityFilter.value === 'medium' ? '中' : '低'}`)
   if (overdueFilter.value) labels.push('逾期')
   if (scopeFilter.value === 'shared') labels.push('共享')
   if (scopeFilter.value === 'participating') labels.push('我参与的')
@@ -570,14 +586,14 @@ const statsTotal = computed(() => (
   taskStats.value?.total ?? (taskTotal.value || tasks.value.length)
 ))
 const statsTotalActive = computed(() => (
-  !statusFilter.value && !overdueFilter.value && scopeFilter.value === 'all'
+  !statusFilter.value && !overdueFilter.value && !priorityFilter.value && scopeFilter.value === 'all'
 ))
 const statsInProgressActive = computed(() => statusFilter.value === 'in_progress')
 const statsOverdueActive = computed(() => overdueFilter.value)
 const statsSharedActive = computed(() => scopeFilter.value === 'shared')
 const statsParticipatingActive = computed(() => scopeFilter.value === 'participating')
 const statFiltersActive = computed(() => (
-  Boolean(statusFilter.value) || overdueFilter.value || scopeFilter.value !== 'all'
+  Boolean(statusFilter.value) || overdueFilter.value || priorityFilter.value || scopeFilter.value !== 'all'
 ))
 const totalCardLabel = computed(() => {
   if (statFiltersActive.value) return '当前结果'
@@ -680,6 +696,7 @@ const fetchTasks = async () => {
       page_size: taskPageSize.value,
       scope: scopeFilter.value,
       status: statusFilter.value || undefined,
+      priority: priorityFilter.value || undefined,
       overdue: overdueFilter.value || undefined,
       archived: archivedFilter.value || undefined,
       source_type: sourceFilterMeta.value?.sourceType || undefined,
@@ -703,6 +720,15 @@ const handleScopeChange = async () => {
   const nextQuery = { ...route.query, view: viewMode.value }
   if (scopeFilter.value === 'all') delete nextQuery.scope
   else nextQuery.scope = scopeFilter.value
+  taskPage.value = 1
+  await router.replace({ query: nextQuery })
+  await fetchTasks()
+}
+
+const handlePriorityChange = async () => {
+  const nextQuery = { ...route.query }
+  if (priorityFilter.value) nextQuery.priority = priorityFilter.value
+  else delete nextQuery.priority
   taskPage.value = 1
   await router.replace({ query: nextQuery })
   await fetchTasks()
@@ -922,6 +948,20 @@ watch(
 )
 
 watch(
+  () => route.query.priority,
+  async (value, oldValue) => {
+    if (value === oldValue) return
+    const priority = typeof value === 'string' && ['low', 'medium', 'high'].includes(value)
+      ? value
+      : ''
+    if (priority === priorityFilter.value) return
+    priorityFilter.value = priority
+    taskPage.value = 1
+    await fetchTasks()
+  }
+)
+
+watch(
   () => route.query.archived,
   async (value, oldValue) => {
     if (value === oldValue) return
@@ -1093,6 +1133,9 @@ watch(detailVisible, (visible) => {
 }
 .task-sort {
   width: 132px;
+}
+.task-priority-filter {
+  width: 104px;
 }
 .task-bulk-bar {
   display: flex;
