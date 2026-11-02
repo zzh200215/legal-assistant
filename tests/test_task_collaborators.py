@@ -12,6 +12,8 @@ from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.org import LegalMemberRole, Organization, OrganizationMember
+from app.models.legal_notifications import LegalNotificationEvent
+from app.models.task import Task, TaskLog
 from app.models.user import User, UserStatus
 
 
@@ -152,6 +154,45 @@ class TaskCollaboratorTests(unittest.TestCase):
         task = self._create(collaborators=["张三", "李四"])
         self.assertEqual(task["collaborator_user_ids"], [])
         self.assertEqual(task["collaborators"], ["张三", "李四"])
+
+    def test_added_collaborator_gets_site_notification_once(self):
+        task = self._create(collaborator_ids=[self.collaborator.id])
+        events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.user_id == self.collaborator.id,
+            LegalNotificationEvent.reference_type == "task",
+            LegalNotificationEvent.reference_id == task["id"],
+        ).all()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].channel, "site")
+        self.assertIn("你被加入任务", events[0].title)
+
+        # 重复提交相同协作者列表：不重复通知
+        repeated = self.client.put(
+            f"/api/tasks/{task['id']}",
+            json={"collaborator_user_ids": [self.collaborator.id]},
+            headers=self._headers(self.owner),
+        )
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        count = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.user_id == self.collaborator.id,
+            LegalNotificationEvent.reference_type == "task",
+            LegalNotificationEvent.reference_id == task["id"],
+        ).count()
+        self.assertEqual(count, 1)
+
+        # 新加成员：只给新增的人发
+        added = self.client.put(
+            f"/api/tasks/{task['id']}",
+            json={"collaborator_user_ids": [self.collaborator.id, self.member.id]},
+            headers=self._headers(self.owner),
+        )
+        self.assertEqual(added.status_code, 200, added.text)
+        member_events = self.db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.user_id == self.member.id,
+            LegalNotificationEvent.reference_type == "task",
+            LegalNotificationEvent.reference_id == task["id"],
+        ).count()
+        self.assertEqual(member_events, 1)
 
     def test_participating_scope_includes_collaborator(self):
         task = self._create(collaborator_ids=[self.collaborator.id])

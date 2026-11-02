@@ -162,6 +162,7 @@ class TaskService:
         )
         db.add(log)
         db.commit()
+        self._notify_collaborators_added(db, task, collaborator_users, user_id)
         return task
 
     def get(
@@ -226,14 +227,26 @@ class TaskService:
         old_progress = task.progress
         old_assignee = task.assignee
         collaborator_ids_provided = "collaborator_user_ids" in kwargs
+        added_collaborators: list[User] = []
         if collaborator_ids_provided:
+            kwargs.pop("collaborators", None)
+            old_collaborator_ids = {
+                link.user_id for link in task.collaborator_links
+            }
             users = self._resolve_collaborators(
                 db, kwargs.pop("collaborator_user_ids"), task.organization_id
             )
-            kwargs.pop("collaborators", None)
-            task.collaborator_links.clear()
+            added_collaborators = [
+                user for user in users if user.id not in old_collaborator_ids
+            ]
+            new_collaborator_ids = {user.id for user in users}
+            old_links = {link.user_id: link for link in task.collaborator_links}
+            for user_id, link in old_links.items():
+                if user_id not in new_collaborator_ids:
+                    task.collaborator_links.remove(link)
             for user in users:
-                task.collaborator_links.append(TaskCollaborator(user_id=user.id))
+                if user.id not in old_links:
+                    task.collaborator_links.append(TaskCollaborator(user_id=user.id))
             task.collaborators = (
                 self._dump_collaborators([self._assignee_display(user) for user in users])
                 if users else None
@@ -291,7 +304,38 @@ class TaskService:
             ))
             db.commit()
 
+        self._notify_collaborators_added(db, task, added_collaborators, user_id)
         return task
+
+    def _notify_collaborators_added(
+        self, db: Session, task: Task, users: list[User], actor_id: int
+    ) -> int:
+        """协作者被加入时发站内通知；owner/负责人本人不重复通知。"""
+        if not task.organization_id or not users:
+            return 0
+        from app.services.notification.notification_service import notification_service
+
+        actor = db.get(User, actor_id)
+        actor_name = self._assignee_display(actor) if actor else "同事"
+        created = 0
+        for user in users:
+            if user.id in (task.user_id, task.assignee_user_id):
+                continue
+            notification_service.create_multi_channel_notification(
+                db=db,
+                organization_id=task.organization_id,
+                user_id=user.id,
+                event_type="workflow",
+                title=f"你被加入任务：{task.title}",
+                body=f"任务 #{task.id} · 由 {actor_name} 邀请协作",
+                channels=["site"],
+                case_id=task.case_id,
+                reference_type="task",
+                reference_id=task.id,
+                business_version=task.version,
+            )
+            created += 1
+        return created
 
     def bulk_reassign(
         self,
