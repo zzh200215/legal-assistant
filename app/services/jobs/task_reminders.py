@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -43,6 +43,10 @@ COLLABORATOR_TEMPLATES = {
     "task_overdue_1d": "task_collaborator_overdue_1d",
     "task_overdue_3d": "task_collaborator_overdue_3d",
 }
+
+# owner 升级：任务逾期 3 天及以上、负责人/协作者仍未完成，且 owner 不在普通收件人里。
+ESCALATION_TEMPLATE = "task_owner_escalation_overdue_3d"
+ESCALATION_AFTER_DAYS = 3
 
 
 def _utc(value: datetime | None) -> datetime:
@@ -84,6 +88,20 @@ def _title(task: Task) -> str:
     return text[:40]
 
 
+def _display_name(db: Session, user_id: int | None) -> str:
+    user = db.get(User, user_id) if user_id else None
+    if user is None:
+        return "未指派" if not user_id else f"用户 {user_id}"
+    return (user.full_name or user.username or f"用户 {user.id}").strip()[:128]
+
+
+def _delta_days(task: Task, zone: ZoneInfo, local_today: date) -> int:
+    """截止日期相对「收件人所在地的今天」还有几天（负数=逾期）。"""
+    due = task.due_date
+    due_day = due.astimezone(zone).date() if due.tzinfo is not None else due.date()
+    return (due_day - local_today).days
+
+
 def _recipients(task: Task) -> list[tuple[int, bool]]:
     """返回 ``[(user_id, is_collaborator)]``：负责人优先，无负责人回退 owner，最后协作者。
 
@@ -121,7 +139,7 @@ def _existing_reminders(db: Session, task_ids: list[int]) -> set[tuple[int, int,
 
 
 def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict:
-    """扫描任务并发到期/逾期提醒，返回各阶段提醒条数（按收件人计）。"""
+    """扫描任务并发到期/逾期提醒与 owner 升级，返回各阶段提醒条数（按收件人计）。"""
     moment = _utc(now)
 
     rows = (
@@ -133,16 +151,17 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
         )
         .all()
     )
-    created = collaborator_created = skipped_no_org = 0
+    created = collaborator_created = escalated = skipped_no_org = 0
     counts = {"tomorrow": 0, "today": 0, "overdue_1d": 0, "overdue_3d": 0}
     zone_cache: dict[tuple[int, int], ZoneInfo] = {}
-    today_cache: dict[tuple[int, int], object] = {}
+    today_cache: dict[tuple[int, int], date] = {}
     existing = _existing_reminders(db, [task.id for task in rows])
 
     for task in rows:
         org_id = _org_id(db, task)
+        recipients = _recipients(task)
         hit_without_org = False
-        for recipient_id, is_collaborator in _recipients(task):
+        for recipient_id, is_collaborator in recipients:
             if org_id:
                 zone = _zone_for(db, recipient_id, org_id, zone_cache)
                 user_key = (recipient_id, org_id)
@@ -155,12 +174,7 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
                 local_today = moment.astimezone(zone).date()
                 today_cache[user_key] = local_today
 
-            due = task.due_date
-            if due.tzinfo is not None:
-                due_day = due.astimezone(zone).date()
-            else:
-                due_day = due.date()
-            delta = (due_day - local_today).days
+            delta = _delta_days(task, zone, local_today)
             stage_info = STAGES.get(delta)
             if stage_info is None:
                 continue
@@ -176,6 +190,7 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
                 continue
 
             title = _title(task)
+            due = task.due_date
             overdue_suffix = f"（已逾期 {abs(delta)} 天）" if delta < 0 else ""
             body = f"task:{stage} · 任务 #{task.id} 的截止日期为 {due:%Y-%m-%d}{overdue_suffix}"
             reminder_prefix = f"协作者提醒 · {prefix}" if is_collaborator else prefix
@@ -198,6 +213,47 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
             if is_collaborator:
                 collaborator_created += 1
             counts[stage] += 1
+
+        # owner 升级：只在 task 有负责人、且 owner 本人不在普通收件人里时发一次。
+        owner_id = task.user_id
+        if org_id and task.assignee_user_id and owner_id not in {uid for uid, _ in recipients}:
+            owner_zone = _zone_for(db, owner_id, org_id, zone_cache)
+            owner_key = (owner_id, org_id)
+            owner_today = today_cache.get(owner_key)
+            if owner_today is None:
+                owner_today = moment.astimezone(owner_zone).date()
+                today_cache[owner_key] = owner_today
+            owner_delta = _delta_days(task, owner_zone, owner_today)
+            already_escalated = (task.id, owner_id, ESCALATION_TEMPLATE) in existing
+            if owner_delta <= -ESCALATION_AFTER_DAYS and not already_escalated:
+                overdue_days = abs(owner_delta)
+                collaborator_count = max(0, len(recipients) - 1)
+                assignee_name = _display_name(db, task.assignee_user_id)
+                pending_text = (
+                    f"负责人 {assignee_name}、协作者 {collaborator_count} 人仍未完成"
+                    if collaborator_count
+                    else f"负责人 {assignee_name} 仍未完成"
+                )
+                notification_service.create_multi_channel_notification(
+                    db=db,
+                    organization_id=org_id,
+                    user_id=owner_id,
+                    event_type="deadline",
+                    title=f"任务逾期 {overdue_days} 天升级：{_title(task)}",
+                    body=(
+                        f"task:owner_escalation · 任务 #{task.id} 已逾期 {overdue_days} 天，"
+                        f"{pending_text}"
+                    ),
+                    channels=["site", "email"],
+                    case_id=task.case_id,
+                    reference_type="task",
+                    reference_id=task.id,
+                    template_key=ESCALATION_TEMPLATE,
+                )
+                existing.add((task.id, owner_id, ESCALATION_TEMPLATE))
+                created += 1
+                escalated += 1
+
         if hit_without_org:
             skipped_no_org += 1
 
@@ -209,5 +265,6 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
         "overdue_1d": counts["overdue_1d"],
         "overdue_3d": counts["overdue_3d"],
         "collaborator_created": collaborator_created,
+        "escalated": escalated,
         "skipped_no_org": skipped_no_org,
     }

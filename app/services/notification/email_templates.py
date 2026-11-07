@@ -89,6 +89,12 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "去处理",
         "footnote": "逾期 3 天为最后一次自动提醒，后续请人工跟进。",
     },
+    "task_owner_escalation_overdue_3d": {
+        "subject": "【律智检】{{title}}",
+        "lead": "以下任务已逾期 3 天以上，负责人和协作者仍未完成，请关注处理进度。",
+        "action_label": "去查看",
+        "footnote": "升级提醒每个任务只发一次；任务完成或归档后不再发送。",
+    },
     "review_consultation_uncited": {
         "subject": "【律智检】{{title}}",
         "lead": "有新的咨询进入审核队列，但该咨询没有关联法源引用。",

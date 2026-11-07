@@ -67,7 +67,7 @@ class NotificationTemplateApiTests(unittest.TestCase):
         response = self.client.get(f"{BASE}/", headers=self.admin_headers)
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
-        self.assertEqual(len(data["builtin"]), 17)
+        self.assertEqual(len(data["builtin"]), 18)
         self.assertEqual({item["field"] for item in data["layout_fields"]},
                          {"subject", "lead", "action_label", "footnote"})
         self.assertEqual(data["templates"], [])
