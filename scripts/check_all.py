@@ -116,10 +116,12 @@ STAGES: tuple[Stage, ...] = (
     ),
     Stage(
         id="frontend-e2e-tasks",
-        title="Playwright e2e（任务中心，全 mock）",
+        title="Playwright e2e（任务中心 / 通知偏好，全 mock）",
         command=(
             "{npm}", "run", "test:e2e", "--",
-            "tests/e2e/tasks-flow.spec.js", "--reporter=list",
+            "tests/e2e/tasks-flow.spec.js",
+            "tests/e2e/notification-preferences.spec.js",
+            "--reporter=list",
         ),
         cwd="frontend",
         tool="npm",

@@ -186,6 +186,7 @@ const sectionMeta = {
   '/documents': { label: '文档', description: '案件材料、合同与法律文件' },
   '/tasks': { label: '任务', description: '案件协作事项与处理进度' },
   '/notifications': { label: '通知中心', description: '案件动作、审核和关键日期提醒' },
+  '/settings/notifications': { label: '通知偏好', description: '按事件类型配置渠道、静默时段与代理接收人' },
   '/agent': { label: 'Agent', description: '自动化执行与运行记录' },
   '/chat': { label: '案件助手', description: '基于案件资料开展法律工作' },
   '/system': { label: '系统', description: '组织、权限、策略与平台运行' },

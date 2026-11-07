@@ -25356,6 +25356,7 @@
           "Developer Platform"
         ],
         "summary": "Update Notification Preferences",
+        "description": "按事件类型更新通知偏好（未传字段保持原值，显式传 null 可清除静默/代理）。",
         "operationId": "update_notification_preferences_api_developer_notification_preferences_me_put",
         "security": [
           {
@@ -30743,8 +30744,7 @@
           "mute_start": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^\\d{2}:\\d{2}$"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -30755,8 +30755,7 @@
           "mute_end": {
             "anyOf": [
               {
-                "type": "string",
-                "pattern": "^\\d{2}:\\d{2}$"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -30767,7 +30766,8 @@
           "timezone": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"

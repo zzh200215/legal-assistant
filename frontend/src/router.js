@@ -15,6 +15,7 @@ const LegalOnboarding = () => import('./views/LegalOnboarding.vue')
 const Pricing = () => import('./views/Pricing.vue')
 const ManagementCenter = () => import('./views/ManagementCenter.vue')
 const Notifications = () => import('./views/Notifications.vue')
+const NotificationPreferences = () => import('./views/NotificationPreferences.vue')
 
 // meta.capability：路由级权限门禁（App.vue 统一渲染 403 状态，直接访问受保护路由不静默放行）。
 // 仅对后端确有管理门槛的页面启用（/system 的 /admin/*、/org/* 接口为管理员权限）；
@@ -33,6 +34,7 @@ const routes = [
   { path: '/documents', component: Documents, meta: { capability: CAPABILITY.DOCUMENT_READ } },
   { path: '/tasks', component: Tasks },
   { path: '/notifications', component: Notifications },
+  { path: '/settings/notifications', component: NotificationPreferences },
   { path: '/agent', component: Agent },
   { path: '/chat', component: Chat },
   { path: '/system', component: System, meta: { capability: CAPABILITY.SYSTEM_VIEW } },

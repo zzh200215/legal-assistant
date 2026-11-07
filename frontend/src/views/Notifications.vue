@@ -6,6 +6,7 @@
         <p class="app-page-sub">查看案件动作、审核和关键日期的处理提醒。</p>
       </div>
       <div class="app-page-head-actions">
+        <button class="notification-action" type="button" @click="router.push('/settings/notifications')">通知偏好</button>
         <button v-if="unread > 0" class="notification-action" type="button" @click="markAllRead">全部标记已读</button>
       </div>
     </header>

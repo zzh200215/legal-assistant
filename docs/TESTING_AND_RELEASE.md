@@ -125,7 +125,7 @@ cd frontend && npx eslint src/components/legal/LegalSourcesTab.vue
 cd frontend && npx playwright test sources-flow copilot-dock --workers=1
 ```
 
-**收尾全量（一轮 / 一个目标完成时跑一次）：** §3 的四条门禁（后端全量、build、eslint src、e2e 全量）。默认 `check_all.py` 会跑任务中心 20 条全 mock e2e；`--e2e` 再追加全量 e2e。
+**收尾全量（一轮 / 一个目标完成时跑一次）：** §3 的四条门禁（后端全量、build、eslint src、e2e 全量）。默认 `check_all.py` 会跑任务中心与通知偏好 21 条全 mock e2e；`--e2e` 再追加全量 e2e。
 
 **并行的边界（实测踩过）：** 独立模块可以并行（subagent、后台 job），但**不要让 eslint / node --test / vite build
 这类重命令与 Playwright 同时跑**——它们与 Playwright 复用的 Vite dev server 抢资源，会把 dev server 挤掉，
@@ -143,7 +143,7 @@ cd frontend && npx playwright test sources-flow copilot-dock --workers=1
 串成一条命令，顺序与 CI 一致，逐段输出并落 `.gate_logs/<stage>.log`：
 
 ```bash
-.\.venv\Scripts\python.exe scripts\check_all.py            # 默认 11 段（含任务中心 20 条 e2e），约 16 分钟
+.\.venv\Scripts\python.exe scripts\check_all.py            # 默认 11 段（含任务中心 / 通知偏好 21 条 e2e），约 16 分钟
 .\.venv\Scripts\python.exe scripts\check_all.py --e2e      # 追加全量 Playwright（需后端已在 :8001）
 .\.venv\Scripts\python.exe scripts\check_all.py --list     # 只列清单
 .\.venv\Scripts\python.exe scripts\check_all.py --only backend,openapi

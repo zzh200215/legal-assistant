@@ -46,7 +46,7 @@ step41 的告警是无状态的：每次扫描按冷却窗口幂等发一条，�
 - 升级提醒始终 `["site","email"]`；
 - `OUTBOX_ALERT_RESPECT_QUIET_HOURS=false` 可整体关闭该行为（运维需要 24h 邮件时）。
 
-偏好本身通过既有接口设置：`PUT /api/developer/notification-preferences/me?event_type=approval`（字段 `mute_start`/`mute_end`/`timezone`），没有单独的前端设置页——这是本步的已知缺口。
+偏好本身通过既有接口设置：`PUT /api/developer/notification-preferences/me?event_type=approval`（字段 `mute_start`/`mute_end`/`timezone`）。当时没有前端设置页，这个缺口已由 [step108](step108-notification-preferences-page.md) 补上（静默仍只作用于投递告警，未接入普通通知邮件）。
 
 ## 4. 看板
 

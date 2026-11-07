@@ -1,5 +1,6 @@
 """通知偏好 / 通知中心 / 组织 Onboarding 子路由。"""
 import json
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,13 +19,30 @@ from app.models.user import User
 
 router = APIRouter()
 
+ALLOWED_CHANNELS = {"site", "email", "wechat", "feishu"}
+SUMMARY_FREQUENCIES = {"none", "daily", "weekly"}
+_MUTE_TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+
 class NotificationPrefUpdate(BaseModel):
     channels_json: Optional[str] = None
-    mute_start: Optional[str] = Field(None, pattern=r"^\d{2}:\d{2}$")
-    mute_end: Optional[str] = Field(None, pattern=r"^\d{2}:\d{2}$")
-    timezone: Optional[str] = None
+    mute_start: Optional[str] = None
+    mute_end: Optional[str] = None
+    timezone: Optional[str] = Field(None, max_length=64)
     delegate_user_id: Optional[int] = None
     summary_frequency: Optional[str] = None
+
+
+def _normalize_mute(value: Optional[str], field: str) -> Optional[str]:
+    """空串/None 表示清除静默；只接受 HH:MM。"""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if not _MUTE_TIME_RE.match(text):
+        raise HTTPException(422, detail=f"{field} 必须是 HH:MM")
+    return text
 
 
 @router.get("/notification-preferences/me")
@@ -32,10 +50,14 @@ def get_notification_preferences(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    prefs = db.query(LegalNotificationPreference).filter(
+    query = db.query(LegalNotificationPreference).filter(
         LegalNotificationPreference.user_id == current_user.id,
-    ).all()
-    return prefs
+    )
+    if current_user.organization_id:
+        query = query.filter(
+            LegalNotificationPreference.organization_id == current_user.organization_id
+        )
+    return query.all()
 
 
 @router.put("/notification-preferences/me")
@@ -45,21 +67,68 @@ def update_notification_preferences(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """按事件类型更新通知偏好（未传字段保持原值，显式传 null 可清除静默/代理）。"""
+    from app.services.notification.notification_service import EVENT_TYPES
+
+    if event_type not in EVENT_TYPES:
+        raise HTTPException(422, detail="通知事件类型不支持")
+    if not current_user.organization_id:
+        raise HTTPException(422, detail="用户未加入组织，无法保存通知偏好")
+
     pref = db.query(LegalNotificationPreference).filter(
         LegalNotificationPreference.user_id == current_user.id,
+        LegalNotificationPreference.organization_id == current_user.organization_id,
         LegalNotificationPreference.event_type == event_type,
     ).first()
 
     if not pref:
         pref = LegalNotificationPreference(
             user_id=current_user.id,
-            organization_id=current_user.organization_id or 0,
+            organization_id=current_user.organization_id,
             event_type=event_type,
         )
         db.add(pref)
 
-    for field, value in body.dict(exclude_none=True).items():
-        setattr(pref, field, value)
+    data = body.model_dump(exclude_unset=True)
+    if data.get("channels_json") is not None:
+        try:
+            channels = json.loads(data["channels_json"])
+        except (TypeError, ValueError):
+            raise HTTPException(422, detail="channels_json 必须是 JSON 数组")
+        if not isinstance(channels, list) or any(not isinstance(item, str) for item in channels):
+            raise HTTPException(422, detail="channels_json 必须是 JSON 数组")
+        unknown = set(channels) - ALLOWED_CHANNELS
+        if unknown:
+            raise HTTPException(422, detail=f"不支持的通知渠道: {', '.join(sorted(unknown))}")
+        pref.channels_json = json.dumps(list(dict.fromkeys(channels)), ensure_ascii=False)
+
+    if "mute_start" in data:
+        pref.mute_start = _normalize_mute(data["mute_start"], "mute_start")
+    if "mute_end" in data:
+        pref.mute_end = _normalize_mute(data["mute_end"], "mute_end")
+
+    if data.get("timezone"):
+        from zoneinfo import ZoneInfo
+
+        try:
+            ZoneInfo(data["timezone"])
+        except Exception:  # noqa: BLE001 - 非法时区统一按 422 返回
+            raise HTTPException(422, detail="时区不合法")
+        pref.timezone = data["timezone"]
+
+    if "delegate_user_id" in data:
+        delegate_id = data["delegate_user_id"]
+        if delegate_id is not None:
+            delegate = db.get(User, delegate_id)
+            if delegate is None or delegate.organization_id != current_user.organization_id:
+                raise HTTPException(422, detail="代理接收人必须是同组织成员")
+        pref.delegate_user_id = delegate_id
+
+    if "summary_frequency" in data:
+        frequency = data["summary_frequency"] or "none"
+        if frequency not in SUMMARY_FREQUENCIES:
+            raise HTTPException(422, detail="摘要频率不支持")
+        pref.summary_frequency = frequency
 
     db.commit()
     db.refresh(pref)
