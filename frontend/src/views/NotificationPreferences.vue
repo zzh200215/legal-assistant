@@ -76,6 +76,17 @@
             </label>
             <p class="pref-hint">时区用于任务到期提醒判断「今天/明天」，以及静默窗口的解释。</p>
 
+            <label class="pref-field">
+              <span>代理接收人</span>
+              <select v-model="form.delegate_user_id">
+                <option :value="null">不设置</option>
+                <option v-for="member in members" :key="member.user_id" :value="member.user_id">
+                  {{ member.full_name || member.username || `用户 ${member.user_id}` }}
+                </option>
+              </select>
+            </label>
+            <p class="pref-hint">设置后该事件的通知改发代理，正文标注「代 X 接收」；代理只跳一层，逾期升级等强提醒仍直达本人。</p>
+
             <div class="pref-actions">
               <button class="pref-primary" type="submit" :disabled="saving">
                 {{ saving ? '保存中…' : '保存偏好' }}
@@ -92,12 +103,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
 import api from '../api'
 import { errorMessage, normalizeError } from '../api/errors.js'
+import { useAuthStore } from '../stores/auth'
 import {
   EVENT_TYPES,
   TIMEZONES,
@@ -107,6 +119,7 @@ import {
 } from '../utils/notificationPreferences'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const eventTypes = EVENT_TYPES
 
 const selected = ref('all')
@@ -116,6 +129,9 @@ const loading = ref(true)
 const saving = ref(false)
 const loadError = ref(null)
 const savedTip = ref('')
+const members = ref([])
+
+const orgId = computed(() => authStore.user?.organization_id || null)
 
 const currentLabel = computed(
   () => eventTypes.find((item) => item.value === selected.value)?.label || selected.value,
@@ -141,6 +157,19 @@ const selectType = (value) => {
   applyForm(prefs.value[value] || null)
 }
 
+let membersOrg = null
+const loadMembers = async () => {
+  const currentOrg = orgId.value
+  if (!currentOrg || membersOrg === currentOrg) return
+  try {
+    const { data } = await api.listOrgMembers(currentOrg)
+    members.value = data || []
+    membersOrg = currentOrg
+  } catch {
+    members.value = []
+  }
+}
+
 const load = async () => {
   loading.value = true
   loadError.value = null
@@ -150,6 +179,7 @@ const load = async () => {
     for (const item of data || []) map[item.event_type] = item
     prefs.value = map
     applyForm(map[selected.value] || null)
+    await loadMembers()
   } catch (err) {
     loadError.value = normalizeError(err)
   } finally {
@@ -185,6 +215,10 @@ const resetCurrent = () => {
   applyForm(prefs.value[selected.value] || null)
   savedTip.value = ''
 }
+
+watch(orgId, () => {
+  loadMembers()
+})
 
 onMounted(load)
 </script>

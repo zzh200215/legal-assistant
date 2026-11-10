@@ -4,6 +4,10 @@ import { test, expect } from '@playwright/test'
 // 全 mock，锁定 API 契约与表单接线。
 const success = (data) => ({ success: true, data })
 const ME = { id: 15, username: 'pilot01-lawyer', role: 'dept_admin', organization_id: 5, department_id: 51, status: 'active' }
+const MEMBERS = [
+  { user_id: 15, username: 'pilot01-lawyer', full_name: '主办律师', legal_role: 'admin' },
+  { user_id: 16, username: 'lawyer2', full_name: '协办律师', legal_role: 'editor' },
+]
 const deadlinePref = {
   id: 1,
   organization_id: 5,
@@ -32,6 +36,7 @@ test('通知偏好：事件类型切换→回显→保存→静默校验', async
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
+    if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success(MEMBERS) })
     if (method === 'GET' && path === '/developer/notification-preferences/me') {
       return route.fulfill({ json: success([deadlinePref]) })
     }
@@ -58,22 +63,24 @@ test('通知偏好：事件类型切换→回显→保存→静默校验', async
   await expect(page.locator('.pref-field', { hasText: '静默开始' }).locator('input')).toHaveValue('22:00')
   await expect(page.locator('.pref-field', { hasText: '静默结束' }).locator('input')).toHaveValue('07:00')
   await expect(page.locator('.pref-field', { hasText: '时区' }).locator('select')).toHaveValue('Asia/Tokyo')
+  await expect(page.locator('.pref-field', { hasText: '代理接收人' }).locator('select')).toHaveValue('16')
 
-  // 修改并保存
+  // 修改并保存（代理改为 15）
   await emailCheck.check()
   await page.locator('.pref-field', { hasText: '静默结束' }).locator('input').fill('06:30')
+  await page.locator('.pref-field', { hasText: '代理接收人' }).locator('select').selectOption('15')
   await page.getByRole('button', { name: '保存偏好' }).click()
 
   await expect(page.locator('.pref-saved')).toHaveText('已保存')
   expect(puts).toHaveLength(1)
   expect(puts[0].eventType).toBe('deadline')
   expect(JSON.parse(puts[0].body.channels_json)).toEqual(['site', 'email'])
-  // 页面未暴露的代理/摘要字段按原值保留，不能因为保存渠道而丢失
+  // 页面未暴露的摘要字段按原值保留
   expect(puts[0].body).toMatchObject({
     mute_start: '22:00',
     mute_end: '06:30',
     timezone: 'Asia/Tokyo',
-    delegate_user_id: 16,
+    delegate_user_id: 15,
     summary_frequency: 'daily',
   })
 

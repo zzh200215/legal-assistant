@@ -179,7 +179,8 @@ class NotificationService:
     @staticmethod
     def _idempotency_key(organization_id: int, user_id: int, channel: str, event_type: str,
                          reference_type: str | None, reference_id: int | None,
-                         business_version: int | None, template_key: str | None = None) -> str:
+                         business_version: int | None, template_key: str | None = None,
+                         on_behalf_of_user_id: int | None = None) -> str:
         version = business_version if business_version is not None else 1
         parts = [
             str(organization_id), str(user_id), str(channel), str(event_type),
@@ -189,6 +190,9 @@ class NotificationService:
         # 不传 template_key 时保持旧键，历史事件与幂等语义不变。
         if template_key:
             parts.append(str(template_key))
+        # 代理接收：原收件人参与去重，避免多个人的同类事件在代理处互相覆盖。
+        if on_behalf_of_user_id:
+            parts.append(f"for:{on_behalf_of_user_id}")
         return "notify:" + ":".join(parts)
 
     def create_notification(self, *, db: Session, organization_id: int,
@@ -201,10 +205,12 @@ class NotificationService:
                            scheduled_at: datetime | None = None,
                            business_version: int | None = None,
                            template_key: str | None = None,
-                           locale: str | None = None) -> LegalNotificationEvent:
+                           locale: str | None = None,
+                           on_behalf_of_user_id: int | None = None) -> LegalNotificationEvent:
         """创建一条通知事件（幂等：同幂等键重复请求返回已有记录，不重复创建）。
 
         站内通知是基础渠道，始终创建。邮件渠道仅登记事件，实际投递由 Outbox 领取。
+        ``on_behalf_of_user_id`` 非空表示 user_id 是代理、该字段是原收件人。
         """
         if event_type not in EVENT_TYPES and event_type != "deadline_reminder":
             raise ValueError(f"不支持的事件类型: {event_type}")
@@ -214,6 +220,7 @@ class NotificationService:
         idem_key = self._idempotency_key(
             organization_id, user_id, channel, event_type,
             reference_type, reference_id, business_version, template_key,
+            on_behalf_of_user_id,
         )
         existing = db.query(LegalNotificationEvent).filter(
             LegalNotificationEvent.idempotency_key == idem_key
@@ -227,6 +234,7 @@ class NotificationService:
         event = LegalNotificationEvent(
             organization_id=organization_id,
             user_id=user_id,
+            on_behalf_of_user_id=on_behalf_of_user_id,
             case_id=case_id,
             event_type=event_type,
             title=title,
@@ -282,21 +290,32 @@ class NotificationService:
                                           scheduled_at: datetime | None = None,
                                           business_version: int | None = None,
                                           template_key: str | None = None,
-                                          respect_quiet_hours: bool = True) -> list[LegalNotificationEvent]:
+                                          respect_quiet_hours: bool = True,
+                                          allow_delegate: bool = True) -> list[LegalNotificationEvent]:
         """创建多渠道通知事件（幂等：每个渠道一个事件，同键去重）。
 
         根据 user 通知偏好决定哪些渠道生效。站内通知始终创建。
         默认尊重静默时段：命中窗口时站内照常即时送达，邮件/微信/飞书推迟到窗口结束
         （``scheduled_at`` 由 Outbox 领取条件消费），正文注明预计发送时间。
         ``respect_quiet_hours=False`` 用于升级等强提醒，穿透静默。
+        ``allow_delegate=True`` 时若 user 配置了代理接收人，事件改发给代理，
+        原收件人写入 ``on_behalf_of_user_id``，正文标注「代 X 接收」；代理只跳一层。
         """
+        recipient_id, on_behalf = user_id, None
+        if allow_delegate:
+            recipient_id, on_behalf = self._effective_recipient(
+                db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
+            )
+        if on_behalf is not None:
+            body = f"（代 {self._display_name(db, on_behalf)} 接收）{body or ''}".strip()
+
         effective_channels = self._resolve_channels(
-            db=db, user_id=user_id, organization_id=organization_id,
+            db=db, user_id=recipient_id, organization_id=organization_id,
             event_type=event_type, requested_channels=channels,
         )
 
         pref = self._get_preference(
-            db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
+            db=db, user_id=recipient_id, organization_id=organization_id, event_type=event_type,
         )
         has_external = any(channel != CHANNEL_SITE for channel in effective_channels)
         quiet_end = (
@@ -312,7 +331,7 @@ class NotificationService:
             event = self.create_notification(
                 db=db,
                 organization_id=organization_id,
-                user_id=user_id,
+                user_id=recipient_id,
                 event_type=event_type,
                 title=title,
                 body=body,
@@ -323,9 +342,35 @@ class NotificationService:
                 scheduled_at=channel_scheduled,
                 business_version=business_version,
                 template_key=template_key,
+                on_behalf_of_user_id=on_behalf,
             )
             events.append(event)
         return events
+
+    def _effective_recipient(self, *, db: Session, user_id: int, organization_id: int,
+                             event_type: str) -> tuple[int, int | None]:
+        """解析代理接收人；无效/停用/跨组织/指向自己时回退原收件人。"""
+        pref = self._get_preference(
+            db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
+        )
+        delegate_id = getattr(pref, "delegate_user_id", None) if pref else None
+        if not delegate_id or delegate_id == user_id:
+            return user_id, None
+        delegate = db.get(User, delegate_id)
+        if (
+            delegate is None
+            or delegate.status != "active"
+            or delegate.organization_id != organization_id
+        ):
+            return user_id, None
+        return delegate.id, user_id
+
+    @staticmethod
+    def _display_name(db: Session, user_id: int) -> str:
+        user = db.get(User, user_id)
+        if user is None:
+            return f"用户 {user_id}"
+        return (user.full_name or user.username or f"用户 {user.id}").strip()[:128]
 
     def _resolve_channels(self, *, db: Session, user_id: int, organization_id: int,
                           event_type: str, requested_channels: list[str] | None) -> list[str]:
@@ -980,6 +1025,7 @@ class NotificationService:
             "id": event.id,
             "organization_id": event.organization_id,
             "user_id": event.user_id,
+            "on_behalf_of_user_id": event.on_behalf_of_user_id,
             "case_id": event.case_id,
             "event_type": event.event_type,
             "title": event.title,

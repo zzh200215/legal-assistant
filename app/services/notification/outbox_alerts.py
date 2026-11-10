@@ -122,6 +122,8 @@ def _notify(db: Session, *, organization_id: int, admin_ids: list[int], title: s
             # 告警自己按 _channels_for 处理静默（普通告警降为站内、升级穿透），
             # 不再走通用的「延迟到窗口结束」逻辑。
             respect_quiet_hours=False,
+            # 投递告警是平台运维提醒，不转给个人代理。
+            allow_delegate=False,
         )
         events += len(created)
     return events, muted

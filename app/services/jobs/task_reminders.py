@@ -119,13 +119,18 @@ def _recipients(task: Task) -> list[tuple[int, bool]]:
 
 
 def _existing_reminders(db: Session, task_ids: list[int]) -> set[tuple[int, int, str]]:
-    """预取已发提醒，避免逐个收件人查询；键为 (task_id, user_id, template_key)。"""
+    """预取已发提醒；键为 (task_id, 原收件人, template_key)。
+
+    代理接收的事件 user_id 是代理，用 on_behalf_of_user_id 还原原收件人，
+    避免每轮扫描都以为「没发过」而重复创建（幂等键会挡住重复，但计数会虚高）。
+    """
     if not task_ids:
         return set()
     rows = (
         db.query(
             LegalNotificationEvent.reference_id,
             LegalNotificationEvent.user_id,
+            LegalNotificationEvent.on_behalf_of_user_id,
             LegalNotificationEvent.template_key,
         )
         .filter(
@@ -135,7 +140,10 @@ def _existing_reminders(db: Session, task_ids: list[int]) -> set[tuple[int, int,
         )
         .all()
     )
-    return {(int(rid), int(uid), str(key)) for rid, uid, key in rows}
+    return {
+        (int(rid), int(on_behalf or uid), str(key))
+        for rid, uid, on_behalf, key in rows
+    }
 
 
 def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict:
@@ -250,6 +258,7 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
                     reference_id=task.id,
                     template_key=ESCALATION_TEMPLATE,
                     respect_quiet_hours=False,
+                    allow_delegate=False,
                 )
                 existing.add((task.id, owner_id, ESCALATION_TEMPLATE))
                 created += 1

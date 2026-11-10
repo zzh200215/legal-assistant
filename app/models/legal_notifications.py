@@ -100,6 +100,10 @@ class LegalNotificationEvent(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    on_behalf_of_user_id = Column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True,
+        comment="代理接收时的原收件人；NULL=本人接收",
+    )
     case_id = Column(Integer, ForeignKey("legal_cases.id"), nullable=True, index=True)
     event_type = Column(String(64), nullable=False, index=True)
     title = Column(String(256), nullable=False)
