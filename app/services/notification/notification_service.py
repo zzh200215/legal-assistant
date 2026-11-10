@@ -281,18 +281,34 @@ class NotificationService:
                                           reference_id: int | None = None,
                                           scheduled_at: datetime | None = None,
                                           business_version: int | None = None,
-                                          template_key: str | None = None) -> list[LegalNotificationEvent]:
+                                          template_key: str | None = None,
+                                          respect_quiet_hours: bool = True) -> list[LegalNotificationEvent]:
         """创建多渠道通知事件（幂等：每个渠道一个事件，同键去重）。
 
         根据 user 通知偏好决定哪些渠道生效。站内通知始终创建。
+        默认尊重静默时段：命中窗口时站内照常即时送达，邮件/微信/飞书推迟到窗口结束
+        （``scheduled_at`` 由 Outbox 领取条件消费），正文注明预计发送时间。
+        ``respect_quiet_hours=False`` 用于升级等强提醒，穿透静默。
         """
         effective_channels = self._resolve_channels(
             db=db, user_id=user_id, organization_id=organization_id,
             event_type=event_type, requested_channels=channels,
         )
 
+        pref = self._get_preference(
+            db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
+        )
+        has_external = any(channel != CHANNEL_SITE for channel in effective_channels)
+        quiet_end = (
+            self.next_quiet_end(pref) if respect_quiet_hours and has_external and pref else None
+        )
+        if quiet_end is not None:
+            note = f"（静默时段，外部渠道将于 {self._quiet_end_label(quiet_end, pref)} 后发送）"
+            body = f"{body or ''} {note}".strip()
+
         events: list[LegalNotificationEvent] = []
         for channel in effective_channels:
+            channel_scheduled = quiet_end if quiet_end and channel != CHANNEL_SITE else scheduled_at
             event = self.create_notification(
                 db=db,
                 organization_id=organization_id,
@@ -304,7 +320,7 @@ class NotificationService:
                 case_id=case_id,
                 reference_type=reference_type,
                 reference_id=reference_id,
-                scheduled_at=scheduled_at,
+                scheduled_at=channel_scheduled,
                 business_version=business_version,
                 template_key=template_key,
             )
@@ -401,6 +417,42 @@ class NotificationService:
         if start < end:
             return start <= minutes < end
         return minutes >= start or minutes < end
+
+    def next_quiet_end(self, pref: LegalNotificationPreference | None, *,
+                       now: datetime | None = None) -> datetime | None:
+        """静默窗口结束时刻（UTC）；不在窗口内返回 None。
+
+        跨夜窗口按用户本地日期推算：22:00–07:00 在 23:00 命中，结束是次日 07:00；
+        在 01:00 命中，结束是当天 07:00。只延迟、不丢事件。
+        """
+        if not self.is_quiet_now(pref, now=now):
+            return None
+        start = _parse_hhmm(pref.mute_start)
+        end = _parse_hhmm(pref.mute_end)
+        if start is None or end is None or start == end:
+            return None
+        try:
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(pref.timezone or "Asia/Shanghai")
+        except Exception:  # noqa: BLE001 - 时区非法按 UTC 解释，不阻塞投递
+            tz = timezone.utc
+        moment = (now or utc_now()).replace(tzinfo=timezone.utc).astimezone(tz)
+        end_at = moment.replace(hour=end // 60, minute=end % 60, second=0, microsecond=0)
+        if end_at <= moment:
+            end_at += timedelta(days=1)
+        return end_at.astimezone(timezone.utc)
+
+    @staticmethod
+    def _quiet_end_label(quiet_end: datetime, pref: LegalNotificationPreference) -> str:
+        """静默结束的本地时间（HH:MM），用于正文提示。"""
+        try:
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(pref.timezone or "Asia/Shanghai")
+        except Exception:  # noqa: BLE001 - 时区非法按 UTC 展示
+            tz = timezone.utc
+        return quiet_end.astimezone(tz).strftime("%H:%M")
 
     def _is_email_available(self, db: Session, organization_id: int) -> bool:
         """检查组织是否配置了外发邮件。"""

@@ -66,7 +66,7 @@
                 <input v-model="form.mute_end" type="time" step="60" />
               </label>
             </div>
-            <p class="pref-hint">静默时段目前只对系统投递告警生效；任务/审核邮件仍会发送。按下方时区解释，跨夜可填 22:00–07:00。</p>
+            <p class="pref-hint">命中静默时站内立即送达，邮件等外部渠道延后到窗口结束发送；逾期升级等强提醒会穿透静默。按下方时区解释，跨夜可填 22:00–07:00。</p>
 
             <label class="pref-field">
               <span>时区</span>

@@ -119,6 +119,9 @@ def _notify(db: Session, *, organization_id: int, admin_ids: list[int], title: s
             # 冷却窗口进幂等键：窗口内重复扫描不会产生新事件
             business_version=business_version,
             template_key=template_key,
+            # 告警自己按 _channels_for 处理静默（普通告警降为站内、升级穿透），
+            # 不再走通用的「延迟到窗口结束」逻辑。
+            respect_quiet_hours=False,
         )
         events += len(created)
     return events, muted

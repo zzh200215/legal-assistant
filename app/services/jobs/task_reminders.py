@@ -249,6 +249,7 @@ def scan_task_due_reminders(db: Session, *, now: datetime | None = None) -> dict
                     reference_type="task",
                     reference_id=task.id,
                     template_key=ESCALATION_TEMPLATE,
+                    respect_quiet_hours=False,
                 )
                 existing.add((task.id, owner_id, ESCALATION_TEMPLATE))
                 created += 1
