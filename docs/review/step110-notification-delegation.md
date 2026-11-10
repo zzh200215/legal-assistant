@@ -77,6 +77,8 @@
 - 后端全量：**2583 passed / 4 skipped**；OpenAPI **375**；前端单测 **112 passed**。
 - 包体：入口 **83.9 / 100 KB**、最大页面 chunk **85.3 / 130 KB**、总资产 **1681.2 / 1700 KB**。
 
+**MySQL 实库验证**：临时库 `aibg_migration_check110` 从零 `upgrade head` 到 `20261110_0119`，`information_schema` 确认 `legal_notification_events.on_behalf_of_user_id` 存在；`downgrade -1` 后再 `upgrade head` 成功；临时库已删除。开发库 `aibg` 也已从 0118 升到 0119。
+
 ## 6. 边界
 
 1. **代理不改变资源权限**：代理能收到通知，但打开任务/咨询/案件仍按代理本人的权限判定；同组织通常可见，跨部门/共享范围仍可能 403。
