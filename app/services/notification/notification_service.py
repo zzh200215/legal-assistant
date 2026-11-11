@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import or_ as sa_or
 from sqlalchemy import text as sa_text
@@ -24,12 +25,23 @@ from app.core.obs_context import get_context
 from app.core.time import utc_now
 from app.models.legal_notifications import (
     LegalNotificationEvent,
+    LegalNotificationLeave,
     LegalNotificationPreference,
 )
 from app.models.user import User
 from app.services.observability.oplog_service import oplog_service
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_TIMEZONE = "Asia/Shanghai"
+
+
+def _zone(name: str | None) -> timezone | ZoneInfo:
+    """时区解析：缺失/非法回退到默认时区，再不行按 UTC，不阻塞投递。"""
+    try:
+        return ZoneInfo(name or DEFAULT_TIMEZONE)
+    except Exception:  # noqa: BLE001 - 非法时区按 UTC 解释
+        return timezone.utc
 
 
 def _parse_hhmm(value: str | None) -> int | None:
@@ -298,8 +310,9 @@ class NotificationService:
         默认尊重静默时段：命中窗口时站内照常即时送达，邮件/微信/飞书推迟到窗口结束
         （``scheduled_at`` 由 Outbox 领取条件消费），正文注明预计发送时间。
         ``respect_quiet_hours=False`` 用于升级等强提醒，穿透静默。
-        ``allow_delegate=True`` 时若 user 配置了代理接收人，事件改发给代理，
-        原收件人写入 ``on_behalf_of_user_id``，正文标注「代 X 接收」；代理只跳一层。
+        ``allow_delegate=True`` 时按「全局请假 > 事件类型代理 > 本人」解析接收人：
+        命中代理则事件改发给代理，原收件人写入 ``on_behalf_of_user_id``，正文标注
+        「代 X 接收」；代理只跳一层。
         """
         recipient_id, on_behalf = user_id, None
         if allow_delegate:
@@ -349,7 +362,16 @@ class NotificationService:
 
     def _effective_recipient(self, *, db: Session, user_id: int, organization_id: int,
                              event_type: str) -> tuple[int, int | None]:
-        """解析代理接收人；无效/停用/跨组织/指向自己/不在有效期时回退原收件人。"""
+        """解析接收人：全局请假 > 事件类型代理 > 本人。
+
+        无效配置（停用/跨组织/指向自己/不在有效期）回退到下一层，最终回退本人，
+        保证通知不会因为代理设置坏掉而丢失；代理只跳一层，不跟随代理自己的代理。
+        """
+        leave_delegate = self._leave_active_recipient(
+            db=db, user_id=user_id, organization_id=organization_id,
+        )
+        if leave_delegate is not None:
+            return leave_delegate, user_id
         pref = self._get_preference(
             db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
         )
@@ -367,26 +389,95 @@ class NotificationService:
             return user_id, None
         return delegate.id, user_id
 
+    def _leave_active_recipient(self, *, db: Session, user_id: int,
+                                organization_id: int) -> int | None:
+        """当前生效的请假代理；未请假/不在有效期/配置无效返回 None。"""
+        leave = self.get_leave(db=db, user_id=user_id, organization_id=organization_id)
+        delegate_id = getattr(leave, "delegate_user_id", None) if leave else None
+        if not delegate_id or delegate_id == user_id:
+            return None
+        if not self._leave_window_active(
+            leave,
+            timezone_name=self.user_timezone(
+                db=db, user_id=user_id, organization_id=organization_id),
+        ):
+            return None
+        delegate = db.get(User, delegate_id)
+        if (
+            delegate is None
+            or delegate.status != "active"
+            or delegate.organization_id != organization_id
+        ):
+            return None
+        return delegate.id
+
     @staticmethod
     def _delegate_window_active(pref: LegalNotificationPreference, *,
                                 now: datetime | None = None) -> bool:
-        """代理有效期按偏好时区的「当地日期」判断，起止日期都含当天。"""
-        start = getattr(pref, "delegate_start", None)
-        end = getattr(pref, "delegate_end", None)
+        """事件类型代理有效期：按偏好时区的当地日期比较，起止都含当天。"""
+        return NotificationService._date_window_active(
+            start=getattr(pref, "delegate_start", None),
+            end=getattr(pref, "delegate_end", None),
+            timezone_name=pref.timezone,
+            now=now,
+        )
+
+    @staticmethod
+    def _leave_window_active(leave: LegalNotificationLeave, *, timezone_name: str | None,
+                             now: datetime | None = None) -> bool:
+        """请假有效期：与事件类型代理同一套本地日期语义（起止都含当天）。"""
+        return NotificationService._date_window_active(
+            start=getattr(leave, "leave_start", None),
+            end=getattr(leave, "leave_end", None),
+            timezone_name=timezone_name,
+            now=now,
+        )
+
+    @staticmethod
+    def _date_window_active(*, start: date | None, end: date | None,
+                            timezone_name: str | None = None,
+                            now: datetime | None = None) -> bool:
         if not start and not end:
             return True
-        try:
-            from zoneinfo import ZoneInfo
-
-            tz = ZoneInfo(pref.timezone or "Asia/Shanghai")
-        except Exception:  # noqa: BLE001 - 时区非法按 UTC 解释，不阻塞通知
-            tz = timezone.utc
-        today = (now or utc_now()).astimezone(tz).date()
+        today = NotificationService.local_today(timezone_name, now=now)
         if start and today < start:
             return False
         if end and today > end:
             return False
         return True
+
+    @staticmethod
+    def local_today(timezone_name: str | None = None, *,
+                    now: datetime | None = None) -> date:
+        """指定时区的「今天」：有效期、到期提醒、接口展示共用同一口径。"""
+        return (now or utc_now()).astimezone(_zone(timezone_name)).date()
+
+    def user_timezone(self, *, db: Session, user_id: int, organization_id: int) -> str:
+        """用户级时区口径：「默认（全部事件）」偏好的时区，缺失回退 Asia/Shanghai。
+
+        请假是全局设置，不能跟着某一种事件类型的时区走，否则同一段请假在不同事由
+        下会有两个「今天」。
+        """
+        pref = db.query(LegalNotificationPreference).filter(
+            LegalNotificationPreference.user_id == user_id,
+            LegalNotificationPreference.organization_id == organization_id,
+            LegalNotificationPreference.event_type == "all",
+        ).first()
+        return (pref.timezone if pref and pref.timezone else DEFAULT_TIMEZONE)
+
+    @staticmethod
+    def leave_status(leave: LegalNotificationLeave | None, *,
+                     timezone_name: str | None = None,
+                     now: datetime | None = None) -> str:
+        """请假状态：none / scheduled / active / expired（接口与到期任务同口径）。"""
+        if leave is None or not getattr(leave, "delegate_user_id", None):
+            return "none"
+        today = NotificationService.local_today(timezone_name, now=now)
+        if leave.leave_start and today < leave.leave_start:
+            return "scheduled"
+        if leave.leave_end and today > leave.leave_end:
+            return "expired"
+        return "active"
 
     @staticmethod
     def _display_name(db: Session, user_id: int) -> str:
@@ -472,14 +563,7 @@ class NotificationService:
         end = _parse_hhmm(pref.mute_end)
         if start is None or end is None or start == end:
             return False
-        try:
-            from zoneinfo import ZoneInfo
-
-            tz = ZoneInfo(pref.timezone or "Asia/Shanghai")
-        except Exception:  # noqa: BLE001 - 时区非法按 UTC 解释，不阻塞投递
-            from datetime import timezone as _tz
-
-            tz = _tz.utc
+        tz = _zone(pref.timezone)
         moment = (now or utc_now()).replace(tzinfo=timezone.utc).astimezone(tz)
         minutes = moment.hour * 60 + moment.minute
         if start < end:
@@ -499,12 +583,7 @@ class NotificationService:
         end = _parse_hhmm(pref.mute_end)
         if start is None or end is None or start == end:
             return None
-        try:
-            from zoneinfo import ZoneInfo
-
-            tz = ZoneInfo(pref.timezone or "Asia/Shanghai")
-        except Exception:  # noqa: BLE001 - 时区非法按 UTC 解释，不阻塞投递
-            tz = timezone.utc
+        tz = _zone(pref.timezone)
         moment = (now or utc_now()).replace(tzinfo=timezone.utc).astimezone(tz)
         end_at = moment.replace(hour=end // 60, minute=end % 60, second=0, microsecond=0)
         if end_at <= moment:
@@ -514,13 +593,7 @@ class NotificationService:
     @staticmethod
     def _quiet_end_label(quiet_end: datetime, pref: LegalNotificationPreference) -> str:
         """静默结束的本地时间（HH:MM），用于正文提示。"""
-        try:
-            from zoneinfo import ZoneInfo
-
-            tz = ZoneInfo(pref.timezone or "Asia/Shanghai")
-        except Exception:  # noqa: BLE001 - 时区非法按 UTC 展示
-            tz = timezone.utc
-        return quiet_end.astimezone(tz).strftime("%H:%M")
+        return quiet_end.astimezone(_zone(pref.timezone)).strftime("%H:%M")
 
     def _is_email_available(self, db: Session, organization_id: int) -> bool:
         """检查组织是否配置了外发邮件。"""
@@ -947,6 +1020,63 @@ class NotificationService:
             LegalNotificationPreference.organization_id == organization_id,
         ).all()
         return [self.serialize_preference(p) for p in prefs]
+
+    # ── 全局请假代理 ────────────────────────────────────────────────
+
+    def get_leave(self, *, db: Session, user_id: int,
+                  organization_id: int) -> LegalNotificationLeave | None:
+        """读取用户的请假记录（每用户每组织最多一条）。"""
+        return db.query(LegalNotificationLeave).filter(
+            LegalNotificationLeave.user_id == user_id,
+            LegalNotificationLeave.organization_id == organization_id,
+        ).first()
+
+    def set_leave(self, *, db: Session, user_id: int, organization_id: int,
+                  delegate_user_id: int | None, leave_start: date | None = None,
+                  leave_end: date | None = None, note: str | None = None,
+                  actor_id: int | None = None) -> LegalNotificationLeave:
+        """设置/更新请假代理；没有代理时有效期与备注一起清空（等价结束请假）。"""
+        leave = self.get_leave(db=db, user_id=user_id, organization_id=organization_id)
+        if leave is None:
+            leave = LegalNotificationLeave(
+                user_id=user_id, organization_id=organization_id)
+            db.add(leave)
+        if delegate_user_id:
+            leave.delegate_user_id = delegate_user_id
+            leave.leave_start = leave_start
+            leave.leave_end = leave_end
+            leave.note = (note or "").strip()[:256] or None
+        else:
+            leave.delegate_user_id = None
+            leave.leave_start = None
+            leave.leave_end = None
+            leave.note = None
+        db.commit()
+        db.refresh(leave)
+        oplog_service.log(
+            module="notification", action="notification_leave_set", db=db,
+            user_id=actor_id or user_id, target_type="notification_leave",
+            target_id=leave.id,
+            detail=(
+                f"delegate={leave.delegate_user_id or 'none'};"
+                f"start={leave.leave_start or 'none'};end={leave.leave_end or 'none'}"
+            ),
+        )
+        return leave
+
+    def clear_leave(self, *, db: Session, user_id: int, organization_id: int,
+                    actor_id: int | None = None) -> bool:
+        """结束请假；本来就没有请假记录时返回 False（不清空、不写审计）。"""
+        leave = self.get_leave(db=db, user_id=user_id, organization_id=organization_id)
+        if leave is None or not (
+            leave.delegate_user_id or leave.leave_start or leave.leave_end or leave.note
+        ):
+            return False
+        self.set_leave(
+            db=db, user_id=user_id, organization_id=organization_id,
+            delegate_user_id=None, actor_id=actor_id,
+        )
+        return True
 
     # ── 通知读取与确认 ──────────────────────────────────────────────
 

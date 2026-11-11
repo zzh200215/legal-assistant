@@ -25416,6 +25416,121 @@
         }
       }
     },
+    "/api/developer/notification-leave/me": {
+      "get": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Get Notification Leave",
+        "description": "当前用户全局请假设置（覆盖全部事件类型）。",
+        "operationId": "get_notification_leave_api_developer_notification_leave_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Update Notification Leave",
+        "description": "设置请假代理；传 null 代理表示结束请假（同时清空有效期与备注）。",
+        "operationId": "update_notification_leave_api_developer_notification_leave_me_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationLeaveUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Developer Platform"
+        ],
+        "summary": "Delete Notification Leave",
+        "description": "结束请假：清空代理、有效期与备注；本来没有请假也算成功。",
+        "operationId": "delete_notification_leave_api_developer_notification_leave_me_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "幂等键：同 key + 同请求指纹重放原结果；同 key + 异指纹返回 409"
+          }
+        ]
+      }
+    },
     "/api/developer/cases/{case_id}/notification-policy": {
       "put": {
         "tags": [
@@ -30745,6 +30860,59 @@
           "candidate_model"
         ],
         "title": "ModelReleaseDraftRequest"
+      },
+      "NotificationLeaveUpdate": {
+        "properties": {
+          "delegate_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delegate User Id"
+          },
+          "leave_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leave Start"
+          },
+          "leave_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leave End"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "title": "NotificationLeaveUpdate"
       },
       "NotificationPrefUpdate": {
         "properties": {

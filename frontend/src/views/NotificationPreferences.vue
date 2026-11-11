@@ -3,12 +3,84 @@
     <header class="app-page-head">
       <div class="app-page-head-main">
         <h1 class="app-page-title">通知偏好</h1>
-        <p class="app-page-sub">按事件类型控制邮件渠道、静默时段与时区；站内通知始终开启。</p>
+        <p class="app-page-sub">按事件类型控制渠道与静默，或用请假代理一次覆盖全部事件；站内通知始终开启。</p>
       </div>
       <div class="app-page-head-actions">
         <button class="pref-link" type="button" @click="router.push('/notifications')">返回通知中心</button>
       </div>
     </header>
+
+    <section class="app-card">
+      <div class="app-card-head">
+        <h2>请假代理（全部事件）</h2>
+        <span class="app-card-head-meta">请假期间所有事件都转给代理，优先于下面按事件类型的设置</span>
+      </div>
+      <div class="app-card-body">
+        <p v-if="leaveLoading" class="pref-state" role="status">正在加载请假设置…</p>
+        <div v-else-if="leaveError" class="pref-state pref-state-error" role="alert">
+          <span>{{ leaveError.message || '请假设置加载失败' }}</span>
+          <button class="pref-link" type="button" @click="loadLeave">重试</button>
+        </div>
+        <div v-else class="leave-body">
+          <div class="leave-status" :class="`leave-status-${leaveStatus}`">
+            <span class="leave-pill">{{ statusLabel }}</span>
+            <span v-if="leaveSummaryText" class="leave-summary">{{ leaveSummaryText }}</span>
+            <span v-else class="leave-summary">未设置请假代理，通知按下面的按事件类型设置发送。</span>
+          </div>
+
+          <div class="pref-grid">
+            <label class="pref-field">
+              <span>请假代理</span>
+              <select v-model="leaveForm.delegate_user_id">
+                <option :value="null">不设置</option>
+                <option v-for="member in members" :key="member.user_id" :value="member.user_id">
+                  {{ member.full_name || member.username || `用户 ${member.user_id}` }}
+                </option>
+              </select>
+            </label>
+            <label class="pref-field">
+              <span>备注</span>
+              <input
+                v-model="leaveForm.note"
+                type="text"
+                maxlength="200"
+                placeholder="如：出差、年假"
+              />
+            </label>
+          </div>
+
+          <div class="pref-grid">
+            <label class="pref-field">
+              <span>请假开始</span>
+              <input v-model="leaveForm.leave_start" type="date" />
+            </label>
+            <label class="pref-field">
+              <span>请假结束</span>
+              <input v-model="leaveForm.leave_end" type="date" />
+            </label>
+          </div>
+          <p class="pref-hint">留空表示长期有效；起止日期都含当天，按「默认（全部事件）」偏好的时区计算。到期提醒只发给你本人，不会转给代理。</p>
+
+          <div class="pref-actions">
+            <button class="pref-primary" type="button" :disabled="leaveSaving" @click="saveLeave">
+              {{ leaveSaving ? '保存中…' : '保存请假' }}
+            </button>
+            <button
+              class="pref-link"
+              type="button"
+              :disabled="leaveSaving || leaveStatus === 'none'"
+              @click="endLeave"
+            >
+              结束请假
+            </button>
+            <span v-if="leaveSavedTip" class="leave-saved" role="status">{{ leaveSavedTip }}</span>
+          </div>
+          <p v-if="leaveStatus === 'expired'" class="pref-hint pref-hint-warn">
+            请假已结束，通知已恢复发送给你；到期任务会自动清理这条记录，也可以手动结束请假。
+          </p>
+        </div>
+      </div>
+    </section>
 
     <section class="app-card">
       <div class="app-card-head">
@@ -123,6 +195,13 @@ import api from '../api'
 import { errorMessage, normalizeError } from '../api/errors.js'
 import { useAuthStore } from '../stores/auth'
 import {
+  buildLeavePayload,
+  leaveStatusLabel,
+  leaveSummary,
+  toLeaveForm,
+  validateLeaveForm,
+} from '../utils/notificationLeave'
+import {
   EVENT_TYPES,
   TIMEZONES,
   buildPreferencePayload,
@@ -143,6 +222,14 @@ const loadError = ref(null)
 const savedTip = ref('')
 const members = ref([])
 
+// 请假代理：用户级设置，覆盖全部事件类型，优先级高于按事件类型的代理。
+const leaveData = ref(null)
+const leaveForm = reactive(toLeaveForm(null))
+const leaveLoading = ref(true)
+const leaveSaving = ref(false)
+const leaveError = ref(null)
+const leaveSavedTip = ref('')
+
 const orgId = computed(() => authStore.user?.organization_id || null)
 
 const currentLabel = computed(
@@ -158,6 +245,10 @@ const timezoneOptions = computed(() => {
 })
 
 const statusOf = (value) => (prefs.value[value] ? '已配置' : value === 'all' ? '默认' : '未配置')
+
+const leaveStatus = computed(() => leaveData.value?.status || 'none')
+const statusLabel = computed(() => leaveStatusLabel(leaveStatus.value))
+const leaveSummaryText = computed(() => leaveSummary(leaveData.value))
 
 const applyForm = (pref) => {
   Object.assign(form, toPreferenceForm(pref))
@@ -228,15 +319,84 @@ const resetCurrent = () => {
   savedTip.value = ''
 }
 
+const loadLeave = async () => {
+  leaveLoading.value = true
+  leaveError.value = null
+  try {
+    const { data } = await api.getNotificationLeave()
+    leaveData.value = data || null
+    Object.assign(leaveForm, toLeaveForm(data))
+    await loadMembers()
+  } catch (err) {
+    leaveError.value = normalizeError(err)
+  } finally {
+    leaveLoading.value = false
+  }
+}
+
+const saveLeave = async () => {
+  if (!leaveForm.delegate_user_id) {
+    // 选「不设置」再保存等价于结束请假，避免用户卡在一条校验里无路可走。
+    await endLeave()
+    return
+  }
+  const invalid = validateLeaveForm(leaveForm)
+  if (invalid) {
+    ElMessage.warning(invalid)
+    return
+  }
+  leaveSaving.value = true
+  leaveSavedTip.value = ''
+  try {
+    const { data } = await api.updateNotificationLeave(buildLeavePayload(leaveForm))
+    leaveData.value = data || null
+    Object.assign(leaveForm, toLeaveForm(data))
+    leaveSavedTip.value = '已保存'
+    ElMessage.success('请假设置已保存')
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    leaveSaving.value = false
+  }
+}
+
+const endLeave = async () => {
+  leaveSaving.value = true
+  leaveSavedTip.value = ''
+  try {
+    const { data } = await api.clearNotificationLeave()
+    leaveData.value = data || null
+    Object.assign(leaveForm, toLeaveForm(data))
+    leaveSavedTip.value = '已结束请假'
+    ElMessage.success('已结束请假')
+  } catch (err) {
+    ElMessage.error(errorMessage(err))
+  } finally {
+    leaveSaving.value = false
+  }
+}
+
 watch(orgId, () => {
   loadMembers()
 })
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadLeave()
+})
 </script>
 
 <style scoped>
 .pref-page { display: grid; gap: var(--space-5); padding-bottom: var(--space-8); }
+.leave-body { display: grid; gap: var(--space-4); max-width: 640px; }
+.leave-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.leave-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 var(--space-2); border-radius: 999px; background: var(--color-surface-hover); color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: 600; }
+.leave-status-active .leave-pill { background: var(--color-primary-subtle); color: var(--color-primary); }
+.leave-status-scheduled .leave-pill { background: var(--color-warning-light); color: var(--color-warning); }
+.leave-status-expired .leave-pill { background: var(--color-danger-light); color: var(--color-danger); }
+.leave-summary { color: var(--color-text-muted); font-size: var(--text-sm); }
+.leave-saved { color: var(--color-success); font-size: var(--text-sm); }
+.pref-hint-warn { color: var(--color-danger); }
 .pref-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--space-6); }
 .pref-nav { display: grid; align-content: start; gap: 4px; padding-right: var(--space-4); border-right: 1px solid var(--color-border-light); }
 .pref-nav-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 38px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }

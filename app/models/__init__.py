@@ -67,6 +67,7 @@ from app.models.legal_contract import (
 from app.models.legal_domain import LegalClaim, LegalEvidence, LegalFact, LegalReference
 from app.models.legal_notifications import (
     LegalNotificationEvent,
+    LegalNotificationLeave,
     LegalNotificationPolicy,
     LegalNotificationPreference,
     NotificationTemplate,
@@ -231,6 +232,7 @@ __all__ = [
     "SecurityAuditEvent",
     "LegalNotificationPreference",
     "LegalNotificationPolicy",
+    "LegalNotificationLeave",
     "LegalNotificationEvent",
     "NotificationTemplate",
     "OrganizationOnboardingProgress",

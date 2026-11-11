@@ -12,4 +12,9 @@ export default {
       params: { event_type: eventType },
     })
   },
+  getNotificationLeave() { return http.get('/developer/notification-leave/me') },
+  updateNotificationLeave(payload) {
+    return http.put('/developer/notification-leave/me', payload)
+  },
+  clearNotificationLeave() { return http.delete('/developer/notification-leave/me') },
 }

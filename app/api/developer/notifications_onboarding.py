@@ -12,6 +12,7 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.legal_notifications import (
     LegalNotificationEvent,
+    LegalNotificationLeave,
     LegalNotificationPolicy,
     LegalNotificationPreference,
     OrganizationOnboardingProgress,
@@ -147,6 +148,122 @@ def update_notification_preferences(
     db.commit()
     db.refresh(pref)
     return pref
+
+
+class NotificationLeaveUpdate(BaseModel):
+    delegate_user_id: Optional[int] = None
+    leave_start: Optional[date] = None
+    leave_end: Optional[date] = None
+    note: Optional[str] = Field(None, max_length=200)
+
+
+def _leave_payload(db: Session, leave: LegalNotificationLeave | None,
+                   current_user: User) -> dict:
+    """请假设置 + 状态（none / scheduled / active / expired），日期按用户时区口径。"""
+    from app.services.notification.notification_service import notification_service
+
+    timezone_name = notification_service.user_timezone(
+        db=db, user_id=current_user.id, organization_id=current_user.organization_id,
+    )
+    payload = {
+        "delegate_user_id": None,
+        "delegate_name": None,
+        "leave_start": None,
+        "leave_end": None,
+        "note": None,
+        "timezone": timezone_name,
+        "status": "none",
+        "days_left": None,
+        "updated_at": None,
+    }
+    if leave is None or not leave.delegate_user_id:
+        return payload
+    delegate = db.get(User, leave.delegate_user_id)
+    today = notification_service.local_today(timezone_name)
+    status = notification_service.leave_status(leave, timezone_name=timezone_name)
+    payload.update({
+        "delegate_user_id": leave.delegate_user_id,
+        "delegate_name": (
+            (delegate.full_name or delegate.username) if delegate is not None else None
+        ),
+        "leave_start": leave.leave_start.isoformat() if leave.leave_start else None,
+        "leave_end": leave.leave_end.isoformat() if leave.leave_end else None,
+        "note": leave.note,
+        "status": status,
+        "days_left": (leave.leave_end - today).days if leave.leave_end else None,
+        "updated_at": leave.updated_at.isoformat() if leave.updated_at else None,
+    })
+    return payload
+
+
+@router.get("/notification-leave/me")
+def get_notification_leave(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """当前用户全局请假设置（覆盖全部事件类型）。"""
+    from app.services.notification.notification_service import notification_service
+
+    if not current_user.organization_id:
+        raise HTTPException(422, detail="用户未加入组织，无法读取请假设置")
+    leave = notification_service.get_leave(
+        db=db, user_id=current_user.id, organization_id=current_user.organization_id,
+    )
+    return _leave_payload(db, leave, current_user)
+
+
+@router.put("/notification-leave/me")
+def update_notification_leave(
+    body: NotificationLeaveUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """设置请假代理；传 null 代理表示结束请假（同时清空有效期与备注）。"""
+    from app.services.notification.notification_service import notification_service
+
+    if not current_user.organization_id:
+        raise HTTPException(422, detail="用户未加入组织，无法设置请假")
+    delegate_id = body.delegate_user_id
+    if delegate_id is not None:
+        delegate = db.get(User, delegate_id)
+        if delegate is None or delegate.organization_id != current_user.organization_id:
+            raise HTTPException(422, detail="请假代理必须是同组织成员")
+        if delegate.id == current_user.id:
+            raise HTTPException(422, detail="不能把通知转给自己")
+    if body.leave_start and body.leave_end and body.leave_start > body.leave_end:
+        raise HTTPException(422, detail="请假开始日期不能晚于结束日期")
+    note = (body.note or "").strip()
+    leave = notification_service.set_leave(
+        db=db,
+        user_id=current_user.id,
+        organization_id=current_user.organization_id,
+        delegate_user_id=delegate_id,
+        leave_start=body.leave_start if delegate_id else None,
+        leave_end=body.leave_end if delegate_id else None,
+        note=note if delegate_id else None,
+        actor_id=current_user.id,
+    )
+    return _leave_payload(db, leave, current_user)
+
+
+@router.delete("/notification-leave/me")
+def delete_notification_leave(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """结束请假：清空代理、有效期与备注；本来没有请假也算成功。"""
+    from app.services.notification.notification_service import notification_service
+
+    if not current_user.organization_id:
+        raise HTTPException(422, detail="用户未加入组织，无法结束请假")
+    notification_service.clear_leave(
+        db=db, user_id=current_user.id, organization_id=current_user.organization_id,
+        actor_id=current_user.id,
+    )
+    leave = notification_service.get_leave(
+        db=db, user_id=current_user.id, organization_id=current_user.organization_id,
+    )
+    return _leave_payload(db, leave, current_user)
 
 
 @router.put("/cases/{case_id}/notification-policy")

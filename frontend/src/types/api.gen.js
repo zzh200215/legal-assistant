@@ -593,6 +593,11 @@
  * @property {number}= rollout_percentage
  * @property {number}= shadow_percentage
  * @property {string} version
+ * @typedef {Object} NotificationLeaveUpdate
+ * @property {number | null}= delegate_user_id
+ * @property {string | null}= leave_end
+ * @property {string | null}= leave_start
+ * @property {string | null}= note
  * @typedef {Object} NotificationPrefUpdate
  * @property {string | null}= channels_json
  * @property {string | null}= delegate_end

@@ -72,6 +72,31 @@ class LegalNotificationPreference(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class LegalNotificationLeave(Base):
+    """用户级「请假代理」：一条记录覆盖全部事件类型。
+
+    与按事件类型的 ``delegate_user_id`` 分开存：请假表达的是「我整段时间不在」，
+    优先级高于事件类型代理，同一用户同一组织只有一条记录（结束请假即清空字段）。
+    有效期沿用同一套本地日期语义：起止日期都含当天，NULL 表示不限。
+    """
+
+    __tablename__ = "legal_notification_leaves"
+    __table_args__ = (
+        UniqueConstraint("user_id", "organization_id",
+                         name="uq_legal_notification_leaves_user_org"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False, index=True)
+    delegate_user_id = Column(Integer, ForeignKey("users.id"), nullable=True,
+                              comment="请假期间的代理接收人")
+    leave_start = Column(Date, nullable=True, comment="请假开始日期（本地日期，含当天）")
+    leave_end = Column(Date, nullable=True, comment="请假结束日期（本地日期，含当天）")
+    note = Column(String(256), nullable=True, comment="请假备注（如「出差」），仅展示")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class LegalNotificationPolicy(Base):
     __tablename__ = "legal_notification_policies"
 

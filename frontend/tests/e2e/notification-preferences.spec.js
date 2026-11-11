@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 
-// 通知偏好设置页：事件类型切换、已有偏好回显、保存下推、静默校验。
+// 通知偏好设置页：事件类型切换、已有偏好回显、保存下推、静默校验；
+// 以及用户级请假代理（全部事件）的设置、回显与结束。
 // 全 mock，锁定 API 契约与表单接线。
 const success = (data) => ({ success: true, data })
 const ME = { id: 15, username: 'pilot01-lawyer', role: 'dept_admin', organization_id: 5, department_id: 51, status: 'active' }
@@ -21,10 +22,24 @@ const deadlinePref = {
   delegate_end: '2026-11-20',
   summary_frequency: 'daily',
 }
+const NO_LEAVE = {
+  delegate_user_id: null,
+  delegate_name: null,
+  leave_start: null,
+  leave_end: null,
+  note: null,
+  timezone: 'Asia/Shanghai',
+  status: 'none',
+  days_left: null,
+  updated_at: null,
+}
 
 test('通知偏好：事件类型切换→回显→保存→静默校验', async ({ page }) => {
   const puts = []
   const failed = []
+  let leave = NO_LEAVE
+  const leavePuts = []
+  let leaveDeletes = 0
   page.on('response', (r) => {
     if (r.url().includes('/api/') && r.status() >= 400) failed.push(`${r.request().method()} ${new URL(r.url()).pathname} -> ${r.status()}`)
   })
@@ -39,6 +54,28 @@ test('通知偏好：事件类型切换→回显→保存→静默校验', async
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
     if (method === 'GET' && path === '/developer/notifications/me') return route.fulfill({ json: success({ items: [], unread: 0 }) })
     if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success(MEMBERS) })
+    if (method === 'GET' && path === '/developer/notification-leave/me') {
+      return route.fulfill({ json: success(leave) })
+    }
+    if (method === 'PUT' && path === '/developer/notification-leave/me') {
+      const body = route.request().postDataJSON()
+      leavePuts.push(body)
+      const member = MEMBERS.find((item) => item.user_id === body.delegate_user_id)
+      leave = {
+        ...body,
+        delegate_name: member ? member.full_name : null,
+        timezone: 'Asia/Shanghai',
+        status: 'active',
+        days_left: 9,
+        updated_at: '2026-11-11T09:00:00',
+      }
+      return route.fulfill({ json: success(leave) })
+    }
+    if (method === 'DELETE' && path === '/developer/notification-leave/me') {
+      leaveDeletes += 1
+      leave = NO_LEAVE
+      return route.fulfill({ json: success(leave) })
+    }
     if (method === 'GET' && path === '/developer/notification-preferences/me') {
       return route.fulfill({ json: success([deadlinePref]) })
     }
@@ -56,6 +93,30 @@ test('通知偏好：事件类型切换→回显→保存→静默校验', async
 
   await page.goto('/settings/notifications')
   await expect(page.getByRole('heading', { name: '通知偏好' })).toBeVisible()
+
+  // 请假代理：默认未设置 → 设置 → 请假中 → 结束请假
+  const leavePill = page.locator('.leave-pill')
+  await expect(leavePill).toHaveText('未设置')
+  await expect(page.locator('.leave-summary')).toContainText('未设置请假代理')
+
+  await page.locator('.pref-field', { hasText: '请假代理' }).locator('select').selectOption('16')
+  await page.locator('.pref-field', { hasText: '请假开始' }).locator('input').fill('2026-11-10')
+  await page.locator('.pref-field', { hasText: '请假结束' }).locator('input').fill('2026-11-20')
+  await page.locator('.pref-field', { hasText: '备注' }).locator('input').fill('出差')
+  await page.getByRole('button', { name: '保存请假' }).click()
+
+  await expect(leavePill).toHaveText('请假中')
+  await expect(page.locator('.leave-summary')).toContainText(
+    '代 协办律师 接收 · 2026-11-10 至 2026-11-20 · 剩余 9 天',
+  )
+  expect(leavePuts).toEqual([
+    { delegate_user_id: 16, leave_start: '2026-11-10', leave_end: '2026-11-20', note: '出差' },
+  ])
+
+  await page.getByRole('button', { name: '结束请假' }).click()
+  await expect(leavePill).toHaveText('未设置')
+  expect(leaveDeletes).toBe(1)
+
   await expect(page.locator('.pref-nav-item', { hasText: '关键日期' })).toContainText('已配置')
 
   // 切换到关键日期 → 回显已有偏好（邮件未勾选、静默/时区）

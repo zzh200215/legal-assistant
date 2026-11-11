@@ -101,6 +101,12 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "去调整",
         "footnote": "到期后通知会自动恢复发送给你；如需延长，请在通知偏好中修改结束日期。",
     },
+    "leave_expiring_soon": {
+        "subject": "【律智检】{{title}}",
+        "lead": "你设置的请假代理即将到期，期间所有事件类型的通知都转给了代理。",
+        "action_label": "去调整",
+        "footnote": "到期后通知会自动恢复发送给你；如需延长请假，请在通知偏好中修改结束日期。",
+    },
     "review_consultation_uncited": {
         "subject": "【律智检】{{title}}",
         "lead": "有新的咨询进入审核队列，但该咨询没有关联法源引用。",
@@ -152,6 +158,7 @@ _ACTION_PATHS = {
     "draft": "/legal-workspace?view=review",
     "task": "/tasks",
     "notification_preference": "/settings/notifications",
+    "notification_leave": "/settings/notifications",
     "outbox_health": "/system?tab=delivery",
 }
 _DEFAULT_ACTION_PATH = "/notifications"
