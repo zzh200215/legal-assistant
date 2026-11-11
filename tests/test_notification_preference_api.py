@@ -128,6 +128,19 @@ class NotificationPreferenceApiTests(unittest.TestCase):
         self.assertIsNone(data["delegate_start"])
         self.assertIsNone(data["delegate_end"])
 
+    def test_clearing_delegate_also_clears_window(self):
+        self._put("deadline", {
+            "delegate_user_id": self.colleague.id,
+            "delegate_start": "2026-11-10",
+            "delegate_end": "2026-11-20",
+        })
+        response = self._put("deadline", {"delegate_user_id": None})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertIsNone(data["delegate_user_id"])
+        self.assertIsNone(data["delegate_start"])
+        self.assertIsNone(data["delegate_end"])
+
     def test_partial_update_keeps_other_fields(self):
         self._put("approval", {
             "channels_json": json.dumps(["site"]),

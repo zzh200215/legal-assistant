@@ -59,12 +59,21 @@ def scan_delegate_expiring(db: Session, *, now: datetime | None = None) -> dict:
         .all()
     )
     created = 0
+    cleared = 0
     for pref in prefs:
         if not pref.organization_id:
             continue
         today = moment.astimezone(_zone(pref)).date()
         days = (pref.delegate_end - today).days
-        if days < 0 or days > REMIND_DAYS:
+        if days < 0:
+            # 已过期：清空代理与有效期，避免设置残留；日期字段本身也一起清掉，
+            # 否则页面会显示「没有代理，却有一段有效期」。
+            pref.delegate_user_id = None
+            pref.delegate_start = None
+            pref.delegate_end = None
+            cleared += 1
+            continue
+        if days > REMIND_DAYS:
             continue
         title = f"通知代理将于 {pref.delegate_end:%Y-%m-%d} 到期"
         exists = (
@@ -100,4 +109,4 @@ def scan_delegate_expiring(db: Session, *, now: datetime | None = None) -> dict:
         created += 1
 
     db.commit()
-    return {"created": created, "scanned": len(prefs)}
+    return {"created": created, "scanned": len(prefs), "cleared": cleared}

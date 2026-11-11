@@ -94,7 +94,7 @@ class DelegateExpiryReminderTests(unittest.TestCase):
 
         result = scan_delegate_expiring(self.db, now=NOW)
 
-        self.assertEqual(result, {"created": 1, "scanned": 1})
+        self.assertEqual(result, {"created": 1, "scanned": 1, "cleared": 0})
         event = self._reminder()
         self.assertEqual(event.user_id, self.user.id)
         self.assertIsNone(event.on_behalf_of_user_id)
@@ -121,12 +121,58 @@ class DelegateExpiryReminderTests(unittest.TestCase):
         self.assertEqual(result["created"], 0)
         self.assertEqual(self._events(), [])
 
-    def test_does_not_remind_after_expiry(self):
-        self._pref(end=date(2026, 11, 9))
+    def test_expired_delegate_is_cleared(self):
+        pref = self._pref(end=date(2026, 11, 9))
 
         result = scan_delegate_expiring(self.db, now=NOW)
 
         self.assertEqual(result["created"], 0)
+        self.assertEqual(result["cleared"], 1)
+        self.db.refresh(pref)
+        self.assertIsNone(pref.delegate_user_id)
+        self.assertIsNone(pref.delegate_start)
+        self.assertIsNone(pref.delegate_end)
+
+    def test_cleanup_is_idempotent(self):
+        self._pref(end=date(2026, 11, 9))
+        scan_delegate_expiring(self.db, now=NOW)
+
+        second = scan_delegate_expiring(self.db, now=NOW)
+
+        self.assertEqual(second["cleared"], 0)
+        self.assertEqual(second["scanned"], 0)
+
+    def test_cleanup_uses_local_timezone(self):
+        """纽约还是 11-10，结束日 11-10 应提醒且不清理；UTC 已是 11-11。"""
+        pref = self._pref(end=date(2026, 11, 10), timezone_name="America/New_York")
+        now = datetime(2026, 11, 11, 2, 0, tzinfo=timezone.utc)
+
+        result = scan_delegate_expiring(self.db, now=now)
+
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["cleared"], 0)
+        self.db.refresh(pref)
+        self.assertIsNotNone(pref.delegate_user_id)
+        self.assertIn("今天", self._reminder().body)
+
+    def test_after_cleanup_notification_goes_to_original(self):
+        from app.services.notification.notification_service import notification_service
+
+        self._pref(end=date(2026, 11, 9))
+        scan_delegate_expiring(self.db, now=NOW)
+
+        events = notification_service.create_multi_channel_notification(
+            db=self.db,
+            organization_id=self.org.id,
+            user_id=self.user.id,
+            event_type="deadline",
+            title="清理后通知",
+            body="正文",
+            channels=["site"],
+        )
+
+        self.assertEqual({event.user_id for event in events}, {self.user.id})
+        self.assertTrue(all(event.on_behalf_of_user_id is None for event in events))
 
     def test_skips_without_delegate_or_end(self):
         self._pref(delegate=False)
@@ -140,7 +186,7 @@ class DelegateExpiryReminderTests(unittest.TestCase):
 
         result = scan_delegate_expiring(self.db, now=NOW)
 
-        self.assertEqual(result, {"created": 0, "scanned": 0})
+        self.assertEqual(result, {"created": 0, "scanned": 0, "cleared": 0})
         self.assertEqual(self._events(), [])
 
     def test_repeat_scan_does_not_duplicate(self):

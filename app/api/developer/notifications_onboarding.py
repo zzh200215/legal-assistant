@@ -133,6 +133,10 @@ def update_notification_preferences(
         pref.delegate_end = data["delegate_end"]
     if pref.delegate_start and pref.delegate_end and pref.delegate_start > pref.delegate_end:
         raise HTTPException(422, detail="代理开始日期不能晚于结束日期")
+    # 没有代理时有效期无意义：清掉，避免页面显示「无代理但有一段有效期」。
+    if not pref.delegate_user_id:
+        pref.delegate_start = None
+        pref.delegate_end = None
 
     if "summary_frequency" in data:
         frequency = data["summary_frequency"] or "none"
