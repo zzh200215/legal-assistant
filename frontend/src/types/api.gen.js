@@ -595,6 +595,8 @@
  * @property {string} version
  * @typedef {Object} NotificationPrefUpdate
  * @property {string | null}= channels_json
+ * @property {string | null}= delegate_end
+ * @property {string | null}= delegate_start
  * @property {number | null}= delegate_user_id
  * @property {string | null}= mute_end
  * @property {string | null}= mute_start

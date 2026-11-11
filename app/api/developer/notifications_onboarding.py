@@ -1,6 +1,7 @@
 """通知偏好 / 通知中心 / 组织 Onboarding 子路由。"""
 import json
 import re
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -30,6 +31,8 @@ class NotificationPrefUpdate(BaseModel):
     mute_end: Optional[str] = None
     timezone: Optional[str] = Field(None, max_length=64)
     delegate_user_id: Optional[int] = None
+    delegate_start: Optional[date] = None
+    delegate_end: Optional[date] = None
     summary_frequency: Optional[str] = None
 
 
@@ -123,6 +126,13 @@ def update_notification_preferences(
             if delegate is None or delegate.organization_id != current_user.organization_id:
                 raise HTTPException(422, detail="代理接收人必须是同组织成员")
         pref.delegate_user_id = delegate_id
+
+    if "delegate_start" in data:
+        pref.delegate_start = data["delegate_start"]
+    if "delegate_end" in data:
+        pref.delegate_end = data["delegate_end"]
+    if pref.delegate_start and pref.delegate_end and pref.delegate_start > pref.delegate_end:
+        raise HTTPException(422, detail="代理开始日期不能晚于结束日期")
 
     if "summary_frequency" in data:
         frequency = data["summary_frequency"] or "none"

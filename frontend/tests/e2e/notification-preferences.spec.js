@@ -17,6 +17,8 @@ const deadlinePref = {
   mute_end: '07:00',
   timezone: 'Asia/Tokyo',
   delegate_user_id: 16,
+  delegate_start: '2026-11-10',
+  delegate_end: '2026-11-20',
   summary_frequency: 'daily',
 }
 
@@ -64,11 +66,14 @@ test('通知偏好：事件类型切换→回显→保存→静默校验', async
   await expect(page.locator('.pref-field', { hasText: '静默结束' }).locator('input')).toHaveValue('07:00')
   await expect(page.locator('.pref-field', { hasText: '时区' }).locator('select')).toHaveValue('Asia/Tokyo')
   await expect(page.locator('.pref-field', { hasText: '代理接收人' }).locator('select')).toHaveValue('16')
+  await expect(page.locator('.pref-field', { hasText: '代理开始' }).locator('input')).toHaveValue('2026-11-10')
+  await expect(page.locator('.pref-field', { hasText: '代理结束' }).locator('input')).toHaveValue('2026-11-20')
 
-  // 修改并保存（代理改为 15）
+  // 修改并保存（代理改为 15，结束日期延长一天）
   await emailCheck.check()
   await page.locator('.pref-field', { hasText: '静默结束' }).locator('input').fill('06:30')
   await page.locator('.pref-field', { hasText: '代理接收人' }).locator('select').selectOption('15')
+  await page.locator('.pref-field', { hasText: '代理结束' }).locator('input').fill('2026-11-21')
   await page.getByRole('button', { name: '保存偏好' }).click()
 
   await expect(page.locator('.pref-saved')).toHaveText('已保存')
@@ -81,6 +86,8 @@ test('通知偏好：事件类型切换→回显→保存→静默校验', async
     mute_end: '06:30',
     timezone: 'Asia/Tokyo',
     delegate_user_id: 15,
+    delegate_start: '2026-11-10',
+    delegate_end: '2026-11-21',
     summary_frequency: 'daily',
   })
 

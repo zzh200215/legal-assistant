@@ -1,7 +1,7 @@
 """代理接收人：通知改发代理、原收件人入审计字段、失败回退、强提醒穿透。"""
 
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -62,13 +62,16 @@ class NotificationDelegationTests(unittest.TestCase):
         return user
 
     def _pref(self, user, *, delegate=None, channels='["site","email"]',
-              mute_start=None, mute_end=None, timezone_name="Asia/Shanghai"):
+              mute_start=None, mute_end=None, timezone_name="Asia/Shanghai",
+              delegate_start=None, delegate_end=None):
         row = LegalNotificationPreference(
             user_id=user.id,
             organization_id=user.organization_id,
             event_type="deadline",
             channels_json=channels,
             delegate_user_id=delegate.id if delegate else None,
+            delegate_start=delegate_start,
+            delegate_end=delegate_end,
             mute_start=mute_start,
             mute_end=mute_end,
             timezone=timezone_name,
@@ -235,6 +238,81 @@ class NotificationDelegationTests(unittest.TestCase):
         self.assertEqual(escalation.user_id, self.alice.id)
         self.assertIsNone(escalation.on_behalf_of_user_id)
         self.assertFalse(any(event.user_id == self.bob.id for event in self._events(self.bob)))
+
+    def _assert_delegated(self, events):
+        self.assertEqual({event.user_id for event in events}, {self.bob.id})
+        self.assertEqual({event.on_behalf_of_user_id for event in events}, {self.alice.id})
+
+    def _assert_original(self, events):
+        self.assertEqual({event.user_id for event in events}, {self.alice.id})
+        self.assertTrue(all(event.on_behalf_of_user_id is None for event in events))
+
+    def test_delegate_window_includes_today(self):
+        self._pref(
+            self.alice, delegate=self.bob,
+            delegate_start=date(2026, 11, 9), delegate_end=date(2026, 11, 11),
+        )
+
+        with patch(SERVICE_NOW, return_value=NOW):
+            events = self._create(self.alice)
+
+        self._assert_delegated(events)
+
+    def test_delegate_not_active_before_start(self):
+        self._pref(self.alice, delegate=self.bob, delegate_start=date(2026, 11, 12))
+
+        with patch(SERVICE_NOW, return_value=NOW):
+            events = self._create(self.alice)
+
+        self._assert_original(events)
+
+    def test_delegate_expired_after_end(self):
+        self._pref(self.alice, delegate=self.bob, delegate_end=date(2026, 11, 9))
+
+        with patch(SERVICE_NOW, return_value=NOW):
+            events = self._create(self.alice)
+
+        self._assert_original(events)
+
+    def test_delegate_start_only_is_active_from_that_day(self):
+        self._pref(self.alice, delegate=self.bob, delegate_start=date(2026, 11, 10))
+
+        with patch(SERVICE_NOW, return_value=NOW):
+            events = self._create(self.alice)
+
+        self._assert_delegated(events)
+
+    def test_delegate_end_only_is_active_through_that_day(self):
+        self._pref(self.alice, delegate=self.bob, delegate_end=date(2026, 11, 10))
+
+        with patch(SERVICE_NOW, return_value=NOW):
+            events = self._create(self.alice)
+
+        self._assert_delegated(events)
+
+    def test_delegate_single_day_window(self):
+        self._pref(
+            self.alice, delegate=self.bob,
+            delegate_start=date(2026, 11, 10), delegate_end=date(2026, 11, 10),
+        )
+
+        with patch(SERVICE_NOW, return_value=NOW):
+            events = self._create(self.alice)
+
+        self._assert_delegated(events)
+
+    def test_delegate_window_uses_preference_timezone_date(self):
+        """UTC 已是 11-11，但纽约还是 11-10；开始日期 11-11 尚未生效。"""
+        self._pref(
+            self.alice, delegate=self.bob,
+            timezone_name="America/New_York", delegate_start=date(2026, 11, 11),
+        )
+        ny_late = datetime(2026, 11, 11, 2, 0, tzinfo=timezone.utc)
+
+        with patch(SERVICE_NOW, return_value=ny_late):
+            events = self._create(self.alice)
+
+        self._assert_original(events)
 
 
 if __name__ == "__main__":

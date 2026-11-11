@@ -87,6 +87,18 @@
             </label>
             <p class="pref-hint">设置后该事件的通知改发代理，正文标注「代 X 接收」；代理只跳一层，逾期升级等强提醒仍直达本人。</p>
 
+            <div class="pref-grid">
+              <label class="pref-field">
+                <span>代理开始</span>
+                <input v-model="form.delegate_start" type="date" />
+              </label>
+              <label class="pref-field">
+                <span>代理结束</span>
+                <input v-model="form.delegate_end" type="date" />
+              </label>
+            </div>
+            <p class="pref-hint">留空表示长期有效；起止日期都含当天，按上方时区的当地日期计算。</p>
+
             <div class="pref-actions">
               <button class="pref-primary" type="submit" :disabled="saving">
                 {{ saving ? '保存中…' : '保存偏好' }}

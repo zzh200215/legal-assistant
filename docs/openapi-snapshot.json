@@ -30786,6 +30786,30 @@
             ],
             "title": "Delegate User Id"
           },
+          "delegate_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delegate Start"
+          },
+          "delegate_end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delegate End"
+          },
           "summary_frequency": {
             "anyOf": [
               {

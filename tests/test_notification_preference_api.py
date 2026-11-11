@@ -93,6 +93,8 @@ class NotificationPreferenceApiTests(unittest.TestCase):
             "mute_end": "07:30",
             "timezone": "Asia/Tokyo",
             "delegate_user_id": self.colleague.id,
+            "delegate_start": "2026-11-10",
+            "delegate_end": "2026-11-20",
             "summary_frequency": "daily",
         })
         self.assertEqual(response.status_code, 200, response.text)
@@ -103,11 +105,28 @@ class NotificationPreferenceApiTests(unittest.TestCase):
         self.assertEqual(data["mute_start"], "22:00")
         self.assertEqual(data["timezone"], "Asia/Tokyo")
         self.assertEqual(data["delegate_user_id"], self.colleague.id)
+        self.assertEqual(data["delegate_start"], "2026-11-10")
+        self.assertEqual(data["delegate_end"], "2026-11-20")
         self.assertEqual(data["summary_frequency"], "daily")
 
         listed = self.client.get(BASE, headers=self.headers).json()["data"]
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["event_type"], "deadline")
+
+    def test_delegate_window_rejects_reversed_dates_and_can_clear(self):
+        self._put("deadline", {
+            "delegate_user_id": self.colleague.id,
+            "delegate_start": "2026-11-10",
+            "delegate_end": "2026-11-20",
+        })
+        bad = self._put("deadline", {"delegate_start": "2026-11-21"})
+        self.assertEqual(bad.status_code, 422)
+
+        cleared = self._put("deadline", {"delegate_start": None, "delegate_end": None})
+        self.assertEqual(cleared.status_code, 200)
+        data = cleared.json()["data"]
+        self.assertIsNone(data["delegate_start"])
+        self.assertIsNone(data["delegate_end"])
 
     def test_partial_update_keeps_other_fields(self):
         self._put("approval", {

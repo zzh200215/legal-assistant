@@ -1,7 +1,7 @@
 """Phase 14 — 安全审计 / 通知偏好 / 引导进度 / 通知模板与投递可靠性"""
 
 from sqlalchemy import (
-    Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func,
+    Column, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func,
 )
 
 from app.core.database import Base
@@ -65,6 +65,8 @@ class LegalNotificationPreference(Base):
     mute_end = Column(String(5), nullable=True, comment="静默结束时间 HH:MM")
     timezone = Column(String(64), nullable=False, default="Asia/Shanghai")
     delegate_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="代理接收人")
+    delegate_start = Column(Date, nullable=True, comment="代理生效开始日期（本地日期，含当天）")
+    delegate_end = Column(Date, nullable=True, comment="代理生效结束日期（本地日期，含当天）")
     summary_frequency = Column(String(16), nullable=True,
                                comment="none / daily / weekly，低优先级汇总发送频率")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

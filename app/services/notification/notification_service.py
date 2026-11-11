@@ -349,12 +349,14 @@ class NotificationService:
 
     def _effective_recipient(self, *, db: Session, user_id: int, organization_id: int,
                              event_type: str) -> tuple[int, int | None]:
-        """解析代理接收人；无效/停用/跨组织/指向自己时回退原收件人。"""
+        """解析代理接收人；无效/停用/跨组织/指向自己/不在有效期时回退原收件人。"""
         pref = self._get_preference(
             db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
         )
         delegate_id = getattr(pref, "delegate_user_id", None) if pref else None
         if not delegate_id or delegate_id == user_id:
+            return user_id, None
+        if not self._delegate_window_active(pref):
             return user_id, None
         delegate = db.get(User, delegate_id)
         if (
@@ -364,6 +366,27 @@ class NotificationService:
         ):
             return user_id, None
         return delegate.id, user_id
+
+    @staticmethod
+    def _delegate_window_active(pref: LegalNotificationPreference, *,
+                                now: datetime | None = None) -> bool:
+        """代理有效期按偏好时区的「当地日期」判断，起止日期都含当天。"""
+        start = getattr(pref, "delegate_start", None)
+        end = getattr(pref, "delegate_end", None)
+        if not start and not end:
+            return True
+        try:
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(pref.timezone or "Asia/Shanghai")
+        except Exception:  # noqa: BLE001 - 时区非法按 UTC 解释，不阻塞通知
+            tz = timezone.utc
+        today = (now or utc_now()).astimezone(tz).date()
+        if start and today < start:
+            return False
+        if end and today > end:
+            return False
+        return True
 
     @staticmethod
     def _display_name(db: Session, user_id: int) -> str:

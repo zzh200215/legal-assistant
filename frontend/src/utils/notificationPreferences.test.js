@@ -30,6 +30,8 @@ test('toPreferenceForm：已有偏好只开站内时 email=false，扩展渠道�
     mute_end: '07:00',
     timezone: 'Asia/Tokyo',
     delegate_user_id: 7,
+    delegate_start: '2026-11-10',
+    delegate_end: '2026-11-20',
     summary_frequency: 'daily',
   })
   assert.equal(form.email, false)
@@ -37,6 +39,8 @@ test('toPreferenceForm：已有偏好只开站内时 email=false，扩展渠道�
   assert.equal(form.mute_start, '22:00')
   assert.equal(form.timezone, 'Asia/Tokyo')
   assert.equal(form.delegate_user_id, 7)
+  assert.equal(form.delegate_start, '2026-11-10')
+  assert.equal(form.delegate_end, '2026-11-20')
   assert.equal(form.summary_frequency, 'daily')
 })
 
@@ -65,11 +69,24 @@ test('buildPreferencePayload：邮件开关与扩展渠道去重', () => {
     mute_end: '07:00',
     timezone: 'Asia/Shanghai',
     delegate_user_id: 3,
+    delegate_start: '2026-11-10',
+    delegate_end: '2026-11-20',
     summary_frequency: 'none',
   })
   assert.deepEqual(JSON.parse(payload.channels_json), ['site', 'email', 'wechat'])
   assert.equal(payload.mute_start, '22:00')
   assert.equal(payload.delegate_user_id, 3)
+  assert.equal(payload.delegate_start, '2026-11-10')
+  assert.equal(payload.delegate_end, '2026-11-20')
+})
+
+test('validatePreferenceForm：代理开始日期不能晚于结束日期', () => {
+  const base = { mute_start: '', mute_end: '', timezone: 'Asia/Shanghai' }
+  assert.equal(validatePreferenceForm({ ...base, delegate_start: '2026-11-10', delegate_end: '2026-11-20' }), '')
+  assert.match(
+    validatePreferenceForm({ ...base, delegate_start: '2026-11-21', delegate_end: '2026-11-20' }),
+    /不能晚于/,
+  )
 })
 
 test('validatePreferenceForm：静默必须成对、不能相同、时区必填', () => {

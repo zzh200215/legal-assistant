@@ -51,6 +51,8 @@ export function toPreferenceForm(pref) {
     mute_end: pref?.mute_end || '',
     timezone: pref?.timezone || 'Asia/Shanghai',
     delegate_user_id: pref?.delegate_user_id ?? null,
+    delegate_start: pref?.delegate_start || '',
+    delegate_end: pref?.delegate_end || '',
     summary_frequency: pref?.summary_frequency || 'none',
   }
 }
@@ -66,6 +68,8 @@ export function buildPreferencePayload(form) {
     mute_end: form.mute_end || null,
     timezone: form.timezone,
     delegate_user_id: form.delegate_user_id ?? null,
+    delegate_start: form.delegate_start || null,
+    delegate_end: form.delegate_end || null,
     summary_frequency: form.summary_frequency || 'none',
   }
 }
@@ -75,6 +79,11 @@ export function validatePreferenceForm(form) {
   const end = form.mute_end || ''
   if (Boolean(start) !== Boolean(end)) return '请同时填写静默开始和结束时间'
   if (start && start === end) return '静默开始和结束不能相同'
+  const delegateStart = form.delegate_start || ''
+  const delegateEnd = form.delegate_end || ''
+  if (delegateStart && delegateEnd && delegateStart > delegateEnd) {
+    return '代理开始日期不能晚于结束日期'
+  }
   if (!form.timezone) return '请选择时区'
   return ''
 }
