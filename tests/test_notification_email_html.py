@@ -56,14 +56,14 @@ def _engine():
 
 
 class BuiltinEmailTemplateTests(unittest.TestCase):
-    """内置模板注册表：18 个业务键、转义、深链可选。"""
+    """内置模板注册表：19 个业务键、转义、深链可选。"""
 
     EXPECTED_KEYS = {
         "review_sla_due_soon", "review_sla_overdue",
         "task_due_tomorrow", "task_due_today", "task_overdue_1d", "task_overdue_3d",
         "task_collaborator_due_tomorrow", "task_collaborator_due_today",
         "task_collaborator_overdue_1d", "task_collaborator_overdue_3d",
-        "task_owner_escalation_overdue_3d",
+        "task_owner_escalation_overdue_3d", "delegate_expiring_soon",
         "review_consultation_uncited", "review_consultation_weak",
         "consultation_returned_supplement", "consultation_returned",
         "consultation_supplemented", "outbox_health_alert", "outbox_health_escalation",
@@ -107,6 +107,8 @@ class BuiltinEmailTemplateTests(unittest.TestCase):
             self.assertEqual(action_url("task"), "https://legal.example.com/tasks")
             self.assertEqual(action_url("task", 42),
                              "https://legal.example.com/tasks?taskId=42")
+            self.assertEqual(action_url("notification_preference"),
+                             "https://legal.example.com/settings/notifications")
             self.assertEqual(action_url(None), "https://legal.example.com/notifications")
             rendered = render_builtin_email(
                 "consultation_returned_supplement",

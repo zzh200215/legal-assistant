@@ -95,6 +95,12 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "去查看",
         "footnote": "升级提醒每个任务只发一次；任务完成或归档后不再发送。",
     },
+    "delegate_expiring_soon": {
+        "subject": "【律智检】{{title}}",
+        "lead": "你设置的通知代理即将到期。",
+        "action_label": "去调整",
+        "footnote": "到期后通知会自动恢复发送给你；如需延长，请在通知偏好中修改结束日期。",
+    },
     "review_consultation_uncited": {
         "subject": "【律智检】{{title}}",
         "lead": "有新的咨询进入审核队列，但该咨询没有关联法源引用。",
@@ -145,6 +151,7 @@ _ACTION_PATHS = {
     "contract_review": "/legal-workspace?view=review",
     "draft": "/legal-workspace?view=review",
     "task": "/tasks",
+    "notification_preference": "/settings/notifications",
     "outbox_health": "/system?tab=delivery",
 }
 _DEFAULT_ACTION_PATH = "/notifications"

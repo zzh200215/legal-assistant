@@ -89,6 +89,10 @@ celery_app.conf.update(
             "task": "check_task_due_reminders",
             "schedule": 900.0,  # 每15分钟
         },
+        "check-delegate-expiring": {
+            "task": "check_delegate_expiring",
+            "schedule": crontab(minute=10, hour=9),  # 每天 09:10 扫描代理到期
+        },
         "prune-legal-consultation-exports": {
             "task": "prune_legal_consultation_exports",
             "schedule": crontab(minute=23, hour=3),  # 每天 03:23 清理导出记录
