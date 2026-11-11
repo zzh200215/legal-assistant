@@ -33,6 +33,14 @@
               <option v-for="item in eventTypes" :key="item.value" :value="item.value">{{ item.label }}</option>
             </select>
           </label>
+          <label>
+            <span>来源</span>
+            <select v-model="filters.delegated" @change="resetAndLoad">
+              <option value="">全部来源</option>
+              <option value="own">本人</option>
+              <option value="delegated">代收</option>
+            </select>
+          </label>
           <label class="case-filter">
             <span>案件编号</span>
             <input v-model="filters.case_id" inputmode="numeric" placeholder="可选" @keyup.enter="resetAndLoad">
@@ -47,6 +55,9 @@
                 <span class="notification-row-heading">
                   <strong>{{ item.title }}</strong>
                   <span>{{ eventLabel(item.event_type) }}</span>
+                  <span v-if="item.on_behalf_of_user_id" class="notification-delegated">
+                    代 {{ item.on_behalf_of_name || '同事' }} 接收
+                  </span>
                 </span>
                 <span v-if="item.body" class="notification-body">{{ item.body }}</span>
                 <span class="notification-meta">
@@ -91,7 +102,7 @@ const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
 const loadError = ref(null)
-const filters = reactive({ status: 'all', event_type: '', case_id: '' })
+const filters = reactive({ status: 'all', event_type: '', case_id: '', delegated: '' })
 const eventTypes = [
   { value: 'workflow', label: '案件工作流' },
   { value: 'deadline', label: '关键日期' },
@@ -121,6 +132,7 @@ const load = async () => {
       status: filters.status,
       event_type: filters.event_type || undefined,
       case_id: filters.case_id ? Number(filters.case_id) : undefined,
+      delegated: filters.delegated ? filters.delegated === 'delegated' : undefined,
       page: page.value,
       page_size: pageSize,
     }
@@ -261,6 +273,7 @@ onMounted(load)
 .notification-row-heading { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
 .notification-row-heading strong { overflow: hidden; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .notification-row-heading span { flex: 0 0 auto; color: var(--color-text-muted); font-size: var(--text-xs); }
+.notification-row-heading .notification-delegated { padding: 1px 6px; border-radius: 999px; background: var(--color-primary-subtle); color: var(--color-primary); }
 .notification-body, .notification-meta { overflow: hidden; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .notification-meta { color: var(--color-text-muted); font-size: var(--text-xs); }
 .notification-read { padding: 4px 0; white-space: nowrap; }

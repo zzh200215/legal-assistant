@@ -238,12 +238,13 @@ def get_my_notifications(
     status: str | None = Query(default=None, description="all / unread / read"),
     event_type: str | None = Query(default=None, max_length=64),
     case_id: int | None = Query(default=None, ge=1),
+    delegated: bool | None = Query(default=None, description="true=只看代收，false=只看本人"),
     page: int = Query(default=1, ge=1, le=10000),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """当前用户站内通知，支持状态、案件、类型筛选和分页。"""
+    """当前用户站内通知，支持状态、案件、类型、代收筛选和分页。"""
     from app.services.notification.notification_service import notification_service
     if status == "unread":
         status_filter = "unread"
@@ -256,14 +257,33 @@ def get_my_notifications(
     offset = (page - 1) * page_size
     events = notification_service.get_user_notifications(
         db=db, user_id=current_user.id, status=status_filter,
-        event_type=event_type, case_id=case_id, limit=page_size, offset=offset,
+        event_type=event_type, case_id=case_id, delegated=delegated,
+        limit=page_size, offset=offset,
     )
     total = notification_service.count_user_notifications(
         db=db, user_id=current_user.id,
         status=status_filter,
-        event_type=event_type, case_id=case_id,
+        event_type=event_type, case_id=case_id, delegated=delegated,
     )
     items = [notification_service.serialize_event(e) for e in events if e.status != "failed"]
+    delegate_ids = {
+        item["on_behalf_of_user_id"]
+        for item in items
+        if item.get("on_behalf_of_user_id")
+    }
+    names: dict[int, str] = {}
+    if delegate_ids:
+        rows = (
+            db.query(User.id, User.full_name, User.username)
+            .filter(User.id.in_(delegate_ids))
+            .all()
+        )
+        names = {
+            user_id: (full_name or username or f"用户 {user_id}")
+            for user_id, full_name, username in rows
+        }
+    for item in items:
+        item["on_behalf_of_name"] = names.get(item.get("on_behalf_of_user_id"))
     unread = notification_service.get_unread_count(db=db, user_id=current_user.id)
     return {"items": items, "unread": unread, "total": total, "page": page, "page_size": page_size}
 

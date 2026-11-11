@@ -25573,7 +25573,7 @@
           "Developer Platform"
         ],
         "summary": "Get My Notifications",
-        "description": "当前用户站内通知，支持状态、案件、类型筛选和分页。",
+        "description": "当前用户站内通知，支持状态、案件、类型、代收筛选和分页。",
         "operationId": "get_my_notifications_api_developer_notifications_me_get",
         "security": [
           {
@@ -25632,6 +25632,24 @@
               ],
               "title": "Case Id"
             }
+          },
+          {
+            "name": "delegated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true=只看代收，false=只看本人",
+              "title": "Delegated"
+            },
+            "description": "true=只看代收，false=只看本人"
           },
           {
             "name": "page",

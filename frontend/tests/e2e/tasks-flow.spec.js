@@ -1167,6 +1167,7 @@ test('任务优先级筛选：选择高优先级并写回 URL/请求', async ({ 
 
 test('通知中心任务提醒：点击直达任务详情', async ({ page }) => {
   const requests = []
+  const delegatedQueries = []
   await page.addInitScript(() => localStorage.setItem('token', 'tasks-e2e-token'))
   const reminder = {
     id: 1,
@@ -1179,6 +1180,15 @@ test('通知中心任务提醒：点击直达任务详情', async ({ page }) => 
     status: 'delivered',
     created_at: '2026-12-30T10:00:00',
   }
+  const delegated = {
+    ...reminder,
+    id: 2,
+    title: '代收提醒：合同审查任务',
+    body: '代 主办律师 接收',
+    reference_id: 101,
+    on_behalf_of_user_id: 15,
+    on_behalf_of_name: '主办律师',
+  }
 
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
@@ -1190,7 +1200,10 @@ test('通知中心任务提醒：点击直达任务详情', async ({ page }) => 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
     if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([]) })
     if (method === 'GET' && path === '/developer/notifications/me') {
-      return route.fulfill({ json: success({ items: [reminder], unread: 1, total: 1 }) })
+      const delegatedParam = url.searchParams.get('delegated')
+      delegatedQueries.push(delegatedParam)
+      const items = delegatedParam === 'true' ? [delegated] : delegatedParam === 'false' ? [reminder] : [reminder, delegated]
+      return route.fulfill({ json: success({ items, unread: 1, total: items.length }) })
     }
     if (method === 'POST' && path === '/developer/notifications/1/read') {
       return route.fulfill({ json: success({ ...reminder, status: 'read' }) })
@@ -1210,7 +1223,25 @@ test('通知中心任务提醒：点击直达任务详情', async ({ page }) => 
 
   await page.goto('/notifications')
   await expect(page.getByText('协作者提醒 · 任务今天到期：起草合同初稿')).toBeVisible()
-  await page.locator('.notification-main').first().click()
+  await expect(page.getByText('代收提醒：合同审查任务')).toBeVisible()
+  await expect(page.locator('.notification-delegated')).toContainText('代 主办律师 接收')
+
+  // 来源筛选：代收 / 本人 / 全部，服务端参数下推
+  const sourceSelect = page.locator('label', { hasText: '来源' }).locator('select')
+  await sourceSelect.selectOption('delegated')
+  await expect.poll(() => delegatedQueries.at(-1)).toBe('true')
+  await expect(page.getByText('代收提醒：合同审查任务')).toBeVisible()
+  await expect(page.getByText('协作者提醒 · 任务今天到期：起草合同初稿')).toHaveCount(0)
+
+  await sourceSelect.selectOption('own')
+  await expect.poll(() => delegatedQueries.at(-1)).toBe('false')
+  await expect(page.getByText('协作者提醒 · 任务今天到期：起草合同初稿')).toBeVisible()
+
+  await sourceSelect.selectOption('')
+  await expect.poll(() => delegatedQueries.at(-1)).toBe(null)
+  await expect(page.getByText('代收提醒：合同审查任务')).toBeVisible()
+
+  await page.locator('.notification-main', { hasText: '协作者提醒 · 任务今天到期' }).click()
 
   await expect(page).toHaveURL(/\/tasks\?taskId=101/)
   await expect(page.locator('.el-dialog:visible').getByText('起草合同初稿').first()).toBeVisible()

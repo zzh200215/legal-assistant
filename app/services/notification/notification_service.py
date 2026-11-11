@@ -954,9 +954,10 @@ class NotificationService:
                                status: str | None = None,
                                event_type: str | None = None,
                                case_id: int | None = None,
+                               delegated: bool | None = None,
                                limit: int = 50,
                                offset: int = 0) -> list[LegalNotificationEvent]:
-        """获取用户的站内通知列表。"""
+        """获取用户的站内通知列表；delegated 控制只看代收/只看本人。"""
         query = db.query(LegalNotificationEvent).filter(
             LegalNotificationEvent.user_id == user_id,
             LegalNotificationEvent.channel == CHANNEL_SITE,
@@ -969,6 +970,10 @@ class NotificationService:
             query = query.filter(LegalNotificationEvent.event_type == event_type)
         if case_id is not None:
             query = query.filter(LegalNotificationEvent.case_id == case_id)
+        if delegated is True:
+            query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.isnot(None))
+        elif delegated is False:
+            query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.is_(None))
         return query.order_by(
             LegalNotificationEvent.created_at.desc()
         ).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
@@ -976,7 +981,8 @@ class NotificationService:
     def count_user_notifications(self, *, db: Session, user_id: int,
                                  status: str | None = None,
                                  event_type: str | None = None,
-                                 case_id: int | None = None) -> int:
+                                 case_id: int | None = None,
+                                 delegated: bool | None = None) -> int:
         """Count visible site notifications using the same filters as the list."""
         query = db.query(LegalNotificationEvent.id).filter(
             LegalNotificationEvent.user_id == user_id,
@@ -991,6 +997,10 @@ class NotificationService:
             query = query.filter(LegalNotificationEvent.event_type == event_type)
         if case_id is not None:
             query = query.filter(LegalNotificationEvent.case_id == case_id)
+        if delegated is True:
+            query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.isnot(None))
+        elif delegated is False:
+            query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.is_(None))
         return query.count()
 
     def mark_as_read(self, *, db: Session, event_id: int, user_id: int) -> LegalNotificationEvent:

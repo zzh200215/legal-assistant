@@ -28,6 +28,9 @@
           >
             <div class="bell-item-title">{{ n.title }}</div>
             <div v-if="n.body" class="bell-item-body">{{ n.body }}</div>
+            <div v-if="n.on_behalf_of_user_id" class="bell-item-delegated">
+              代 {{ n.on_behalf_of_name || '同事' }} 接收
+            </div>
             <div class="bell-item-time">{{ formatTime(n.created_at) }}</div>
             <div v-if="canRequestEvidence(n) || canGoSupplement(n)" class="bell-item-actions">
               <button v-if="canRequestEvidence(n)" type="button" class="bell-item-action" :disabled="returning[n.id]" @click.stop="requestEvidence(n)">
@@ -388,6 +391,16 @@ onUnmounted(() => {
   margin-top: 3px;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+.bell-item-delegated {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+  font-size: var(--text-xs);
 }
 
 .bell-header-actions { display: flex; align-items: center; gap: 10px; }
