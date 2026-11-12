@@ -80,9 +80,11 @@ ALL_CHANNELS = (CHANNEL_SITE, CHANNEL_EMAIL, CHANNEL_WECHAT, CHANNEL_FEISHU)
 # 事件类型
 EVENT_TYPES = ("deadline", "approval", "invoice", "sign", "portal", "workflow", "all")
 
-# 请假代理通知：代理开始代收 / 请假结束交还
+# 请假代理通知：代理开始代收 / 请假结束交还；给请假人的生效 / 恢复回执
 LEAVE_STARTED_TEMPLATE = "leave_agent_started"
 LEAVE_ENDED_TEMPLATE = "leave_agent_ended"
+LEAVE_OWNER_STARTED_TEMPLATE = "leave_owner_started"
+LEAVE_OWNER_RESUMED_TEMPLATE = "leave_owner_resumed"
 LEAVE_NOTICE_REFERENCE = "notification_leave"
 
 # ── 通知状态机（LegalNotificationEvent 作为通知 Outbox）────────────────────────
@@ -1042,9 +1044,10 @@ class NotificationService:
                   actor_id: int | None = None) -> LegalNotificationLeave:
         """设置/更新请假代理；没有代理时有效期与备注一起清空（等价结束请假）。
 
-        代理变化时同步通知代理本人：旧代理收到「已交还」，新代理在请假已生效时
-        立即收到「开始代收」，尚未生效的由每日任务在生效当天补发；两类通知都按
-        请假轮次去重，重复保存同一段请假不会重复通知。
+        代理变化时同步通知：旧代理收到「已交还」，新代理在请假已生效时立即收到
+        「开始代收」，尚未生效的由每日任务在生效当天补发；请假人同时收到「已生效」
+        回执，结束或到期时收到「已恢复」回执。所有通知都按请假轮次去重，重复保存
+        同一段请假不会重复通知。
         """
         leave = self.get_leave(db=db, user_id=user_id, organization_id=organization_id)
         if leave is None:
@@ -1065,6 +1068,7 @@ class NotificationService:
         else:
             if previous_delegate:
                 self.notify_leave_ended(db=db, leave=leave)
+                self.notify_leave_owner_resumed(db=db, leave=leave)
             leave.delegate_user_id = None
             leave.leave_start = None
             leave.leave_end = None
@@ -1082,6 +1086,7 @@ class NotificationService:
         )
         if leave.delegate_user_id:
             self.notify_leave_started(db=db, leave=leave)
+            self.notify_leave_owner_started(db=db, leave=leave)
         return leave
 
     def clear_leave(self, *, db: Session, user_id: int, organization_id: int,
@@ -1175,6 +1180,83 @@ class NotificationService:
         )
         return True
 
+    def notify_leave_owner_started(self, *, db: Session, leave: LegalNotificationLeave,
+                                   now: datetime | None = None) -> bool:
+        """请假生效时给请假人一条「已转给 X」回执；返回是否新建（幂等）。
+
+        回执必须直达本人（``allow_delegate=False``），否则会被刚设置的代理转走，
+        请假人永远看不到「通知已经转给谁」。代理无效（停用/跨组织）时不发。
+        """
+        if self._leave_notice_target(db=db, leave=leave) is None:
+            return False
+        if not self._leave_window_active(
+            leave,
+            timezone_name=self.user_timezone(
+                db=db, user_id=leave.user_id, organization_id=leave.organization_id),
+            now=now,
+        ):
+            return False
+        if self._leave_notice_exists(
+            db=db, leave=leave, delegate_id=leave.user_id,
+            template_key=LEAVE_OWNER_STARTED_TEMPLATE,
+        ):
+            return False
+        delegate_name = self._display_name(db, leave.delegate_user_id)
+        self.create_multi_channel_notification(
+            db=db,
+            organization_id=leave.organization_id,
+            user_id=leave.user_id,
+            event_type="deadline",
+            title=f"请假已生效：通知转给 {delegate_name}",
+            body=(
+                f"你的请假已生效（{self._leave_range_text(leave)}），期间所有事件类型的"
+                f"通知都会转给 {delegate_name}；结束请假或到期后自动恢复给你。"
+            ),
+            channels=[CHANNEL_SITE, CHANNEL_EMAIL],
+            reference_type=LEAVE_NOTICE_REFERENCE,
+            reference_id=leave.id,
+            business_version=leave.leave_period or 0,
+            template_key=LEAVE_OWNER_STARTED_TEMPLATE,
+            allow_delegate=False,
+        )
+        return True
+
+    def notify_leave_owner_resumed(self, *, db: Session,
+                                   leave: LegalNotificationLeave) -> bool:
+        """请假结束/到期时给请假人一条「已恢复」回执；返回是否新建（幂等）。
+
+        只有请假真正开始过（本人收到过生效回执）才发：取消一段还没开始的请假，
+        「已恢复给你」没有意义。换代理属于交接，不发恢复回执。
+        """
+        if not leave.organization_id or not leave.delegate_user_id:
+            return False
+        if not self._leave_notice_exists(
+            db=db, leave=leave, delegate_id=leave.user_id,
+            template_key=LEAVE_OWNER_STARTED_TEMPLATE,
+        ):
+            return False
+        if self._leave_notice_exists(
+            db=db, leave=leave, delegate_id=leave.user_id,
+            template_key=LEAVE_OWNER_RESUMED_TEMPLATE,
+        ):
+            return False
+        delegate_name = self._display_name(db, leave.delegate_user_id)
+        self.create_multi_channel_notification(
+            db=db,
+            organization_id=leave.organization_id,
+            user_id=leave.user_id,
+            event_type="deadline",
+            title="通知已恢复：请假结束",
+            body=f"你的请假已结束，{delegate_name} 不再代收，之后的通知都会发给你本人。",
+            channels=[CHANNEL_SITE, CHANNEL_EMAIL],
+            reference_type=LEAVE_NOTICE_REFERENCE,
+            reference_id=leave.id,
+            business_version=leave.leave_period or 0,
+            template_key=LEAVE_OWNER_RESUMED_TEMPLATE,
+            allow_delegate=False,
+        )
+        return True
+
     def _leave_notice_target(self, *, db: Session,
                              leave: LegalNotificationLeave) -> User | None:
         """通知接收人：请假代理本人；停用/跨组织/未设置时返回 None。"""
@@ -1212,6 +1294,19 @@ class NotificationService:
         if end:
             return f"请假至 {end:%Y-%m-%d}"
         return "请假中"
+
+    @staticmethod
+    def _leave_range_text(leave: LegalNotificationLeave) -> str:
+        """请假区间（不含「请假」字样），用于给请假人本人的回执正文。"""
+        start = getattr(leave, "leave_start", None)
+        end = getattr(leave, "leave_end", None)
+        if start and end:
+            return f"{start:%Y-%m-%d} 至 {end:%Y-%m-%d}"
+        if start:
+            return f"{start:%Y-%m-%d} 起"
+        if end:
+            return f"至 {end:%Y-%m-%d}"
+        return "长期有效"
 
     # ── 通知读取与确认 ──────────────────────────────────────────────
 

@@ -119,6 +119,18 @@ BUILTIN_EMAIL_TEMPLATES: dict[str, dict[str, str]] = {
         "action_label": "查看通知",
         "footnote": "此后该同事的通知不再转发给你；如需再次代收，请让对方重新设置请假代理。",
     },
+    "leave_owner_started": {
+        "subject": "【律智检】{{title}}",
+        "lead": "你的请假已生效，期间的通知转给了代理。",
+        "action_label": "查看通知偏好",
+        "footnote": "结束请假或到期后自动恢复给你；代理信息可在通知偏好中调整。",
+    },
+    "leave_owner_resumed": {
+        "subject": "【律智检】{{title}}",
+        "lead": "你的请假已结束，通知已恢复给你。",
+        "action_label": "查看通知",
+        "footnote": "之后的通知不再转给代理；如需再次请假，在通知偏好中重新设置即可。",
+    },
     "review_consultation_uncited": {
         "subject": "【律智检】{{title}}",
         "lead": "有新的咨询进入审核队列，但该咨询没有关联法源引用。",

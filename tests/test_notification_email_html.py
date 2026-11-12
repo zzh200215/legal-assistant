@@ -56,7 +56,7 @@ def _engine():
 
 
 class BuiltinEmailTemplateTests(unittest.TestCase):
-    """内置模板注册表：22 个业务键、转义、深链可选。"""
+    """内置模板注册表：24 个业务键、转义、深链可选。"""
 
     EXPECTED_KEYS = {
         "review_sla_due_soon", "review_sla_overdue",
@@ -65,6 +65,7 @@ class BuiltinEmailTemplateTests(unittest.TestCase):
         "task_collaborator_overdue_1d", "task_collaborator_overdue_3d",
         "task_owner_escalation_overdue_3d", "delegate_expiring_soon", "leave_expiring_soon",
         "leave_agent_started", "leave_agent_ended",
+        "leave_owner_started", "leave_owner_resumed",
         "review_consultation_uncited", "review_consultation_weak",
         "consultation_returned_supplement", "consultation_returned",
         "consultation_supplemented", "outbox_health_alert", "outbox_health_escalation",

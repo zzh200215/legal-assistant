@@ -9,6 +9,7 @@
 去重：同一配置、同一结束日期、同一标题只发一次；延长结束日期会得到新标题，重新提醒。
 请假另有两条发给代理本人的通知：生效当天的「开始代收」，结束/换代理时的「已交还」，
 都按请假轮次去重（见 notification_service.notify_leave_started / notify_leave_ended）。
+请假人本人也会收到「已生效 / 已恢复」两条回执，避免只看到代理在动、自己不知道状态。
 到期后清空代理与有效期（请假还把备注一起清掉），通知自动恢复发给本人。
 """
 
@@ -174,6 +175,8 @@ def _scan_leave(db: Session, *, moment: datetime) -> tuple[int, int, int, int, i
             continue
         if notification_service.notify_leave_started(db=db, leave=leave, now=moment):
             started += 1
+        # 给请假人的「已生效」回执；同样按轮次幂等，不计入代理通知计数。
+        notification_service.notify_leave_owner_started(db=db, leave=leave, now=moment)
 
     leaves = (
         db.query(LegalNotificationLeave)
@@ -197,6 +200,8 @@ def _scan_leave(db: Session, *, moment: datetime) -> tuple[int, int, int, int, i
         if days < 0:
             if notification_service.notify_leave_ended(db=db, leave=leave):
                 ended += 1
+            # 请假人本人的「已恢复」回执：只在其确实收到过生效回执时发。
+            notification_service.notify_leave_owner_resumed(db=db, leave=leave)
             leave.delegate_user_id = None
             leave.leave_start = None
             leave.leave_end = None
