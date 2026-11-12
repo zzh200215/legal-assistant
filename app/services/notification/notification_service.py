@@ -1241,13 +1241,22 @@ class NotificationService:
         ):
             return False
         delegate_name = self._display_name(db, leave.delegate_user_id)
+        forwarded = self._leave_period_forwarded_count(db=db, leave=leave)
+        summary = (
+            f"期间共 {forwarded} 条通知由 {delegate_name} 代收"
+            if forwarded
+            else "期间没有产生需要转发的通知"
+        )
         self.create_multi_channel_notification(
             db=db,
             organization_id=leave.organization_id,
             user_id=leave.user_id,
             event_type="deadline",
             title="通知已恢复：请假结束",
-            body=f"你的请假已结束，{delegate_name} 不再代收，之后的通知都会发给你本人。",
+            body=(
+                f"你的请假已结束，{delegate_name} 不再代收；{summary}，"
+                "之后的通知都会发给你本人。"
+            ),
             channels=[CHANNEL_SITE, CHANNEL_EMAIL],
             reference_type=LEAVE_NOTICE_REFERENCE,
             reference_id=leave.id,
@@ -1272,16 +1281,44 @@ class NotificationService:
             return None
         return delegate
 
-    def _leave_notice_exists(self, *, db: Session, leave: LegalNotificationLeave,
-                             delegate_id: int, template_key: str) -> bool:
-        """同一请假轮次、同一模板的通知是否已存在（幂等判定，不依赖正文）。"""
-        key = self._idempotency_key(
+    def _leave_notice_key(self, *, leave: LegalNotificationLeave, delegate_id: int,
+                          template_key: str) -> str:
+        """同一请假轮次、同一模板的幂等键；开始/交还/回执共用。"""
+        return self._idempotency_key(
             leave.organization_id, delegate_id, CHANNEL_SITE, "deadline",
             LEAVE_NOTICE_REFERENCE, leave.id, leave.leave_period or 0, template_key,
         )
+
+    def _leave_notice_exists(self, *, db: Session, leave: LegalNotificationLeave,
+                             delegate_id: int, template_key: str) -> bool:
+        """同一请假轮次、同一模板的通知是否已存在（幂等判定，不依赖正文）。"""
+        key = self._leave_notice_key(
+            leave=leave, delegate_id=delegate_id, template_key=template_key)
         return db.query(LegalNotificationEvent.id).filter(
             LegalNotificationEvent.idempotency_key == key
         ).first() is not None
+
+    def _leave_period_forwarded_count(self, *, db: Session,
+                                      leave: LegalNotificationLeave) -> int:
+        """本轮请假期间由代理代收的站内通知数。
+
+        起点取「已生效」回执：它创建的时刻就是转发开始，且带轮次，比用请假日期
+        更准（请假可能没有开始日期，也可能提前几天设置）。用事件 id 递增划分本轮，
+        更早轮次的事件 id 更小，不会被重复计数。
+        """
+        started = db.query(LegalNotificationEvent).filter(
+            LegalNotificationEvent.idempotency_key == self._leave_notice_key(
+                leave=leave, delegate_id=leave.user_id,
+                template_key=LEAVE_OWNER_STARTED_TEMPLATE,
+            )
+        ).first()
+        if started is None or started.id is None:
+            return 0
+        return db.query(LegalNotificationEvent.id).filter(
+            LegalNotificationEvent.channel == CHANNEL_SITE,
+            LegalNotificationEvent.on_behalf_of_user_id == leave.user_id,
+            LegalNotificationEvent.id > started.id,
+        ).count()
 
     @staticmethod
     def _leave_window_text(leave: LegalNotificationLeave) -> str:

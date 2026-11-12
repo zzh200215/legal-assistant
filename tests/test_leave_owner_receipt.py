@@ -1,4 +1,4 @@
-"""请假回执：请假人收到「已生效 / 已恢复」，按轮次去重，不被自己的代理转走。"""
+﻿"""请假回执：请假人收到「已生效 / 已恢复」，按轮次去重，不被自己的代理转走。"""
 
 import unittest
 from datetime import date, datetime, timezone
@@ -79,6 +79,34 @@ class LeaveOwnerReceiptTests(unittest.TestCase):
         if template:
             query = query.filter(LegalNotificationEvent.template_key == template)
         return query.order_by(LegalNotificationEvent.id.asc()).all()
+
+    def _forwarded(self, title, *, channels=None, ref=None):
+        """请假期间给 Alice 发一条通知：会被转发给代理，计入代收条数。
+
+        幂等键不含标题，所以多条通知要用不同 reference_id 区分，否则会被去重成一条。
+        """
+        notification_service.create_multi_channel_notification(
+            db=self.db,
+            organization_id=self.org.id,
+            user_id=self.alice.id,
+            event_type="deadline",
+            title=title,
+            body="正文",
+            channels=channels or ["site"],
+            reference_type="task" if ref is not None else None,
+            reference_id=ref,
+        )
+
+    def _clear(self):
+        with patch(SERVICE_NOW, return_value=NOW):
+            return notification_service.clear_leave(
+                db=self.db, user_id=self.alice.id, organization_id=self.org.id,
+            )
+
+    def _resumed_site(self):
+        return [event for event in
+                self._events(self.alice, template=LEAVE_OWNER_RESUMED_TEMPLATE)
+                if event.channel == "site"]
 
     def test_active_leave_sends_receipt_to_owner(self):
         leave = self._leave(delegate=self.bob)
@@ -177,6 +205,47 @@ class LeaveOwnerReceiptTests(unittest.TestCase):
         self._leave(delegate=None)
 
         self.assertEqual(self._events(self.alice, template=LEAVE_OWNER_STARTED_TEMPLATE), [])
+
+    def test_resumed_receipt_counts_forwarded_notifications(self):
+        self._leave(delegate=self.bob)
+        for index in range(3):
+            self._forwarded(f"代收通知 {index}", ref=index)
+
+        self._clear()
+
+        site = self._resumed_site()
+        self.assertEqual(len(site), 1)
+        self.assertIn("期间共 3 条通知由 Bob 代收", site[0].body)
+
+    def test_resumed_receipt_reports_zero_forwarded(self):
+        self._leave(delegate=self.bob)
+
+        self._clear()
+
+        self.assertIn("期间没有产生需要转发的通知", self._resumed_site()[0].body)
+
+    def test_resumed_count_is_per_notification_not_per_channel(self):
+        self._leave(delegate=self.bob)
+        self._forwarded("站内加邮件", channels=["site", "email"])
+
+        self._clear()
+
+        self.assertIn("期间共 1 条通知由 Bob 代收", self._resumed_site()[0].body)
+
+    def test_resumed_count_only_covers_current_period(self):
+        self._leave(delegate=self.bob)
+        self._forwarded("第一轮通知")
+        self._clear()
+
+        self._leave(delegate=self.bob)
+        self._forwarded("第二轮通知 1", ref=101)
+        self._forwarded("第二轮通知 2", ref=102)
+        self._clear()
+
+        site = self._resumed_site()
+        self.assertEqual(len(site), 2)
+        self.assertIn("期间共 1 条通知", site[0].body)
+        self.assertIn("期间共 2 条通知", site[1].body)
 
 
 if __name__ == "__main__":
