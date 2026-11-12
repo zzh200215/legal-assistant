@@ -94,6 +94,8 @@ class LegalNotificationLeave(Base):
     leave_start = Column(Date, nullable=True, comment="请假开始日期（本地日期，含当天）")
     leave_end = Column(Date, nullable=True, comment="请假结束日期（本地日期，含当天）")
     note = Column(String(256), nullable=True, comment="请假备注（如「出差」），仅展示")
+    leave_period = Column(Integer, nullable=False, default=0, server_default="0",
+                          comment="请假轮次：换代理时 +1，用于代收开始/交还通知去重")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

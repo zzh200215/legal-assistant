@@ -112,7 +112,10 @@ class LeaveExpiryReminderTests(unittest.TestCase):
         self.assertIn("代理律师", event.body)
         self.assertEqual(
             self.db.query(LegalNotificationEvent)
-            .filter(LegalNotificationEvent.user_id == self.delegate.id)
+            .filter(
+                LegalNotificationEvent.user_id == self.delegate.id,
+                LegalNotificationEvent.on_behalf_of_user_id.isnot(None),
+            )
             .count(),
             0,
         )
@@ -178,7 +181,8 @@ class LeaveExpiryReminderTests(unittest.TestCase):
 
         self.assertEqual(result["created"], 1)
         self.assertEqual(result["leave_created"], 1)
-        self.assertEqual(len(self.db.query(LegalNotificationEvent).all()), 4)  # 各 site+email
+        # 代理提醒 + 请假提醒 + 代收开始通知，各 site + email
+        self.assertEqual(len(self.db.query(LegalNotificationEvent).all()), 6)
 
     def test_leave_uses_default_preference_timezone(self):
         """纽约还是 11-10，请假结束日 11-10 应提醒且不清理；UTC 已是 11-11。"""

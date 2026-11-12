@@ -96,7 +96,8 @@ class DelegateExpiryReminderTests(unittest.TestCase):
 
         self.assertEqual(result, {"created": 1, "scanned": 1, "cleared": 0,
                                   "leave_created": 0, "leave_scanned": 0,
-                                  "leave_cleared": 0})
+                                  "leave_cleared": 0, "leave_started": 0,
+                                  "leave_ended": 0})
         event = self._reminder()
         self.assertEqual(event.user_id, self.user.id)
         self.assertIsNone(event.on_behalf_of_user_id)
@@ -190,7 +191,8 @@ class DelegateExpiryReminderTests(unittest.TestCase):
 
         self.assertEqual(result, {"created": 0, "scanned": 0, "cleared": 0,
                                   "leave_created": 0, "leave_scanned": 0,
-                                  "leave_cleared": 0})
+                                  "leave_cleared": 0, "leave_started": 0,
+                                  "leave_ended": 0})
         self.assertEqual(self._events(), [])
 
     def test_repeat_scan_does_not_duplicate(self):

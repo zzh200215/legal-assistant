@@ -1,12 +1,14 @@
-"""通知代理到期提醒：每天扫描代理/请假有效期，提前 2 天提醒原收件人一次。
+"""通知代理与请假：每天扫描代理/请假有效期，发提醒、代收开始/交还通知并清理过期配置。
 
 覆盖两类配置：
 - 按事件类型的代理（``legal_notification_preferences.delegate_end``）；
-- 全局请假代理（``legal_notification_leaves.leave_end``）。
+- 全局请假代理（``legal_notification_leaves``）。
 
-两类都只提醒原收件人（``allow_delegate=False``）：这条消息本身就是「代理要结束了」，
+到期提醒只提醒原收件人（``allow_delegate=False``）：这条消息本身就是「代理要结束了」，
 不能再转给代理。按用户时区的当地日期计算剩余天数，起止含当天。
 去重：同一配置、同一结束日期、同一标题只发一次；延长结束日期会得到新标题，重新提醒。
+请假另有两条发给代理本人的通知：生效当天的「开始代收」，结束/换代理时的「已交还」，
+都按请假轮次去重（见 notification_service.notify_leave_started / notify_leave_ended）。
 到期后清空代理与有效期（请假还把备注一起清掉），通知自动恢复发给本人。
 """
 
@@ -90,7 +92,8 @@ def scan_delegate_expiring(db: Session, *, now: datetime | None = None) -> dict:
     """扫描代理/请假有效期，返回创建与清理计数。
 
     ``created`` / ``scanned`` / ``cleared`` 是按事件类型的代理；
-    ``leave_created`` / ``leave_scanned`` / ``leave_cleared`` 是全局请假。
+    ``leave_created`` / ``leave_scanned`` / ``leave_cleared`` 是全局请假的到期提醒与清理；
+    ``leave_started`` / ``leave_ended`` 是发给代理本人的代收开始 / 交还通知。
     """
     moment = now or utc_now()
     if moment.tzinfo is None:
@@ -137,7 +140,8 @@ def scan_delegate_expiring(db: Session, *, now: datetime | None = None) -> dict:
         )
         created += 1
 
-    leave_created, leave_cleared, leave_scanned = _scan_leave(db, moment=moment)
+    leave_created, leave_cleared, leave_scanned, leave_started, leave_ended = _scan_leave(
+        db, moment=moment)
 
     db.commit()
     return {
@@ -147,11 +151,30 @@ def scan_delegate_expiring(db: Session, *, now: datetime | None = None) -> dict:
         "leave_created": leave_created,
         "leave_scanned": leave_scanned,
         "leave_cleared": leave_cleared,
+        "leave_started": leave_started,
+        "leave_ended": leave_ended,
     }
 
 
-def _scan_leave(db: Session, *, moment: datetime) -> tuple[int, int, int]:
-    """扫描全局请假：提前提醒，到期清空；返回 ``(created, cleared, scanned)``。"""
+def _scan_leave(db: Session, *, moment: datetime) -> tuple[int, int, int, int, int]:
+    """扫描全局请假：生效通知、到期提醒、到期交还与清理。
+
+    返回 ``(created, cleared, scanned, started, ended)``：``created``/``scanned``
+    是到期提醒口径（只统计带结束日期的请假），``started``/``ended`` 是发给代理的
+    开始代收 / 交还通知数量。
+    """
+    started = 0
+    active_leaves = (
+        db.query(LegalNotificationLeave)
+        .filter(LegalNotificationLeave.delegate_user_id.isnot(None))
+        .all()
+    )
+    for leave in active_leaves:
+        if not leave.organization_id:
+            continue
+        if notification_service.notify_leave_started(db=db, leave=leave, now=moment):
+            started += 1
+
     leaves = (
         db.query(LegalNotificationLeave)
         .filter(
@@ -162,6 +185,7 @@ def _scan_leave(db: Session, *, moment: datetime) -> tuple[int, int, int]:
     )
     created = 0
     cleared = 0
+    ended = 0
     for leave in leaves:
         if not leave.organization_id:
             continue
@@ -171,6 +195,8 @@ def _scan_leave(db: Session, *, moment: datetime) -> tuple[int, int, int]:
         today = moment.astimezone(_zone(timezone_name)).date()
         days = (leave.leave_end - today).days
         if days < 0:
+            if notification_service.notify_leave_ended(db=db, leave=leave):
+                ended += 1
             leave.delegate_user_id = None
             leave.leave_start = None
             leave.leave_end = None
@@ -195,4 +221,4 @@ def _scan_leave(db: Session, *, moment: datetime) -> tuple[int, int, int]:
             business_version=leave.leave_end.toordinal(),
         )
         created += 1
-    return created, cleared, len(leaves)
+    return created, cleared, len(leaves), started, ended

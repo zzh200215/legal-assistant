@@ -240,8 +240,11 @@ class NotificationLeaveTests(unittest.TestCase):
 
         self.assertEqual(len(first), 2)
         self.assertEqual(len(second), 2)
-        originals = {event.on_behalf_of_user_id for event in self._events(self.carol)}
-        self.assertEqual(originals, {self.alice.id, self.bob.id})
+        delegated = [event for event in self._events(self.carol)
+                     if event.on_behalf_of_user_id is not None]
+        self.assertEqual({event.on_behalf_of_user_id for event in delegated},
+                         {self.alice.id, self.bob.id})
+        self.assertEqual(len(delegated), 4)  # 两人各 site + email
 
     def test_clear_leave_restores_original_recipient(self):
         self._leave(self.alice, delegate=self.carol, note="出差")
@@ -287,9 +290,9 @@ class NotificationLeaveTests(unittest.TestCase):
             result = scan_task_due_reminders(self.db)
 
         self.assertEqual(result["created"], 1)
-        events = self._events(self.carol)
-        self.assertEqual(len(events), 2)  # site + email
-        self.assertTrue(all(event.on_behalf_of_user_id == self.alice.id for event in events))
+        delegated = [event for event in self._events(self.carol)
+                     if event.on_behalf_of_user_id == self.alice.id]
+        self.assertEqual(len(delegated), 2)  # site + email
 
     def test_task_escalation_not_delegated_by_leave(self):
         self._leave(self.alice, delegate=self.carol)
