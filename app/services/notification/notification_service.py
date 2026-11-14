@@ -87,6 +87,13 @@ LEAVE_OWNER_STARTED_TEMPLATE = "leave_owner_started"
 LEAVE_OWNER_RESUMED_TEMPLATE = "leave_owner_resumed"
 LEAVE_NOTICE_REFERENCE = "notification_leave"
 
+# 代收来源：通知中心据此区分「请假代收」与「按事件类型代收」。
+# 事件列 NULL 表示本人接收或历史数据（当时未记录路径，不做猜测回填）。
+ON_BEHALF_LEAVE = "leave"
+ON_BEHALF_EVENT = "event"
+ON_BEHALF_SOURCES = (ON_BEHALF_LEAVE, ON_BEHALF_EVENT)
+ON_BEHALF_FILTERS = ON_BEHALF_SOURCES + ("unknown",)
+
 # ── 通知状态机（LegalNotificationEvent 作为通知 Outbox）────────────────────────
 # pending(=requested) -> approved -> sending -> sent / delivered / failed / dead_letter
 # 恢复：failed -> pending / dead_letter；dead_letter -> pending（人工）
@@ -225,16 +232,22 @@ class NotificationService:
                            business_version: int | None = None,
                            template_key: str | None = None,
                            locale: str | None = None,
-                           on_behalf_of_user_id: int | None = None) -> LegalNotificationEvent:
+                           on_behalf_of_user_id: int | None = None,
+                           on_behalf_of_source: str | None = None) -> LegalNotificationEvent:
         """创建一条通知事件（幂等：同幂等键重复请求返回已有记录，不重复创建）。
 
         站内通知是基础渠道，始终创建。邮件渠道仅登记事件，实际投递由 Outbox 领取。
-        ``on_behalf_of_user_id`` 非空表示 user_id 是代理、该字段是原收件人。
+        ``on_behalf_of_user_id`` 非空表示 user_id 是代理、该字段是原收件人；
+        ``on_behalf_of_source`` 记录命中路径（leave / event），无代理时统一存 NULL。
         """
         if event_type not in EVENT_TYPES and event_type != "deadline_reminder":
             raise ValueError(f"不支持的事件类型: {event_type}")
         if channel not in ALL_CHANNELS:
             raise ValueError(f"不支持的通知渠道: {channel}")
+        if on_behalf_of_user_id is None:
+            on_behalf_of_source = None
+        elif on_behalf_of_source is not None and on_behalf_of_source not in ON_BEHALF_SOURCES:
+            raise ValueError(f"不支持的代收来源: {on_behalf_of_source}")
 
         idem_key = self._idempotency_key(
             organization_id, user_id, channel, event_type,
@@ -254,6 +267,7 @@ class NotificationService:
             organization_id=organization_id,
             user_id=user_id,
             on_behalf_of_user_id=on_behalf_of_user_id,
+            on_behalf_of_source=on_behalf_of_source,
             case_id=case_id,
             event_type=event_type,
             title=title,
@@ -321,9 +335,9 @@ class NotificationService:
         命中代理则事件改发给代理，原收件人写入 ``on_behalf_of_user_id``，正文标注
         「代 X 接收」；代理只跳一层。
         """
-        recipient_id, on_behalf = user_id, None
+        recipient_id, on_behalf, source = user_id, None, None
         if allow_delegate:
-            recipient_id, on_behalf = self._effective_recipient(
+            recipient_id, on_behalf, source = self._effective_recipient(
                 db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
             )
         if on_behalf is not None:
@@ -363,38 +377,40 @@ class NotificationService:
                 business_version=business_version,
                 template_key=template_key,
                 on_behalf_of_user_id=on_behalf,
+                on_behalf_of_source=source,
             )
             events.append(event)
         return events
 
     def _effective_recipient(self, *, db: Session, user_id: int, organization_id: int,
-                             event_type: str) -> tuple[int, int | None]:
+                             event_type: str) -> tuple[int, int | None, str | None]:
         """解析接收人：全局请假 > 事件类型代理 > 本人。
 
         无效配置（停用/跨组织/指向自己/不在有效期）回退到下一层，最终回退本人，
         保证通知不会因为代理设置坏掉而丢失；代理只跳一层，不跟随代理自己的代理。
+        第三个返回值是命中的代收来源（leave / event / None），随事件落库供通知中心区分。
         """
         leave_delegate = self._leave_active_recipient(
             db=db, user_id=user_id, organization_id=organization_id,
         )
         if leave_delegate is not None:
-            return leave_delegate, user_id
+            return leave_delegate, user_id, ON_BEHALF_LEAVE
         pref = self._get_preference(
             db=db, user_id=user_id, organization_id=organization_id, event_type=event_type,
         )
         delegate_id = getattr(pref, "delegate_user_id", None) if pref else None
         if not delegate_id or delegate_id == user_id:
-            return user_id, None
+            return user_id, None, None
         if not self._delegate_window_active(pref):
-            return user_id, None
+            return user_id, None, None
         delegate = db.get(User, delegate_id)
         if (
             delegate is None
             or delegate.status != "active"
             or delegate.organization_id != organization_id
         ):
-            return user_id, None
-        return delegate.id, user_id
+            return user_id, None, None
+        return delegate.id, user_id, ON_BEHALF_EVENT
 
     def _leave_active_recipient(self, *, db: Session, user_id: int,
                                 organization_id: int) -> int | None:
@@ -1352,9 +1368,11 @@ class NotificationService:
                                event_type: str | None = None,
                                case_id: int | None = None,
                                delegated: bool | None = None,
+                               delegation_source: str | None = None,
                                limit: int = 50,
                                offset: int = 0) -> list[LegalNotificationEvent]:
-        """获取用户的站内通知列表；delegated 控制只看代收/只看本人。"""
+        """获取用户的站内通知列表；delegated 控制只看代收/只看本人，
+        delegation_source 再按来源细分（leave / event / unknown=历史代收未记录来源）。"""
         query = db.query(LegalNotificationEvent).filter(
             LegalNotificationEvent.user_id == user_id,
             LegalNotificationEvent.channel == CHANNEL_SITE,
@@ -1371,15 +1389,30 @@ class NotificationService:
             query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.isnot(None))
         elif delegated is False:
             query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.is_(None))
+        query = self._filter_delegation_source(query, delegation_source)
         return query.order_by(
             LegalNotificationEvent.created_at.desc()
         ).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
+
+    @staticmethod
+    def _filter_delegation_source(query, delegation_source: str | None):
+        """按代收来源过滤；unknown 取「有代收人但未记录来源」的历史事件。"""
+        if delegation_source == "unknown":
+            return query.filter(
+                LegalNotificationEvent.on_behalf_of_user_id.isnot(None),
+                LegalNotificationEvent.on_behalf_of_source.is_(None),
+            )
+        if delegation_source:
+            return query.filter(
+                LegalNotificationEvent.on_behalf_of_source == delegation_source)
+        return query
 
     def count_user_notifications(self, *, db: Session, user_id: int,
                                  status: str | None = None,
                                  event_type: str | None = None,
                                  case_id: int | None = None,
-                                 delegated: bool | None = None) -> int:
+                                 delegated: bool | None = None,
+                                 delegation_source: str | None = None) -> int:
         """Count visible site notifications using the same filters as the list."""
         query = db.query(LegalNotificationEvent.id).filter(
             LegalNotificationEvent.user_id == user_id,
@@ -1398,6 +1431,7 @@ class NotificationService:
             query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.isnot(None))
         elif delegated is False:
             query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.is_(None))
+        query = self._filter_delegation_source(query, delegation_source)
         return query.count()
 
     def mark_as_read(self, *, db: Session, event_id: int, user_id: int) -> LegalNotificationEvent:
@@ -1456,6 +1490,7 @@ class NotificationService:
             "organization_id": event.organization_id,
             "user_id": event.user_id,
             "on_behalf_of_user_id": event.on_behalf_of_user_id,
+            "on_behalf_of_source": event.on_behalf_of_source,
             "case_id": event.case_id,
             "event_type": event.event_type,
             "title": event.title,

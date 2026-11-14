@@ -1199,6 +1199,9 @@ test('通知中心任务提醒：点击直达任务详情', async ({ page }) => 
 
     if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
     if (method === 'GET' && path === '/legal/orgs/5/members') return route.fulfill({ json: success([]) })
+    if (method === 'GET' && path === '/developer/notification-leave/me') {
+      return route.fulfill({ json: success({ delegate_user_id: null, delegate_name: null, status: 'none' }) })
+    }
     if (method === 'GET' && path === '/developer/notifications/me') {
       const delegatedParam = url.searchParams.get('delegated')
       delegatedQueries.push(delegatedParam)
@@ -1224,7 +1227,8 @@ test('通知中心任务提醒：点击直达任务详情', async ({ page }) => 
   await page.goto('/notifications')
   await expect(page.getByText('协作者提醒 · 任务今天到期：起草合同初稿')).toBeVisible()
   await expect(page.getByText('代收提醒：合同审查任务')).toBeVisible()
-  await expect(page.locator('.notification-delegated')).toContainText('代 主办律师 接收')
+  // 没有来源列的历史代收事件：标签回落为「代收 · X」
+  await expect(page.locator('.notification-delegated')).toContainText('代收 · 主办律师')
 
   // 来源筛选：代收 / 本人 / 全部，服务端参数下推
   const sourceSelect = page.locator('label', { hasText: '来源' }).locator('select')

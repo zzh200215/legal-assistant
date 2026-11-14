@@ -356,13 +356,22 @@ def get_my_notifications(
     event_type: str | None = Query(default=None, max_length=64),
     case_id: int | None = Query(default=None, ge=1),
     delegated: bool | None = Query(default=None, description="true=只看代收，false=只看本人"),
+    delegation_source: str | None = Query(
+        default=None, max_length=16,
+        description="代收来源细分：leave=请假代收，event=按事件类型代收，unknown=历史代收（未记录来源）",
+    ),
     page: int = Query(default=1, ge=1, le=10000),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """当前用户站内通知，支持状态、案件、类型、代收筛选和分页。"""
-    from app.services.notification.notification_service import notification_service
+    """当前用户站内通知，支持状态、案件、类型、代收来源筛选和分页。"""
+    from app.services.notification.notification_service import (
+        ON_BEHALF_FILTERS,
+        notification_service,
+    )
+    if delegation_source is not None and delegation_source not in ON_BEHALF_FILTERS:
+        raise HTTPException(status_code=422, detail="代收来源不支持")
     if status == "unread":
         status_filter = "unread"
     elif status in {None, "all"}:
@@ -375,12 +384,14 @@ def get_my_notifications(
     events = notification_service.get_user_notifications(
         db=db, user_id=current_user.id, status=status_filter,
         event_type=event_type, case_id=case_id, delegated=delegated,
+        delegation_source=delegation_source,
         limit=page_size, offset=offset,
     )
     total = notification_service.count_user_notifications(
         db=db, user_id=current_user.id,
         status=status_filter,
         event_type=event_type, case_id=case_id, delegated=delegated,
+        delegation_source=delegation_source,
     )
     items = [notification_service.serialize_event(e) for e in events if e.status != "failed"]
     delegate_ids = {

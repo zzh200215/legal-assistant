@@ -25688,7 +25688,7 @@
           "Developer Platform"
         ],
         "summary": "Get My Notifications",
-        "description": "当前用户站内通知，支持状态、案件、类型、代收筛选和分页。",
+        "description": "当前用户站内通知，支持状态、案件、类型、代收来源筛选和分页。",
         "operationId": "get_my_notifications_api_developer_notifications_me_get",
         "security": [
           {
@@ -25765,6 +25765,25 @@
               "title": "Delegated"
             },
             "description": "true=只看代收，false=只看本人"
+          },
+          {
+            "name": "delegation_source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 16
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "代收来源细分：leave=请假代收，event=按事件类型代收，unknown=历史代收（未记录来源）",
+              "title": "Delegation Source"
+            },
+            "description": "代收来源细分：leave=请假代收，event=按事件类型代收，unknown=历史代收（未记录来源）"
           },
           {
             "name": "page",

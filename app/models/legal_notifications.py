@@ -133,6 +133,10 @@ class LegalNotificationEvent(Base):
         Integer, ForeignKey("users.id"), nullable=True, index=True,
         comment="代理接收时的原收件人；NULL=本人接收",
     )
+    on_behalf_of_source = Column(
+        String(16), nullable=True,
+        comment="代收来源：leave=全局请假代收，event=按事件类型代收；NULL=本人接收或历史数据",
+    )
     case_id = Column(Integer, ForeignKey("legal_cases.id"), nullable=True, index=True)
     event_type = Column(String(64), nullable=False, index=True)
     title = Column(String(256), nullable=False)

@@ -11,6 +11,12 @@
       </div>
     </header>
 
+    <section v-if="leaveActive" class="notification-leave" role="status">
+      <span class="notification-leave-tag">请假中</span>
+      <span class="notification-leave-text">{{ leaveSummary(leave) }}</span>
+      <button class="notification-leave-link" type="button" @click="router.push('/settings/notifications')">调整请假</button>
+    </section>
+
     <section class="app-card">
       <div class="app-card-head">
         <h2>通知</h2>
@@ -38,7 +44,9 @@
             <select v-model="filters.delegated" @change="resetAndLoad">
               <option value="">全部来源</option>
               <option value="own">本人</option>
-              <option value="delegated">代收</option>
+              <option value="delegated">全部代收</option>
+              <option value="leave">请假代收</option>
+              <option value="event">类型代收</option>
             </select>
           </label>
           <label class="case-filter">
@@ -55,8 +63,12 @@
                 <span class="notification-row-heading">
                   <strong>{{ item.title }}</strong>
                   <span>{{ eventLabel(item.event_type) }}</span>
-                  <span v-if="item.on_behalf_of_user_id" class="notification-delegated">
-                    代 {{ item.on_behalf_of_name || '同事' }} 接收
+                  <span
+                    v-if="item.on_behalf_of_user_id"
+                    class="notification-delegated"
+                    :class="`source-${item.on_behalf_of_source || 'unknown'}`"
+                  >
+                    {{ delegationBadge(item) }}
                   </span>
                 </span>
                 <span v-if="item.body" class="notification-body">{{ item.body }}</span>
@@ -93,6 +105,8 @@ import 'element-plus/es/components/message/style/css'
 import api from '../api'
 import QueryStateView from '../components/QueryStateView.vue'
 import { normalizeError, errorMessage } from '../api/errors.js'
+import { delegationBadge, delegationFilterParams } from '../utils/notificationDelegation'
+import { leaveSummary } from '../utils/notificationLeave'
 
 const router = useRouter()
 const items = ref([])
@@ -102,6 +116,9 @@ const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
 const loadError = ref(null)
+// 请假提示条：只做提示，读取失败按「没有请假」处理，不影响列表
+const leave = ref(null)
+const leaveActive = computed(() => Boolean(leave.value?.delegate_user_id) && leave.value?.status === 'active')
 const filters = reactive({ status: 'all', event_type: '', case_id: '', delegated: '' })
 const eventTypes = [
   { value: 'workflow', label: '案件工作流' },
@@ -132,7 +149,7 @@ const load = async () => {
       status: filters.status,
       event_type: filters.event_type || undefined,
       case_id: filters.case_id ? Number(filters.case_id) : undefined,
-      delegated: filters.delegated ? filters.delegated === 'delegated' : undefined,
+      ...delegationFilterParams(filters.delegated),
       page: page.value,
       page_size: pageSize,
     }
@@ -247,7 +264,19 @@ const openNotification = async (item) => {
   }
 }
 
-onMounted(load)
+const loadLeave = async () => {
+  try {
+    const { data } = await api.getNotificationLeave()
+    leave.value = data || null
+  } catch {
+    leave.value = null
+  }
+}
+
+onMounted(() => {
+  load()
+  loadLeave()
+})
 </script>
 
 <style scoped>
@@ -274,6 +303,15 @@ onMounted(load)
 .notification-row-heading strong { overflow: hidden; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .notification-row-heading span { flex: 0 0 auto; color: var(--color-text-muted); font-size: var(--text-xs); }
 .notification-row-heading .notification-delegated { padding: 1px 6px; border-radius: 999px; background: var(--color-primary-subtle); color: var(--color-primary); }
+/* 类型代收与历史代收用中性色，只有当前请假代收用主色，扫一眼就能分清来源 */
+.notification-row-heading .notification-delegated.source-event,
+.notification-row-heading .notification-delegated.source-unknown { background: var(--color-surface-subtle); color: var(--color-text-secondary); }
+/* 请假提示条：本人视图顶部提示「这几天的通知由代理代收」并直达通知偏好 */
+.notification-leave { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-primary-subtle); }
+.notification-leave-tag { padding: 1px 8px; border-radius: 999px; background: var(--color-primary); color: var(--color-surface); font-size: var(--text-xs); font-weight: 600; }
+.notification-leave-text { flex: 1 1 240px; min-width: 0; color: var(--color-text); font-size: var(--text-sm); }
+.notification-leave-link { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+.notification-leave-link:hover { text-decoration: underline; }
 .notification-body, .notification-meta { overflow: hidden; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .notification-meta { color: var(--color-text-muted); font-size: var(--text-xs); }
 .notification-read { padding: 4px 0; white-space: nowrap; }
