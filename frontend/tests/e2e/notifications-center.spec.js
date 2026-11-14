@@ -223,13 +223,13 @@ test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', a
   const pageQueries = () => listQueries.filter((query) => query.page_size === '20')
   await expect.poll(() => pageQueries().length).toBe(2)
   expect(pageQueries()[1].delegated_from_user_id).toBe('15')
-  await expect(page.locator('.notification-proxy-active')).toContainText('只看代 主办律师 的通知')
+  await expect(page.locator('.notification-proxy-active')).toContainText('正在看 主办律师 的代收')
   await expect(aliceRow).toHaveClass(/active/)
   await expect(page.locator('.notification-row')).toHaveCount(2)
   await expect(page.locator('.notification-row', { hasText: '任务到期提醒' })).toHaveCount(0)
 
   // 清除：参数消失，列表恢复
-  await page.locator('.notification-proxy-active').getByRole('button', { name: '清除' }).click()
+  await page.locator('.notification-proxy-active').getByRole('button', { name: '返回全部' }).click()
   await expect.poll(() => pageQueries().length).toBe(3)
   expect(pageQueries()[2].delegated_from_user_id).toBeUndefined()
   await expect(page.locator('.notification-proxy-active')).toHaveCount(0)
@@ -248,6 +248,20 @@ test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', a
   expect(pageQueries()[4].days).toBeUndefined()
   await expect.poll(() => summaryQueries.at(-1)?.days).toBeUndefined()
   await expect(proxy.locator('.notification-proxy-head')).toContainText('全部时间 · 2 人 · 共 3 条')
+
+  // 明细：先加一个状态筛选，点「明细」后其它筛选被清空，只留该同事
+  const statusSelect = page.locator('.notification-toolbar label', { hasText: '状态' }).locator('select')
+  await statusSelect.selectOption('unread')
+  await expect.poll(() => pageQueries().length).toBe(6)
+  expect(pageQueries()[5].status).toBe('unread')
+
+  await page.locator('.notification-proxy-row', { hasText: '协办律师' })
+    .getByRole('button', { name: '明细' }).click()
+  await expect.poll(() => pageQueries().length).toBe(7)
+  const detail = pageQueries()[6]
+  expect(detail.delegated_from_user_id).toBe('16')
+  expect(detail.status).toBe('all')
+  await expect(page.locator('.notification-proxy-active')).toContainText('正在看 协办律师 的代收，共 1 条')
 
   expect(failed).toEqual([])
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)

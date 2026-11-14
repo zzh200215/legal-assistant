@@ -24,30 +24,31 @@
         <button type="button" @click="proxyOpen = !proxyOpen">{{ proxyOpen ? '收起' : '展开' }}</button>
       </div>
       <div v-if="proxyOpen" class="notification-proxy-list">
-        <button
+        <div
           v-for="row in summary"
           :key="row.user_id"
-          type="button"
           class="notification-proxy-row"
           :class="{ active: filters.delegated_from === String(row.user_id) }"
-          @click="filterByOrigin(row)"
         >
-          <span class="notification-proxy-name">{{ row.name || `用户 ${row.user_id}` }}</span>
-          <span class="notification-proxy-count">代收 {{ row.count }} 条<template v-if="row.unread"> · 未读 {{ row.unread }}</template></span>
-          <span class="notification-proxy-time">{{ formatTime(row.last_at) }}</span>
-        </button>
+          <button type="button" class="notification-proxy-pick" @click="filterByOrigin(row)">
+            <span class="notification-proxy-name">{{ row.name || `用户 ${row.user_id}` }}</span>
+            <span class="notification-proxy-count">代收 {{ row.count }} 条<template v-if="row.unread"> · 未读 {{ row.unread }}</template></span>
+            <span class="notification-proxy-time">{{ formatTime(row.last_at) }}</span>
+          </button>
+          <button type="button" class="notification-proxy-detail" @click="openOriginDetail(row)">明细</button>
+        </div>
       </div>
     </section>
 
-    <section class="app-card">
+    <section ref="listCard" class="app-card">
       <div class="app-card-head">
         <h2>通知</h2>
         <span class="app-card-head-meta">未读 {{ unread }} · 共 {{ total }} 条</span>
       </div>
       <div class="app-card-body">
         <div v-if="filters.delegated_from" class="notification-proxy-active">
-          <span>只看代 <strong>{{ originName }}</strong> 的通知</span>
-          <button type="button" @click="clearOrigin">清除</button>
+          <span>正在看 <strong>{{ originName }}</strong> 的代收，共 {{ total }} 条{{ filters.days ? `（近 ${filters.days} 天）` : '' }}</span>
+          <button type="button" @click="clearOrigin">返回全部</button>
         </div>
         <div class="notification-toolbar" role="toolbar" aria-label="通知筛选">
           <label>
@@ -132,7 +133,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
@@ -156,6 +157,7 @@ const leaveActive = computed(() => Boolean(leave.value?.delegate_user_id) && lea
 // 「我代收了谁」：按原收件人分组，点分组即筛到这位同事的通知
 const summary = ref([])
 const proxyOpen = ref(true)
+const listCard = ref(null)
 const summaryTotal = computed(() => summary.value.reduce((total, row) => total + (row.count || 0), 0))
 const filters = reactive({ status: 'all', event_type: '', case_id: '', delegated: '', delegated_from: '', days: '' })
 const originName = computed(() => {
@@ -341,6 +343,19 @@ const filterByOrigin = (row) => {
   resetAndLoad()
 }
 
+// 明细：清掉其它筛选，只留这位同事 + 当前时间窗，并把列表带到视野里
+const openOriginDetail = (row) => {
+  filters.status = 'all'
+  filters.event_type = ''
+  filters.case_id = ''
+  filters.delegated = ''
+  filters.delegated_from = String(row.user_id)
+  resetAndLoad()
+  nextTick(() => {
+    listCard.value?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  })
+}
+
 const clearOrigin = () => {
   filters.delegated_from = ''
   resetAndLoad()
@@ -400,9 +415,12 @@ onMounted(() => {
 .notification-proxy-head button, .notification-proxy-active button { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .notification-proxy-head button:hover, .notification-proxy-active button:hover, .notification-proxy-active button:focus-visible { text-decoration: underline; }
 .notification-proxy-list { display: grid; gap: 4px; }
-.notification-proxy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--color-surface-subtle); color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
+.notification-proxy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; padding: 0 var(--space-2) 0 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--color-surface-subtle); }
 .notification-proxy-row:hover { background: var(--color-surface-hover); }
 .notification-proxy-row.active { border-color: var(--color-primary); background: var(--color-primary-subtle); }
+.notification-proxy-pick { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.notification-proxy-detail { padding: 2px 4px; border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: var(--text-xs); white-space: nowrap; cursor: pointer; }
+.notification-proxy-detail:hover { text-decoration: underline; }
 .notification-proxy-name { overflow: hidden; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .notification-proxy-count, .notification-proxy-time { color: var(--color-text-muted); font-size: var(--text-xs); white-space: nowrap; }
 .notification-proxy-active { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--color-primary-subtle); color: var(--color-text); font-size: var(--text-sm); }
@@ -417,7 +435,7 @@ onMounted(() => {
   .notification-body { white-space: normal; }
   .notification-toolbar { align-items: stretch; }
   .notification-refresh { align-self: end; margin-left: 0; }
-  .notification-proxy-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .notification-proxy-pick { grid-template-columns: minmax(0, 1fr) auto; }
   .notification-proxy-time { display: none; }
 }
 
