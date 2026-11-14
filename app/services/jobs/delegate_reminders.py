@@ -214,10 +214,18 @@ def _scan_leave(db: Session, *, moment: datetime) -> tuple[int, int, int, int, i
         if _already_reminded(db, user_id=leave.user_id,
                              template_key=LEAVE_TEMPLATE_KEY, title=title):
             continue
+        # 请假人在结束前最想知道「这轮积压了多少」，口径与「已恢复」回执一致。
+        forwarded = notification_service.leave_period_forwarded_count(
+            db=db, leave=leave)
+        progress = (
+            f"本轮代理已代收 {forwarded} 条通知"
+            if forwarded
+            else "本轮还没有需要转发的通知"
+        )
         body = (
             f"leave:expiring · 请假代理 {_display_name(db, leave.delegate_user_id)} "
             f"将于{_when_label(days)}到期（{leave.leave_end:%Y-%m-%d}），"
-            "之后通知恢复发送给你"
+            f"{progress}，之后的通知恢复发送给你"
         )
         _remind(
             db, organization_id=leave.organization_id, user_id=leave.user_id,

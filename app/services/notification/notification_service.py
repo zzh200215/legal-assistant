@@ -1314,6 +1314,15 @@ class NotificationService:
             LegalNotificationEvent.idempotency_key == key
         ).first() is not None
 
+    def leave_period_forwarded_count(self, *, db: Session,
+                                     leave: LegalNotificationLeave) -> int:
+        """本轮请假期间由代理代收的站内通知数。
+
+        请假到期提醒与「已恢复」回执共用同一口径（起点=「已生效」回执），
+        避免两处数字对不上。
+        """
+        return self._leave_period_forwarded_count(db=db, leave=leave)
+
     def _leave_period_forwarded_count(self, *, db: Session,
                                       leave: LegalNotificationLeave) -> int:
         """本轮请假期间由代理代收的站内通知数。

@@ -23,8 +23,10 @@ from app.services.jobs.delegate_reminders import (
     LEAVE_TEMPLATE_KEY,
     scan_delegate_expiring,
 )
+from app.services.notification.notification_service import notification_service
 
 NOW = datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc)  # 上海 11-10 18:00
+SERVICE_NOW = "app.services.notification.notification_service.utc_now"
 
 
 class LeaveExpiryReminderTests(unittest.TestCase):
@@ -110,6 +112,8 @@ class LeaveExpiryReminderTests(unittest.TestCase):
         self.assertTrue(event.title.startswith("请假代理将于 2026-11-12 到期"))
         self.assertIn("2 天后", event.body)
         self.assertIn("代理律师", event.body)
+        # 还没转发过任何通知：正文明确写「没有」，不写「0 条」这种像是统计失败的说法
+        self.assertIn("本轮还没有需要转发的通知", event.body)
         self.assertEqual(
             self.db.query(LegalNotificationEvent)
             .filter(
@@ -119,6 +123,49 @@ class LeaveExpiryReminderTests(unittest.TestCase):
             .count(),
             0,
         )
+
+    def test_reminder_reports_forwarded_count(self):
+        """到期提醒带上本轮代收条数，站内与邮件同口径（与「已恢复」回执一致）。"""
+        leave = self._leave(end=date(2026, 11, 12))
+        notification_service.notify_leave_owner_started(db=self.db, leave=leave, now=NOW)
+        # 请假窗口按服务端 utc_now 判断，这里把时钟拨回 NOW 才能真实走代收链路
+        with patch(SERVICE_NOW, return_value=NOW):
+            for index in range(2):
+                notification_service.create_multi_channel_notification(
+                    db=self.db,
+                    organization_id=self.org.id,
+                    user_id=self.user.id,
+                    event_type="deadline",
+                    title=f"代收事件 {index}",
+                    channels=["site"],
+                    # 幂等键不含标题：用不同 reference 造出两条独立事件
+                    reference_type="task",
+                    reference_id=index + 1,
+                )
+
+        scan_delegate_expiring(self.db, now=NOW)
+
+        self.assertIn("本轮代理已代收 2 条通知", self._reminders("site")[0].body)
+        self.assertIn("本轮代理已代收 2 条通知", self._reminders("email")[0].body)
+
+    def test_forwarded_count_starts_from_started_receipt(self):
+        """上一轮请假代收的通知不计入本轮（以「已生效」回执划界）。"""
+        leave = self._leave(end=date(2026, 11, 12))
+        # 先造一条「上一轮」的转发事件（早于本轮起点）
+        with patch(SERVICE_NOW, return_value=NOW):
+            notification_service.create_multi_channel_notification(
+                db=self.db,
+                organization_id=self.org.id,
+                user_id=self.user.id,
+                event_type="deadline",
+                title="上一轮代收事件",
+                channels=["site"],
+            )
+        notification_service.notify_leave_owner_started(db=self.db, leave=leave, now=NOW)
+
+        scan_delegate_expiring(self.db, now=NOW)
+
+        self.assertIn("本轮还没有需要转发的通知", self._reminders("site")[0].body)
 
     def test_reminds_on_end_day_and_tomorrow(self):
         for end, label in ((date(2026, 11, 10), "今天"), (date(2026, 11, 11), "明天")):
