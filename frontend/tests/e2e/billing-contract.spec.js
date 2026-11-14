@@ -117,6 +117,13 @@ test('计费契约：计时器暂停用 action 载荷、发票用 client_display
       return
     }
 
+    // 手动录入工时：断言数字字段是数字且按上限归一
+    if (method === 'POST' && path === '/legal/orgs/5/cases/3/time-entries') {
+      requests.manualEntry = request.postDataJSON()
+      await route.fulfill({ json: success({ id: 502, description: requests.manualEntry.description, status: 'finished', billable: true }) })
+      return
+    }
+
     // 发票创建：断言 client_display_name + issue_date
     if (method === 'POST' && path === '/legal/orgs/5/invoices') {
       requests.invoice = request.postDataJSON()
@@ -148,6 +155,21 @@ test('计费契约：计时器暂停用 action 载荷、发票用 client_display
   expect(requests.timerPause).toEqual({ action: 'pause' })
   expect(requests.timerPause).not.toHaveProperty('status')
   await expect(timerCard.getByRole('button', { name: '继续', exact: true })).toBeVisible()
+
+  // 手动录入工时：数字输入框失焦后按 max 归一，载荷是数字（原生输入替代 el-input-number）
+  const manualCard = page.locator('.app-card', { hasText: '手动录入工时' })
+  await manualCard.getByPlaceholder('工作内容描述').fill('批量起草意见书')
+  const durationInput = manualCard.locator('.number-field input')
+  await durationInput.fill('2000')
+  await durationInput.blur()
+  await expect(durationInput).toHaveValue('1440')
+  await manualCard.getByRole('button', { name: '录入', exact: true }).click()
+  await expect.poll(() => requests.manualEntry).not.toBeNull()
+  expect(requests.manualEntry).toEqual({
+    description: '批量起草意见书',
+    duration_minutes: 1440,
+    case_id: 3,
+  })
 
   // 发票：创建费用通知单，载荷必须用 client_display_name + issue_date
   await page.getByRole('button', { name: '创建费用通知单', exact: true }).click()

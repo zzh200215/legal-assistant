@@ -6,7 +6,7 @@
           <div>
             <span>{{ docMeta?.title || '文档工作区' }}</span>
           </div>
-          <el-space>
+          <div class="toolbar-actions">
             <el-button type="primary" plain :disabled="!docId" @click="openAgentDemo">
               继续处理
             </el-button>
@@ -14,7 +14,7 @@
             <el-button type="warning" :disabled="!docId" :loading="creatingTasks" @click="createTasks">
               提取待办并创建任务
             </el-button>
-          </el-space>
+          </div>
         </div>
       </template>
       <div class="toolbar-meta">
@@ -357,7 +357,6 @@ import { ElCard } from 'element-plus/es/components/card/index'
 import { ElEmpty } from 'element-plus/es/components/empty/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElOption, ElSelect } from 'element-plus/es/components/select/index'
-import { ElSpace } from 'element-plus/es/components/space/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/button/style/css'
@@ -366,7 +365,6 @@ import 'element-plus/es/components/empty/style/css'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/space/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import 'element-plus/es/components/tag/style/css'
@@ -418,6 +416,10 @@ const {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+/* el-space 用包裹层隔开按钮，直接用 flex 时要清掉 EP 的相邻按钮外边距 */
+.card-header-inline > :last-child .el-button + .el-button {
+  margin-left: 0;
 }
 .section-eyebrow {
   margin-bottom: 4px;

@@ -98,7 +98,7 @@
         <div class="download-policy-controls">
           <label>
             <span>允许下载</span>
-            <el-switch
+            <AppSwitch
               :model-value="docMeta.download_enabled !== false"
               :loading="downloadPolicySaving"
               @change="(value) => updateDownloadPolicy('download_enabled', value)"
@@ -106,7 +106,7 @@
           </label>
           <label>
             <span>下载水印</span>
-            <el-switch
+            <AppSwitch
               :model-value="Boolean(docMeta.watermark_required)"
               :disabled="docMeta.download_enabled === false"
               :loading="downloadPolicySaving"
@@ -188,7 +188,6 @@ import { ElCard } from 'element-plus/es/components/card/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElOption, ElSelect } from 'element-plus/es/components/select/index'
 import { ElPagination } from 'element-plus/es/components/pagination/index'
-import { ElSwitch } from 'element-plus/es/components/switch/index'
 import { ElTag } from 'element-plus/es/components/tag/index'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/card/style/css'
@@ -196,8 +195,8 @@ import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/option/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/switch/style/css'
 import 'element-plus/es/components/tag/style/css'
+import AppSwitch from '../AppSwitch.vue'
 import { useDocuments } from '../../composables/useDocuments'
 import QueryStateView from '../QueryStateView.vue'
 

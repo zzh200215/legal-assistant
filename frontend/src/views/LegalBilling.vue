@@ -78,7 +78,7 @@
             <el-input v-model="manualForm.description" placeholder="工作内容描述" style="width:240px" />
           </el-form-item>
           <el-form-item label="时长（分钟）">
-            <el-input-number v-model="manualForm.duration_minutes" :min="1" :max="1440" style="width:140px" />
+            <NumberField v-model="manualForm.duration_minutes" :min="1" :max="1440" style="width:140px" />
           </el-form-item>
           <el-form-item>
             <button class="workspace-primary" type="button" :disabled="manualLoading" @click="submitManualEntry">录入</button>
@@ -155,10 +155,10 @@
             </el-select>
           </el-form-item>
           <el-form-item v-if="ruleForm.billing_mode === 'hourly' || ruleForm.billing_mode === 'hybrid'" label="时薪">
-            <el-input-number v-model="ruleForm.hourly_rate" :min="0" :precision="2" style="width:130px" />
+            <NumberField v-model="ruleForm.hourly_rate" :min="0" :precision="2" style="width:130px" />
           </el-form-item>
           <el-form-item v-if="ruleForm.billing_mode === 'fixed_stage' || ruleForm.billing_mode === 'hybrid'" label="固定金额">
-            <el-input-number v-model="ruleForm.fixed_amount" :min="0" :precision="2" style="width:130px" />
+            <NumberField v-model="ruleForm.fixed_amount" :min="0" :precision="2" style="width:130px" />
           </el-form-item>
           <el-form-item>
             <button class="workspace-primary" type="button" :disabled="ruleLoading" @click="submitBillingRule">创建规则</button>
@@ -276,7 +276,7 @@
     <el-dialog v-model="paymentDialogVisible" title="记录收款" width="460px">
       <el-form :model="paymentForm" label-width="100px" size="small">
         <el-form-item label="收款金额" required>
-          <el-input-number v-model="paymentForm.amount" :min="0.01" :precision="2" style="width:100%" />
+          <NumberField v-model="paymentForm.amount" :min="0.01" :precision="2" style="width:100%" />
         </el-form-item>
         <el-form-item label="支付方式">
           <el-select v-model="paymentForm.payment_method" style="width:100%">
@@ -301,7 +301,7 @@
     <el-dialog v-model="refundDialogVisible" title="创建退款" width="460px">
       <el-form :model="refundForm" label-width="100px" size="small">
         <el-form-item label="退款金额" required>
-          <el-input-number v-model="refundForm.amount" :min="0.01" :precision="2" style="width:100%" />
+          <NumberField v-model="refundForm.amount" :min="0.01" :precision="2" style="width:100%" />
         </el-form-item>
         <el-form-item label="退款原因" required>
           <el-input v-model="refundForm.reason" type="textarea" :rows="2" />
@@ -369,7 +369,6 @@ import { ElDialog } from 'element-plus/es/components/dialog/index'
 import { ElEmpty } from 'element-plus/es/components/empty/index'
 import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
 import { ElInput } from 'element-plus/es/components/input/index'
-import { ElInputNumber } from 'element-plus/es/components/input-number/index'
 import { ElPagination } from 'element-plus/es/components/pagination/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import 'element-plus/es/components/select/style/css'
@@ -377,11 +376,11 @@ import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/empty/style/css'
 import 'element-plus/es/components/form/style/css'
 import 'element-plus/es/components/input/style/css'
-import 'element-plus/es/components/input-number/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import api from '../api'
+import NumberField from '../components/NumberField.vue'
 import QueryStateView from '../components/QueryStateView.vue'
 import { normalizeError } from '../api/errors.js'
 

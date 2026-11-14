@@ -88,7 +88,7 @@
         <el-table-column prop="updated_at" label="最近更新时间" width="180" />
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <el-space wrap>
+            <div class="task-actions">
               <el-button text type="primary" @click="openTaskTarget(row)">查看</el-button>
               <el-button
                 v-if="row.retryable"
@@ -100,7 +100,7 @@
                 重试
               </el-button>
               <el-button text @click="showTaskDetail(row)">详情</el-button>
-            </el-space>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -179,7 +179,6 @@ import { ElDialog } from 'element-plus/es/components/dialog/index'
 import { ElPagination } from 'element-plus/es/components/pagination/index'
 import { ElRadioButton, ElRadioGroup } from 'element-plus/es/components/radio/index'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
-import { ElSpace } from 'element-plus/es/components/space/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/dialog/style/css'
@@ -188,7 +187,6 @@ import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/radio-button/style/css'
 import 'element-plus/es/components/radio-group/style/css'
 import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/space/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
 import api from '../../api'
@@ -238,6 +236,16 @@ watch(
 <style scoped>
 .tab-intro {
   margin-top: var(--space-5);
+}
+/* 表格行内操作：替代 el-space wrap，窄列里换行、按钮之间保持 8px 间距 */
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* el-space 用包裹层隔开按钮，直接用 flex 时要清掉 EP 的相邻按钮外边距 */
+.task-actions .el-button + .el-button {
+  margin-left: 0;
 }
 .system-panel-card {
   margin-top: var(--space-4);

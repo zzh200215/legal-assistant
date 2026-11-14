@@ -21,7 +21,7 @@
                 演示文档 {{ demoContext.documentId }}{{ demoContext.documentTitle ? ` · ${demoContext.documentTitle}` : '' }}
               </span>
               <span class="meta-text">最大步数</span>
-              <el-input-number v-model="maxSteps" :min="2" :max="10" size="small" />
+              <NumberField v-model="maxSteps" :min="2" :max="10" size="small" />
               <el-button :loading="previewLoading" @click="previewPlan">预览计划</el-button>
               <button type="button" class="workspace-primary is-compact" :disabled="loading" @click="run">直接执行</button>
             </div>
@@ -160,11 +160,10 @@
 import { ElButton } from 'element-plus/es/components/button/index'
 import { ElDialog } from 'element-plus/es/components/dialog/index'
 import { ElInput } from 'element-plus/es/components/input/index'
-import { ElInputNumber } from 'element-plus/es/components/input-number/index'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/input/style/css'
-import 'element-plus/es/components/input-number/style/css'
+import NumberField from '../NumberField.vue'
 import { formatJson, toolLabel } from '../../utils/workspacePresentation'
 import { useAgentWorkbench } from '../../composables/useAgentWorkbench'
 

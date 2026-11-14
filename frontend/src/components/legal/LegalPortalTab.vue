@@ -207,7 +207,7 @@
         </el-form-item>
         <el-form-item label="邮箱验证"><span class="app-tag is-ok">强制启用</span></el-form-item>
         <el-form-item label="聚合全部">
-          <el-switch v-model="portalForm.aggregate_case" />
+          <AppSwitch v-model="portalForm.aggregate_case" />
           <div class="aggregate-hint">开启后该链接自动展示本案件全部已发布客户可见内容（进度+文书），一个案件一个URL。仅包含已发布内容，未发布项不会暴露；建议发布前对照清单复核客户可见范围。</div>
         </el-form-item>
       </el-form>
@@ -231,8 +231,7 @@ import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElOption, ElSelect } from 'element-plus/es/components/select/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
-import { ElSwitch } from 'element-plus/es/components/switch/index'
-import 'element-plus/es/components/switch/style/css'
+import AppSwitch from '../AppSwitch.vue'
 import { legalWorkspace } from '../../api'
 import { useLegalCaseCollaboration } from '../../composables/useLegalCaseCollaboration'
 import { formatDate } from '../../composables/useLegalWorkspacePresentation'
