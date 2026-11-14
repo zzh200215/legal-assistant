@@ -132,6 +132,53 @@ class LeaveDelegateNoticeTests(unittest.TestCase):
         self.assertEqual({event.channel for event in ended}, {"site", "email"})
         self.assertEqual(ended[0].title, "请假代收结束：已交还给 Alice")
         self.assertIn("不再转给你", ended[0].body)
+        self.assertIn("本轮没有需要转发的通知", ended[0].body)
+
+    def test_handback_reports_forwarded_count(self):
+        """交还时告诉代理这轮代收了多少，站内与邮件同口径。"""
+        self._leave(delegate=self.bob)
+        for index in range(3):
+            notification_service.create_multi_channel_notification(
+                db=self.db,
+                organization_id=self.org.id,
+                user_id=self.alice.id,
+                event_type="deadline",
+                title=f"代收事件 {index}",
+                channels=["site"],
+                # 幂等键不含标题：用不同 reference 造出三条独立事件
+                reference_type="task",
+                reference_id=index + 1,
+            )
+
+        notification_service.clear_leave(
+            db=self.db, user_id=self.alice.id, organization_id=self.org.id,
+        )
+
+        ended = self._events(self.bob, template=LEAVE_ENDED_TEMPLATE)
+        self.assertEqual(len(ended), 2)  # site + email
+        self.assertTrue(all("本轮你共代收 3 条通知" in event.body for event in ended))
+
+    def test_handback_count_ignores_previous_period(self):
+        """换代理时，旧代理只收到自己那轮的条数，新代理从 0 开始。"""
+        self._leave(delegate=self.bob)
+        for index in range(2):
+            notification_service.create_multi_channel_notification(
+                db=self.db,
+                organization_id=self.org.id,
+                user_id=self.alice.id,
+                event_type="deadline",
+                title=f"Bob 代收 {index}",
+                channels=["site"],
+                reference_type="task",
+                reference_id=index + 1,
+            )
+
+        self._leave(delegate=self.carol)
+
+        bob_ended = self._events(self.bob, template=LEAVE_ENDED_TEMPLATE)
+        self.assertTrue(all("本轮你共代收 2 条通知" in event.body for event in bob_ended))
+        carol_started = self._events(self.carol, template=LEAVE_STARTED_TEMPLATE)
+        self.assertTrue(all("代 Alice 接收" in event.body for event in carol_started))
 
     def test_expiry_cleanup_sends_handback(self):
         self._leave(delegate=self.bob, end=date(2026, 11, 10))

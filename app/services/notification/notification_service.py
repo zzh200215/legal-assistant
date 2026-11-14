@@ -1180,13 +1180,23 @@ class NotificationService:
         ):
             return False
         original = self._display_name(db, leave.user_id)
+        # 与请假人回执同一口径：本轮从「开始代收」算起，让代理知道这轮帮人接了多少。
+        forwarded = self._leave_period_forwarded_count(db=db, leave=leave)
+        summary = (
+            f"本轮你共代收 {forwarded} 条通知"
+            if forwarded
+            else "本轮没有需要转发的通知"
+        )
         self.create_multi_channel_notification(
             db=db,
             organization_id=leave.organization_id,
             user_id=delegate.id,
             event_type="deadline",
             title=f"请假代收结束：已交还给 {original}",
-            body=f"{original} 的请假已结束，之后通知恢复发给本人，不再转给你。",
+            body=(
+                f"{original} 的请假已结束，之后通知恢复发给本人，不再转给你。"
+                f"{summary}。"
+            ),
             channels=[CHANNEL_SITE, CHANNEL_EMAIL],
             reference_type=LEAVE_NOTICE_REFERENCE,
             reference_id=leave.id,
