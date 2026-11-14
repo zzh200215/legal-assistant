@@ -363,6 +363,7 @@ def get_my_notifications(
     delegated_from_user_id: int | None = Query(
         default=None, ge=1, description="只看某位同事被代收的通知（原收件人 user_id）",
     ),
+    days: int | None = Query(default=None, ge=1, le=365, description="只看最近 N 天"),
     page: int = Query(default=1, ge=1, le=10000),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -389,6 +390,7 @@ def get_my_notifications(
         event_type=event_type, case_id=case_id, delegated=delegated,
         delegation_source=delegation_source,
         delegated_from=delegated_from_user_id,
+        days=days,
         limit=page_size, offset=offset,
     )
     total = notification_service.count_user_notifications(
@@ -397,6 +399,7 @@ def get_my_notifications(
         event_type=event_type, case_id=case_id, delegated=delegated,
         delegation_source=delegation_source,
         delegated_from=delegated_from_user_id,
+        days=days,
     )
     items = [notification_service.serialize_event(e) for e in events if e.status != "failed"]
     delegate_ids = {
@@ -424,17 +427,18 @@ def get_my_notifications(
 @router.get("/notifications/delegated-summary")
 def get_delegated_summary(
     limit: int = Query(default=20, ge=1, le=50),
+    days: int | None = Query(default=None, ge=1, le=365, description="只看最近 N 天"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """「我代收了谁」：按原收件人分组的条数、未读数与最近时间。
 
-    与通知列表同口径（站内、非失败），点开分组能筛到同一批通知。
+    与通知列表同口径（站内、非失败、同一天数窗口），点开分组能筛到同一批通知。
     """
     from app.services.notification.notification_service import notification_service
 
     rows = notification_service.delegated_summary(
-        db=db, user_id=current_user.id, limit=limit)
+        db=db, user_id=current_user.id, limit=limit, days=days)
     origin_ids = {row["user_id"] for row in rows}
     names: dict[int, str] = {}
     if origin_ids:

@@ -1,7 +1,7 @@
 """「我代收了谁」汇总：按原收件人分组、未读数、最近时间、按人筛选。"""
 
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 import app.models  # noqa: F401
 from app.core.auth import create_access_token, hash_password
 from app.core.database import Base, get_db
+from app.core.time import utc_now
 from app.main import app
 from app.models.legal_notifications import LegalNotificationEvent
 from app.models.org import Organization
@@ -183,6 +184,56 @@ class DelegatedSummaryTests(unittest.TestCase):
         rows = notification_service.delegated_summary(db=self.db, user_id=self.carol.id)
 
         self.assertEqual([row["user_id"] for row in rows], [self.alice.id])
+
+    def _reset_events(self):
+        self.db.query(LegalNotificationEvent).delete()
+        self.db.commit()
+
+    def test_days_window_filters_old_events(self):
+        self._reset_events()
+        now = utc_now()
+        self._event("Alice 十天前", on_behalf=self.alice, created_at=now - timedelta(days=10))
+        self._event("Alice 昨天", on_behalf=self.alice, created_at=now - timedelta(days=1))
+        self._event("Bob 两天前", on_behalf=self.bob, created_at=now - timedelta(days=2))
+
+        week = self._summary(days=7)
+        self.assertEqual(
+            {item["name"]: item["count"] for item in week["items"]},
+            {"主办律师": 1, "summary-bob": 1},
+        )
+        month = self._summary(days=30)
+        self.assertEqual(
+            {item["name"]: item["count"] for item in month["items"]},
+            {"主办律师": 2, "summary-bob": 1},
+        )
+        self.assertEqual(
+            {item["name"]: item["count"] for item in self._summary()["items"]},
+            {"主办律师": 2, "summary-bob": 1},
+        )
+
+    def test_days_window_applies_to_list_and_count(self):
+        self._reset_events()
+        now = utc_now()
+        self._event("旧通知", on_behalf=self.alice, created_at=now - timedelta(days=29))
+        self._event("新通知", on_behalf=self.alice, created_at=now - timedelta(days=1))
+
+        week = self._list(days=7)
+        self.assertEqual(week["total"], 1)
+        self.assertEqual([item["title"] for item in week["items"]], ["新通知"])
+
+        month = self._list(days=30)
+        self.assertEqual(month["total"], 2)
+
+        self.assertEqual(self._summary(days=7)["items"][0]["count"], 1)
+
+    def test_days_window_rejects_out_of_range(self):
+        for value in (0, 366):
+            response = self.client.get(
+                f"{BASE}/me", params={"days": value}, headers=self.headers)
+            self.assertEqual(response.status_code, 422, f"days={value}: {response.text}")
+            summary = self.client.get(
+                SUMMARY, params={"days": value}, headers=self.headers)
+            self.assertEqual(summary.status_code, 422, f"summary days={value}")
 
 
 if __name__ == "__main__":

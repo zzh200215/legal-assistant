@@ -25805,6 +25805,26 @@
             "description": "只看某位同事被代收的通知（原收件人 user_id）"
           },
           {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 365,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看最近 N 天",
+              "title": "Days"
+            },
+            "description": "只看最近 N 天"
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -25857,7 +25877,7 @@
           "Developer Platform"
         ],
         "summary": "Get Delegated Summary",
-        "description": "「我代收了谁」：按原收件人分组的条数、未读数与最近时间。\n\n与通知列表同口径（站内、非失败），点开分组能筛到同一批通知。",
+        "description": "「我代收了谁」：按原收件人分组的条数、未读数与最近时间。\n\n与通知列表同口径（站内、非失败、同一天数窗口），点开分组能筛到同一批通知。",
         "operationId": "get_delegated_summary_api_developer_notifications_delegated_summary_get",
         "security": [
           {
@@ -25876,6 +25896,26 @@
               "default": 20,
               "title": "Limit"
             }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 365,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看最近 N 天",
+              "title": "Days"
+            },
+            "description": "只看最近 N 天"
           }
         ],
         "responses": {

@@ -20,7 +20,7 @@
     <section v-if="summary.length" class="notification-proxy" aria-label="我代收的对象">
       <div class="notification-proxy-head">
         <strong>我代收的对象</strong>
-        <span>{{ summary.length }} 人 · 共 {{ summaryTotal }} 条</span>
+        <span>{{ filters.days ? `近 ${filters.days} 天` : '全部时间' }} · {{ summary.length }} 人 · 共 {{ summaryTotal }} 条</span>
         <button type="button" @click="proxyOpen = !proxyOpen">{{ proxyOpen ? '收起' : '展开' }}</button>
       </div>
       <div v-if="proxyOpen" class="notification-proxy-list">
@@ -78,6 +78,14 @@
           <label class="case-filter">
             <span>案件编号</span>
             <input v-model="filters.case_id" inputmode="numeric" placeholder="可选" @keyup.enter="resetAndLoad">
+          </label>
+          <label>
+            <span>时间</span>
+            <select v-model="filters.days" @change="changeDays">
+              <option value="">全部时间</option>
+              <option value="7">近 7 天</option>
+              <option value="30">近 30 天</option>
+            </select>
           </label>
           <button class="notification-refresh" type="button" :disabled="loading" @click="load">刷新</button>
         </div>
@@ -149,7 +157,7 @@ const leaveActive = computed(() => Boolean(leave.value?.delegate_user_id) && lea
 const summary = ref([])
 const proxyOpen = ref(true)
 const summaryTotal = computed(() => summary.value.reduce((total, row) => total + (row.count || 0), 0))
-const filters = reactive({ status: 'all', event_type: '', case_id: '', delegated: '', delegated_from: '' })
+const filters = reactive({ status: 'all', event_type: '', case_id: '', delegated: '', delegated_from: '', days: '' })
 const originName = computed(() => {
   const row = summary.value.find((item) => String(item.user_id) === filters.delegated_from)
   return row?.name || (filters.delegated_from ? `用户 ${filters.delegated_from}` : '')
@@ -185,6 +193,7 @@ const load = async () => {
       case_id: filters.case_id ? Number(filters.case_id) : undefined,
       ...delegationFilterParams(filters.delegated),
       delegated_from_user_id: filters.delegated_from ? Number(filters.delegated_from) : undefined,
+      days: filters.days ? Number(filters.days) : undefined,
       page: page.value,
       page_size: pageSize,
     }
@@ -312,11 +321,19 @@ const loadLeave = async () => {
 
 const loadSummary = async () => {
   try {
-    const { data } = await api.getDelegatedSummary()
+    const { data } = await api.getDelegatedSummary({
+      params: { days: filters.days ? Number(filters.days) : undefined },
+    })
     summary.value = data?.items || []
   } catch {
     summary.value = []
   }
+}
+
+// 时间窗同时作用于列表与汇总面板，两处数字始终对得上
+const changeDays = () => {
+  resetAndLoad()
+  loadSummary()
 }
 
 const filterByOrigin = (row) => {

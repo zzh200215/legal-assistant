@@ -1391,11 +1391,12 @@ class NotificationService:
                                delegated: bool | None = None,
                                delegation_source: str | None = None,
                                delegated_from: int | None = None,
+                               days: int | None = None,
                                limit: int = 50,
                                offset: int = 0) -> list[LegalNotificationEvent]:
         """获取用户的站内通知列表；delegated 控制只看代收/只看本人，
         delegation_source 再按来源细分（leave / event / unknown=历史代收未记录来源），
-        delegated_from 只看某一位同事被代收的通知。"""
+        delegated_from 只看某一位同事被代收的通知，days 只看最近 N 天。"""
         query = db.query(LegalNotificationEvent).filter(
             LegalNotificationEvent.user_id == user_id,
             LegalNotificationEvent.channel == CHANNEL_SITE,
@@ -1416,18 +1417,28 @@ class NotificationService:
             query = query.filter(
                 LegalNotificationEvent.on_behalf_of_user_id == delegated_from)
         query = self._filter_delegation_source(query, delegation_source)
+        query = self._filter_recent_days(query, days)
         return query.order_by(
             LegalNotificationEvent.created_at.desc()
         ).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
 
+    @staticmethod
+    def _filter_recent_days(query, days: int | None):
+        """按天数窗口过滤（含今天）；None 表示不限。"""
+        if not days:
+            return query
+        since = utc_now() - timedelta(days=max(1, min(int(days), 365)))
+        return query.filter(LegalNotificationEvent.created_at >= since)
+
     def delegated_summary(self, *, db: Session, user_id: int,
-                          limit: int = 20) -> list[dict]:
+                          limit: int = 20, days: int | None = None) -> list[dict]:
         """当前用户「代收了谁」汇总：按原收件人分组，含条数、未读数与最近时间。
 
-        与列表同一口径（站内、非失败），所以点开分组能筛到完全一致的一批通知。
+        与列表同一口径（站内、非失败、同一个天数窗口），所以点开分组能筛到
+        完全一致的一批通知。
         """
         unread_states = (STATUS_DELIVERED, STATUS_SENT)
-        rows = (
+        query = (
             db.query(
                 LegalNotificationEvent.on_behalf_of_user_id.label("origin_id"),
                 func.count().label("total"),
@@ -1442,6 +1453,10 @@ class NotificationService:
                 LegalNotificationEvent.on_behalf_of_user_id.isnot(None),
                 LegalNotificationEvent.status != STATUS_FAILED,
             )
+        )
+        query = self._filter_recent_days(query, days)
+        rows = (
+            query
             .group_by(LegalNotificationEvent.on_behalf_of_user_id)
             .order_by(
                 func.count().desc(),
@@ -1479,7 +1494,8 @@ class NotificationService:
                                  case_id: int | None = None,
                                  delegated: bool | None = None,
                                  delegation_source: str | None = None,
-                                 delegated_from: int | None = None) -> int:
+                                 delegated_from: int | None = None,
+                                 days: int | None = None) -> int:
         """Count visible site notifications using the same filters as the list."""
         query = db.query(LegalNotificationEvent.id).filter(
             LegalNotificationEvent.user_id == user_id,
@@ -1502,6 +1518,7 @@ class NotificationService:
             query = query.filter(
                 LegalNotificationEvent.on_behalf_of_user_id == delegated_from)
         query = self._filter_delegation_source(query, delegation_source)
+        query = self._filter_recent_days(query, days)
         return query.count()
 
     def mark_as_read(self, *, db: Session, event_id: int, user_id: int) -> LegalNotificationEvent:

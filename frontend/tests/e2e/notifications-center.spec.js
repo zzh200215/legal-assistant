@@ -150,6 +150,7 @@ test('通知中心：请假提示条 + 代收来源标签 + 来源筛选', async
 
 test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', async ({ page }) => {
   const listQueries = []
+  const summaryQueries = []
   const failed = []
   page.on('response', (r) => {
     if (r.url().includes('/api/') && r.status() >= 400) failed.push(`${r.request().method()} ${new URL(r.url()).pathname} -> ${r.status()}`)
@@ -182,7 +183,11 @@ test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', a
       return route.fulfill({ json: success(NO_LEAVE) })
     }
     if (method === 'GET' && path === '/developer/notifications/delegated-summary') {
-      return route.fulfill({ json: success({ items: SUMMARY, total: SUMMARY.length }) })
+      summaryQueries.push(Object.fromEntries(url.searchParams))
+      const days = url.searchParams.get('days')
+      // 近 7 天只剩一位同事的两条，用来验证时间窗同时作用到列表与面板
+      const items = days === '7' ? [SUMMARY[0]] : SUMMARY
+      return route.fulfill({ json: success({ items, total: items.length }) })
     }
     if (method === 'GET' && path === '/developer/notifications/me') {
       listQueries.push(Object.fromEntries(url.searchParams))
@@ -229,6 +234,20 @@ test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', a
   expect(pageQueries()[2].delegated_from_user_id).toBeUndefined()
   await expect(page.locator('.notification-proxy-active')).toHaveCount(0)
   await expect(page.locator('.notification-row')).toHaveCount(4)
+
+  // 时间窗：列表与汇总同时带 days，面板标题写明窗口
+  const daysSelect = page.locator('.notification-toolbar label', { hasText: '时间' }).locator('select')
+  await daysSelect.selectOption('7')
+  await expect.poll(() => pageQueries().length).toBe(4)
+  expect(pageQueries()[3].days).toBe('7')
+  await expect.poll(() => summaryQueries.at(-1)?.days).toBe('7')
+  await expect(proxy.locator('.notification-proxy-head')).toContainText('近 7 天 · 1 人 · 共 2 条')
+
+  await daysSelect.selectOption('')
+  await expect.poll(() => pageQueries().length).toBe(5)
+  expect(pageQueries()[4].days).toBeUndefined()
+  await expect.poll(() => summaryQueries.at(-1)?.days).toBeUndefined()
+  await expect(proxy.locator('.notification-proxy-head')).toContainText('全部时间 · 2 人 · 共 3 条')
 
   expect(failed).toEqual([])
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
