@@ -134,12 +134,24 @@
               <section class="app-card">
                 <div class="app-card-head">
                   <h2>资料导入</h2>
-                  <el-upload class="import-upload" :before-upload="handleSourceImport" :show-file-list="false" accept=".csv,.xlsx,.xls">
-                    <button type="button" class="workspace-primary is-compact" :disabled="importLoading">
+                  <span class="import-upload">
+                    <input
+                      ref="sourceFileInput"
+                      class="upload-hidden-input"
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      @change="onSourceFilePicked"
+                    />
+                    <button
+                      type="button"
+                      class="workspace-primary is-compact"
+                      :disabled="importLoading"
+                      @click="sourceFileInput?.click()"
+                    >
                       <el-icon><Upload /></el-icon>
                       导入资料表
                     </button>
-                  </el-upload>
+                  </span>
                 </div>
                 <div class="app-card-body">
                   <el-alert type="info" :closable="false" show-icon>
@@ -343,7 +355,6 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import 'element-plus/es/components/message-box/style/css'
-import { ElUpload } from 'element-plus/es/components/upload/index'
 import { ElAlert } from 'element-plus/es/components/alert/index'
 import { ElDialog } from 'element-plus/es/components/dialog/index'
 import { ElForm, ElFormItem } from 'element-plus/es/components/form/index'
@@ -351,7 +362,6 @@ import { ElInput } from 'element-plus/es/components/input/index'
 import { ElTable, ElTableColumn } from 'element-plus/es/components/table/index'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
 import { ElCheckbox } from 'element-plus/es/components/checkbox/index'
-import 'element-plus/es/components/upload/style/css'
 import 'element-plus/es/components/alert/style/css'
 import 'element-plus/es/components/dialog/style/css'
 import 'element-plus/es/components/form/style/css'
@@ -392,6 +402,15 @@ const {
   updateSourceStatus,
   submitRetrievalTest,
 } = useLegalSources({ client: legalWorkspace, message: ElMessage, confirm: ElMessageBox.confirm })
+
+// 原生文件选择：代替 el-upload（只当文件选择器用），交互与 before-upload 一致
+const sourceFileInput = ref(null)
+const onSourceFilePicked = (event) => {
+  const input = event.target
+  const picked = input.files && input.files[0]
+  input.value = ''
+  if (picked) handleSourceImport(picked)
+}
 
 const props = defineProps({ caseId: { type: [Number, String], default: null } })
 const router = useRouter()
@@ -667,7 +686,9 @@ onMounted(async () => {
 .source-maintenance > summary { padding: var(--space-3) 2px; color: var(--color-text-secondary); font-size: var(--text-sm); cursor: pointer; list-style-position: inside; }
 .source-maintenance > summary span { margin-left: var(--space-2); color: var(--color-text-muted); font-size: var(--text-xs); }
 .maintenance-stack { display: grid; gap: var(--space-5); padding-bottom: var(--space-2); }
-.import-upload { margin-left: auto; }
+.import-upload { display: inline-flex; margin-left: auto; }
+/* 原生文件选择：保留可点击 / 可聚焦，但不显示浏览器默认按钮 */
+.upload-hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .import-format-list { margin: var(--space-2) 0 0 var(--space-5); padding: 0; }
 .import-result { margin-top: var(--space-4); padding: var(--space-3); border: 1px solid var(--color-border-light); border-radius: var(--radius-md); background: var(--color-surface-subtle); font-size: var(--text-sm); }
 .import-error-block { margin-top: var(--space-3); }

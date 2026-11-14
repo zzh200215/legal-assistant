@@ -20,9 +20,14 @@
           <label class="field-label" for="contract-content">合同原文</label>
           <el-input id="contract-content" v-model="contractForm.content" type="textarea" :rows="13" placeholder="粘贴合同全文或主要条款..." maxlength="50000" show-word-limit />
           <div class="intake-actions">
-            <el-upload :show-file-list="false" :before-upload="handleContractUpload" accept=".pdf,.docx,.doc,.txt,.md">
-              <el-button :loading="uploadLoading">上传合同文件</el-button>
-            </el-upload>
+            <input
+              ref="contractFileInput"
+              class="upload-hidden-input"
+              type="file"
+              accept=".pdf,.docx,.doc,.txt,.md"
+              @change="onContractFilePicked"
+            />
+            <el-button :loading="uploadLoading" @click="contractFileInput?.click()">上传合同文件</el-button>
             <el-button type="primary" :loading="contractLoading" @click="submitContractReview">开始审查</el-button>
             <div v-if="contractLoading" class="staged-hint" aria-live="polite">{{ contractStageText }}</div>
           </div>
@@ -318,11 +323,9 @@ import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import 'element-plus/es/components/message-box/style/css'
 import { ElInput } from 'element-plus/es/components/input/index'
 import { ElSelect, ElOption } from 'element-plus/es/components/select/index'
-import { ElUpload } from 'element-plus/es/components/upload/index'
 import 'element-plus/es/components/input/style/css'
 import 'element-plus/es/components/select/style/css'
 import 'element-plus/es/components/option/style/css'
-import 'element-plus/es/components/upload/style/css'
 import { ElButton } from 'element-plus/es/components/button/index'
 import 'element-plus/es/components/button/style/css'
 import legalWorkspace from '../../api/legalWorkspace'
@@ -486,6 +489,14 @@ const submitContractReview = async () => {
   await loadQuota()
 }
 const handleContractUpload = (file) => uploadContractReview(file, resetRiskFilter)
+// 原生文件选择：代替 el-upload（只当文件选择器用），交互与 before-upload 一致
+const contractFileInput = ref(null)
+const onContractFilePicked = (event) => {
+  const input = event.target
+  const picked = input.files && input.files[0]
+  input.value = ''
+  if (picked) handleContractUpload(picked)
+}
 const selectRisk = (risk) => {
   selectedRisk.value = risk
   jumpToRisk(risk)
@@ -699,6 +710,8 @@ onMounted(openLatestContractReview)
 /* 录入态 */
 .contract-intake { min-width: 0; }
 .intake-body { display: grid; gap: var(--space-2); }
+/* 原生文件选择：保留可点击 / 可聚焦，但不显示浏览器默认按钮 */
+.upload-hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .field-label { margin: var(--space-1) 0 0; color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: 600; }
 .intake-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); padding-top: var(--space-2); }
 .staged-hint { flex-basis: 100%; margin-top: 2px; color: var(--color-text-muted); font-size: var(--text-xs); text-align: right; }

@@ -113,8 +113,9 @@ export function useDocumentList() {
     },
   })
 
-  const onFileChange = (_uploadFile, uploadFiles) => {
-    selectedFiles.value = (uploadFiles || []).map((item) => item.raw).filter(Boolean)
+  // 原生文件选择 / 拖拽：接收 File[]，与旧 el-upload 归一出的 .raw 结果一致
+  const onFileChange = (files) => {
+    selectedFiles.value = (files || []).filter((item) => item instanceof File)
     file.value = selectedFiles.value[0] || null
   }
 

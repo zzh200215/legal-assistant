@@ -10,6 +10,8 @@ export default defineConfig({
     // 目标浏览器按 ES2021 标准构建（Chrome/Edge 85+、Firefox 79+、Safari 15+）。
     // 比 Vite 默认 modules 少一层旧浏览器 downlevel 辅助代码，给 System 分组 chunk 留出余量。
     target: 'es2021',
+    // 包体治理：esbuild 压缩留白较多，改用 terser 压到更小，行为不变。
+    minify: 'terser',
     rollupOptions: {
       output: {
         manualChunks(id) {

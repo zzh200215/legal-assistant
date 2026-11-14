@@ -51,19 +51,19 @@
         <span class="app-card-head-meta">{{ selectedFiles.length ? `已选 ${selectedFiles.length} 份` : '文件不会自动上传，确认后进入解析队列' }}</span>
       </div>
       <div class="app-card-body">
-        <el-upload
+        <label
           class="upload-dropzone"
-          drag
-          multiple
-          :auto-upload="false"
-          :show-file-list="false"
-          :on-change="onFileChange"
+          :class="{ 'is-dragover': dragOver }"
+          @dragover.prevent="dragOver = true"
+          @dragleave.prevent="dragOver = false"
+          @drop.prevent="onDrop"
         >
+          <input class="upload-dropzone-input" type="file" multiple @change="onPickFiles" />
           <div class="upload-dropzone-inner">
             <strong>拖拽文件到此处，或点击选择</strong>
             <span>支持法规、案例、合同、证据和文书模板</span>
           </div>
-        </el-upload>
+        </label>
       </div>
     </section>
 
@@ -76,12 +76,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElButton } from 'element-plus/es/components/button/index'
-import { ElUpload } from 'element-plus/es/components/upload/index'
 import 'element-plus/es/components/button/style/css'
-import 'element-plus/es/components/upload/style/css'
 import DocumentSidebar from '../components/documents/DocumentSidebar.vue'
 import DocumentWorkspace from '../components/documents/DocumentWorkspace.vue'
 import { useDocuments } from '../composables/useDocuments'
@@ -93,6 +91,18 @@ const {
   documentTotal, documents, analysis, docMeta, qaRecords,
   initialize, loadDocumentFromRoute, clearAnalysisPolling,
 } = useDocuments()
+
+// 原生拖拽 / 选择：不再依赖 el-upload（省 ~32KB 包体），行为与原上传入口一致
+const dragOver = ref(false)
+const onPickFiles = (event) => {
+  const input = event.target
+  onFileChange([...(input.files || [])])
+  input.value = ''
+}
+const onDrop = (event) => {
+  dragOver.value = false
+  onFileChange([...(event.dataTransfer?.files || [])])
+}
 
 // 数据摘要由既有响应式状态派生，不新增任何接口调用
 const materialCount = computed(() => documentTotal.value || documents.value.length)
@@ -164,24 +174,28 @@ onUnmounted(() => {
   gap: var(--space-2);
 }
 .upload-dropzone {
-  width: 100%;
-}
-:deep(.upload-dropzone .el-upload) {
-  width: 100%;
-}
-:deep(.upload-dropzone .el-upload-dragger) {
+  display: block;
   width: 100%;
   height: 120px;
+  border: 1px dashed var(--color-border-hover);
   border-radius: var(--radius-lg);
-  border-color: var(--color-border-hover);
   background: var(--color-surface-subtle);
-  padding: 0;
+  cursor: pointer;
   transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 /* 拖拽区不加彩色底与外发光环：整块蓝面是页面里最抢眼的“模板色块” */
-:deep(.upload-dropzone .el-upload-dragger:hover) {
+.upload-dropzone:hover,
+.upload-dropzone.is-dragover {
   border-color: var(--color-primary);
   background: var(--color-bg);
+}
+/* 原生文件选择：保留可点击 / 可聚焦，但不显示浏览器默认按钮 */
+.upload-dropzone-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 .upload-dropzone-inner {
   height: 100%;
