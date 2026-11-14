@@ -17,12 +17,38 @@
       <button class="notification-leave-link" type="button" @click="router.push('/settings/notifications')">调整请假</button>
     </section>
 
+    <section v-if="summary.length" class="notification-proxy" aria-label="我代收的对象">
+      <div class="notification-proxy-head">
+        <strong>我代收的对象</strong>
+        <span>{{ summary.length }} 人 · 共 {{ summaryTotal }} 条</span>
+        <button type="button" @click="proxyOpen = !proxyOpen">{{ proxyOpen ? '收起' : '展开' }}</button>
+      </div>
+      <div v-if="proxyOpen" class="notification-proxy-list">
+        <button
+          v-for="row in summary"
+          :key="row.user_id"
+          type="button"
+          class="notification-proxy-row"
+          :class="{ active: filters.delegated_from === String(row.user_id) }"
+          @click="filterByOrigin(row)"
+        >
+          <span class="notification-proxy-name">{{ row.name || `用户 ${row.user_id}` }}</span>
+          <span class="notification-proxy-count">代收 {{ row.count }} 条<template v-if="row.unread"> · 未读 {{ row.unread }}</template></span>
+          <span class="notification-proxy-time">{{ formatTime(row.last_at) }}</span>
+        </button>
+      </div>
+    </section>
+
     <section class="app-card">
       <div class="app-card-head">
         <h2>通知</h2>
         <span class="app-card-head-meta">未读 {{ unread }} · 共 {{ total }} 条</span>
       </div>
       <div class="app-card-body">
+        <div v-if="filters.delegated_from" class="notification-proxy-active">
+          <span>只看代 <strong>{{ originName }}</strong> 的通知</span>
+          <button type="button" @click="clearOrigin">清除</button>
+        </div>
         <div class="notification-toolbar" role="toolbar" aria-label="通知筛选">
           <label>
             <span>状态</span>
@@ -119,7 +145,15 @@ const loadError = ref(null)
 // 请假提示条：只做提示，读取失败按「没有请假」处理，不影响列表
 const leave = ref(null)
 const leaveActive = computed(() => Boolean(leave.value?.delegate_user_id) && leave.value?.status === 'active')
-const filters = reactive({ status: 'all', event_type: '', case_id: '', delegated: '' })
+// 「我代收了谁」：按原收件人分组，点分组即筛到这位同事的通知
+const summary = ref([])
+const proxyOpen = ref(true)
+const summaryTotal = computed(() => summary.value.reduce((total, row) => total + (row.count || 0), 0))
+const filters = reactive({ status: 'all', event_type: '', case_id: '', delegated: '', delegated_from: '' })
+const originName = computed(() => {
+  const row = summary.value.find((item) => String(item.user_id) === filters.delegated_from)
+  return row?.name || (filters.delegated_from ? `用户 ${filters.delegated_from}` : '')
+})
 const eventTypes = [
   { value: 'workflow', label: '案件工作流' },
   { value: 'deadline', label: '关键日期' },
@@ -150,6 +184,7 @@ const load = async () => {
       event_type: filters.event_type || undefined,
       case_id: filters.case_id ? Number(filters.case_id) : undefined,
       ...delegationFilterParams(filters.delegated),
+      delegated_from_user_id: filters.delegated_from ? Number(filters.delegated_from) : undefined,
       page: page.value,
       page_size: pageSize,
     }
@@ -175,6 +210,7 @@ const markRead = async (item) => {
     await api.markNotificationRead(item.id)
     item.status = 'read'
     unread.value = Math.max(0, unread.value - 1)
+    if (item.on_behalf_of_user_id) bumpSummaryUnread(item.on_behalf_of_user_id, -1)
   } catch (err) {
     ElMessage.error(errorMessage(err))
   }
@@ -185,6 +221,7 @@ const markAllRead = async () => {
     await api.markAllNotificationsRead()
     items.value.forEach((item) => { if (isUnread(item)) item.status = 'read' })
     unread.value = 0
+    summary.value.forEach((row) => { row.unread = 0 })
   } catch (err) {
     ElMessage.error(errorMessage(err))
   }
@@ -273,9 +310,35 @@ const loadLeave = async () => {
   }
 }
 
+const loadSummary = async () => {
+  try {
+    const { data } = await api.getDelegatedSummary()
+    summary.value = data?.items || []
+  } catch {
+    summary.value = []
+  }
+}
+
+const filterByOrigin = (row) => {
+  filters.delegated_from = String(row.user_id)
+  resetAndLoad()
+}
+
+const clearOrigin = () => {
+  filters.delegated_from = ''
+  resetAndLoad()
+}
+
+// 已读数在本地同步，避免每点一次「标记已读」都重拉一次汇总
+const bumpSummaryUnread = (originId, delta) => {
+  const row = summary.value.find((item) => item.user_id === originId)
+  if (row) row.unread = Math.max(0, (row.unread || 0) + delta)
+}
+
 onMounted(() => {
   load()
   loadLeave()
+  loadSummary()
 })
 </script>
 
@@ -312,6 +375,20 @@ onMounted(() => {
 .notification-leave-text { flex: 1 1 240px; min-width: 0; color: var(--color-text); font-size: var(--text-sm); }
 .notification-leave-link { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: var(--text-sm); cursor: pointer; }
 .notification-leave-link:hover { text-decoration: underline; }
+/* 「我代收了谁」：按原收件人分组的折叠面板，点一行即筛到该同事的通知 */
+.notification-proxy { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.notification-proxy-head { display: flex; align-items: baseline; gap: var(--space-2); }
+.notification-proxy-head strong { font-size: var(--text-sm); font-weight: 600; }
+.notification-proxy-head > span { flex: 1; color: var(--color-text-muted); font-size: var(--text-xs); }
+.notification-proxy-head button, .notification-proxy-active button { border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.notification-proxy-head button:hover, .notification-proxy-active button:hover, .notification-proxy-active button:focus-visible { text-decoration: underline; }
+.notification-proxy-list { display: grid; gap: 4px; }
+.notification-proxy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--color-surface-subtle); color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
+.notification-proxy-row:hover { background: var(--color-surface-hover); }
+.notification-proxy-row.active { border-color: var(--color-primary); background: var(--color-primary-subtle); }
+.notification-proxy-name { overflow: hidden; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.notification-proxy-count, .notification-proxy-time { color: var(--color-text-muted); font-size: var(--text-xs); white-space: nowrap; }
+.notification-proxy-active { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--color-primary-subtle); color: var(--color-text); font-size: var(--text-sm); }
 .notification-body, .notification-meta { overflow: hidden; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .notification-meta { color: var(--color-text-muted); font-size: var(--text-xs); }
 .notification-read { padding: 4px 0; white-space: nowrap; }
@@ -323,6 +400,8 @@ onMounted(() => {
   .notification-body { white-space: normal; }
   .notification-toolbar { align-items: stretch; }
   .notification-refresh { align-self: end; margin-left: 0; }
+  .notification-proxy-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .notification-proxy-time { display: none; }
 }
 
 .notification-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }

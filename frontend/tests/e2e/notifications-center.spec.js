@@ -71,6 +71,9 @@ test('通知中心：请假提示条 + 代收来源标签 + 来源筛选', async
     if (method === 'GET' && path === '/developer/notification-leave/me') {
       return route.fulfill({ json: success(LEAVE) })
     }
+    if (method === 'GET' && path === '/developer/notifications/delegated-summary') {
+      return route.fulfill({ json: success({ items: [], total: 0 }) })
+    }
     if (method === 'GET' && path === '/developer/notifications/me') {
       listQueries.push(Object.fromEntries(url.searchParams))
       const delegated = url.searchParams.get('delegated')
@@ -140,6 +143,92 @@ test('通知中心：请假提示条 + 代收来源标签 + 来源筛选', async
   await expect.poll(() => pageQueries().length).toBe(5)
   expect(pageQueries()[4].delegated).toBe('true')
   await expect(page.locator('.notification-row')).toHaveCount(2)
+
+  expect(failed).toEqual([])
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
+
+test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', async ({ page }) => {
+  const listQueries = []
+  const failed = []
+  page.on('response', (r) => {
+    if (r.url().includes('/api/') && r.status() >= 400) failed.push(`${r.request().method()} ${new URL(r.url()).pathname} -> ${r.status()}`)
+  })
+  await page.addInitScript(() => localStorage.setItem('token', 'center-proxy-token'))
+
+  const NO_LEAVE = {
+    delegate_user_id: null, delegate_name: null, leave_start: null, leave_end: null,
+    note: null, timezone: 'Asia/Shanghai', status: 'none', days_left: null, updated_at: null,
+  }
+  const SUMMARY = [
+    { user_id: 15, name: '主办律师', count: 2, unread: 1, last_at: '2026-11-14T09:00:00' },
+    { user_id: 16, name: '协办律师', count: 1, unread: 1, last_at: '2026-11-12T09:00:00' },
+  ]
+  const PROXY_ITEMS = [
+    { id: 11, title: '合同到期提醒', event_type: 'deadline', status: 'delivered', created_at: '2026-11-14T09:00:00', on_behalf_of_user_id: 15, on_behalf_of_source: 'leave', on_behalf_of_name: '主办律师' },
+    { id: 12, title: '审核待处理', event_type: 'approval', status: 'read', created_at: '2026-11-13T09:00:00', on_behalf_of_user_id: 15, on_behalf_of_source: 'event', on_behalf_of_name: '主办律师' },
+    { id: 13, title: '任务到期提醒', event_type: 'workflow', status: 'delivered', created_at: '2026-11-12T09:00:00', on_behalf_of_user_id: 16, on_behalf_of_source: 'leave', on_behalf_of_name: '协办律师' },
+    { id: 14, title: '本人通知', event_type: 'deadline', status: 'delivered', created_at: '2026-11-11T09:00:00', on_behalf_of_user_id: null, on_behalf_of_source: null, on_behalf_of_name: null },
+  ]
+
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notification-leave/me') {
+      return route.fulfill({ json: success(NO_LEAVE) })
+    }
+    if (method === 'GET' && path === '/developer/notifications/delegated-summary') {
+      return route.fulfill({ json: success({ items: SUMMARY, total: SUMMARY.length }) })
+    }
+    if (method === 'GET' && path === '/developer/notifications/me') {
+      listQueries.push(Object.fromEntries(url.searchParams))
+      const origin = url.searchParams.get('delegated_from_user_id')
+      const items = PROXY_ITEMS.filter((item) => (
+        origin ? String(item.on_behalf_of_user_id) === origin : true
+      ))
+      return route.fulfill({
+        json: success({ items, unread: items.length, total: items.length, page: 1, page_size: 20 }),
+      })
+    }
+
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  await page.goto('/notifications')
+  await expect(page.getByRole('heading', { name: '通知中心' })).toBeVisible()
+
+  // 分组面板：人数与总条数、每行条数/未读/最近时间
+  const proxy = page.locator('.notification-proxy')
+  await expect(proxy).toBeVisible()
+  await expect(proxy.locator('.notification-proxy-head')).toContainText('我代收的对象')
+  await expect(proxy.locator('.notification-proxy-head')).toContainText('2 人 · 共 3 条')
+  const aliceRow = proxy.locator('.notification-proxy-row', { hasText: '主办律师' })
+  await expect(aliceRow).toContainText('代收 2 条 · 未读 1')
+  await expect(aliceRow).toContainText('2026-11-14 09:00')
+  const bobRow = proxy.locator('.notification-proxy-row', { hasText: '协办律师' })
+  await expect(bobRow).toContainText('代收 1 条 · 未读 1')
+
+  // 点分组：只筛这位同事，出现可清除的筛选条
+  await aliceRow.click()
+  // 顶部铃铛也请求同一个接口（不带分页参数），只看通知中心自己的请求
+  const pageQueries = () => listQueries.filter((query) => query.page_size === '20')
+  await expect.poll(() => pageQueries().length).toBe(2)
+  expect(pageQueries()[1].delegated_from_user_id).toBe('15')
+  await expect(page.locator('.notification-proxy-active')).toContainText('只看代 主办律师 的通知')
+  await expect(aliceRow).toHaveClass(/active/)
+  await expect(page.locator('.notification-row')).toHaveCount(2)
+  await expect(page.locator('.notification-row', { hasText: '任务到期提醒' })).toHaveCount(0)
+
+  // 清除：参数消失，列表恢复
+  await page.locator('.notification-proxy-active').getByRole('button', { name: '清除' }).click()
+  await expect.poll(() => pageQueries().length).toBe(3)
+  expect(pageQueries()[2].delegated_from_user_id).toBeUndefined()
+  await expect(page.locator('.notification-proxy-active')).toHaveCount(0)
+  await expect(page.locator('.notification-row')).toHaveCount(4)
 
   expect(failed).toEqual([])
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)

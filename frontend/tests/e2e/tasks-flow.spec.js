@@ -1202,6 +1202,9 @@ test('通知中心任务提醒：点击直达任务详情', async ({ page }) => 
     if (method === 'GET' && path === '/developer/notification-leave/me') {
       return route.fulfill({ json: success({ delegate_user_id: null, delegate_name: null, status: 'none' }) })
     }
+    if (method === 'GET' && path === '/developer/notifications/delegated-summary') {
+      return route.fulfill({ json: success({ items: [], total: 0 }) })
+    }
     if (method === 'GET' && path === '/developer/notifications/me') {
       const delegatedParam = url.searchParams.get('delegated')
       delegatedQueries.push(delegatedParam)

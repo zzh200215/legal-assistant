@@ -15,6 +15,8 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import case as sa_case
+from sqlalchemy import func
 from sqlalchemy import or_ as sa_or
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
@@ -1388,10 +1390,12 @@ class NotificationService:
                                case_id: int | None = None,
                                delegated: bool | None = None,
                                delegation_source: str | None = None,
+                               delegated_from: int | None = None,
                                limit: int = 50,
                                offset: int = 0) -> list[LegalNotificationEvent]:
         """获取用户的站内通知列表；delegated 控制只看代收/只看本人，
-        delegation_source 再按来源细分（leave / event / unknown=历史代收未记录来源）。"""
+        delegation_source 再按来源细分（leave / event / unknown=历史代收未记录来源），
+        delegated_from 只看某一位同事被代收的通知。"""
         query = db.query(LegalNotificationEvent).filter(
             LegalNotificationEvent.user_id == user_id,
             LegalNotificationEvent.channel == CHANNEL_SITE,
@@ -1408,10 +1412,53 @@ class NotificationService:
             query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.isnot(None))
         elif delegated is False:
             query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.is_(None))
+        if delegated_from is not None:
+            query = query.filter(
+                LegalNotificationEvent.on_behalf_of_user_id == delegated_from)
         query = self._filter_delegation_source(query, delegation_source)
         return query.order_by(
             LegalNotificationEvent.created_at.desc()
         ).offset(max(0, offset)).limit(max(1, min(limit, 100))).all()
+
+    def delegated_summary(self, *, db: Session, user_id: int,
+                          limit: int = 20) -> list[dict]:
+        """当前用户「代收了谁」汇总：按原收件人分组，含条数、未读数与最近时间。
+
+        与列表同一口径（站内、非失败），所以点开分组能筛到完全一致的一批通知。
+        """
+        unread_states = (STATUS_DELIVERED, STATUS_SENT)
+        rows = (
+            db.query(
+                LegalNotificationEvent.on_behalf_of_user_id.label("origin_id"),
+                func.count().label("total"),
+                func.max(LegalNotificationEvent.created_at).label("last_at"),
+                func.sum(sa_case(
+                    (LegalNotificationEvent.status.in_(unread_states), 1), else_=0,
+                )).label("unread"),
+            )
+            .filter(
+                LegalNotificationEvent.user_id == user_id,
+                LegalNotificationEvent.channel == CHANNEL_SITE,
+                LegalNotificationEvent.on_behalf_of_user_id.isnot(None),
+                LegalNotificationEvent.status != STATUS_FAILED,
+            )
+            .group_by(LegalNotificationEvent.on_behalf_of_user_id)
+            .order_by(
+                func.count().desc(),
+                func.max(LegalNotificationEvent.created_at).desc(),
+            )
+            .limit(max(1, min(limit, 50)))
+            .all()
+        )
+        return [
+            {
+                "user_id": row.origin_id,
+                "count": int(row.total or 0),
+                "unread": int(row.unread or 0),
+                "last_at": row.last_at,
+            }
+            for row in rows
+        ]
 
     @staticmethod
     def _filter_delegation_source(query, delegation_source: str | None):
@@ -1431,7 +1478,8 @@ class NotificationService:
                                  event_type: str | None = None,
                                  case_id: int | None = None,
                                  delegated: bool | None = None,
-                                 delegation_source: str | None = None) -> int:
+                                 delegation_source: str | None = None,
+                                 delegated_from: int | None = None) -> int:
         """Count visible site notifications using the same filters as the list."""
         query = db.query(LegalNotificationEvent.id).filter(
             LegalNotificationEvent.user_id == user_id,
@@ -1450,6 +1498,9 @@ class NotificationService:
             query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.isnot(None))
         elif delegated is False:
             query = query.filter(LegalNotificationEvent.on_behalf_of_user_id.is_(None))
+        if delegated_from is not None:
+            query = query.filter(
+                LegalNotificationEvent.on_behalf_of_user_id == delegated_from)
         query = self._filter_delegation_source(query, delegation_source)
         return query.count()
 

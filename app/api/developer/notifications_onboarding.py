@@ -360,6 +360,9 @@ def get_my_notifications(
         default=None, max_length=16,
         description="代收来源细分：leave=请假代收，event=按事件类型代收，unknown=历史代收（未记录来源）",
     ),
+    delegated_from_user_id: int | None = Query(
+        default=None, ge=1, description="只看某位同事被代收的通知（原收件人 user_id）",
+    ),
     page: int = Query(default=1, ge=1, le=10000),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -385,6 +388,7 @@ def get_my_notifications(
         db=db, user_id=current_user.id, status=status_filter,
         event_type=event_type, case_id=case_id, delegated=delegated,
         delegation_source=delegation_source,
+        delegated_from=delegated_from_user_id,
         limit=page_size, offset=offset,
     )
     total = notification_service.count_user_notifications(
@@ -392,6 +396,7 @@ def get_my_notifications(
         status=status_filter,
         event_type=event_type, case_id=case_id, delegated=delegated,
         delegation_source=delegation_source,
+        delegated_from=delegated_from_user_id,
     )
     items = [notification_service.serialize_event(e) for e in events if e.status != "failed"]
     delegate_ids = {
@@ -414,6 +419,45 @@ def get_my_notifications(
         item["on_behalf_of_name"] = names.get(item.get("on_behalf_of_user_id"))
     unread = notification_service.get_unread_count(db=db, user_id=current_user.id)
     return {"items": items, "unread": unread, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/notifications/delegated-summary")
+def get_delegated_summary(
+    limit: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """「我代收了谁」：按原收件人分组的条数、未读数与最近时间。
+
+    与通知列表同口径（站内、非失败），点开分组能筛到同一批通知。
+    """
+    from app.services.notification.notification_service import notification_service
+
+    rows = notification_service.delegated_summary(
+        db=db, user_id=current_user.id, limit=limit)
+    origin_ids = {row["user_id"] for row in rows}
+    names: dict[int, str] = {}
+    if origin_ids:
+        users = (
+            db.query(User.id, User.full_name, User.username)
+            .filter(User.id.in_(origin_ids))
+            .all()
+        )
+        names = {
+            user_id: (full_name or username or f"用户 {user_id}")
+            for user_id, full_name, username in users
+        }
+    items = [
+        {
+            "user_id": row["user_id"],
+            "name": names.get(row["user_id"]),
+            "count": row["count"],
+            "unread": row["unread"],
+            "last_at": row["last_at"].isoformat() if row["last_at"] else None,
+        }
+        for row in rows
+    ]
+    return {"items": items, "total": len(items)}
 
 
 @router.post("/notifications/{notification_id}/read")
