@@ -23,31 +23,53 @@
         <span>{{ filters.days ? `近 ${filters.days} 天` : '全部时间' }} · {{ summary.length }} 人 · 共 {{ summaryTotal }} 条</span>
         <button type="button" @click="proxyOpen = !proxyOpen">{{ proxyOpen ? '收起' : '展开' }}</button>
       </div>
-      <div v-if="proxyOpen" class="notification-proxy-list">
-        <div
-          v-for="row in summary"
-          :key="row.user_id"
-          class="notification-proxy-row"
-          :class="{ active: filters.delegated_from === String(row.user_id) }"
-        >
-          <button type="button" class="notification-proxy-pick" @click="filterByOrigin(row)">
-            <span class="notification-proxy-name">{{ row.name || `用户 ${row.user_id}` }}</span>
-            <span class="notification-proxy-count">代收 {{ row.count }} 条<template v-if="row.unread"> · 未读 {{ row.unread }}</template></span>
-            <span class="notification-proxy-time">{{ formatTime(row.last_at) }}</span>
-            <span v-if="row.types?.length" class="notification-proxy-bar" aria-hidden="true">
-              <span
-                v-for="part in row.types"
-                :key="part.event_type"
-                class="notification-proxy-seg"
-                :class="`seg-${part.event_type}`"
-                :style="{ flexGrow: part.count }"
-                :title="`${eventLabel(part.event_type)} ${part.count} 条`"
-              />
-            </span>
+      <template v-if="proxyOpen">
+        <div class="notification-proxy-legend" aria-label="按事件类型筛选">
+          <button
+            v-for="item in eventTypes"
+            :key="item.value"
+            type="button"
+            class="notification-proxy-legend-item"
+            :class="{ active: filters.event_type === item.value }"
+            :aria-pressed="filters.event_type === item.value ? 'true' : 'false'"
+            @click="toggleType(item.value)"
+          >
+            <span class="notification-proxy-dot" :class="`seg-${item.value}`" />
+            <span>{{ item.label }}</span>
+            <span class="notification-proxy-legend-count">{{ typeTotals[item.value] || 0 }}</span>
           </button>
-          <button type="button" class="notification-proxy-detail" @click="openOriginDetail(row)">明细</button>
         </div>
-      </div>
+        <div class="notification-proxy-list">
+          <div
+            v-for="row in summary"
+            :key="row.user_id"
+            class="notification-proxy-row"
+            :class="{ active: filters.delegated_from === String(row.user_id) }"
+          >
+            <div class="notification-proxy-main">
+              <button type="button" class="notification-proxy-pick" @click="filterByOrigin(row)">
+                <span class="notification-proxy-name">{{ row.name || `用户 ${row.user_id}` }}</span>
+                <span class="notification-proxy-count">代收 {{ row.count }} 条<template v-if="row.unread"> · 未读 {{ row.unread }}</template></span>
+                <span class="notification-proxy-time">{{ formatTime(row.last_at) }}</span>
+              </button>
+              <div v-if="row.types?.length" class="notification-proxy-bar">
+                <button
+                  v-for="part in row.types"
+                  :key="part.event_type"
+                  type="button"
+                  class="notification-proxy-seg"
+                  :class="`seg-${part.event_type}`"
+                  :style="{ flexGrow: part.count }"
+                  :title="`${eventLabel(part.event_type)} ${part.count} 条，点击只看该类型`"
+                  :aria-label="`${eventLabel(part.event_type)} ${part.count} 条`"
+                  @click.stop="toggleType(part.event_type)"
+                />
+              </div>
+            </div>
+            <button type="button" class="notification-proxy-detail" @click="openOriginDetail(row)">明细</button>
+          </div>
+        </div>
+      </template>
     </section>
 
     <section ref="listCard" class="app-card">
@@ -170,6 +192,16 @@ const summary = ref([])
 const proxyOpen = ref(true)
 const listCard = ref(null)
 const summaryTotal = computed(() => summary.value.reduce((total, row) => total + (row.count || 0), 0))
+// 图例上的数字：当前汇总里各事件类型的总条数
+const typeTotals = computed(() => {
+  const totals = {}
+  summary.value.forEach((row) => {
+    ;(row.types || []).forEach((part) => {
+      totals[part.event_type] = (totals[part.event_type] || 0) + part.count
+    })
+  })
+  return totals
+})
 const filters = reactive({ status: 'all', event_type: '', case_id: '', delegated: '', delegated_from: '', days: '' })
 const originName = computed(() => {
   const row = summary.value.find((item) => String(item.user_id) === filters.delegated_from)
@@ -420,6 +452,12 @@ const filterByOrigin = (row) => {
   resetAndLoad()
 }
 
+// 图例与色段共用：点一下按该类型筛，再点一下取消（与 URL 同步）
+const toggleType = (value) => {
+  filters.event_type = filters.event_type === value ? '' : value
+  resetAndLoad()
+}
+
 // 明细：清掉其它筛选，只留这位同事 + 当前时间窗，并把列表带到视野里
 const openOriginDetail = (row) => {
   filters.status = 'all'
@@ -495,11 +533,20 @@ onMounted(() => {
 .notification-proxy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; padding: 0 var(--space-2) 0 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--color-surface-subtle); }
 .notification-proxy-row:hover { background: var(--color-surface-hover); }
 .notification-proxy-row.active { border-color: var(--color-primary); background: var(--color-primary-subtle); }
-.notification-proxy-pick { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-/* 类型分布条：按条数分配宽度，悬停显示「类型 N 条」 */
-.notification-proxy-bar { grid-column: 1 / -1; display: flex; gap: 2px; height: 3px; margin-top: 2px; border-radius: 999px; overflow: hidden; }
-.notification-proxy-seg { flex-basis: 0; min-width: 3px; background: var(--color-border); }
-.notification-proxy-seg[title] { cursor: help; }
+.notification-proxy-main { display: grid; gap: 5px; min-width: 0; padding: var(--space-2) 0 var(--space-2) var(--space-3); }
+.notification-proxy-pick { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-3); align-items: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+/* 类型分布条：按条数分配宽度，点任一段只看该类型 */
+.notification-proxy-bar { display: flex; gap: 2px; height: 6px; border-radius: 999px; overflow: hidden; }
+.notification-proxy-seg { flex-basis: 0; min-width: 6px; height: 100%; padding: 0; border: 0; border-radius: 2px; opacity: 0.9; cursor: pointer; }
+.notification-proxy-seg:hover, .notification-proxy-seg:focus-visible { opacity: 1; outline: none; box-shadow: 0 0 0 1px var(--color-surface); }
+/* 图例：每种类型一个圆点 + 名称 + 条数，点击即按类型筛选 */
+.notification-proxy-legend { display: flex; flex-wrap: wrap; gap: 4px var(--space-3); padding: 2px 0 6px; border-bottom: 1px solid var(--color-border-light); }
+.notification-proxy-legend-item { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.notification-proxy-legend-item:hover { background: var(--color-surface-hover); }
+.notification-proxy-legend-item.active { border-color: var(--color-primary); background: var(--color-primary-subtle); color: var(--color-primary); }
+.notification-proxy-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-border); }
+.notification-proxy-legend-count { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.notification-proxy-legend-item.active .notification-proxy-legend-count { color: inherit; }
 .seg-workflow { background: var(--color-success); }
 .seg-deadline { background: var(--color-primary); }
 .seg-approval { background: var(--color-warning); }

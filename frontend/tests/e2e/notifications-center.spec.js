@@ -313,10 +313,16 @@ test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', a
   await expect(aliceRow.locator('.notification-proxy-bar')).toBeVisible()
   await expect(aliceSegs).toHaveCount(2)
   await expect(aliceSegs.first()).toHaveClass(/seg-approval/)
-  await expect(aliceSegs.first()).toHaveAttribute('title', '审核 1 条')
+  await expect(aliceSegs.first()).toHaveAttribute('title', /审核 1 条/)
   await expect(aliceSegs.nth(1)).toHaveClass(/seg-deadline/)
-  await expect(aliceSegs.nth(1)).toHaveAttribute('title', '关键日期 1 条')
+  await expect(aliceSegs.nth(1)).toHaveAttribute('title', /关键日期 1 条/)
   await expect(bobRow.locator('.notification-proxy-seg')).toHaveCount(1)
+
+  // 图例：五个类型 + 各自总条数
+  const legend = proxy.locator('.notification-proxy-legend-item')
+  await expect(legend).toHaveCount(5)
+  await expect(legend.nth(0)).toContainText('案件工作流')
+  await expect(legend.filter({ hasText: '审核' })).toContainText('审核1')
 
   // 点分组：只筛这位同事，出现可清除的筛选条
   await aliceRow.click()
@@ -363,6 +369,20 @@ test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', a
   expect(detail.delegated_from_user_id).toBe('16')
   expect(detail.status).toBe('all')
   await expect(page.locator('.notification-proxy-active')).toContainText('正在看 协办律师 的代收，共 1 条')
+
+  // 点图例按类型筛选，再点取消（与 URL 同步）
+  await legend.filter({ hasText: '审核' }).click()
+  await expect.poll(() => pageQueries().length).toBe(8)
+  expect(pageQueries()[7].event_type).toBe('approval')
+  await expect.poll(() => page.url()).toContain('event_type=approval')
+  await legend.filter({ hasText: '审核' }).click()
+  await expect.poll(() => pageQueries().length).toBe(9)
+  expect(pageQueries()[8].event_type).toBeUndefined()
+
+  // 点色段同样按该类型筛选
+  await aliceSegs.first().click()
+  await expect.poll(() => pageQueries().length).toBe(10)
+  expect(pageQueries()[9].event_type).toBe('approval')
 
   expect(failed).toEqual([])
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
