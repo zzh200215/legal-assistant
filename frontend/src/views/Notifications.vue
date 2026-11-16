@@ -34,6 +34,16 @@
             <span class="notification-proxy-name">{{ row.name || `用户 ${row.user_id}` }}</span>
             <span class="notification-proxy-count">代收 {{ row.count }} 条<template v-if="row.unread"> · 未读 {{ row.unread }}</template></span>
             <span class="notification-proxy-time">{{ formatTime(row.last_at) }}</span>
+            <span v-if="row.types?.length" class="notification-proxy-bar" aria-hidden="true">
+              <span
+                v-for="part in row.types"
+                :key="part.event_type"
+                class="notification-proxy-seg"
+                :class="`seg-${part.event_type}`"
+                :style="{ flexGrow: part.count }"
+                :title="`${eventLabel(part.event_type)} ${part.count} 条`"
+              />
+            </span>
           </button>
           <button type="button" class="notification-proxy-detail" @click="openOriginDetail(row)">明细</button>
         </div>
@@ -485,7 +495,16 @@ onMounted(() => {
 .notification-proxy-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; padding: 0 var(--space-2) 0 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--color-surface-subtle); }
 .notification-proxy-row:hover { background: var(--color-surface-hover); }
 .notification-proxy-row.active { border-color: var(--color-primary); background: var(--color-primary-subtle); }
-.notification-proxy-pick { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.notification-proxy-pick { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 4px var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+/* 类型分布条：按条数分配宽度，悬停显示「类型 N 条」 */
+.notification-proxy-bar { grid-column: 1 / -1; display: flex; gap: 2px; height: 3px; margin-top: 2px; border-radius: 999px; overflow: hidden; }
+.notification-proxy-seg { flex-basis: 0; min-width: 3px; background: var(--color-border); }
+.notification-proxy-seg[title] { cursor: help; }
+.seg-workflow { background: var(--color-success); }
+.seg-deadline { background: var(--color-primary); }
+.seg-approval { background: var(--color-warning); }
+.seg-portal { background: var(--color-info); }
+.seg-invoice { background: var(--color-danger); }
 .notification-proxy-detail { padding: 2px 4px; border: 0; background: transparent; color: var(--color-primary); font: inherit; font-size: var(--text-xs); white-space: nowrap; cursor: pointer; }
 .notification-proxy-detail:hover { text-decoration: underline; }
 .notification-proxy-name { overflow: hidden; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }

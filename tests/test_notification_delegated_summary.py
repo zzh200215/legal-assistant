@@ -90,13 +90,14 @@ class DelegatedSummaryTests(unittest.TestCase):
         self.db.flush()
         return user
 
-    def _event(self, title, *, on_behalf, status="delivered", created_at=None, user=None):
+    def _event(self, title, *, on_behalf, status="delivered", created_at=None, user=None,
+               event_type="deadline"):
         event = LegalNotificationEvent(
             organization_id=self.org.id,
             user_id=(user or self.user).id,
             on_behalf_of_user_id=on_behalf.id if on_behalf else None,
             on_behalf_of_source="leave" if on_behalf else None,
-            event_type="deadline",
+            event_type=event_type,
             title=title,
             body="正文",
             channel="site",
@@ -144,8 +145,39 @@ class DelegatedSummaryTests(unittest.TestCase):
         self.assertEqual(first["count"], 2)
         self.assertEqual(first["unread"], 1)
         self.assertTrue(first["last_at"].startswith("2026-11-13T09:00"))
+        self.assertEqual(first["types"], [{"event_type": "deadline", "count": 2}])
         # 没有 full_name 时回落用户名
         self.assertEqual(data["items"][1]["name"], "summary-bob")
+
+    def test_type_distribution_sorted_and_windowed(self):
+        self._reset_events()
+        now = utc_now()
+        self._event("截止", on_behalf=self.alice, event_type="deadline",
+                    created_at=now - timedelta(days=1))
+        self._event("审核一", on_behalf=self.alice, event_type="approval",
+                    created_at=now - timedelta(days=2))
+        self._event("审核二", on_behalf=self.alice, event_type="approval",
+                    created_at=now - timedelta(days=3))
+        self._event("旧账单", on_behalf=self.alice, event_type="invoice",
+                    created_at=now - timedelta(days=40))
+
+        alice = notification_service.delegated_summary(db=self.db, user_id=self.user.id)[0]
+        self.assertEqual(alice["types"], [
+            {"event_type": "approval", "count": 2},
+            {"event_type": "deadline", "count": 1},
+            {"event_type": "invoice", "count": 1},
+        ])
+
+        week = notification_service.delegated_summary(
+            db=self.db, user_id=self.user.id, days=7)[0]
+        self.assertEqual(week["types"], [
+            {"event_type": "approval", "count": 2},
+            {"event_type": "deadline", "count": 1},
+        ])
+        self.assertEqual(
+            sum(item["count"] for item in week["types"]),
+            week["count"],
+        )
 
     def test_api_empty_summary(self):
         self.db.query(LegalNotificationEvent).filter(

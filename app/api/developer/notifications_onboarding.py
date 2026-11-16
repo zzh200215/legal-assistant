@@ -458,6 +458,7 @@ def get_delegated_summary(
             "count": row["count"],
             "unread": row["unread"],
             "last_at": row["last_at"].isoformat() if row["last_at"] else None,
+            "types": row.get("types") or [],
         }
         for row in rows
     ]

@@ -1432,11 +1432,17 @@ class NotificationService:
 
     def delegated_summary(self, *, db: Session, user_id: int,
                           limit: int = 20, days: int | None = None) -> list[dict]:
-        """当前用户「代收了谁」汇总：按原收件人分组，含条数、未读数与最近时间。
+        """当前用户「代收了谁」汇总：按原收件人分组，含条数、未读数、最近时间与类型分布。
 
         与列表同一口径（站内、非失败、同一个天数窗口），所以点开分组能筛到
-        完全一致的一批通知。
+        完全一致的一批通知；``types`` 是按事件类型的条数，用于画分布条。
         """
+        conditions = (
+            LegalNotificationEvent.user_id == user_id,
+            LegalNotificationEvent.channel == CHANNEL_SITE,
+            LegalNotificationEvent.on_behalf_of_user_id.isnot(None),
+            LegalNotificationEvent.status != STATUS_FAILED,
+        )
         unread_states = (STATUS_DELIVERED, STATUS_SENT)
         query = (
             db.query(
@@ -1447,12 +1453,7 @@ class NotificationService:
                     (LegalNotificationEvent.status.in_(unread_states), 1), else_=0,
                 )).label("unread"),
             )
-            .filter(
-                LegalNotificationEvent.user_id == user_id,
-                LegalNotificationEvent.channel == CHANNEL_SITE,
-                LegalNotificationEvent.on_behalf_of_user_id.isnot(None),
-                LegalNotificationEvent.status != STATUS_FAILED,
-            )
+            .filter(*conditions)
         )
         query = self._filter_recent_days(query, days)
         rows = (
@@ -1465,12 +1466,37 @@ class NotificationService:
             .limit(max(1, min(limit, 50)))
             .all()
         )
+        types_by_origin: dict[int, list[dict]] = {}
+        if rows:
+            type_query = self._filter_recent_days(
+                db.query(
+                    LegalNotificationEvent.on_behalf_of_user_id.label("origin_id"),
+                    LegalNotificationEvent.event_type.label("event_type"),
+                    func.count().label("total"),
+                ).filter(*conditions),
+                days,
+            )
+            for type_row in (
+                type_query
+                .group_by(
+                    LegalNotificationEvent.on_behalf_of_user_id,
+                    LegalNotificationEvent.event_type,
+                )
+                .all()
+            ):
+                types_by_origin.setdefault(type_row.origin_id, []).append({
+                    "event_type": type_row.event_type,
+                    "count": int(type_row.total or 0),
+                })
+        for types in types_by_origin.values():
+            types.sort(key=lambda item: (-item["count"], item["event_type"]))
         return [
             {
                 "user_id": row.origin_id,
                 "count": int(row.total or 0),
                 "unread": int(row.unread or 0),
                 "last_at": row.last_at,
+                "types": types_by_origin.get(row.origin_id, []),
             }
             for row in rows
         ]

@@ -247,8 +247,14 @@ test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', a
     note: null, timezone: 'Asia/Shanghai', status: 'none', days_left: null, updated_at: null,
   }
   const SUMMARY = [
-    { user_id: 15, name: '主办律师', count: 2, unread: 1, last_at: '2026-11-14T09:00:00' },
-    { user_id: 16, name: '协办律师', count: 1, unread: 1, last_at: '2026-11-12T09:00:00' },
+    {
+      user_id: 15, name: '主办律师', count: 2, unread: 1, last_at: '2026-11-14T09:00:00',
+      types: [{ event_type: 'approval', count: 1 }, { event_type: 'deadline', count: 1 }],
+    },
+    {
+      user_id: 16, name: '协办律师', count: 1, unread: 1, last_at: '2026-11-12T09:00:00',
+      types: [{ event_type: 'deadline', count: 1 }],
+    },
   ]
   const PROXY_ITEMS = [
     { id: 11, title: '合同到期提醒', event_type: 'deadline', status: 'delivered', created_at: '2026-11-14T09:00:00', on_behalf_of_user_id: 15, on_behalf_of_source: 'leave', on_behalf_of_name: '主办律师' },
@@ -301,6 +307,16 @@ test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', a
   await expect(aliceRow).toContainText('2026-11-14 09:00')
   const bobRow = proxy.locator('.notification-proxy-row', { hasText: '协办律师' })
   await expect(bobRow).toContainText('代收 1 条 · 未读 1')
+
+  // 类型分布条：按条数分段，悬停文案带类型名与条数
+  const aliceSegs = aliceRow.locator('.notification-proxy-seg')
+  await expect(aliceRow.locator('.notification-proxy-bar')).toBeVisible()
+  await expect(aliceSegs).toHaveCount(2)
+  await expect(aliceSegs.first()).toHaveClass(/seg-approval/)
+  await expect(aliceSegs.first()).toHaveAttribute('title', '审核 1 条')
+  await expect(aliceSegs.nth(1)).toHaveClass(/seg-deadline/)
+  await expect(aliceSegs.nth(1)).toHaveAttribute('title', '关键日期 1 条')
+  await expect(bobRow.locator('.notification-proxy-seg')).toHaveCount(1)
 
   // 点分组：只筛这位同事，出现可清除的筛选条
   await aliceRow.click()
