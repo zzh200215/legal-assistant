@@ -148,6 +148,91 @@ test('通知中心：请假提示条 + 代收来源标签 + 来源筛选', async
   await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
 })
 
+test('通知中心：筛选写进 URL，刷新与后退能还原', async ({ page }) => {
+  const listQueries = []
+  const failed = []
+  page.on('response', (r) => {
+    if (r.url().includes('/api/') && r.status() >= 400) failed.push(`${r.request().method()} ${new URL(r.url()).pathname} -> ${r.status()}`)
+  })
+  await page.addInitScript(() => localStorage.setItem('token', 'center-url-token'))
+
+  const NO_LEAVE = {
+    delegate_user_id: null, delegate_name: null, leave_start: null, leave_end: null,
+    note: null, timezone: 'Asia/Shanghai', status: 'none', days_left: null, updated_at: null,
+  }
+
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (!url.pathname.startsWith('/api/')) { await route.continue(); return }
+    const path = url.pathname.replace(/^\/api/, '')
+    const method = route.request().method()
+
+    if (method === 'GET' && path === '/auth/me') return route.fulfill({ json: success(ME) })
+    if (method === 'GET' && path === '/developer/notification-leave/me') {
+      return route.fulfill({ json: success(NO_LEAVE) })
+    }
+    if (method === 'GET' && path === '/developer/notifications/delegated-summary') {
+      return route.fulfill({ json: success({ items: [], total: 0 }) })
+    }
+    if (method === 'GET' && path === '/developer/notifications/me') {
+      listQueries.push(Object.fromEntries(url.searchParams))
+      return route.fulfill({ json: success({ items: [], unread: 0, total: 0, page: 1, page_size: 20 }) })
+    }
+
+    await route.fulfill({ status: 500, json: { detail: `Unhandled: ${method} ${path}` } })
+  })
+
+  // 带筛选参数打开：控件回显、请求按参数下推
+  await page.goto('/notifications?status=unread&days=7&delegated=leave&event_type=deadline')
+  await expect(page.getByRole('heading', { name: '通知中心' })).toBeVisible()
+  const pageQueries = () => listQueries.filter((query) => query.page_size === '20')
+  await expect.poll(() => pageQueries().length).toBe(1)
+  expect(pageQueries()[0]).toMatchObject({
+    status: 'unread',
+    days: '7',
+    delegation_source: 'leave',
+    event_type: 'deadline',
+  })
+
+  // 工具栏顺序：状态 / 类型 / 来源 / 时间（「类型」与来源里的「类型代收」同词，改用序号定位）
+  const toolbarSelects = page.locator('.notification-toolbar select')
+  const statusSelect = toolbarSelects.nth(0)
+  const typeSelect = toolbarSelects.nth(1)
+  const sourceSelect = toolbarSelects.nth(2)
+  const daysSelect = toolbarSelects.nth(3)
+  await expect(statusSelect).toHaveValue('unread')
+  await expect(typeSelect).toHaveValue('deadline')
+  await expect(sourceSelect).toHaveValue('leave')
+  await expect(daysSelect).toHaveValue('7')
+
+  // 改筛选 → URL 跟着变（push，后退可撤销）
+  await statusSelect.selectOption('read')
+  await expect.poll(() => page.url()).toContain('status=read')
+  await expect.poll(() => pageQueries().length).toBe(2)
+  expect(pageQueries()[1].status).toBe('read')
+  expect(page.url()).toContain('delegated=leave')
+
+  // 后退 → 回到上一个筛选状态并重新请求
+  await page.goBack()
+  await expect(statusSelect).toHaveValue('unread')
+  await expect.poll(() => pageQueries().at(-1)?.status).toBe('unread')
+
+  // 刷新 → 仍按 URL 参数加载
+  const beforeRefresh = pageQueries().length
+  await page.reload()
+  await expect.poll(() => pageQueries().length).toBe(beforeRefresh + 1)
+  await expect(statusSelect).toHaveValue('unread')
+
+  // 非法参数被忽略，页面回落到默认筛选
+  await page.goto('/notifications?status=deleted&days=999&delegated=someone')
+  await expect(statusSelect).toHaveValue('all')
+  await expect(daysSelect).toHaveValue('')
+  await expect(sourceSelect).toHaveValue('')
+
+  expect(failed).toEqual([])
+  await expect(page.locator('#runtime-error-panel')).toHaveCount(0)
+})
+
 test('通知中心：我代收了谁 → 点分组筛到该同事 → 清除', async ({ page }) => {
   const listQueries = []
   const summaryQueries = []

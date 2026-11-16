@@ -133,8 +133,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import 'element-plus/es/components/message/style/css'
 import api from '../api'
@@ -144,6 +144,7 @@ import { delegationBadge, delegationFilterParams } from '../utils/notificationDe
 import { leaveSummary } from '../utils/notificationLeave'
 
 const router = useRouter()
+const route = useRoute()
 const items = ref([])
 const unread = ref(0)
 const total = ref(0)
@@ -176,6 +177,71 @@ const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const isUnread = (item) => item.status === 'delivered' || item.status === 'sent'
 const eventLabel = (value) => eventLabels[value] || value || '系统通知'
 const formatTime = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : '时间未记录'
+
+// ── 筛选状态写进 URL：刷新、分享、后退都能还原 ─────────────────────
+const QUERY_ALLOWED = {
+  status: ['all', 'unread', 'read'],
+  delegated: ['', 'own', 'delegated', 'leave', 'event'],
+  days: ['', '7', '30'],
+}
+const digits = (value) => (typeof value === 'string' && /^\d+$/.test(value) ? value : '')
+
+// 只接受页面认识的值，非法/多余参数回落到默认，避免 URL 把页面带进坏状态
+const normalizeQuery = (query) => {
+  const raw = (key) => (Array.isArray(query[key]) ? query[key][0] : query[key])
+  const text = (key) => (typeof raw(key) === 'string' ? raw(key) : '')
+  const status = text('status')
+  const delegated = text('delegated')
+  const days = text('days')
+  const eventType = text('event_type')
+  return {
+    status: QUERY_ALLOWED.status.includes(status) ? status : 'all',
+    event_type: eventTypes.some((item) => item.value === eventType) ? eventType : '',
+    delegated: QUERY_ALLOWED.delegated.includes(delegated) ? delegated : '',
+    delegated_from: digits(raw('delegated_from')),
+    days: QUERY_ALLOWED.days.includes(days) ? days : '',
+    case_id: digits(raw('case_id')),
+  }
+}
+
+const queryEquals = (left, right) => {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)])
+  return [...keys].every((key) => String(left[key] ?? '') === String(right[key] ?? ''))
+}
+
+const applyQuery = (query) => {
+  Object.assign(filters, normalizeQuery(query))
+}
+
+// 有变化才 push：后退可以撤销最近一次筛选，同时避免重复导航
+const syncQuery = () => {
+  const query = {}
+  if (filters.status !== 'all') query.status = filters.status
+  if (filters.event_type) query.event_type = filters.event_type
+  if (filters.delegated) query.delegated = filters.delegated
+  if (filters.delegated_from) query.delegated_from = filters.delegated_from
+  if (filters.days) query.days = filters.days
+  if (filters.case_id) query.case_id = filters.case_id
+  if (queryEquals(query, route.query)) return
+  router.push({ path: '/notifications', query }).catch(() => {})
+}
+
+applyQuery(route.query)
+
+// 后退/前进或手动改 URL：按新参数还原筛选并重新加载
+watch(
+  () => route.query,
+  (query) => {
+    if (route.path !== '/notifications') return
+    const next = normalizeQuery(query)
+    const changed = Object.keys(next).some((key) => filters[key] !== next[key])
+    if (!changed) return
+    Object.assign(filters, next)
+    page.value = 1
+    loadSummary()
+    load()
+  },
+)
 
 // 三态（ux-audit P1-3/M-13）：加载失败与"暂无通知"分离，失败可重试；刷新时保留已有列表不闪骨架
 const listStatus = computed(() => {
@@ -212,6 +278,7 @@ const load = async () => {
 
 const resetAndLoad = () => {
   page.value = 1
+  syncQuery()
   load()
 }
 
